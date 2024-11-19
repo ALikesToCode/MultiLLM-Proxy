@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Proxy Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .endpoint-card {
+            transition: all 0.3s ease;
+        }
+        .endpoint-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .copy-notification {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Navigation -->
+        <nav class="bg-white shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <i class="fas fa-network-wired text-indigo-600 text-2xl mr-2"></i>
+                        <h1 class="text-xl font-bold text-gray-900">API Proxy Dashboard</h1>
+                    </div>
+                    <div class="flex items-center">
+                        <span id="status-indicator" class="flex items-center">
+                            <span class="h-3 w-3 bg-green-400 rounded-full mr-2"></span>
+                            <span class="text-sm text-gray-600">System Online</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Status Overview -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                {% for provider, details in providers.items() %}
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center">
+                            <i class="fas fa-plug text-indigo-600 mr-3"></i>
+                            <h3 class="text-lg font-semibold text-gray-900">{{ provider.upper() }}</h3>
+                        </div>
+                        <span class="px-3 py-1 rounded-full text-sm font-medium {{ 'bg-green-100 text-green-800' if details.active else 'bg-red-100 text-red-800' }}">
+                            {{ 'Active' if details.active else 'Inactive' }}
+                        </span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Endpoints Section -->
+            {% for provider, details in providers.items() %}
+            <div class="bg-white rounded-lg shadow mb-8">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-xl font-semibold text-gray-900">{{ provider.upper() }} Endpoints</h2>
+                </div>
+                <div class="p-6">
+                    <div class="mb-4">
+                        <h3 class="text-sm font-medium text-gray-500">Base URL</h3>
+                        <div class="mt-1 flex items-center">
+                            <code class="text-sm bg-gray-50 px-3 py-2 rounded-md flex-grow">
+                                {{ config['SERVER_BASE_URL'] }}/{{ provider }}
+                            </code>
+                            <button onclick="copyToClipboard('{{ config['SERVER_BASE_URL'] }}/{{ provider }}')" 
+                                    class="ml-2 p-2 text-gray-400 hover:text-indigo-600">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    {% for endpoint in details.endpoints %}
+                    <div class="endpoint-card bg-gray-50 rounded-lg p-6 mb-4">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Endpoint: {{ endpoint.url }}</h3>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <h4 class="text-sm font-medium text-gray-500">Full URL</h4>
+                                <div class="mt-1 flex items-center">
+                                    <code class="text-sm bg-white px-3 py-2 rounded-md flex-grow">
+                                        {{ config['SERVER_BASE_URL'] }}/{{ provider }}{{ endpoint.url }}
+                                    </code>
+                                    <button onclick="copyToClipboard('{{ config['SERVER_BASE_URL'] }}/{{ provider }}{{ endpoint.url }}')"
+                                            class="ml-2 p-2 text-gray-400 hover:text-indigo-600">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div class="flex items-center justify-between">
+                                    <h4 class="text-sm font-medium text-gray-500">Example cURL</h4>
+                                    <button onclick="copyToClipboard(`{{ endpoint.curl }}`)"
+                                            class="px-3 py-1 text-sm text-indigo-600 hover:text-indigo-800 flex items-center">
+                                        <i class="fas fa-copy mr-1"></i>
+                                        Copy Command
+                                    </button>
+                                </div>
+                                <pre class="mt-2 bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto text-sm">{{ endpoint.curl }}</pre>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </main>
+    </div>
+
+    <!-- Copy Notification -->
+    <div id="copyNotification" class="copy-notification">
+        <div class="flex items-center">
+            <i class="fas fa-check-circle mr-2"></i>
+            <span>Copied to clipboard!</span>
+        </div>
+    </div>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showNotification();
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+
+        function showNotification() {
+            const notification = document.getElementById('copyNotification');
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 2000);
+        }
+
+        // Add real-time status check
+        function checkStatus() {
+            fetch('{{ config["SERVER_BASE_URL"] }}/health')
+                .then(response => {
+                    const indicator = document.getElementById('status-indicator');
+                    if (response.ok) {
+                        indicator.innerHTML = `
+                            <span class="h-3 w-3 bg-green-400 rounded-full mr-2"></span>
+                            <span class="text-sm text-gray-600">System Online</span>
+                        `;
+                    } else {
+                        indicator.innerHTML = `
+                            <span class="h-3 w-3 bg-red-400 rounded-full mr-2"></span>
+                            <span class="text-sm text-gray-600">System Offline</span>
+                        `;
+                    }
+                })
+                .catch(() => {
+                    const indicator = document.getElementById('status-indicator');
+                    indicator.innerHTML = `
+                        <span class="h-3 w-3 bg-red-400 rounded-full mr-2"></span>
+                        <span class="text-sm text-gray-600">System Offline</span>
+                    `;
+                });
+        }
+
+        // Check status every 30 seconds
+        setInterval(checkStatus, 30000);
+        checkStatus(); // Initial check
+    </script>
+</body>
+</html> 
