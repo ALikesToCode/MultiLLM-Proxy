@@ -2,42 +2,33 @@
 
 A unified API proxy service for multiple LLM providers (OpenAI, Cerebras, X.AI, and Google AI) with a beautiful dashboard interface.
 
-## Quick Start
+## Quick Setup
 
-1. **Clone and Setup**
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/multillm-proxy.git
+# Clone and setup
+git clone https://github.com/ALikesToCode/MultiLLM-Proxy.git
 cd multillm-proxy
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-npm install
+chmod +x setup.sh
+./setup.sh
 ```
 
-2. **Configure Environment**
-```bash
-# Copy example environment file
-cp .env.example .env
+## Configuration
 
-# Edit .env with your API keys
+Edit `.env` file with your API keys:
+```env
 OPENAI_API_KEY=your-openai-api-key
 CEREBRAS_API_KEY=your-cerebras-api-key
 XAI_API_KEY=your-xai-api-key
 GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
 ```
 
-3. **Build Frontend Assets**
-```bash
-npm run build
-```
+## Run
 
-4. **Run the Application**
 ```bash
+# Activate virtual environment (if not already activated)
+source venv/bin/activate
+
+# Start the application
 python app.py
 ```
 
@@ -45,14 +36,14 @@ Visit `http://localhost:1400` to access the dashboard.
 
 ## Features
 
-- 🔄 **Unified API Access**: Single endpoint for multiple LLM providers
-- 🔑 **Secure Key Management**: Environment-based API key handling
-- 🚦 **Real-time Monitoring**: Live status updates for all providers
-- 🛡️ **Built-in Protection**: Rate limiting and error handling
-- 📊 **Modern Dashboard**: Dark/light theme, responsive design
-- 🚀 **Performance Optimized**: Response caching and compression
+- 🔄 **Unified API**: Single endpoint for multiple LLM providers
+- 🔑 **Secure**: Environment-based API key management
+- 🚦 **Monitoring**: Real-time status updates
+- 🛡️ **Protected**: Rate limiting and error handling
+- 📊 **Dashboard**: Dark/light theme, responsive design
+- 🚀 **Optimized**: Response caching and compression
 
-## Supported Endpoints
+## Endpoints
 
 - OpenAI: `/openai/v1/chat/completions`
 - Cerebras: `/cerebras/v1/chat/completions`
@@ -65,85 +56,46 @@ Visit `http://localhost:1400` to access the dashboard.
 # Run in development mode
 export FLASK_ENV=development
 python app.py
-
-# Watch frontend changes
-npm run dev
 ```
 
-## Docker Deployment
+## Rate Limits
 
-```bash
-# Build image
-docker build -t multillm-proxy .
+Default limits per minute:
+- OpenAI: 60
+- Cerebras: 40
+- X.AI: 50
+- Google AI: 30
+- Default: 100
 
-# Run container
-docker run -p 1400:1400 \
-  --env-file .env \
-  multillm-proxy
-```
+## Environment Variables
 
-## Configuration
-
-### Rate Limits (per minute)
-- OpenAI: 60 requests
-- Cerebras: 40 requests
-- X.AI: 50 requests
-- Google AI: 30 requests
-- Default: 100 requests
-
-### Environment Variables
 | Variable | Description | Default |
 |----------|-------------|---------|
 | SERVER_HOST | Host address | localhost |
 | SERVER_PORT | Port number | 1400 |
-| FLASK_ENV | Environment mode | production |
-| *_API_KEY | Provider API keys | None |
-
-## Project Structure
-```
-multillm-proxy/
-├── app.py                # Main application
-├── services/            # Core services
-│   ├── auth_service.py   # Authentication
-│   ├── cache_service.py  # Response caching
-│   ├── proxy_service.py  # Request proxying
-│   └── rate_limit.py     # Rate limiting
-├── static/              # Frontend assets
-│   ├── css/             # Stylesheets
-│   └── js/              # JavaScript
-└── templates/           # HTML templates
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+| FLASK_ENV | Environment | production |
+| *_API_KEY | Provider keys | None |
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **Rate Limit Exceeded (429)**
+1. **Rate Limit (429)**
    - Reduce request frequency
-   - Check rate limits in `rate_limit_service.py`
+   - Check `rate_limit_service.py`
 
-2. **Authentication Failed (500)**
+2. **Auth Failed (500)**
    - Verify API keys in `.env`
-   - Check key permissions
+   - Check permissions
 
-3. **Provider Unavailable (503)**
-   - Confirm provider status
-   - Check network connectivity
-
-## License
-
-[MIT License](LICENSE) - feel free to use and modify for your needs.
+3. **Provider Down (503)**
+   - Check provider status
+   - Verify connectivity
 
 ## Support
 
-- 📖 [Documentation](https://github.com/yourusername/multillm-proxy/wiki)
-- 🐛 [Issue Tracker](https://github.com/yourusername/multillm-proxy/issues)
-- 💬 [Discussions](https://github.com/yourusername/multillm-proxy/discussions)
+- 📖 [Wiki](https://github.com/ALikesToCode/MultiLLM-Proxy/wiki)
+- 🐛 [Issues](https://github.com/ALikesToCode/MultiLLM-Proxy/issues)
+- 💬 [Discussions](https://github.com/ALikesToCode/MultiLLM-Proxy/discussions)
+
+## License
+
+[MIT License](LICENSE)
