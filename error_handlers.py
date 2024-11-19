@@ -1,4 +1,4 @@
-from flask import jsonify
+from flask import jsonify, request
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -27,4 +27,13 @@ def init_error_handlers(app):
     @app.errorhandler(Exception)
     def handle_generic_error(error):
         logger.error(f"Unexpected error: {str(error)}")
-        return jsonify(message="An unexpected error occurred"), 500 
+        return jsonify({
+            "error": "An unexpected error occurred",
+            "message": str(error)
+        }), 500
+
+    @app.errorhandler(404)
+    def not_found_error(error):
+        if request.path == '/favicon.ico':
+            return app.send_static_file('favicon.ico')
+        return jsonify({"error": "Not found"}), 404

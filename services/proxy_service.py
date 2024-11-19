@@ -1,8 +1,10 @@
 import requests
 import json
-from error_handlers import APIError
 import logging
+from error_handlers import APIError
 from config import Config
+from services.cache_service import CacheService
+from services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,20 @@ class ProxyService:
         except json.JSONDecodeError:
             return request_data
 
-    @staticmethod
-    def make_request(method, url, headers, params, data, timeout=Config.REQUEST_TIMEOUT):
+    @classmethod
+    def make_request(cls, method, url, headers, params, data, api_provider=None, use_cache=True):
+        # Check rate limits
+        if RateLimitService.is_rate_limited(api_provider):
+            raise APIError("Rate limit exceeded", status_code=429)
+
+        # Try to get from cache for GET requests
+        if use_cache and method.upper() == 'GET':
+            cache_key = CacheService.generate_cache_key(method, url, data)
+            cached_response = CacheService.get(cache_key)
+            if cached_response:
+                logger.info(f"Cache hit for {url}")
+                return cached_response
+
         try:
             logger.info(f"Making {method} request to {url}")
             response = requests.request(
@@ -39,7 +53,7 @@ class ProxyService:
                 params=params,
                 data=data,
                 stream=True,
-                timeout=timeout
+                timeout=Config.REQUEST_TIMEOUT
             )
             
             logger.info(f"Response status: {response.status_code}")
@@ -49,6 +63,11 @@ class ProxyService:
                     f"API request failed: {response.text}",
                     status_code=response.status_code
                 )
+
+            # Cache successful GET responses
+            if use_cache and method.upper() == 'GET' and response.status_code == 200:
+                cache_key = CacheService.generate_cache_key(method, url, data)
+                CacheService.set(cache_key, response)
                 
             return response
             

@@ -1,162 +1,149 @@
 # MultiLLM Proxy
 
-A robust API proxy service that provides unified access to multiple LLM (Large Language Model) providers including OpenAI, Cerebras, X.AI, and Google AI. This service simplifies the integration and management of multiple AI model providers through a single interface.
+A unified API proxy service for multiple LLM providers (OpenAI, Cerebras, X.AI, and Google AI) with a beautiful dashboard interface.
+
+## Quick Start
+
+1. **Clone and Setup**
+```bash
+# Clone repository
+git clone https://github.com/yourusername/multillm-proxy.git
+cd multillm-proxy
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+npm install
+```
+
+2. **Configure Environment**
+```bash
+# Copy example environment file
+cp .env.example .env
+
+# Edit .env with your API keys
+OPENAI_API_KEY=your-openai-api-key
+CEREBRAS_API_KEY=your-cerebras-api-key
+XAI_API_KEY=your-xai-api-key
+GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
+```
+
+3. **Build Frontend Assets**
+```bash
+npm run build
+```
+
+4. **Run the Application**
+```bash
+python app.py
+```
+
+Visit `http://localhost:1400` to access the dashboard.
 
 ## Features
 
-- 🔄 Unified proxy interface for multiple LLM providers
-- 🔑 Secure API key management
-- 🚦 Real-time status monitoring
-- 📝 Interactive API documentation
-- 🔌 Easy-to-use REST endpoints
-- 🛡️ Error handling and rate limiting
-- 🎯 Dynamic configuration
-- 📊 Beautiful dashboard interface
+- 🔄 **Unified API Access**: Single endpoint for multiple LLM providers
+- 🔑 **Secure Key Management**: Environment-based API key handling
+- 🚦 **Real-time Monitoring**: Live status updates for all providers
+- 🛡️ **Built-in Protection**: Rate limiting and error handling
+- 📊 **Modern Dashboard**: Dark/light theme, responsive design
+- 🚀 **Performance Optimized**: Response caching and compression
 
-## Supported Providers
+## Supported Endpoints
 
-- OpenAI
-- Cerebras
-- X.AI
-- Google AI Platform
-
-## Prerequisites
-
-- Python 3.8+
-- Flask
-- Google Cloud SDK (for Google AI Platform)
-- Valid API keys for the providers you want to use
-
-## Installation
-
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/multillm-proxy.git
-    cd multillm-proxy
-    ```
-
-2. Create a virtual environment and activate it:
-    ```bash
-    python -m venv venv
-    source venv/bin/activate # On Windows: venv\Scripts\activate
-    ```
-
-3. Install the required dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4. Copy the example environment file and update it with your credentials:
-    ```bash
-    cp .env.example .env
-    ```
-
-5. Update the `.env` file with your API keys and other configurations:
-    ```env
-    OPENAI_API_KEY=your-openai-api-key
-    CEREBRAS_API_KEY=your-cerebras-api-key
-    XAI_API_KEY=your-xai-api-key
-    GOOGLE_APPLICATION_CREDENTIALS=path-to-your-credentials.json
-    SERVER_HOST=localhost
-    SERVER_PORT=1400
-    ```
-
-## Usage
-
-1. Start the application:
-    ```bash
-    python app.py
-    ```
-
-2. Access the application in your browser:
-    ```
-    http://localhost:1400
-    ```
-
-3. Example API requests:
-    ```bash
-    curl -X POST "http://localhost:1400/openai/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -d '{"model": "gpt-3.5-turbo","messages": [{"role": "user","content": "Hello!"}]}'
-    ```
-
-    ```bash
-    curl -X POST "http://localhost:1400/cerebras/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -d '{"model": "llama3.1-70b","messages": [{"role": "user","content": "Hello!"}]}'
-    ```
-
-    ```bash
-    curl -X POST "http://localhost:1400/xai/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -d '{"model": "xai-1.0","messages": [{"role": "user","content": "Hello!"}]}'
-    ```
-
-    ```bash
-    curl -X POST "http://localhost:1400/googleai/predict" \
-    -H "Content-Type: application/json" \
-    -d '{
-    "instances": [{
-    "prompt": "What is the capital of France?"
-    }]
-    }'
-    ```
+- OpenAI: `/openai/v1/chat/completions`
+- Cerebras: `/cerebras/v1/chat/completions`
+- X.AI: `/xai/v1/chat/completions`
+- Google AI: `/googleai/predict`
 
 ## Development
 
-1. Set the environment to development:
-    ```bash
-    export FLASK_ENV=development
-    ```
+```bash
+# Run in development mode
+export FLASK_ENV=development
+python app.py
 
-2. Run the application:
-    ```bash
-    python app.py
-    ```
+# Watch frontend changes
+npm run dev
+```
 
-3. Run tests:
-    ```bash
-    pytest
-    ```
+## Docker Deployment
 
-4. Lint and format the code:
-    ```bash
-    flake8 .
-    black .
-    ```
+```bash
+# Build image
+docker build -t multillm-proxy .
 
-## Deployment
+# Run container
+docker run -p 1400:1400 \
+  --env-file .env \
+  multillm-proxy
+```
 
-1. Build the Docker image:
-    ```bash
-    docker build -t multillm-proxy .
-    ```
+## Configuration
 
-2. Run the Docker container:
-    ```bash
-    docker run -p 1400:1400 multillm-proxy
-    ```
+### Rate Limits (per minute)
+- OpenAI: 60 requests
+- Cerebras: 40 requests
+- X.AI: 50 requests
+- Google AI: 30 requests
+- Default: 100 requests
 
-3. Deploy with Gunicorn:
-    ```bash
-    gunicorn -w 4 -b 0.0.0.0:1400 app:app
-    ```
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| SERVER_HOST | Host address | localhost |
+| SERVER_PORT | Port number | 1400 |
+| FLASK_ENV | Environment mode | production |
+| *_API_KEY | Provider API keys | None |
+
+## Project Structure
+```
+multillm-proxy/
+├── app.py                # Main application
+├── services/            # Core services
+│   ├── auth_service.py   # Authentication
+│   ├── cache_service.py  # Response caching
+│   ├── proxy_service.py  # Request proxying
+│   └── rate_limit.py     # Rate limiting
+├── static/              # Frontend assets
+│   ├── css/             # Stylesheets
+│   └── js/              # JavaScript
+└── templates/           # HTML templates
+```
 
 ## Contributing
 
-1. Create a new branch for your feature:
-    ```bash
-    git checkout -b feature/amazing-feature
-    ```
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-2. Commit your changes:
-    ```bash
-    git commit -m 'Add amazing feature'
-    ```
+## Troubleshooting
 
-3. Push to the branch:
-    ```bash
-    git push origin feature/amazing-feature
-    ```
+### Common Issues
 
-## Project Structure
+1. **Rate Limit Exceeded (429)**
+   - Reduce request frequency
+   - Check rate limits in `rate_limit_service.py`
+
+2. **Authentication Failed (500)**
+   - Verify API keys in `.env`
+   - Check key permissions
+
+3. **Provider Unavailable (503)**
+   - Confirm provider status
+   - Check network connectivity
+
+## License
+
+[MIT License](LICENSE) - feel free to use and modify for your needs.
+
+## Support
+
+- 📖 [Documentation](https://github.com/yourusername/multillm-proxy/wiki)
+- 🐛 [Issue Tracker](https://github.com/yourusername/multillm-proxy/issues)
+- 💬 [Discussions](https://github.com/yourusername/multillm-proxy/discussions)
