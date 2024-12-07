@@ -30,12 +30,12 @@ class RateLimitService:
 
     # Request limits per provider (requests per time window)
     RATE_LIMITS = {
-        'default': {'requests': 100, 'window': timedelta(minutes=1)},
-        'openai': {'requests': 60, 'window': timedelta(minutes=1)},
-        'cerebras': {'requests': 40, 'window': timedelta(minutes=1)},
-        'xai': {'requests': 50, 'window': timedelta(minutes=1)},
-        'googleai': {'requests': 30, 'window': timedelta(minutes=1)},
-        'groq': {'requests': 30, 'window': timedelta(minutes=1)}
+        'default': {'requests': 1000, 'window': timedelta(minutes=1)},
+        'openai': {'requests': 500, 'window': timedelta(minutes=1)},
+        'cerebras': {'requests': 500, 'window': timedelta(minutes=1)},
+        'xai': {'requests': 500, 'window': timedelta(minutes=1)},
+        'googleai': {'requests': 500, 'window': timedelta(minutes=1)},
+        'groq': {'requests': 500, 'window': timedelta(minutes=1)}  # Increased since we handle token limits separately
     }
 
     @classmethod
@@ -135,8 +135,9 @@ class RateLimitService:
             
             available = total_tokens < Config.GROQ_TOKEN_LIMIT
             if not available:
-                logger.info(
-                    f"Groq API key token limit reached: {total_tokens}/{Config.GROQ_TOKEN_LIMIT} tokens in last minute."
+                logger.warning(
+                    f"Groq API key token limit reached: {total_tokens}/{Config.GROQ_TOKEN_LIMIT} tokens in last minute. "
+                    "Will attempt to use next available key."
                 )
             return available
 
@@ -169,9 +170,10 @@ class RateLimitService:
 
             # Check if limit is exceeded
             if len(cls._requests[key]) >= limit_settings['requests']:
-                logger.info(
-                    f"Rate limit exceeded for {provider} from {client_ip}: "
-                    f"{len(cls._requests[key])} requests in the last minute."
+                logger.warning(
+                    f"Request rate limit exceeded for {provider} from {client_ip}: "
+                    f"{len(cls._requests[key])} requests in the last minute. "
+                    f"Limit is {limit_settings['requests']} requests per minute."
                 )
                 return True
 
