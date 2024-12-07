@@ -1,175 +1,265 @@
-from flask import Flask, request, Response, render_template, jsonify, send_from_directory
+import os
+import json
+import logging
+from flask import Flask, request, Response, jsonify, url_for, send_from_directory, render_template
 from dotenv import load_dotenv
 from services.proxy_service import ProxyService
 from services.auth_service import AuthService
 from services.cache_service import CacheService
 from error_handlers import init_error_handlers, APIError
-from middleware.compression import compress_response
-import os
 from config import DevelopmentConfig, ProductionConfig, Config
 from proxy import PROVIDER_DETAILS
 
-def ensure_favicons():
-    """Ensure favicon files exist, generate them if they don't"""
-    static_dir = os.path.join(os.path.dirname(__file__), 'static')
-    required_files = [
-        'favicon.ico',
-        'favicon-16x16.png',
-        'favicon-32x32.png',
-        'favicon-192x192.png',
-        'favicon-512x512.png',
-        'apple-touch-icon.png',
-        'site.webmanifest'
-    ]
-    
-    # Check if any required files are missing
-    missing_files = [f for f in required_files if not os.path.exists(os.path.join(static_dir, f))]
-    
-    if missing_files:
-        try:
-            from scripts.generate_favicons import generate_favicons
-            print("Generating favicon files...")
-            generate_favicons()
-            print("Favicon files generated successfully")
-        except Exception as e:
-            print(f"Warning: Failed to generate favicons: {str(e)}")
-
-def ensure_static_directory():
-    """Ensure static directory exists"""
-    static_dir = os.path.join(os.path.dirname(__file__), 'static')
-    if not os.path.exists(static_dir):
-        os.makedirs(static_dir)
-    return static_dir
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [%(name)s] %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def create_app():
-    app = Flask(__name__, static_url_path='/static')
-    
+    """Create and configure the Flask application."""
+    # Load environment variables first
     load_dotenv()
     
-    if os.environ.get('FLASK_ENV') == 'development':
-        app.config.from_object(DevelopmentConfig)
-    else:
-        app.config.from_object(ProductionConfig)
+    # Create Flask app with template and static directories
+    app = Flask(__name__,
+                static_url_path='/static',
+                template_folder='templates')
     
-    # Ensure static directory exists
-    static_dir = ensure_static_directory()
+    # Ensure required directories exist
+    for directory in ['static', 'templates']:
+        dir_path = os.path.join(os.path.dirname(__file__), directory)
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
     
-    # Ensure favicons exist before starting the app
-    ensure_favicons()
+    # Configure app
+    flask_env = os.environ.get('FLASK_ENV', 'production')
+    app.config.from_object(DevelopmentConfig if flask_env == 'development' else ProductionConfig)
     
+    # Copy config values
+    for key in dir(Config):
+        if not key.startswith('_'):
+            app.config[key] = getattr(Config, key)
+    
+    # Initialize error handlers
     init_error_handlers(app)
-    return app
-
-app = create_app()
-
-@app.route('/favicon.ico')
-def favicon():
-    return send_from_directory(
-        os.path.join(app.root_path, 'static'),
-        'favicon.ico',
-        mimetype='image/vnd.microsoft.icon'
-    )
-
-@app.route('/static/<path:filename>')
-def static_files(filename):
-    return send_from_directory(
-        os.path.join(app.root_path, 'static'),
-        filename
-    )
-
-@app.errorhandler(404)
-def not_found_error(error):
-    if request.path == '/favicon.ico':
+    
+    @app.route('/favicon.ico')
+    def favicon():
+        """Serve favicon"""
         return send_from_directory(
             os.path.join(app.root_path, 'static'),
             'favicon.ico',
             mimetype='image/vnd.microsoft.icon'
         )
-    return jsonify({"error": "Not found"}), 404
-
-@app.route('/')
-@compress_response
-def status_page():
-    providers = {}
-    api_keys = AuthService.get_api_keys()
     
-    for provider, details in PROVIDER_DETAILS.items():
-        if provider == 'googleai':
-            token = AuthService.get_google_token()
-            providers[provider] = {
-                'active': bool(token),
-                'base_url': app.config['API_BASE_URLS'][provider],
-                'endpoints': details['endpoints']
-            }
-        else:
-            providers[provider] = {
-                'active': bool(api_keys.get(provider)),
-                'base_url': app.config['API_BASE_URLS'][provider],
-                'endpoints': details['endpoints']
-            }
+    @app.route('/static/<path:filename>')
+    def static_files(filename):
+        """Serve static files"""
+        return send_from_directory('static', filename)
     
-    return render_template('status.html', 
-                         providers=providers,
-                         config=app.config)
-
-@app.route('/<api_provider>/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-@app.route('/<api_provider>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-@compress_response
-def proxy(api_provider, path):
-    if api_provider not in app.config['API_BASE_URLS']:
-        raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
-
-    base_url = app.config['API_BASE_URLS'][api_provider]
-    url = f"{base_url}/{path}" if path else base_url
-
-    # Get authentication token
-    if api_provider == 'googleai':
-        auth_token = AuthService.get_google_token()
-        if not auth_token:
-            raise APIError("Failed to get Google Cloud access token", status_code=500)
-    else:
-        api_keys = AuthService.get_api_keys()
-        auth_token = api_keys.get(api_provider)
-        if not auth_token:
-            raise APIError(f"API key not configured for {api_provider}", status_code=500)
-
-    # Prepare request
-    headers = ProxyService.prepare_headers(request.headers, api_provider, auth_token)
-    request_data = ProxyService.filter_request_data(api_provider, request.get_data())
+    @app.before_request
+    def handle_redirects():
+        """Handle redirects for provider endpoints"""
+        if request.path.rstrip('/') in [f'/{provider}' for provider in app.config['API_BASE_URLS']]:
+            return proxy(request.path.strip('/').split('/')[-1])
     
-    # Make request
-    response = ProxyService.make_request(
-        method=request.method,
-        url=url,
-        headers=headers,
-        params=request.args,
-        data=request_data,
-        api_provider=api_provider,
-        use_cache=request.method.upper() == 'GET'
-    )
+    @app.route('/health')
+    def health_check():
+        """Health check endpoint"""
+        try:
+            return jsonify({
+                "status": "healthy",
+                "config": {
+                    "host": os.environ.get('SERVER_HOST', Config.DEFAULT_HOST),
+                    "port": int(os.environ.get('SERVER_PORT', Config.DEFAULT_PORT))
+                }
+            }), 200
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return jsonify({"status": "error", "message": str(e)}), 500
 
-    # Prepare response
-    excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-    response_headers = [(name, value) for (name, value) in response.raw.headers.items()
-                       if name.lower() not in excluded_headers]
+    @app.route('/')
+    def status_page():
+        """Status page showing available providers"""
+        try:
+            providers = {}
+            errors = []
+            
+            def check_provider(provider, details):
+                try:
+                    if provider == 'googleai':
+                        token = AuthService.get_google_token()
+                        return {
+                            'active': bool(token),
+                            'base_url': app.config['API_BASE_URLS'][provider],
+                            'endpoints': details.get('endpoints', []),
+                            'status': 'ok'
+                        }
+                    else:
+                        api_key = AuthService.get_api_key(provider)
+                        return {
+                            'active': bool(api_key),
+                            'base_url': app.config['API_BASE_URLS'][provider],
+                            'endpoints': details.get('endpoints', []),
+                            'status': 'ok'
+                        }
+                except Exception as e:
+                    logger.error(f"Error checking provider {provider}: {str(e)}")
+                    return {
+                        'active': False,
+                        'base_url': app.config['API_BASE_URLS'].get(provider, ''),
+                        'endpoints': details.get('endpoints', []),
+                        'status': 'error',
+                        'error': str(e)
+                    }
+            
+            # Check each provider independently
+            for provider, details in PROVIDER_DETAILS.items():
+                try:
+                    providers[provider] = check_provider(provider, details)
+                except Exception as e:
+                    logger.error(f"Failed to check {provider}: {str(e)}")
+                    errors.append(f"Failed to check {provider}: {str(e)}")
+                    providers[provider] = {
+                        'active': False,
+                        'status': 'error',
+                        'error': str(e)
+                    }
 
-    return Response(response.content, response.status_code, response_headers)
+            # Return JSON or HTML based on Accept header
+            if request.headers.get('Accept', '').find('application/json') != -1:
+                return jsonify({
+                    'status': 'running',
+                    'providers': providers,
+                    'errors': errors if errors else None
+                })
+            else:
+                return render_template('status.html',
+                                    providers=providers,
+                                    errors=errors if errors else None)
 
-@app.route('/health')
-def health_check():
-    try:
-        # Add any necessary health checks here
-        return jsonify({"status": "healthy"}), 200
-    except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+        except Exception as e:
+            logger.error(f"Status page error: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': str(e)
+            }), 500
 
-@app.cli.command('clear-cache')
-def clear_cache():
-    """Clear the application cache"""
-    CacheService.clear()
-    print("Cache cleared successfully")
+    @app.route('/<api_provider>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    @app.route('/<api_provider>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    def proxy(api_provider, path=''):
+        """Main proxy endpoint"""
+        try:
+            # Validate provider
+            if api_provider not in app.config['API_BASE_URLS']:
+                raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
+
+            # Construct URL
+            base_url = app.config['API_BASE_URLS'][api_provider]
+            if api_provider == 'groq':
+                if path.startswith('v1/'):
+                    path = f'openai/{path}'
+                elif path and not path.startswith('openai/'):
+                    path = f'openai/v1/{path}'
+                elif not path:
+                    path = 'openai/v1'
+            
+            url = f"{base_url}/{path}" if path else base_url
+            logger.info(f"Proxying request to: {url}")
+
+            # Get auth token
+            auth_token = None
+            if api_provider == 'googleai':
+                auth_token = AuthService.get_google_token()
+            else:
+                auth_token = AuthService.get_api_key(api_provider)
+            
+            if not auth_token:
+                raise APIError(f"API key not configured for {api_provider}", status_code=500)
+
+            # Check if request is streaming
+            is_streaming = False
+            if request.is_json:
+                try:
+                    body = request.get_json()
+                    is_streaming = body.get('stream', False)
+                except Exception:
+                    pass
+
+            # Make request
+            headers = ProxyService.prepare_headers(request.headers, api_provider, auth_token)
+            request_data = ProxyService.filter_request_data(api_provider, request.get_data())
+            
+            response = ProxyService.make_request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                params=request.args,
+                data=request_data,
+                api_provider=api_provider,
+                use_cache=request.method.upper() == 'GET' and not is_streaming
+            )
+
+            # Handle streaming response
+            if is_streaming and response.headers.get('content-type', '').startswith('text/event-stream'):
+                def generate():
+                    for chunk in response.iter_lines(decode_unicode=True):
+                        if chunk:
+                            yield f"{chunk}\n"
+                
+                return Response(
+                    generate(),
+                    status=response.status_code,
+                    content_type='text/event-stream'
+                )
+
+            # Handle normal response
+            return Response(
+                response.content,
+                status=response.status_code,
+                content_type=response.headers.get('content-type', 'application/json'),
+                headers={k: v for k, v in response.headers.items() 
+                        if k.lower() not in ['content-encoding', 'content-length', 'transfer-encoding']}
+            )
+
+        except Exception as e:
+            logger.error(f"Proxy error for {api_provider}: {str(e)}")
+            if isinstance(e, APIError):
+                raise e
+            raise APIError(f"Proxy error: {str(e)}", status_code=500)
+    
+    @app.errorhandler(404)
+    def not_found_error(error):
+        """Handle 404 errors"""
+        if request.path == '/favicon.ico':
+            return send_from_directory('static', 'favicon.ico')
+        return render_template('404.html'), 404
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        """Handle 500 errors"""
+        logger.error(f"Internal server error: {str(error)}")
+        return render_template('500.html'), 500
+    
+    return app
+
+# Create app instance
+app = create_app()
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', Config.DEFAULT_PORT))
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    try:
+        port = int(os.environ.get('SERVER_PORT', Config.DEFAULT_PORT))
+        host = os.environ.get('SERVER_HOST', '0.0.0.0')
+        logger.info(f"Starting server on {host}:{port}")
+        app.run(
+            host=host,
+            port=port,
+            threaded=True,
+            use_reloader=False,
+            debug=False
+        )
+    except Exception as e:
+        logger.error(f"Server failed to start: {str(e)}")
+        raise
