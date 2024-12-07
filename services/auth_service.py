@@ -6,6 +6,7 @@ from config import Config
 from services.rate_limit_service import RateLimitService
 from error_handlers import APIError
 from typing import Optional
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -49,70 +50,46 @@ class AuthService:
             return os.environ.get('TOGETHER_API_KEY')
         return None
     
-    @classmethod
-    def get_google_token(cls):
-        """Get Google Cloud authentication token with better error handling"""
-        now = datetime.now()
-        
-        # Check if we have a valid cached token
-        if cls._google_token and cls._token_expiry and cls._token_expiry > now + Config.TOKEN_REFRESH_BUFFER:
-            return cls._google_token
-            
+    @staticmethod
+    def _get_google_token():
+        """Get a Google Cloud access token using gcloud command"""
         try:
-            # Check if gcloud is installed
-            import shutil
-            if not shutil.which('gcloud'):
-                raise APIError(
-                    "gcloud CLI not found. Please install Google Cloud SDK.",
-                    status_code=500
-                )
-            
-            # Try to get token using gcloud
-            try:
-                result = subprocess.run(
-                    ['gcloud', 'auth', 'print-access-token'],
-                    capture_output=True,
-                    text=True,
-                    timeout=10  # Add timeout to prevent hanging
-                )
-            except subprocess.TimeoutExpired:
-                raise APIError("Timeout while getting Google token", status_code=504)
-            except subprocess.CalledProcessError as e:
-                error_msg = e.stderr.decode().strip() if e.stderr else str(e)
-                if "not logged in" in error_msg.lower():
-                    raise APIError(
-                        "Not logged in to gcloud. Please run 'gcloud auth login' first.",
-                        status_code=401
-                    )
-                elif "project" in error_msg.lower():
-                    raise APIError(
-                        "No Google Cloud project selected. Please run 'gcloud config set project YOUR_PROJECT_ID'",
-                        status_code=401
-                    )
-                raise APIError(f"Failed to get Google token: {error_msg}", status_code=401)
-            except Exception as e:
-                raise APIError(f"Error running gcloud command: {str(e)}", status_code=500)
-            
-            if result.returncode != 0:
-                error_msg = result.stderr.strip() if result.stderr else "Unknown gcloud error"
-                raise APIError(f"Failed to get Google token: {error_msg}", status_code=401)
-            
+            cmd = [
+                'gcloud', 'auth', 'print-access-token',
+                '--scopes=https://www.googleapis.com/auth/cloud-platform'
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             token = result.stdout.strip()
             if not token:
-                raise APIError("Received empty token from gcloud", status_code=401)
-            
-            # Cache the token
-            cls._google_token = token
-            cls._token_expiry = now + Config.TOKEN_LIFETIME
-            logger.info("Successfully obtained new Google auth token")
-            
+                raise APIError("Failed to get Google Cloud token: Empty token received")
+            return token
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Failed to get Google Cloud token: {e.stderr}"
+            logger.error(error_msg)
+            raise APIError(error_msg, status_code=500)
+        except Exception as e:
+            error_msg = f"Error getting Google Cloud token: {str(e)}"
+            logger.error(error_msg)
+            raise APIError(error_msg, status_code=500)
+
+    @classmethod
+    def get_google_token(cls):
+        """Get a cached Google Cloud access token, refreshing if needed"""
+        current_time = time.time()
+        
+        # Check if we have a cached token that's not expired
+        if cls._google_token and cls._token_expiry > current_time:
             return cls._google_token
             
-        except APIError:
-            raise
-        except Exception as e:
-            raise APIError(f"Unexpected error getting Google token: {str(e)}", status_code=500)
-
+        # Get a new token
+        token = cls._get_google_token()
+        
+        # Cache the token with 45-minute expiry
+        cls._google_token = token
+        cls._token_expiry = current_time + (45 * 60)  # 45 minutes
+        
+        return token
+    
     @classmethod
     def invalidate_google_token(cls):
         """Invalidate the cached Google token to force a refresh."""

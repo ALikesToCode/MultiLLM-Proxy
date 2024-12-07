@@ -2,7 +2,7 @@ import json
 import logging
 import requests
 from typing import Optional, Dict, Any, Tuple, List
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 import tiktoken
 from error_handlers import APIError
 from config import Config
@@ -11,18 +11,23 @@ from services.rate_limit_service import RateLimitService
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
+import time
+import uuid
+import flask
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAY = 1.0  # Seconds
 
 class ProxyService:
     """
     The ProxyService class handles making proxied requests to various API providers,
-    applying caching, rate limits, and token usage rules as needed. With this updated
-    logic, if any provider takes more than 2 seconds to respond, the request will 
-    be terminated to maintain responsiveness.
+    applying caching, rate limits, and token usage rules as needed. For non-Groq 
+    endpoints, requests are made directly without message chunking. For Groq, if 
+    the token limit is exceeded, messages are chunked into smaller pieces.
     """
 
-    # Limit concurrent requests to avoid overwhelming the system
     _executor = ThreadPoolExecutor(max_workers=10)
     _tokenizer = None  # Lazy load tokenizer
     
@@ -36,23 +41,18 @@ class ProxyService:
         """Get Google Cloud access token using gcloud command with caching."""
         with cls._google_token_lock:
             current_time = datetime.now()
-            
-            # Check if token exists and is not expired (45 minutes)
-            if (cls._google_token and cls._google_token_expiry and 
-                current_time < cls._google_token_expiry):
+            if (cls._google_token and cls._google_token_expiry and current_time < cls._google_token_expiry):
                 return cls._google_token
 
             try:
                 import subprocess
                 import shutil
 
-                # First check if gcloud is installed
                 if not shutil.which('gcloud'):
                     error_msg = "gcloud CLI not found. Please install Google Cloud SDK"
                     logger.error(error_msg)
                     raise APIError(error_msg, status_code=500)
 
-                # Try to get token
                 result = subprocess.run(
                     ['gcloud', 'auth', 'print-access-token'], 
                     capture_output=True, 
@@ -67,17 +67,15 @@ class ProxyService:
                     raise APIError(error_msg, status_code=401)
 
                 logger.info("Successfully retrieved new Google Cloud access token")
-                # Set token and expiry (45 minutes from now)
                 cls._google_token = token
                 cls._google_token_expiry = current_time + timedelta(minutes=45)
                 return token
 
             except subprocess.CalledProcessError as e:
-                error_msg = f"Failed to get Google Cloud token: {e.stderr}"
-                logger.error(error_msg)
-                if "not logged in" in str(e.stderr).lower():
+                err_msg = str(e.stderr)
+                if "not logged in" in err_msg.lower():
                     raise APIError("Not logged in to gcloud. Please run 'gcloud auth login' first", status_code=401)
-                elif "project" in str(e.stderr).lower():
+                elif "project" in err_msg.lower():
                     raise APIError("No Google Cloud project selected. Please run 'gcloud config set project YOUR_PROJECT_ID'", status_code=401)
                 else:
                     raise APIError(f"Error running gcloud command: {e.stderr}", status_code=500)
@@ -103,10 +101,8 @@ class ProxyService:
         """Prepare headers for the target provider."""
         headers = {k: v for k, v in request_headers.items() if k.lower() not in ['host', 'content-length']}
         
-        # If auth token is provided, use it
         if auth_token:
             headers['Authorization'] = f'Bearer {auth_token}'
-        # Otherwise use provider-specific auth
         elif api_provider == 'googleai':
             google_token = AuthService.get_google_token()
             if google_token:
@@ -131,10 +127,8 @@ class ProxyService:
     @staticmethod
     def filter_request_data(api_provider: str, request_data: Optional[bytes]) -> Optional[bytes]:
         """
-        Filter and prepare request data for the target provider. This includes:
-          - Attempting JSON parsing of request data.
-          - Removing unsupported parameters.
-          - Applying provider-specific transformations (e.g., default model for Groq).
+        Attempt to parse and filter request data for the target provider.
+        Remove unsupported parameters and apply provider-specific transformations.
         """
         if not request_data:
             return None
@@ -150,9 +144,18 @@ class ProxyService:
             for param in unsupported_params:
                 data.pop(param, None)
 
-        if api_provider == 'groq' and isinstance(data, dict):
-            if 'messages' in data and 'model' not in data:
-                data['model'] = 'mixtral-8x7b-32768'
+            # Format for Google AI if needed
+            if api_provider == 'googleai' and 'messages' in data:
+                formatted_data = {
+                    "messages": data['messages'],
+                    "model": data.get('model', 'google/gemini-pro'),
+                    "temperature": data.get('temperature', 0.7),
+                    "maxOutputTokens": data.get('max_tokens', 1024),
+                    "topP": data.get('top_p', 0.95),
+                    "topK": data.get('top_k', 40)
+                }
+                data = formatted_data
+                logger.info(f"Formatted Google AI request data: {data}")
 
         try:
             return json.dumps(data).encode('utf-8')
@@ -162,48 +165,44 @@ class ProxyService:
     
     @classmethod
     def get_tokenizer(cls):
-        """Get or create the tokenizer for token counting"""
+        """Get or create the tokenizer for token counting."""
         if cls._tokenizer is None:
-            cls._tokenizer = tiktoken.get_encoding("cl100k_base")  # OpenAI's encoding works well for most models
+            cls._tokenizer = tiktoken.get_encoding("cl100k_base")
         return cls._tokenizer
     
     @classmethod
     def count_tokens(cls, text: str) -> int:
-        """Count the number of tokens in a text string"""
+        """Count the number of tokens in a text string."""
         return len(cls.get_tokenizer().encode(text))
     
     @classmethod
     def split_messages(cls, messages: List[Dict[str, str]], max_tokens: int = 4500) -> List[List[Dict[str, str]]]:
-        """Split a list of messages into chunks that fit within token limits.
-        Using 4500 as max_tokens provides a safe buffer below the 6000 TPM limit."""
+        """
+        Split a list of messages into chunks that fit within token limits.
+        Only used for Groq requests. Keeps system message in each chunk if present.
+        """
         chunks = []
         current_chunk = []
         current_tokens = 0
         
-        # Always keep system message if present
         system_message = None
         if messages and messages[0].get('role') == 'system':
             system_message = messages[0]
             messages = messages[1:]
             
         for message in messages:
-            # Count tokens in this message
             message_text = f"{message.get('role', '')}: {message.get('content', '')}"
             message_tokens = cls.count_tokens(message_text)
             
-            # If this message alone exceeds limit, split it
             if message_tokens > max_tokens:
                 if current_chunk:
                     chunks.append(current_chunk)
-                # Split the large message into smaller pieces
                 content = message['content']
                 while content:
                     chunk_content = content
                     while cls.count_tokens(chunk_content) > max_tokens:
-                        # Find last complete sentence within token limit
                         last_period = chunk_content.rfind('.')
                         if last_period == -1:
-                            # No complete sentence, just cut at token limit
                             chunk_content = chunk_content[:int(len(chunk_content) * 0.8)]
                         else:
                             chunk_content = chunk_content[:last_period + 1]
@@ -213,13 +212,11 @@ class ProxyService:
                         new_chunk.append(system_message)
                     new_chunk.append({**message, 'content': chunk_content})
                     chunks.append(new_chunk)
-                    
                     content = content[len(chunk_content):].strip()
                 current_chunk = []
                 current_tokens = 0
                 continue
             
-            # If adding this message would exceed limit, start new chunk
             if current_tokens + message_tokens > max_tokens:
                 if current_chunk:
                     chunks.append(current_chunk)
@@ -233,18 +230,14 @@ class ProxyService:
             current_chunk.append(message)
             current_tokens += message_tokens
         
-        # Add any remaining messages
         if current_chunk:
             chunks.append(current_chunk)
         
-        # Verify no chunk exceeds the token limit
         for chunk in chunks:
             total_tokens = sum(cls.count_tokens(f"{msg.get('role', '')}: {msg.get('content', '')}") for msg in chunk)
             if total_tokens > max_tokens:
                 logger.warning(f"Chunk with {total_tokens} tokens exceeds limit of {max_tokens}, splitting further")
-                # Recursively split this chunk
                 sub_chunks = cls.split_messages(chunk, max_tokens)
-                # Replace the original chunk with the sub-chunks
                 chunks = [c for c in chunks if c != chunk] + sub_chunks
         
         return chunks
@@ -257,14 +250,9 @@ class ProxyService:
                                    params: Dict[str, Any], 
                                    data: Optional[bytes], 
                                    timeout: Tuple[int, int]) -> requests.Response:
-        """
-        Make a single request with a timeout. The timeout is now provider-specific
-        to allow for longer processing times.
-        """
+        """Make a single request with a given timeout."""
         with requests.Session() as session:
             session.max_redirects = 3
-
-            # Check if request is streaming
             is_streaming = False
             if data:
                 try:
@@ -273,14 +261,13 @@ class ProxyService:
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
-            # Use the provider-specific timeout
             response = session.request(
                 method=method,
                 url=url,
                 headers=headers,
                 params=params,
                 data=data,
-                timeout=timeout,  # Use the provided timeout
+                timeout=timeout,
                 allow_redirects=True,
                 verify=True,
                 stream=is_streaming
@@ -288,7 +275,6 @@ class ProxyService:
             
             if not is_streaming:
                 _ = response.content
-                # Debug log the response
                 try:
                     logger.info(f"Response status: {response.status_code}")
                     logger.info(f"Response headers: {response.headers}")
@@ -303,99 +289,49 @@ class ProxyService:
 
     @classmethod
     def _make_base_request(cls,
-                     method: str,
-                     url: str,
-                     headers: Dict[str, str],
-                     params: Dict[str, Any],
-                     data: Optional[bytes],
-                     api_provider: Optional[str] = None,
-                     use_cache: bool = True,
-                     retry_count: int = 0) -> requests.Response:
-        """Make a base request without Groq-specific handling"""
+                          method: str,
+                          url: str,
+                          headers: Dict[str, str],
+                          params: Dict[str, Any],
+                          data: bytes,
+                          api_provider: str,
+                          use_cache: bool = True,
+                          retry_count: int = 0) -> requests.Response:
+        """Make a base request with retries and error handling"""
         try:
-            # Get provider-specific settings
-            timeouts = Config.API_TIMEOUTS.get(api_provider, Config.API_TIMEOUTS['default'])
-            retry_settings = Config.API_RETRIES.get(api_provider, Config.API_RETRIES['default'])
+            # Make the request with streaming if requested
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter()
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
             
-            # Check rate limits
-            if api_provider and RateLimitService.is_rate_limited(api_provider):
-                logger.warning(f"Rate limit exceeded for provider: {api_provider}")
-                raise APIError("Rate limit exceeded", status_code=429)
-
-            retries = 0
-            last_error = None
+            response = session.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
+                stream=True  # Always enable streaming
+            )
             
-            while retries <= retry_settings['max_retries']:
-                try:
-                    response = cls._make_request_with_timeout(
-                        method=method,
-                        url=url,
-                        headers=headers,
-                        params=params,
-                        data=data,
-                        timeout=timeouts
-                    )
-                    
-                    if response.status_code >= 400:
-                        try:
-                            error_json = response.json()
-                            error_message = error_json.get('error', {}).get('message', response.text)
-                        except Exception:
-                            error_message = response.text
-                        
-                        # Log error without full traceback
-                        logger.error(f"API error response: Status {response.status_code}, Message: {error_message}")
-                        
-                        # For Google token expiration, invalidate token and retry
-                        if api_provider == 'googleai' and (
-                            response.status_code == 401 or 
-                            'token expired' in error_message.lower() or 
-                            'invalid token' in error_message.lower()
-                        ):
-                            AuthService.invalidate_google_token()
-                            # Update headers with new token
-                            new_token = AuthService.get_google_token()
-                            if new_token:
-                                headers['Authorization'] = f'Bearer {new_token}'
-                                retries += 1
-                                continue
-                        
-                        # For Groq 413 errors, raise immediately without retrying
-                        if api_provider == 'groq' and response.status_code == 413:
-                            raise APIError(f"API request failed: {error_message}", status_code=response.status_code)
-                        
-                        # Check if error is retryable
-                        if response.status_code in [429, 500, 502, 503, 504] and retries < retry_settings['max_retries']:
-                            retries += 1
-                            wait_time = retry_settings['backoff_factor'] * (2 ** (retries - 1))
-                            logger.warning(f"Request failed with {response.status_code}, retrying in {wait_time}s ({retries}/{retry_settings['max_retries']})")
-                            import time
-                            time.sleep(wait_time)
-                            continue
-                            
-                        raise APIError(f"API request failed: {error_message}", status_code=response.status_code)
-
-                    return response
-
-                except requests.exceptions.Timeout as e:
-                    last_error = f"Request timed out: {str(e)}"
-                    logger.error(f"Request to {url} timed out: {str(e)}")
-                    if retries < retry_settings['max_retries']:
-                        retries += 1
-                        wait_time = retry_settings['backoff_factor'] * (2 ** (retries - 1))
-                        logger.warning(f"Retrying in {wait_time}s ({retries}/{retry_settings['max_retries']})")
-                        time.sleep(wait_time)
-                        continue
-                    break
-
-            # If we get here, all retries failed
-            raise APIError(last_error or "Max retries exceeded", status_code=500)
-
-        except Exception as e:
-            error_msg = f"Error in base request: {str(e)}"
+            return response
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Request failed: {str(e)}"
             logger.error(error_msg)
-            if isinstance(e, APIError):
-                raise
+            if retry_count < MAX_RETRIES:
+                logger.info(f"Retrying request (attempt {retry_count + 1}/{MAX_RETRIES})")
+                time.sleep(RETRY_DELAY * (retry_count + 1))
+                return cls._make_base_request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    params=params,
+                    data=data,
+                    api_provider=api_provider,
+                    use_cache=use_cache,
+                    retry_count=retry_count + 1
+                )
             raise APIError(error_msg, status_code=500)
 
     @classmethod
@@ -408,9 +344,8 @@ class ProxyService:
                      api_provider: Optional[str] = None,
                      use_cache: bool = True,
                      retry_count: int = 0) -> requests.Response:
-        """Make a proxied request with proper error handling and timeouts"""
+        """Make a proxied request with error handling."""
         try:
-            # Parse request data for logging
             request_data = {}
             if data:
                 try:
@@ -419,15 +354,15 @@ class ProxyService:
                 except Exception:
                     pass
 
-            # Special handling for Groq requests
             if api_provider == 'groq' and method.upper() == 'POST':
                 return cls._handle_groq_request(method, url, headers, params, data, request_data, use_cache, retry_count)
             
-            # Special handling for Together AI requests
             if api_provider == 'together' and method.upper() == 'POST':
                 return cls._handle_together_request(method, url, headers, params, data, request_data, use_cache, retry_count)
             
-            # For other requests
+            if api_provider == 'googleai' and method.upper() == 'POST':
+                return cls._handle_googleai_request(method, url, headers, params, data, request_data, use_cache, retry_count)
+            
             return cls._make_base_request(method, url, headers, params, data, api_provider, use_cache, retry_count)
         except Exception as e:
             error_msg = f"Error in make_request: {str(e)}"
@@ -438,30 +373,25 @@ class ProxyService:
 
     @classmethod
     def _handle_together_request(cls,
-                               method: str,
-                               url: str,
-                               headers: Dict[str, str],
-                               params: Dict[str, Any],
-                               data: bytes,
-                               request_data: Dict[str, Any],
-                               use_cache: bool = True,
-                               retry_count: int = 0) -> requests.Response:
-        """Handle Together AI specific request processing"""
+                                 method: str,
+                                 url: str,
+                                 headers: Dict[str, str],
+                                 params: Dict[str, Any],
+                                 data: bytes,
+                                 request_data: Dict[str, Any],
+                                 use_cache: bool = True,
+                                 retry_count: int = 0) -> requests.Response:
+        """Handle Together AI specific request."""
         try:
-            # Add default model if not specified
             if 'model' not in request_data and 'messages' in request_data:
                 request_data['model'] = Config.TOGETHER_MODELS[0]
                 data = json.dumps(request_data).encode('utf-8')
             
-            # Check if streaming is requested
             is_streaming = request_data.get('stream', False)
-            
-            # Log the request details
             logger.info(f"Together AI request URL: {url}")
             logger.info(f"Together AI request headers: {headers}")
             logger.info(f"Together AI request data: {request_data}")
             
-            # Make the request
             response = cls._make_base_request(
                 method=method,
                 url=url,
@@ -473,25 +403,22 @@ class ProxyService:
                 retry_count=retry_count
             )
 
-            # Log raw response
             logger.info(f"Together AI raw response status: {response.status_code}")
             logger.info(f"Together AI raw response headers: {response.headers}")
 
-            # Handle response
             if response.status_code == 200:
                 if is_streaming:
-                    # For streaming responses, return as-is to let Flask handle SSE streaming
                     return response
                 else:
                     try:
-                        # Try to parse JSON response for non-streaming requests
                         if response.content:
                             response_data = response.json()
                             logger.info(f"Together AI parsed response: {response_data}")
                             
-                            # Ensure response has required fields
+                            if url.endswith('/models'):
+                                return response
+                            
                             if 'choices' not in response_data:
-                                # Check different possible response formats
                                 if 'output' in response_data:
                                     content = response_data['output'].get('content', '')
                                 elif 'response' in response_data:
@@ -499,9 +426,8 @@ class ProxyService:
                                 elif 'text' in response_data:
                                     content = response_data['text']
                                 else:
-                                    content = str(response_data)  # Fallback to string representation
+                                    content = str(response_data)
                                 
-                                # Format response in OpenAI-like structure
                                 formatted_response = {
                                     'choices': [{
                                         'message': {
@@ -519,20 +445,19 @@ class ProxyService:
                             raise APIError("Empty response from Together AI", status_code=500)
                     except json.JSONDecodeError as e:
                         logger.error(f"JSON decode error: {str(e)}")
-                        logger.error(f"Raw content causing error: {response.content}")
+                        logger.error(f"Raw content: {response.content}")
                         raise APIError("Invalid JSON response from Together AI", status_code=500)
                     except Exception as e:
                         logger.error(f"Error processing Together AI response: {str(e)}")
                         raise APIError(f"Error processing Together AI response: {str(e)}", status_code=500)
             else:
-                # Log error response
                 try:
                     error_content = response.content.decode('utf-8')
                     logger.error(f"Together AI error response: {error_content}")
                 except Exception as e:
                     logger.error(f"Error decoding error response: {str(e)}")
                 raise APIError(f"Together AI request failed with status {response.status_code}", 
-                             status_code=response.status_code)
+                               status_code=response.status_code)
             
             return response
         except Exception as e:
@@ -544,38 +469,32 @@ class ProxyService:
 
     @classmethod
     def _handle_groq_request(cls,
-                            method: str,
-                            url: str,
-                            headers: Dict[str, str],
-                            params: Dict[str, Any],
-                            data: bytes,
-                            request_data: Dict[str, Any],
-                            use_cache: bool = True,
-                            retry_count: int = 0) -> requests.Response:
-        """Handle Groq specific request processing"""
+                             method: str,
+                             url: str,
+                             headers: Dict[str, str],
+                             params: Dict[str, Any],
+                             data: bytes,
+                             request_data: Dict[str, Any],
+                             use_cache: bool = True,
+                             retry_count: int = 0) -> requests.Response:
+        """Handle Groq specific request processing with message chunking."""
         try:
             messages = request_data.get('messages', [])
-            
-            # If no messages or streaming, process normally
             if not messages or request_data.get('stream', False):
                 return cls._make_base_request(method, url, headers, params, data, 'groq', use_cache, retry_count)
             
-            # Try normal request first
+            # Attempt normal request first
             try:
                 return cls._make_base_request(method, url, headers, params, data, 'groq', use_cache, retry_count)
             except APIError as e:
-                # Check if error is due to token limit
+                # If token limit error, split messages
                 if e.status_code == 413:
                     logger.info("Request exceeded token limit, splitting messages...")
-                    # Split messages into smaller chunks
                     message_chunks = cls.split_messages(messages)
                     if len(message_chunks) == 1:
-                        # If we couldn't split further, raise original error
                         raise
-                    
                     logger.info(f"Split request into {len(message_chunks)} chunks")
-                    
-                    # Process each chunk
+
                     responses = []
                     for i, chunk in enumerate(message_chunks):
                         logger.info(f"Processing chunk {i+1}/{len(message_chunks)}")
@@ -592,7 +511,6 @@ class ProxyService:
                         )
                         responses.append(chunk_response.json()['choices'][0]['message']['content'])
                     
-                    # Combine responses
                     combined_response = {
                         'choices': [{
                             'message': {
@@ -601,8 +519,6 @@ class ProxyService:
                             }
                         }]
                     }
-                    
-                    # Create response object
                     response = requests.Response()
                     response._content = json.dumps(combined_response).encode('utf-8')
                     response.status_code = 200
@@ -618,6 +534,132 @@ class ProxyService:
             raise APIError(error_msg, status_code=500)
 
     @classmethod
+    def _handle_googleai_request(cls,
+                               method: str,
+                               url: str,
+                               headers: Dict[str, str],
+                               params: Dict[str, Any],
+                               data: bytes,
+                               request_data: Dict[str, Any],
+                               use_cache: bool = True,
+                               retry_count: int = 0) -> requests.Response:
+        """Handle Google AI specific request processing"""
+        try:
+            # Update URL to use beta1 openapi chat completions endpoint
+            project_id = "gen-lang-client-0290064683"
+            location = "us-central1"
+            url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
+            
+            # Format request for chat completions API
+            chat_request = {
+                "model": request_data.get("model", "meta/llama-3.1-405b-instruct-maas"),
+                "messages": request_data.get("messages", []),
+                "max_tokens": request_data.get("max_tokens", 1024),
+                "stream": request_data.get("stream", False),
+                "extra_body": {
+                    "google": {
+                        "model_safety_settings": {
+                            "enabled": request_data.get("extra_body", {}).get("google", {}).get("model_safety_settings", {}).get("enabled", False),
+                            "llama_guard_settings": request_data.get("extra_body", {}).get("google", {}).get("model_safety_settings", {}).get("llama_guard_settings", {})
+                        }
+                    }
+                }
+            }
+            
+            # Convert request to bytes
+            data = json.dumps(chat_request).encode('utf-8')
+            
+            # Log request details
+            logger.info(f"Google AI chat request URL: {url}")
+            logger.info(f"Google AI chat request data: {chat_request}")
+            
+            # Make the request
+            response = cls._make_base_request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
+                api_provider='googleai',
+                use_cache=use_cache,
+                retry_count=retry_count
+            )
+
+            # Log response details
+            logger.info(f"Google AI raw response status: {response.status_code}")
+            logger.info(f"Google AI raw response headers: {response.headers}")
+
+            # Handle response
+            if response.status_code == 200:
+                try:
+                    # For streaming responses
+                    if chat_request.get("stream", False):
+                        def generate():
+                            for line in response.iter_lines():
+                                if line:
+                                    try:
+                                        # Parse the JSON data
+                                        json_data = json.loads(line)
+                                        # Format as SSE data
+                                        yield f"data: {json.dumps(json_data)}\n\n"
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"Error parsing streaming response: {e}")
+                                        continue
+                            yield "data: [DONE]\n\n"
+                        
+                        # Create streaming response
+                        streaming_response = flask.Response(
+                            generate(),
+                            mimetype='text/event-stream',
+                            headers={
+                                'Cache-Control': 'no-cache',
+                                'Connection': 'keep-alive',
+                                'Content-Type': 'text/event-stream',
+                                'X-Accel-Buffering': 'no'
+                            }
+                        )
+                        return streaming_response
+                        
+                    # For non-streaming responses
+                    else:
+                        response_data = response.json()
+                        logger.info(f"Google AI parsed response: {response_data}")
+                        
+                        # Create new response with the original data
+                        response_json = json.dumps(response_data)
+                        response_bytes = response_json.encode('utf-8')
+                        
+                        new_response = requests.Response()
+                        new_response.status_code = 200
+                        new_response._content = response_bytes
+                        new_response.headers.update({
+                            'Content-Type': 'application/json; charset=utf-8',
+                            'Content-Length': str(len(response_bytes))
+                        })
+                        
+                        return new_response
+                        
+                except Exception as e:
+                    logger.error(f"Error processing response: {str(e)}")
+                    raise APIError(f"Error processing response: {str(e)}", status_code=500)
+            else:
+                # Log error response
+                try:
+                    error_content = response.content.decode('utf-8')
+                    logger.error(f"Google AI error response: {error_content}")
+                except Exception as e:
+                    logger.error(f"Error decoding error response: {str(e)}")
+                raise APIError(f"Google AI request failed with status {response.status_code}", 
+                             status_code=response.status_code)
+            
+        except Exception as e:
+            error_msg = f"Error handling Google AI request: {str(e)}"
+            logger.error(error_msg)
+            if isinstance(e, APIError):
+                raise
+            raise APIError(error_msg, status_code=500)
+
+    @classmethod
     def shutdown(cls):
-        """Cleanup resources"""
+        """Cleanup resources."""
         cls._executor.shutdown(wait=False)

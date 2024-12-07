@@ -165,6 +165,11 @@ def create_app():
                     path = f'openai/v1/{path}'
                 elif not path:
                     path = 'openai/v1'
+            elif api_provider == 'googleai':
+                if path == 'models':
+                    # Use models endpoint for listing models
+                    base_url = f"https://us-central1-aiplatform.googleapis.com/v1beta1/projects/{Config.PROJECT_ID}/locations/us-central1/models"
+                    path = ''
             
             url = f"{base_url}/{path}" if path else base_url
             logger.info(f"Proxying request to: {url}")
