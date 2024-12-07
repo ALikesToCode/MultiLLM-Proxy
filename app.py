@@ -205,14 +205,25 @@ def create_app():
             # Handle streaming response
             if is_streaming and response.headers.get('content-type', '').startswith('text/event-stream'):
                 def generate():
-                    for chunk in response.iter_lines(decode_unicode=True):
-                        if chunk:
-                            yield f"{chunk}\n"
+                    try:
+                        for chunk in response.iter_lines(decode_unicode=True):
+                            if chunk:
+                                # Together AI sends properly formatted SSE data
+                                # Just forward it as-is
+                                yield f"{chunk}\n"
+                    except Exception as e:
+                        logger.error(f"Error in streaming response: {str(e)}")
+                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
                 
                 return Response(
                     generate(),
                     status=response.status_code,
-                    content_type='text/event-stream'
+                    content_type='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'X-Accel-Buffering': 'no'  # Disable nginx buffering
+                    }
                 )
 
             # Handle normal response

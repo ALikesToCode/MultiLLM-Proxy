@@ -61,5 +61,27 @@ PROVIDER_DETAILS = {
             'distil-whisper-large-v3-en'
         ],
         'response_formats': ['json', 'text', 'verbose_json']
+    },
+    'together': {
+        'endpoints': [
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "https://api.together.xyz/v1/chat/completions" -H "Authorization: Bearer $TOGETHER_API_KEY"'
+            },
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "https://api.together.xyz/v1/models" -H "Authorization: Bearer $TOGETHER_API_KEY"'
+            },
+            {
+                'url': '/v1/completions',
+                'curl': 'curl -X POST "https://api.together.xyz/v1/completions" -H "Authorization: Bearer $TOGETHER_API_KEY"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True
+        },
+        'default_model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
     }
 } 

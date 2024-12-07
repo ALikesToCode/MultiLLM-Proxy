@@ -5,6 +5,7 @@ import logging
 from config import Config
 from services.rate_limit_service import RateLimitService
 from error_handlers import APIError
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,29 +25,29 @@ class AuthService:
         }
     
     @classmethod
-    def get_api_key(cls, provider):
-        """Get API key for a specific provider"""
-        if provider not in cls._api_keys:
-            if provider == 'groq':
-                # Only load Groq keys when specifically requested
-                if not Config.GROQ_API_KEYS:
-                    # Load Groq API keys from environment variables
-                    groq_keys = []
-                    i = 1
-                    while True:
-                        key = os.environ.get(f'GROQ_API_KEY_{i}')
-                        if not key:
-                            break
-                        groq_keys.append(key)
-                        i += 1
-                    Config.GROQ_API_KEYS = groq_keys
-                
-                cls._api_keys[provider] = RateLimitService.get_next_groq_key()
-            else:
-                # For other providers, get from environment
-                cls._api_keys[provider] = os.environ.get(f'{provider.upper()}_API_KEY')
-        
-        return cls._api_keys[provider]
+    def get_api_key(cls, provider: str) -> Optional[str]:
+        """Get API key for the specified provider"""
+        if provider == 'openai':
+            return os.environ.get('OPENAI_API_KEY')
+        elif provider == 'cerebras':
+            return os.environ.get('CEREBRAS_API_KEY')
+        elif provider == 'xai':
+            return os.environ.get('XAI_API_KEY')
+        elif provider == 'groq':
+            # Load Groq API keys if not already loaded
+            if not Config.GROQ_API_KEYS:
+                i = 1
+                while True:
+                    key = os.environ.get(f'GROQ_API_KEY_{i}')
+                    if not key:
+                        break
+                    Config.GROQ_API_KEYS.append(key)
+                    i += 1
+            # Return first available key
+            return Config.GROQ_API_KEYS[0] if Config.GROQ_API_KEYS else None
+        elif provider == 'together':
+            return os.environ.get('TOGETHER_API_KEY')
+        return None
     
     @classmethod
     def get_google_token(cls):
@@ -58,29 +59,39 @@ class AuthService:
             return cls._google_token
             
         try:
-            # First check if GOOGLE_APPLICATION_CREDENTIALS is set
-            creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-            if not creds_path:
+            # Check if gcloud is installed
+            import shutil
+            if not shutil.which('gcloud'):
                 raise APIError(
-                    "GOOGLE_APPLICATION_CREDENTIALS environment variable not set. "
-                    "Please set it to the path of your service account key file.",
-                    status_code=401
-                )
-            
-            if not os.path.exists(creds_path):
-                raise APIError(
-                    f"Google credentials file not found at {creds_path}. "
-                    "Please check the path in GOOGLE_APPLICATION_CREDENTIALS.",
-                    status_code=401
+                    "gcloud CLI not found. Please install Google Cloud SDK.",
+                    status_code=500
                 )
             
             # Try to get token using gcloud
-            result = subprocess.run(
-                ['gcloud', 'auth', 'print-access-token'],
-                capture_output=True,
-                text=True,
-                timeout=10  # Add timeout to prevent hanging
-            )
+            try:
+                result = subprocess.run(
+                    ['gcloud', 'auth', 'print-access-token'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10  # Add timeout to prevent hanging
+                )
+            except subprocess.TimeoutExpired:
+                raise APIError("Timeout while getting Google token", status_code=504)
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr.decode().strip() if e.stderr else str(e)
+                if "not logged in" in error_msg.lower():
+                    raise APIError(
+                        "Not logged in to gcloud. Please run 'gcloud auth login' first.",
+                        status_code=401
+                    )
+                elif "project" in error_msg.lower():
+                    raise APIError(
+                        "No Google Cloud project selected. Please run 'gcloud config set project YOUR_PROJECT_ID'",
+                        status_code=401
+                    )
+                raise APIError(f"Failed to get Google token: {error_msg}", status_code=401)
+            except Exception as e:
+                raise APIError(f"Error running gcloud command: {str(e)}", status_code=500)
             
             if result.returncode != 0:
                 error_msg = result.stderr.strip() if result.stderr else "Unknown gcloud error"
@@ -97,10 +108,14 @@ class AuthService:
             
             return cls._google_token
             
-        except subprocess.TimeoutExpired:
-            raise APIError("Timeout while getting Google token", status_code=504)
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode().strip() if e.stderr else str(e)
-            raise APIError(f"Failed to get Google token: {error_msg}", status_code=401)
+        except APIError:
+            raise
         except Exception as e:
             raise APIError(f"Unexpected error getting Google token: {str(e)}", status_code=500)
+
+    @classmethod
+    def invalidate_google_token(cls):
+        """Invalidate the cached Google token to force a refresh."""
+        cls._google_token = None
+        cls._token_expiry = None
+        logger.info("Invalidated Google Cloud token cache")

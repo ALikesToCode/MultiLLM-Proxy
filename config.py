@@ -21,7 +21,8 @@ class Config:
         'cerebras': 'https://api.cerebras.ai',
         'googleai': f'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_ID}/locations/us-central1/endpoints/openapi',
         'xai': 'https://api.x.ai',
-        'groq': 'https://api.groq.com'
+        'groq': 'https://api.groq.com',
+        'together': 'https://api.together.xyz'
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
@@ -31,6 +32,7 @@ class Config:
         'googleai': (10, 120),  # Google AI can be slow to respond
         'xai': (5, 60),
         'groq': (5, 120),
+        'together': (5, 120),  # Together AI can take longer for larger models
         'default': (5, 60)
     }
     
@@ -41,12 +43,14 @@ class Config:
         'googleai': {'max_retries': 5, 'backoff_factor': 2},  # More retries for Google AI
         'xai': {'max_retries': 3, 'backoff_factor': 1},
         'groq': {'max_retries': 3, 'backoff_factor': 1},
+        'together': {'max_retries': 3, 'backoff_factor': 1},
         'default': {'max_retries': 3, 'backoff_factor': 1}
     }
     
     UNSUPPORTED_PARAMS = {
         'cerebras': ['frequency_penalty', 'presence_penalty', 'logit_bias'],
-        'groq': ['logit_bias', 'logprobs', 'top_logprobs']  # Parameters not supported by Groq
+        'groq': ['logit_bias', 'logprobs', 'top_logprobs'],  # Parameters not supported by Groq
+        'together': ['logit_bias']  # Parameters not supported by Together AI
     }
 
     # Groq specific settings
@@ -75,6 +79,16 @@ class Config:
         'llama-3.2-90b-text-preview',
         'llama3-groq-8b-8192-tool-use-preview',
         'llama-3.1-8b-instant'
+    ]
+    
+    # Together AI models
+    TOGETHER_MODELS = [
+        'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+        'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
+        'mistralai/Mixtral-8x7B-Instruct-v0.1',
+        'mistralai/Mistral-7B-Instruct-v0.2',
+        'NousResearch/Nous-Hermes-2-Yi-34B',
+        'openchat/openchat-3.5-1210'
     ]
     
     # Groq supported parameters and their defaults

@@ -35,7 +35,8 @@ class RateLimitService:
         'cerebras': {'requests': 500, 'window': timedelta(minutes=1)},
         'xai': {'requests': 500, 'window': timedelta(minutes=1)},
         'googleai': {'requests': 500, 'window': timedelta(minutes=1)},
-        'groq': {'requests': 500, 'window': timedelta(minutes=1)}  # Increased since we handle token limits separately
+        'groq': {'requests': 500, 'window': timedelta(minutes=1)},  # Increased since we handle token limits separately
+        'together': {'requests': 500, 'window': timedelta(minutes=1)}  # Together AI has a generous rate limit
     }
 
     @classmethod

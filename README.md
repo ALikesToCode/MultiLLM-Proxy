@@ -1,6 +1,6 @@
 # MultiLLM Proxy
 
-A unified API proxy service for multiple LLM providers (OpenAI, Cerebras, X.AI, and Google AI) with a beautiful dashboard interface.
+A unified API proxy service for multiple LLM providers (OpenAI, Cerebras, X.AI, Google AI, Groq, and Together AI) with a beautiful dashboard interface.
 
 ## Quick Setup
 
@@ -20,6 +20,8 @@ OPENAI_API_KEY=your-openai-api-key
 CEREBRAS_API_KEY=your-cerebras-api-key
 XAI_API_KEY=your-xai-api-key
 GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
+GROQ_API_KEY_1=your-first-groq-api-key
+TOGETHER_API_KEY=your-together-api-key
 ```
 
 ## Run
@@ -49,6 +51,8 @@ Visit `http://localhost:1400` to access the dashboard.
 - Cerebras: `/cerebras/v1/chat/completions`
 - X.AI: `/xai/v1/chat/completions`
 - Google AI: `/googleai/predict`
+- Groq: `/groq/v1/chat/completions`
+- Together: `/together/v1/chat/completions`
 
 ## Development
 
@@ -65,6 +69,8 @@ Default limits per minute:
 - Cerebras: 40
 - X.AI: 50
 - Google AI: 30
+- Groq: 500 (with 6000 TPM per key)
+- Together: 500
 - Default: 100
 
 ## Environment Variables
