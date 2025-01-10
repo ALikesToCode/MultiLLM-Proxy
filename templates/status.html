@@ -15,222 +15,7 @@
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        :root {
-            --primary: #4F46E5;
-            --primary-dark: #4338CA;
-            --success: #10B981;
-            --error: #EF4444;
-            --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        :root[class~="dark"] {
-            --bg-primary: #0F172A;
-            --bg-secondary: #1E293B;
-            --text-primary: #F8FAFC;
-            --text-secondary: #CBD5E1;
-            --border-color: #334155;
-            --hover-bg: #1E293B;
-            --card-bg: #1E293B;
-            --code-bg: #0F172A;
-            --button-hover: #2563EB;
-            --shadow-color: rgba(0, 0, 0, 0.25);
-            --notification-bg: rgba(16, 185, 129, 0.9);
-            --curl-bg: rgba(15, 23, 42, 0.95);
-            --curl-text: #E2E8F0;
-        }
-
-        :root[class~="light"] {
-            --bg-primary: #F8FAFC;
-            --bg-secondary: #FFFFFF;
-            --text-primary: #0F172A;
-            --text-secondary: #475569;
-            --border-color: #E2E8F0;
-            --hover-bg: #F1F5F9;
-            --card-bg: #FFFFFF;
-            --code-bg: #F1F5F9;
-            --button-hover: #3B82F6;
-            --shadow-color: rgba(0, 0, 0, 0.1);
-            --notification-bg: #10B981;
-            --curl-bg: #1E293B;
-            --curl-text: #F8FAFC;
-        }
-
-        body {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.5;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        .endpoint-card {
-            transition: var(--transition);
-            border: 1px solid var(--border-color);
-            background-color: var(--card-bg);
-            box-shadow: 0 1px 3px var(--shadow-color);
-        }
-
-        .endpoint-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px var(--shadow-color);
-        }
-
-        .copy-notification {
-            display: none;
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            padding: 16px 24px;
-            background-color: var(--notification-bg);
-            color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px var(--shadow-color);
-            z-index: 1000;
-            animation: slideIn 0.3s ease-out;
-            backdrop-filter: blur(8px);
-        }
-
-        .code-block {
-            font-family: 'Fira Code', 'Consolas', monospace;
-            line-height: 1.6;
-            color: var(--text-secondary);
-            background-color: var(--code-bg);
-            border: 1px solid var(--border-color);
-        }
-
-        .loading {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .5; }
-        }
-
-        @keyframes slideIn {
-            from { transform: translateY(-100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-
-        .status-badge {
-            transition: var(--transition);
-            backdrop-filter: blur(8px);
-        }
-
-        .status-badge:hover {
-            transform: scale(1.05);
-        }
-
-        .copy-button {
-            transition: var(--transition);
-            background-color: var(--hover-bg);
-        }
-
-        .copy-button:hover {
-            background-color: var(--button-hover);
-            color: white !important;
-            transform: scale(1.05);
-        }
-
-        .curl-container {
-            position: relative;
-        }
-
-        .curl-container pre {
-            scrollbar-width: thin;
-            scrollbar-color: var(--text-secondary) transparent;
-            background-color: var(--curl-bg);
-            color: var(--curl-text);
-            border-radius: 0.75rem;
-            padding: 1.5rem;
-            border: 1px solid var(--border-color);
-        }
-
-        .curl-container pre::-webkit-scrollbar {
-            height: 6px;
-        }
-
-        .curl-container pre::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .curl-container pre::-webkit-scrollbar-thumb {
-            background-color: var(--text-secondary);
-            border-radius: 3px;
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .endpoint-card,
-            .status-badge,
-            .copy-button,
-            body {
-                transition: none;
-            }
-            
-            .loading {
-                animation: none;
-            }
-        }
-
-        .theme-toggle {
-            cursor: pointer;
-            padding: 0.75rem;
-            border-radius: 0.75rem;
-            transition: background-color 0.2s;
-            background-color: var(--hover-bg);
-        }
-
-        .theme-toggle:hover {
-            background-color: var(--button-hover);
-            color: white !important;
-        }
-
-        .dark .theme-toggle .sun {
-            display: block;
-        }
-
-        .dark .theme-toggle .moon {
-            display: none;
-        }
-
-        .light .theme-toggle .sun {
-            display: none;
-        }
-
-        .light .theme-toggle .moon {
-            display: block;
-        }
-
-        /* Improved dark mode styles */
-        .dark .endpoint-card {
-            backdrop-filter: blur(12px);
-            background-color: rgba(30, 41, 59, 0.8);
-        }
-
-        .dark .code-block {
-            background-color: rgba(15, 23, 42, 0.8);
-        }
-
-        .dark nav {
-            backdrop-filter: blur(12px);
-            background-color: rgba(30, 41, 59, 0.9);
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .dark .status-indicator {
-            background-color: rgba(30, 41, 59, 0.8);
-        }
-
-        .dark .curl-container button {
-            background-color: rgba(79, 70, 229, 0.2);
-            color: #818CF8;
-        }
-
-        .dark .curl-container button:hover {
-            background-color: rgba(79, 70, 229, 0.3);
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/status.css') }}">
 </head>
 <body>
     <div class="min-h-screen">
@@ -247,9 +32,9 @@
                             <i class="fas fa-sun sun text-yellow-500 text-xl" aria-hidden="true"></i>
                             <i class="fas fa-moon moon text-gray-500 text-xl" aria-hidden="true"></i>
                         </button>
-                        <span id="status-indicator" class="flex items-center px-4 py-2 rounded-full bg-gray-50 dark:bg-gray-700 shadow-sm" role="status">
-                            <span class="h-3 w-3 bg-green-400 rounded-full mr-2 shadow-sm"></span>
-                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">System Online</span>
+                        <span id="status-indicator" class="status-badge active" role="status">
+                            <i class="fas fa-circle text-xs" aria-hidden="true"></i>
+                            <span class="font-medium">System Online</span>
                         </span>
                     </div>
                 </div>
@@ -261,15 +46,15 @@
             <!-- Status Overview -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 {% for provider, details in providers.items() %}
-                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md transition-shadow p-6">
+                <div class="endpoint-card">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900 flex items-center justify-center">
+                            <div class="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/50 flex items-center justify-center">
                                 <i class="fas fa-plug text-indigo-600 dark:text-indigo-400" aria-hidden="true"></i>
                             </div>
-                            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ provider.upper() }}</h3>
+                            <h3 class="text-lg font-semibold">{{ provider.upper() }}</h3>
                         </div>
-                        <span class="status-badge px-4 py-1.5 rounded-full text-sm font-medium {{ 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-900 dark:text-green-300 dark:border-green-700' if details.active else 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900 dark:text-red-300 dark:border-red-700' }}" role="status">
+                        <span class="status-badge {{ 'active' if details.active else 'inactive' }}" role="status">
                             {{ 'Active' if details.active else 'Inactive' }}
                         </span>
                     </div>
@@ -279,15 +64,15 @@
 
             <!-- Endpoints Section -->
             {% for provider, details in providers.items() %}
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm hover:shadow-md transition-shadow mb-8">
+            <div class="endpoint-card mb-8">
                 <div class="px-6 py-4 border-b border-gray-100 dark:border-gray-700">
-                    <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100">{{ provider.upper() }} Endpoints</h2>
+                    <h2 class="text-xl font-semibold">{{ provider.upper() }} Endpoints</h2>
                 </div>
                 <div class="p-6">
                     <div class="mb-6">
                         <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Base URL</h3>
-                        <div class="flex items-center bg-gray-50 dark:bg-gray-900 rounded-lg p-1">
-                            <code class="text-sm px-4 py-2 rounded-md flex-grow code-block text-gray-700 dark:text-gray-300">
+                        <div class="flex items-center bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1">
+                            <code class="text-sm px-4 py-2 rounded-md flex-grow code-block">
                                 {{ config['SERVER_BASE_URL'] }}/{{ provider }}
                             </code>
                             <button data-copy="{{ config['SERVER_BASE_URL'] }}/{{ provider }}"
@@ -299,9 +84,9 @@
                     </div>
 
                     {% for endpoint in details.endpoints %}
-                    <div class="endpoint-card bg-white dark:bg-gray-800 rounded-xl p-6 mb-6">
-                        <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center">
-                            <span class="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900 flex items-center justify-center mr-3">
+                    <div class="endpoint-card">
+                        <h3 class="text-lg font-medium mb-4 flex items-center">
+                            <span class="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-900/50 flex items-center justify-center mr-3">
                                 <i class="fas fa-link text-indigo-600 dark:text-indigo-400 text-sm" aria-hidden="true"></i>
                             </span>
                             {{ endpoint.url }}
@@ -355,97 +140,135 @@
 
     <script>
         function copyToClipboard(text, event) {
+            const button = event.currentTarget;
+            const originalContent = button.innerHTML;
+            
             navigator.clipboard.writeText(text).then(() => {
+                button.innerHTML = '<i class="fas fa-check text-green-500"></i>';
                 showNotification();
+                
+                setTimeout(() => {
+                    button.innerHTML = originalContent;
+                }, 2000);
             }).catch(err => {
                 console.error('Failed to copy:', err);
+                button.innerHTML = '<i class="fas fa-times text-red-500"></i>';
+                
+                setTimeout(() => {
+                    button.innerHTML = originalContent;
+                }, 2000);
             });
         }
 
         function showNotification() {
             const notification = document.getElementById('copyNotification');
             notification.style.display = 'block';
+            notification.style.opacity = '0';
+            
+            requestAnimationFrame(() => {
+                notification.style.transition = 'opacity 0.3s ease';
+                notification.style.opacity = '1';
+            });
+
             setTimeout(() => {
-                notification.style.display = 'none';
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 300);
             }, 2000);
         }
 
         function checkStatus() {
+            const indicator = document.getElementById('status-indicator');
+            
             fetch('{{ config["SERVER_BASE_URL"] }}/health')
                 .then(response => {
-                    const indicator = document.getElementById('status-indicator');
-                    if (response.ok) {
-                        indicator.innerHTML = `
-                            <span class="h-3 w-3 bg-green-400 rounded-full mr-2 shadow-sm"></span>
-                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">System Online</span>
-                        `;
-                        indicator.className = 'flex items-center px-4 py-2 rounded-full bg-gray-50 dark:bg-gray-700 shadow-sm transition-all';
-                    } else {
-                        indicator.innerHTML = `
-                            <span class="h-3 w-3 bg-red-400 rounded-full mr-2 shadow-sm"></span>
-                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">System Offline</span>
-                        `;
-                        indicator.className = 'flex items-center px-4 py-2 rounded-full bg-red-50 dark:bg-red-900 shadow-sm transition-all';
-                    }
+                    updateStatusIndicator(indicator, response.ok);
                 })
                 .catch(() => {
-                    const indicator = document.getElementById('status-indicator');
-                    indicator.innerHTML = `
-                        <span class="h-3 w-3 bg-red-400 rounded-full mr-2 shadow-sm"></span>
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">System Offline</span>
-                    `;
-                    indicator.className = 'flex items-center px-4 py-2 rounded-full bg-red-50 dark:bg-red-900 shadow-sm transition-all';
+                    updateStatusIndicator(indicator, false);
                 });
         }
 
-        // Check status immediately and then every 30 seconds
-        checkStatus();
-        setInterval(checkStatus, 30000);
+        function updateStatusIndicator(indicator, isOnline) {
+            const newClass = isOnline ? 
+                'status-badge active' :
+                'status-badge inactive';
+            
+            const newContent = `
+                <i class="fas fa-circle text-xs" aria-hidden="true"></i>
+                <span class="font-medium">
+                    ${isOnline ? 'System Online' : 'System Offline'}
+                </span>
+            `;
 
-        // Add keyboard support for copy buttons
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' || e.key === ' ') {
-                if (e.target.classList.contains('copy-button')) {
-                    e.preventDefault();
-                    e.target.click();
-                }
-            }
-        });
-
-        // Theme toggle functionality with smooth transitions
-        const themeToggle = document.getElementById('themeToggle');
-        const html = document.documentElement;
-        
-        // Check for saved theme preference, otherwise use system preference
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            html.className = savedTheme;
-        } else {
-            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            html.className = systemPrefersDark ? 'dark' : 'light';
+            indicator.style.opacity = '0';
+            setTimeout(() => {
+                indicator.className = newClass;
+                indicator.innerHTML = newContent;
+                indicator.style.opacity = '1';
+            }, 300);
         }
 
-        themeToggle.addEventListener('click', () => {
-            const currentTheme = html.className;
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            
-            // Add transition class before changing theme
-            document.body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
-            
-            html.className = newTheme;
-            localStorage.setItem('theme', newTheme);
-            
-            // Remove transition after animation completes
-            setTimeout(() => {
-                document.body.style.transition = '';
-            }, 300);
-        });
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initial status check
+            checkStatus();
+            setInterval(checkStatus, 30000);
 
-        // Listen for system theme changes
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-            if (!localStorage.getItem('theme')) {
-                html.className = e.matches ? 'dark' : 'light';
+            // Add keyboard support
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.target.classList.contains('copy-button')) {
+                        e.preventDefault();
+                        e.target.click();
+                    }
+                }
+            });
+
+            // Theme handling
+            const themeToggle = document.getElementById('themeToggle');
+            const html = document.documentElement;
+            
+            function setTheme(theme) {
+                html.className = theme;
+                localStorage.setItem('theme', theme);
+                
+                // Update theme-specific elements
+                const isDark = theme === 'dark';
+                document.querySelectorAll('[data-theme]').forEach(el => {
+                    el.classList.toggle('dark', isDark);
+                });
+                
+                // Add smooth transition
+                document.body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
+                setTimeout(() => {
+                    document.body.style.transition = '';
+                }, 300);
             }
+
+            // Theme toggle click handler
+            themeToggle.addEventListener('click', () => {
+                const currentTheme = html.className;
+                const newTheme = currentTheme.includes('dark') ? 'light' : 'dark';
+                setTheme(newTheme);
+            });
+
+            // Load saved theme or use system preference
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                setTheme(savedTheme);
+            } else {
+                const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                setTheme(systemPrefersDark ? 'dark' : 'light');
+            }
+
+            // System theme change handler
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+                if (!localStorage.getItem('theme')) {
+                    setTheme(e.matches ? 'dark' : 'light');
+                }
+            });
         });
     </script>
 </body>
