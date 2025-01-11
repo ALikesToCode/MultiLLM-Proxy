@@ -1,107 +1,147 @@
 # MultiLLM Proxy
 
-A unified API proxy service for multiple LLM providers (OpenAI, Cerebras, X.AI, Google AI, Groq, and Together AI) with a beautiful dashboard interface.
-
-## Quick Setup
-
-```bash
-# Clone and setup
-git clone https://github.com/ALikesToCode/MultiLLM-Proxy.git
-cd multillm-proxy
-chmod +x setup.sh
-./setup.sh
-```
-
-## Configuration
-
-Edit `.env` file with your API keys:
-```env
-OPENAI_API_KEY=your-openai-api-key
-CEREBRAS_API_KEY=your-cerebras-api-key
-XAI_API_KEY=your-xai-api-key
-GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
-GROQ_API_KEY_1=your-first-groq-api-key
-TOGETHER_API_KEY=your-together-api-key
-```
-
-## Run
-
-```bash
-# Activate virtual environment (if not already activated)
-source venv/bin/activate
-
-# Start the application
-python app.py
-```
-
-Visit `http://localhost:1400` to access the dashboard.
+A powerful proxy server that provides a unified interface for multiple LLM providers including OpenAI, Groq, Together AI, Google AI, and more.
 
 ## Features
 
-- 🔄 **Unified API**: Single endpoint for multiple LLM providers
-- 🔑 **Secure**: Environment-based API key management
-- 🚦 **Monitoring**: Real-time status updates
-- 🛡️ **Protected**: Rate limiting and error handling
-- 📊 **Dashboard**: Dark/light theme, responsive design
-- 🚀 **Optimized**: Response caching and compression
+- 🔒 Secure authentication system with user management
+- 🔑 Universal API key support for all providers
+- 🔄 Automatic token-based rate limiting
+- 🌐 Support for multiple LLM providers:
+  - OpenAI
+  - Groq
+  - Together AI
+  - Google AI
+  - Cerebras
+  - XAI
+- 🎨 Beautiful web dashboard with dark mode support
+- 🔄 Real-time status monitoring
+- 📊 Request statistics and monitoring
+- 🚀 Streaming support for compatible providers
 
-## Endpoints
+## Setup
 
-- OpenAI: `/openai/v1/chat/completions`
-- Cerebras: `/cerebras/v1/chat/completions`
-- X.AI: `/xai/v1/chat/completions`
-- Google AI: `/googleai/predict`
-- Groq: `/groq/v1/chat/completions`
-- Together: `/together/v1/chat/completions`
-
-## Development
-
+1. Clone the repository:
 ```bash
-# Run in development mode
-export FLASK_ENV=development
+git clone https://github.com/yourusername/MultiLLM-Proxy.git
+cd MultiLLM-Proxy
+```
+
+2. Create a virtual environment and install dependencies:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+3. Copy the example environment file and configure your settings:
+```bash
+cp .env.example .env
+```
+
+4. Configure the required environment variables in `.env`:
+
+### Required Configuration:
+```env
+# Server Configuration
+SERVER_HOST=localhost
+SERVER_PORT=1400
+
+# Authentication (Required)
+ADMIN_USERNAME=admin
+ADMIN_API_KEY=your-universal-api-key
+FLASK_SECRET_KEY=your-flask-secret-key
+JWT_SECRET=your-jwt-secret-key
+```
+
+### Optional Provider-Specific Keys:
+```env
+# Provider API Keys (Optional - if you want to use different keys for different providers)
+OPENAI_API_KEY=your-openai-api-key
+CEREBRAS_API_KEY=your-cerebras-api-key
+XAI_API_KEY=your-xai-api-key
+GOOGLE_APPLICATION_CREDENTIALS=path-to-your-google-credentials.json
+
+# Multiple Groq API keys for token-based rate limiting
+GROQ_API_KEY_1=your-first-groq-api-key
+GROQ_API_KEY_2=your-second-groq-api-key
+
+# Together AI API key
+TOGETHER_API_KEY=your-together-api-key
+```
+
+5. Run the server:
+```bash
 python app.py
 ```
 
-## Rate Limits
+The server will start at `http://localhost:1400` (or your configured host/port).
 
-Default limits per minute:
-- OpenAI: 60
-- Cerebras: 40
-- X.AI: 50
-- Google AI: 30
-- Groq: 500 (with 6000 TPM per key)
-- Together: 500
-- Default: 100
+## Authentication
 
-## Environment Variables
+The proxy uses a secure authentication system with the following features:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| SERVER_HOST | Host address | localhost |
-| SERVER_PORT | Port number | 1400 |
-| FLASK_ENV | Environment | production |
-| *_API_KEY | Provider keys | None |
+- Session-based authentication
+- JWT token generation for API access
+- Universal API key system
+- Secure password hashing
+- CSRF protection
 
-## Troubleshooting
+### Login
 
-1. **Rate Limit (429)**
-   - Reduce request frequency
-   - Check `rate_limit_service.py`
+1. Access the dashboard at `http://localhost:1400`
+2. Login with your configured credentials:
+   - Username: Value of `ADMIN_USERNAME` (defaults to "admin")
+   - API Key: Value of `ADMIN_API_KEY`
 
-2. **Auth Failed (500)**
-   - Verify API keys in `.env`
-   - Check permissions
+### API Usage
 
-3. **Provider Down (503)**
-   - Check provider status
-   - Verify connectivity
+After authentication, you can use the proxy with any supported provider. The universal API key will be used for all providers.
 
-## Support
+Example using curl:
+```bash
+curl -X POST "http://localhost:1400/openai/v1/chat/completions" \
+  -H "Authorization: Bearer your-universal-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
 
-- 📖 [Wiki](https://github.com/ALikesToCode/MultiLLM-Proxy/wiki)
-- 🐛 [Issues](https://github.com/ALikesToCode/MultiLLM-Proxy/issues)
-- 💬 [Discussions](https://github.com/ALikesToCode/MultiLLM-Proxy/discussions)
+## Rate Limiting
+
+- Default rate limit: 500 requests per minute per provider
+- Groq-specific token limit: 6000 tokens per minute per API key
+- Configurable rate limits in `config.py`
+
+## Development
+
+### Running Tests
+```bash
+pytest
+```
+
+### Code Style
+```bash
+black .
+flake8
+```
+
+## Security Considerations
+
+1. Always use strong, unique values for:
+   - `FLASK_SECRET_KEY`
+   - `JWT_SECRET`
+   - `ADMIN_API_KEY`
+
+2. In production:
+   - Use HTTPS
+   - Set secure cookie flags
+   - Configure proper CORS settings
+   - Use a production-grade server (e.g., gunicorn)
+   - Use a proper database for user management
 
 ## License
 
-[MIT License](LICENSE)
+MIT License - See LICENSE file for details

@@ -22,7 +22,13 @@ class Config:
         'googleai': f'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_ID}/locations/us-central1/endpoints/openapi',
         'xai': 'https://api.x.ai',
         'groq': 'https://api.groq.com',
-        'together': 'https://api.together.xyz'
+        'together': 'https://api.together.xyz',
+        'azure': 'https://models.inference.ai.azure.com',
+        'scaleway': 'https://api.scaleway.ai/672113a8-636a-4c18-8096-b0e7d4a4f6be/v1',
+        'hyperbolic': 'https://api.hyperbolic.xyz/v1',
+        'sambanova': 'https://api.sambanova.ai/v1',
+        'openrouter': 'https://openrouter.ai/api/v1',
+        'palm': 'https://generativelanguage.googleapis.com/v1beta'
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
@@ -33,6 +39,12 @@ class Config:
         'xai': (5, 60),
         'groq': (5, 120),
         'together': (5, 120),  # Together AI can take longer for larger models
+        'azure': (10, 120),
+        'scaleway': (5, 60),
+        'hyperbolic': (5, 60),
+        'sambanova': (5, 120),  # SambaNova can take longer for larger models
+        'openrouter': (5, 120),  # OpenRouter can take longer as it routes to various providers
+        'palm': (10, 120),  # PaLM API can be slow to respond
         'default': (5, 60)
     }
     
@@ -44,13 +56,25 @@ class Config:
         'xai': {'max_retries': 3, 'backoff_factor': 1},
         'groq': {'max_retries': 3, 'backoff_factor': 1},
         'together': {'max_retries': 3, 'backoff_factor': 1},
+        'azure': {'max_retries': 3, 'backoff_factor': 1},
+        'scaleway': {'max_retries': 3, 'backoff_factor': 1},
+        'hyperbolic': {'max_retries': 3, 'backoff_factor': 1},
+        'sambanova': {'max_retries': 3, 'backoff_factor': 1},
+        'openrouter': {'max_retries': 3, 'backoff_factor': 1},
+        'palm': {'max_retries': 5, 'backoff_factor': 2},  # More retries for PaLM API
         'default': {'max_retries': 3, 'backoff_factor': 1}
     }
     
     UNSUPPORTED_PARAMS = {
         'cerebras': ['frequency_penalty', 'presence_penalty', 'logit_bias'],
         'groq': ['logit_bias', 'logprobs', 'top_logprobs'],  # Parameters not supported by Groq
-        'together': ['logit_bias']  # Parameters not supported by Together AI
+        'together': ['logit_bias'],  # Parameters not supported by Together AI
+        'azure': ['logit_bias'],  # Parameters not supported by Azure
+        'scaleway': ['logit_bias', 'frequency_penalty', 'presence_penalty'],  # Parameters not supported by Scaleway
+        'hyperbolic': ['logit_bias'],  # Parameters not supported by Hyperbolic
+        'sambanova': ['logit_bias', 'frequency_penalty', 'presence_penalty'],  # Parameters not supported by SambaNova
+        'openrouter': ['logit_bias'],  # Parameters not supported by OpenRouter
+        'palm': ['logit_bias', 'frequency_penalty', 'presence_penalty']  # Parameters not supported by PaLM API
     }
 
     # Groq specific settings

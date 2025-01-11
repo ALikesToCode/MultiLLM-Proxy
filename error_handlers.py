@@ -1,4 +1,4 @@
-from flask import jsonify, request
+from flask import jsonify, request, render_template
 import logging
 import sys
 
@@ -22,33 +22,44 @@ def init_error_handlers(app):
     def handle_api_error(error):
         """Handle API errors without full traceback"""
         logger.error(f"API Error: {error.message}")
-        response = jsonify(error.to_dict())
-        response.status_code = error.status_code
-        return response
+        if request.is_json or request.headers.get('Accept') == 'application/json':
+            response = jsonify(error.to_dict())
+            response.status_code = error.status_code
+            return response
+        return render_template('error.html', error=error.message), error.status_code
 
     @app.errorhandler(Exception)
     def handle_generic_error(error):
         """Handle unexpected errors without full traceback"""
         error_msg = str(error)
         logger.error(f"Unexpected error: {error_msg}")
-        return jsonify({
-            "error": "An unexpected error occurred",
-            "message": error_msg
-        }), 500
+        
+        if request.is_json or request.headers.get('Accept') == 'application/json':
+            return jsonify({
+                "error": "An unexpected error occurred",
+                "message": error_msg
+            }), 500
+        return render_template('error.html', error=error_msg), 500
 
     @app.errorhandler(404)
     def not_found_error(error):
         """Handle 404 errors"""
         if request.path == '/favicon.ico':
             return app.send_static_file('favicon.ico')
-        return jsonify({"error": "Not found"}), 404
+            
+        if request.is_json or request.headers.get('Accept') == 'application/json':
+            return jsonify({"error": "Not found"}), 404
+        return render_template('error.html', error="Page not found"), 404
 
     @app.errorhandler(500)
     def internal_server_error(error):
         """Handle 500 errors without recursion"""
         error_msg = str(error)
         logger.error(f"Internal server error: {error_msg}")
-        return jsonify({
-            "error": "Internal server error",
-            "message": error_msg
-        }), 500
+        
+        if request.is_json or request.headers.get('Accept') == 'application/json':
+            return jsonify({
+                "error": "Internal server error",
+                "message": error_msg
+            }), 500
+        return render_template('error.html', error=error_msg), 500

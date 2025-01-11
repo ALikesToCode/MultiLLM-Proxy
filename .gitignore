@@ -4,6 +4,7 @@
 .env.*
 !.env.example
 
+node_modules/
 # Google Cloud credentials
 *.json
 !example-credentials.json
@@ -56,6 +57,9 @@ flask_session/
 *.log
 logs/
 log/
+error.log
+access.log
+app.log
 
 # Testing
 .coverage
@@ -120,4 +124,17 @@ dmypy.json
 .pyre/
 
 # Local development configuration
-config.local.py 
+config.local.py
+
+# Project specific
+*.db
+*.sqlite
+*.sqlite3
+metrics.json
+cache/
+tmp/
+.cache/
+auth_tokens/
+credentials/
+api_keys.json
+user_data.json 
