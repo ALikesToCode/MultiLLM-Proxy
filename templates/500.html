@@ -1,112 +1,26 @@
-<!DOCTYPE html>
-<html lang="en" class="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="500 - Server Error">
-    <meta name="theme-color" content="#4F46E5">
-    <title>500 - Server Error</title>
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
-    <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        :root {
-            --primary: #4F46E5;
-            --primary-dark: #4338CA;
-            --bg-primary: #F8FAFC;
-            --bg-secondary: #FFFFFF;
-            --text-primary: #0F172A;
-            --text-secondary: #475569;
-            --border-color: #E2E8F0;
-            --hover-bg: #F1F5F9;
-            --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+{% extends "base.html" %}
 
-        :root[class~="dark"] {
-            --bg-primary: #0F172A;
-            --bg-secondary: #1E293B;
-            --text-primary: #F8FAFC;
-            --text-secondary: #CBD5E1;
-            --border-color: #334155;
-            --hover-bg: #1E293B;
-        }
-
-        body {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-            transition: background-color 0.3s ease, color 0.3s ease;
-        }
-
-        .home-button {
-            transition: var(--transition);
-            background-color: var(--primary);
-        }
-
-        .home-button:hover {
-            background-color: var(--primary-dark);
-            transform: translateY(-2px);
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-            .home-button {
-                transition: none;
-            }
-        }
-
-        .error-animation {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .7; }
-        }
-    </style>
-</head>
-<body>
-    <div class="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8">
-        <div class="max-w-md w-full text-center space-y-8">
-            <div class="space-y-4">
-                <i class="fas fa-exclamation-triangle text-6xl text-red-500 dark:text-red-400 mb-4 error-animation" aria-hidden="true"></i>
-                <h1 class="text-4xl font-bold text-gray-900 dark:text-gray-100">Server Error</h1>
-                <p class="text-lg text-gray-600 dark:text-gray-400">
-                    An unexpected error occurred. Our team has been notified and is working on it.
-                </p>
-                <p class="text-sm text-gray-500 dark:text-gray-500">
-                    Please try again in a few moments.
-                </p>
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full text-center">
+        <div class="space-y-6">
+            <div>
+                <h1 class="text-6xl font-bold text-red-600">500</h1>
+                <h2 class="mt-2 text-2xl font-semibold text-gray-900">Server Error</h2>
+                <p class="mt-2 text-sm text-gray-600">Something went wrong on our end. Please try again later.</p>
+                {% if error %}
+                <p class="mt-2 text-xs text-red-600">{{ error }}</p>
+                {% endif %}
             </div>
-            <div class="mt-8 space-y-4">
-                <button onclick="window.location.reload()" class="w-full home-button inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all">
-                    <i class="fas fa-redo mr-2" aria-hidden="true"></i>
-                    Try Again
-                </button>
-                <a href="/" class="inline-flex items-center justify-center text-base font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300">
-                    <i class="fas fa-home mr-2" aria-hidden="true"></i>
-                    Return Home
+            <div>
+                <a href="/" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <svg class="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clip-rule="evenodd" />
+                    </svg>
+                    Back to Home
                 </a>
             </div>
         </div>
     </div>
-
-    <script>
-        // Theme handling
-        const html = document.documentElement;
-        const savedTheme = localStorage.getItem('theme');
-        
-        if (savedTheme) {
-            html.className = savedTheme;
-        } else {
-            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            html.className = systemPrefersDark ? 'dark' : 'light';
-        }
-    </script>
-</body>
-</html> 
+</div>
+{% endblock %} 

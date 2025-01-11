@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-100">
+    <div class="py-10">
+        <header>
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+                <h1 class="text-3xl font-bold leading-tight text-gray-900">
+                    User Management
+                </h1>
+                <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                    Logout
+                </a>
+            </div>
+        </header>
+        <main>
+            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+                <!-- Create User Form -->
+                {% if current_user.is_admin %}
+                <div class="bg-white shadow rounded-lg p-6 mb-6">
+                    <h2 class="text-lg font-medium text-gray-900 mb-4">Create New User</h2>
+                    <form id="create-user-form" class="space-y-4">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <div>
+                            <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+                            <input type="text" name="username" id="username" required
+                                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                        </div>
+                        <div class="flex items-center">
+                            <input type="checkbox" name="is_admin" id="is_admin" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                            <label for="is_admin" class="ml-2 block text-sm text-gray-900">Admin User</label>
+                        </div>
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">
+                            Create User
+                        </button>
+                    </form>
+                </div>
+                {% endif %}
+
+                <!-- User List -->
+                <div class="bg-white shadow rounded-lg p-6">
+                    <h2 class="text-lg font-medium text-gray-900 mb-4">Users</h2>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Login</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for user in users %}
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        {{ user.username }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ 'Admin' if user.is_admin else 'User' }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ user.created_at }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ user.last_login if user.last_login else 'Never' }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {% if current_user.is_admin or current_user.username == user.username %}
+                                        <button onclick="rotateApiKey('{{ user.username }}')"
+                                            class="text-indigo-600 hover:text-indigo-900 mr-4">
+                                            Rotate API Key
+                                        </button>
+                                        {% endif %}
+                                        {% if current_user.is_admin and current_user.username != user.username %}
+                                        <button onclick="deleteUser('{{ user.username }}')"
+                                            class="text-red-600 hover:text-red-900">
+                                            Delete
+                                        </button>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- Modal for displaying API key -->
+<div id="api-key-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-medium text-gray-900">New API Key</h3>
+            <div class="mt-2 px-7 py-3">
+                <p class="text-sm text-gray-500">
+                    Copy this API key now. You won't be able to see it again!
+                </p>
+                <div class="mt-4">
+                    <code id="api-key-display" class="bg-gray-100 p-2 rounded break-all"></code>
+                </div>
+            </div>
+            <div class="items-center px-4 py-3">
+                <button id="close-modal" class="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Get CSRF token from meta tag
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    // Add CSRF token to all AJAX requests
+    function addCSRFToken(options = {}) {
+        if (!options.headers) {
+            options.headers = {};
+        }
+        options.headers['X-CSRFToken'] = csrfToken;
+        return options;
+    }
+
+    async function deleteUser(username) {
+        if (confirm(`Are you sure you want to delete user ${username}?`)) {
+            try {
+                const response = await fetch(`/users/${username}`, addCSRFToken({
+                    method: 'DELETE'
+                }));
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Failed to delete user');
+                }
+            } catch (error) {
+                alert('Error deleting user');
+            }
+        }
+    }
+
+    async function rotateApiKey(username) {
+        try {
+            const response = await fetch(`/users/${username}/rotate-key`, addCSRFToken({
+                method: 'POST'
+            }));
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('api-key-display').textContent = data.api_key;
+                document.getElementById('api-key-modal').classList.remove('hidden');
+            } else {
+                alert(data.error || 'Failed to rotate API key');
+            }
+        } catch (error) {
+            alert('Error rotating API key');
+        }
+    }
+
+    // Handle create user form submission
+    document.getElementById('create-user-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        try {
+            const response = await fetch('/users', addCSRFToken({
+                method: 'POST',
+                body: formData
+            }));
+            const data = await response.json();
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                alert(data.error || 'Failed to create user');
+            }
+        } catch (error) {
+            alert('Error creating user');
+        }
+    });
+</script>
+{% endblock %} 
