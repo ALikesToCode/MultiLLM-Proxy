@@ -108,15 +108,12 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
     """
     Check the status of a provider by retrieving stats and verifying tokens.
     """
-    app_ctx = Flask.current_app
     metrics_service = MetricsService.get_instance()
     provider_stats = {}
     try:
         provider_stats = metrics_service.get_provider_stats(provider)
     except Exception as e:
         logger.error(f"Error fetching provider stats for {provider}: {str(e)}")
-
-    base_url = app_ctx.config['API_BASE_URLS'].get(provider, '')
 
     try:
         if provider == 'googleai':
@@ -130,7 +127,6 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
                     'description': details.get('description', ''),
                     'active': True,
                     'is_configured': True,
-                    'base_url': base_url,
                     'endpoints': details.get('endpoints', []),
                     'status': 'ok',
                     'requests_24h': provider_stats.get('requests_24h', 0),
@@ -144,7 +140,6 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
                     'description': details.get('description', ''),
                     'active': False,
                     'is_configured': False,
-                    'base_url': base_url,
                     'endpoints': details.get('endpoints', []),
                     'status': 'error',
                     'error': f'Google AI authentication error: {str(token_error)}',
@@ -162,7 +157,6 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
                     'description': details.get('description', ''),
                     'active': False,
                     'is_configured': False,
-                    'base_url': base_url,
                     'endpoints': details.get('endpoints', []),
                     'status': 'error',
                     'error': f'{provider.upper()} API key not configured',
@@ -176,7 +170,6 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
                 'description': details.get('description', ''),
                 'active': True,
                 'is_configured': True,
-                'base_url': base_url,
                 'endpoints': details.get('endpoints', []),
                 'status': 'ok',
                 'requests_24h': provider_stats.get('requests_24h', 0),
@@ -191,7 +184,6 @@ def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
             'description': details.get('description', ''),
             'active': False,
             'is_configured': False,
-            'base_url': base_url,
             'endpoints': details.get('endpoints', []),
             'status': 'error',
             'error': str(exc),
