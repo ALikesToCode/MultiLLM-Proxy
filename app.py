@@ -451,18 +451,19 @@ def create_app() -> Flask:
             }
 
             # Check each provider
-            for provider, details in PROVIDER_DETAILS.items():
-                try:
-                    providers[provider] = check_provider(provider, details)
-                except Exception as exc:
-                    logger.error(f"Failed to check {provider}: {str(exc)}")
-                    errors.append(f"Failed to check {provider}: {str(exc)}")
-                    providers[provider] = {
-                        'name': provider.upper(),
-                        'active': False,
-                        'status': 'error',
-                        'error': str(exc)
-                    }
+            with app.app_context():
+                for provider, details in PROVIDER_DETAILS.items():
+                    try:
+                        providers[provider] = check_provider(provider, details)
+                    except Exception as exc:
+                        logger.error(f"Failed to check {provider}: {str(exc)}")
+                        errors.append(f"Failed to check {provider}: {str(exc)}")
+                        providers[provider] = {
+                            'name': provider.upper(),
+                            'active': False,
+                            'status': 'error',
+                            'error': str(exc)
+                        }
 
             recent_activity = metrics_service.get_recent_activity()
 
@@ -668,34 +669,17 @@ def create_app() -> Flask:
                     # Provider status: update every 30 seconds
                     if current_time % 30 == 0:
                         providers_info = {}
-                        for prov, det in PROVIDER_DETAILS.items():
-                            try:
-                                prov_stats = metrics_service.get_provider_stats(prov)
-                                if prov == 'googleai':
-                                    token = AuthService.get_google_token()
+                        with app.app_context():
+                            for prov, det in PROVIDER_DETAILS.items():
+                                try:
+                                    providers_info[prov] = check_provider(prov, det)
+                                except Exception as e:
+                                    logger.error(f"Error checking provider {prov}: {str(e)}")
                                     providers_info[prov] = {
-                                        'active': bool(token),
-                                        'status': 'ok' if token else 'error',
-                                        'requests_24h': prov_stats.get('requests_24h', 0),
-                                        'success_rate': prov_stats.get('success_rate', 0),
-                                        'avg_latency': prov_stats.get('avg_latency', 0)
+                                        'active': False,
+                                        'status': 'error',
+                                        'error': str(e)
                                     }
-                                else:
-                                    api_key = AuthService.get_api_key(prov)
-                                    providers_info[prov] = {
-                                        'active': bool(api_key),
-                                        'status': 'ok' if api_key else 'error',
-                                        'requests_24h': prov_stats.get('requests_24h', 0),
-                                        'success_rate': prov_stats.get('success_rate', 0),
-                                        'avg_latency': prov_stats.get('avg_latency', 0)
-                                    }
-                            except Exception as e:
-                                logger.error(f"Error checking provider {prov}: {str(e)}")
-                                providers_info[prov] = {
-                                    'active': False,
-                                    'status': 'error',
-                                    'error': str(e)
-                                }
                         yield f"event: providers\ndata: {json.dumps(providers_info)}\n\n"
 
                     time.sleep(1)
