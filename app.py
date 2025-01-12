@@ -809,17 +809,37 @@ def create_app() -> Flask:
 
             # Create a new instance of ProxyService
             proxy_service = ProxyService()
-            data['auth_token'] = google_token
-            response = proxy_service.forward_request('googleai', data)
+            
+            # Prepare the request
+            base_url = app.config['API_BASE_URLS']['googleai']
+            url = f"{base_url}/chat/completions"
+            headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
+            
+            # Make the request with all required parameters
+            response = proxy_service.make_request(
+                method='POST',
+                url=url,
+                headers=headers,
+                params=request.args,  # Add query parameters
+                data=data,
+                api_provider='googleai',
+                use_cache=False  # Don't cache chat completions
+            )
 
             # Track request with correct parameters
             response_time = (time.time() - start_time) * 1000  # Convert to ms
             MetricsService.get_instance().track_request(
                 provider='googleai',
-                status_code=200,
+                status_code=response.status_code,
                 response_time=response_time
             )
-            return jsonify(response)
+            
+            # Return the response
+            return Response(
+                response.content,
+                status=response.status_code,
+                content_type=response.headers.get('content-type', 'application/json')
+            )
 
         except APIError as e:
             logger.error(f"API Error in Google chat completions: {str(e)}")
