@@ -21,6 +21,8 @@ from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from dotenv import load_dotenv
+import gzip
+import io
 
 # Import your own modules
 from services.auth_service import AuthService
@@ -848,50 +850,66 @@ def create_app() -> Flask:
             if request_data.get('stream', False):
                 def generate():
                     try:
-                        # Get the raw response content
-                        if hasattr(response, 'iter_lines'):
-                            # For requests.Response objects
-                            for line in response.iter_lines():
-                                if line:
-                                    try:
-                                        line_str = line.decode('utf-8').strip()
-                                        if line_str:
-                                            json_data = json.loads(line_str)
-                                            yield f"data: {json.dumps(json_data)}\n\n"
-                                    except json.JSONDecodeError as e:
-                                        logger.error(f"Error parsing streaming response: {e}")
-                                        continue
-                                    except Exception as e:
-                                        logger.error(f"Error processing line: {e}")
-                                        continue
-                        elif hasattr(response, 'iter_content'):
-                            # For other response types
-                            for chunk in response.iter_content(chunk_size=None):
-                                if chunk:
+                        # Check if response is gzipped
+                        is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
+                        
+                        # For requests.Response objects
+                        if hasattr(response, 'raw'):
+                            buffer = io.BytesIO()
+                            
+                            # Read raw response in chunks
+                            while True:
+                                chunk = response.raw.read(1024)
+                                if not chunk:
+                                    break
+                                    
+                                # If gzipped, accumulate chunks in buffer
+                                if is_gzipped:
+                                    buffer.write(chunk)
+                                else:
+                                    # Process uncompressed chunk directly
                                     try:
                                         chunk_str = chunk.decode('utf-8').strip()
                                         if chunk_str:
-                                            json_data = json.loads(chunk_str)
-                                            yield f"data: {json.dumps(json_data)}\n\n"
-                                    except json.JSONDecodeError as e:
-                                        logger.error(f"Error parsing streaming response: {e}")
-                                        continue
+                                            for line in chunk_str.split('\n'):
+                                                line = line.strip()
+                                                if line and line.startswith('data: '):
+                                                    try:
+                                                        json_str = line[6:].strip()
+                                                        if json_str == '[DONE]':
+                                                            yield 'data: [DONE]\n\n'
+                                                            continue
+                                                        json_data = json.loads(json_str)
+                                                        yield f"data: {json.dumps(json_data)}\n\n"
+                                                    except json.JSONDecodeError as e:
+                                                        logger.error(f"Error parsing JSON in stream: {e}")
+                                                        continue
                                     except Exception as e:
                                         logger.error(f"Error processing chunk: {e}")
                                         continue
-                        else:
-                            # For raw content
-                            content = response.content if hasattr(response, 'content') else response.get_data()
-                            if content:
+                            
+                            # If gzipped, decompress and process the accumulated data
+                            if is_gzipped:
                                 try:
-                                    content_str = content.decode('utf-8').strip()
-                                    if content_str:
-                                        json_data = json.loads(content_str)
-                                        yield f"data: {json.dumps(json_data)}\n\n"
-                                except json.JSONDecodeError as e:
-                                    logger.error(f"Error parsing response content: {e}")
+                                    buffer.seek(0)
+                                    with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
+                                        decompressed = gz.read().decode('utf-8')
+                                        for line in decompressed.split('\n'):
+                                            line = line.strip()
+                                            if line and line.startswith('data: '):
+                                                try:
+                                                    json_str = line[6:].strip()
+                                                    if json_str == '[DONE]':
+                                                        yield 'data: [DONE]\n\n'
+                                                        continue
+                                                    json_data = json.loads(json_str)
+                                                    yield f"data: {json.dumps(json_data)}\n\n"
+                                                except json.JSONDecodeError as e:
+                                                    logger.error(f"Error parsing JSON in decompressed stream: {e}")
+                                                    continue
                                 except Exception as e:
-                                    logger.error(f"Error processing content: {e}")
+                                    logger.error(f"Error decompressing gzipped response: {e}")
+                        
                     except Exception as e:
                         logger.error(f"Error in streaming response: {e}")
                     finally:
@@ -915,6 +933,11 @@ def create_app() -> Flask:
             except (json.JSONDecodeError, AttributeError):
                 # If response is not JSON or has no json() method, return raw content
                 content = response.content if hasattr(response, 'content') else response.get_data()
+                
+                # Handle gzipped content
+                if response.headers.get('content-encoding', '').lower() == 'gzip':
+                    content = gzip.decompress(content)
+                
                 return Response(
                     content,
                     status=response.status_code,
