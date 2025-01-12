@@ -797,6 +797,7 @@ def create_app() -> Flask:
         """
         Specific endpoint for Google AI chat completions.
         """
+        start_time = time.time()
         try:
             data = request.get_json()
             if not data:
@@ -806,35 +807,38 @@ def create_app() -> Flask:
             if not google_token:
                 raise APIError("Google AI authentication token not configured", status_code=401)
 
-            # Get the proxy service instance correctly
-            proxy_service = ProxyService.get_instance()
+            # Create a new instance of ProxyService
+            proxy_service = ProxyService()
             data['auth_token'] = google_token
             response = proxy_service.forward_request('googleai', data)
 
             # Track request with correct parameters
+            response_time = (time.time() - start_time) * 1000  # Convert to ms
             MetricsService.get_instance().track_request(
                 provider='googleai',
-                status='success',
-                latency=response.get('latency', 0)
+                status_code=200,
+                response_time=response_time
             )
             return jsonify(response)
 
         except APIError as e:
             logger.error(f"API Error in Google chat completions: {str(e)}")
+            response_time = (time.time() - start_time) * 1000
             MetricsService.get_instance().track_request(
                 provider='googleai',
-                status='error',
-                error=str(e)
+                status_code=e.status_code,
+                response_time=response_time
             )
             return jsonify({'status': 'error', 'message': str(e)}), (
                 401 if 'authentication' in str(e).lower() else 400
             )
         except Exception as e:
             logger.error(f"Unexpected error in Google chat completions: {str(e)}")
+            response_time = (time.time() - start_time) * 1000
             MetricsService.get_instance().track_request(
                 provider='googleai',
-                status='error',
-                error=str(e)
+                status_code=500,
+                response_time=response_time
             )
             return jsonify({
                 'status': 'error',
