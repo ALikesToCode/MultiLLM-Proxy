@@ -118,23 +118,8 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
     try:
         if provider == 'googleai':
             # Check GoogleAI token
-            try:
-                token = AuthService.get_google_token()
-                if not token:
-                    raise APIError("Google AI token not configured")
-                return {
-                    'name': provider.upper(),
-                    'description': details.get('description', ''),
-                    'active': True,
-                    'is_configured': True,
-                    'endpoints': details.get('endpoints', []),
-                    'status': 'ok',
-                    'requests_24h': provider_stats.get('requests_24h', 0),
-                    'success_rate': provider_stats.get('success_rate', 0),
-                    'avg_latency': provider_stats.get('avg_latency', 0),
-                    'example_curl': details.get('example_curl', '')
-                }
-            except Exception as token_error:
+            token = AuthService.get_google_token()
+            if not token:
                 return {
                     'name': provider.upper(),
                     'description': details.get('description', ''),
@@ -142,12 +127,24 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
                     'is_configured': False,
                     'endpoints': details.get('endpoints', []),
                     'status': 'error',
-                    'error': f'Google AI authentication error: {str(token_error)}',
+                    'error': 'Google AI token not configured',
                     'requests_24h': provider_stats.get('requests_24h', 0),
                     'success_rate': provider_stats.get('success_rate', 0),
                     'avg_latency': provider_stats.get('avg_latency', 0),
                     'example_curl': details.get('example_curl', '')
                 }
+            return {
+                'name': provider.upper(),
+                'description': details.get('description', ''),
+                'active': True,
+                'is_configured': True,
+                'endpoints': details.get('endpoints', []),
+                'status': 'ok',
+                'requests_24h': provider_stats.get('requests_24h', 0),
+                'success_rate': provider_stats.get('success_rate', 0),
+                'avg_latency': provider_stats.get('avg_latency', 0),
+                'example_curl': details.get('example_curl', '')
+            }
         else:
             # Check other providers
             api_key = AuthService.get_api_key(provider)
