@@ -799,9 +799,29 @@ def create_app() -> Flask:
         """
         start_time = time.time()
         try:
+            # Get and validate request data
             data = request.get_json()
             if not data:
                 raise APIError("No request data provided")
+
+            # Get and validate messages array
+            if 'messages' not in data:
+                raise APIError("Messages array is required", status_code=400)
+            
+            messages = data['messages']  # Use direct access to preserve original array
+            if not isinstance(messages, list):
+                raise APIError("Messages must be an array", status_code=400)
+            if not messages:
+                raise APIError("Messages array cannot be empty", status_code=400)
+
+            # Validate message format
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    raise APIError("Each message must be an object", status_code=400)
+                if 'role' not in msg:
+                    raise APIError("Each message must have a 'role' field", status_code=400)
+                if 'content' not in msg:
+                    raise APIError("Each message must have a 'content' field", status_code=400)
 
             google_token = AuthService.get_google_token()
             if not google_token:
@@ -811,23 +831,42 @@ def create_app() -> Flask:
             proxy_service = ProxyService()
             
             # Prepare the request
-            base_url = app.config['API_BASE_URLS']['googleai']
-            url = f"{base_url}/chat/completions"
+            project_id = "gen-lang-client-0290064683"
+            location = "us-central1"
+            url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
             headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
+            
+            # Prepare request data while preserving original messages and data
+            request_data = {
+                'model': data.get('model', 'meta/llama-3.1-405b-instruct-maas'),
+                'messages': messages,  # Use the original messages array
+                'max_tokens': data.get('max_tokens', 1024),
+                'stream': data.get('stream', False),
+                'extra_body': data.get('extra_body', {
+                    'google': {
+                        'model_safety_settings': {
+                            'enabled': False,
+                            'llama_guard_settings': {}
+                        }
+                    }
+                })
+            }
+            
+            logger.debug(f"Prepared request data: {json.dumps(request_data)}")
             
             # Make the request with all required parameters
             response = proxy_service.make_request(
                 method='POST',
                 url=url,
                 headers=headers,
-                params=request.args,  # Add query parameters
-                data=data,
+                params=request.args,
+                data=json.dumps(request_data).encode('utf-8'),  # Encode as bytes
                 api_provider='googleai',
-                use_cache=False  # Don't cache chat completions
+                use_cache=False
             )
 
             # Track request with correct parameters
-            response_time = (time.time() - start_time) * 1000  # Convert to ms
+            response_time = (time.time() - start_time) * 1000
             MetricsService.get_instance().track_request(
                 provider='googleai',
                 status_code=response.status_code,
