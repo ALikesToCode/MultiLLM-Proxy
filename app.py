@@ -796,82 +796,131 @@ def create_app() -> Flask:
                 if 'content' not in msg:
                     raise APIError("Each message must have a 'content' field", status_code=400)
 
-            google_token = AuthService.get_google_token()
-            if not google_token:
-                raise APIError("Google AI authentication token not configured", status_code=401)
+            # Get Google token with retry on auth error
+            def get_fresh_token():
+                token = AuthService.get_google_token()
+                if not token:
+                    raise APIError("Google AI authentication token not configured", status_code=401)
+                return token
 
-            # Create a new instance of ProxyService
-            proxy_service = ProxyService()
-            
-            # Prepare the request
-            project_id = "gen-lang-client-0290064683"
-            location = "us-central1"
-            url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
-            headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
-            
-            # Prepare request data while preserving original messages and data
-            request_data = {
-                'model': data.get('model', 'meta/llama-3.1-405b-instruct-maas'),
-                'messages': messages,  # Use the original messages array
-                'max_tokens': data.get('max_tokens', 1024),
-                'stream': data.get('stream', False),
-                'extra_body': data.get('extra_body', {
-                    'google': {
-                        'model_safety_settings': {
-                            'enabled': False,
-                            'llama_guard_settings': {}
+            try:
+                google_token = get_fresh_token()
+                
+                # Create a new instance of ProxyService
+                proxy_service = ProxyService()
+                
+                # Prepare the request
+                project_id = "gen-lang-client-0290064683"
+                location = "us-central1"
+                url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
+                headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
+                
+                # Prepare request data while preserving original messages and data
+                request_data = {
+                    'model': data.get('model', 'meta/llama-3.1-405b-instruct-maas'),
+                    'messages': messages,  # Use the original messages array
+                    'max_tokens': data.get('max_tokens', 1024),
+                    'stream': data.get('stream', False),
+                    'extra_body': data.get('extra_body', {
+                        'google': {
+                            'model_safety_settings': {
+                                'enabled': False,
+                                'llama_guard_settings': {}
+                            }
                         }
-                    }
-                })
-            }
-            
-            logger.debug(f"Prepared request data: {json.dumps(request_data)}")
-            
-            # Make the request with all required parameters
-            response = proxy_service.make_request(
-                method='POST',
-                url=url,
-                headers=headers,
-                params=request.args,
-                data=json.dumps(request_data).encode('utf-8'),  # Encode as bytes
-                api_provider='googleai',
-                use_cache=False
-            )
+                    })
+                }
+                
+                logger.debug(f"Prepared request data: {json.dumps(request_data)}")
+                
+                # Make the request with all required parameters
+                response = proxy_service.make_request(
+                    method='POST',
+                    url=url,
+                    headers=headers,
+                    params=request.args,
+                    data=json.dumps(request_data).encode('utf-8'),  # Encode as bytes
+                    api_provider='googleai',
+                    use_cache=False
+                )
 
-            # Track request with correct parameters
-            response_time = (time.time() - start_time) * 1000
-            MetricsService.get_instance().track_request(
-                provider='googleai',
-                status_code=response.status_code,
-                response_time=response_time
-            )
-            
-            # Handle streaming response
-            if request_data.get('stream', False):
-                def generate():
-                    try:
-                        # Check if response is gzipped
-                        is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
-                        
-                        # For requests.Response objects
-                        if hasattr(response, 'raw'):
-                            buffer = io.BytesIO()
+                # If we get a 401, try refreshing the token and retry once
+                if response.status_code == 401:
+                    logger.info("Received 401, refreshing Google token and retrying...")
+                    # Force token refresh by clearing the cached token
+                    AuthService._google_token = None
+                    AuthService._google_token_expiry = None
+                    
+                    # Get fresh token and retry
+                    google_token = get_fresh_token()
+                    headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
+                    response = proxy_service.make_request(
+                        method='POST',
+                        url=url,
+                        headers=headers,
+                        params=request.args,
+                        data=json.dumps(request_data).encode('utf-8'),
+                        api_provider='googleai',
+                        use_cache=False
+                    )
+
+                # Track request with correct parameters
+                response_time = (time.time() - start_time) * 1000
+                MetricsService.get_instance().track_request(
+                    provider='googleai',
+                    status_code=response.status_code,
+                    response_time=response_time
+                )
+                
+                # Handle streaming response
+                if request_data.get('stream', False):
+                    def generate():
+                        try:
+                            # Check if response is gzipped
+                            is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
                             
-                            # Read raw response in chunks
-                            while True:
-                                chunk = response.raw.read(1024)
-                                if not chunk:
-                                    break
-                                    
-                                # If gzipped, accumulate chunks in buffer
+                            # For requests.Response objects
+                            if hasattr(response, 'raw'):
+                                buffer = io.BytesIO()
+                                
+                                # Read raw response in chunks
+                                while True:
+                                    chunk = response.raw.read(1024)
+                                    if not chunk:
+                                        break
+                                        
+                                    # If gzipped, accumulate chunks in buffer
+                                    if is_gzipped:
+                                        buffer.write(chunk)
+                                    else:
+                                        # Process uncompressed chunk directly
+                                        try:
+                                            chunk_str = chunk.decode('utf-8').strip()
+                                            if chunk_str:
+                                                for line in chunk_str.split('\n'):
+                                                    line = line.strip()
+                                                    if line and line.startswith('data: '):
+                                                        try:
+                                                            json_str = line[6:].strip()
+                                                            if json_str == '[DONE]':
+                                                                yield 'data: [DONE]\n\n'
+                                                                continue
+                                                            json_data = json.loads(json_str)
+                                                            yield f"data: {json.dumps(json_data)}\n\n"
+                                                        except json.JSONDecodeError as e:
+                                                            logger.error(f"Error parsing JSON in stream: {e}")
+                                                            continue
+                                        except Exception as e:
+                                            logger.error(f"Error processing chunk: {e}")
+                                            continue
+                                
+                                # If gzipped, decompress and process the accumulated data
                                 if is_gzipped:
-                                    buffer.write(chunk)
-                                else:
-                                    # Process uncompressed chunk directly
                                     try:
-                                        chunk_str = chunk.decode('utf-8').strip()
-                                        if chunk_str:
-                                            for line in chunk_str.split('\n'):
+                                        buffer.seek(0)
+                                        with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
+                                            decompressed = gz.read().decode('utf-8')
+                                            for line in decompressed.split('\n'):
                                                 line = line.strip()
                                                 if line and line.startswith('data: '):
                                                     try:
@@ -882,67 +931,68 @@ def create_app() -> Flask:
                                                         json_data = json.loads(json_str)
                                                         yield f"data: {json.dumps(json_data)}\n\n"
                                                     except json.JSONDecodeError as e:
-                                                        logger.error(f"Error parsing JSON in stream: {e}")
+                                                        logger.error(f"Error parsing JSON in decompressed stream: {e}")
                                                         continue
                                     except Exception as e:
-                                        logger.error(f"Error processing chunk: {e}")
-                                        continue
-                            
-                            # If gzipped, decompress and process the accumulated data
-                            if is_gzipped:
-                                try:
-                                    buffer.seek(0)
-                                    with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
-                                        decompressed = gz.read().decode('utf-8')
-                                        for line in decompressed.split('\n'):
-                                            line = line.strip()
-                                            if line and line.startswith('data: '):
-                                                try:
-                                                    json_str = line[6:].strip()
-                                                    if json_str == '[DONE]':
-                                                        yield 'data: [DONE]\n\n'
-                                                        continue
-                                                    json_data = json.loads(json_str)
-                                                    yield f"data: {json.dumps(json_data)}\n\n"
-                                                except json.JSONDecodeError as e:
-                                                    logger.error(f"Error parsing JSON in decompressed stream: {e}")
-                                                    continue
-                                except Exception as e:
-                                    logger.error(f"Error decompressing gzipped response: {e}")
+                                        logger.error(f"Error decompressing gzipped response: {e}")
                         
-                    except Exception as e:
-                        logger.error(f"Error in streaming response: {e}")
-                    finally:
-                        yield "data: [DONE]\n\n"
+                        except Exception as e:
+                            logger.error(f"Error in streaming response: {e}")
+                        finally:
+                            yield "data: [DONE]\n\n"
+                        
+                    return Response(
+                        generate(),
+                        mimetype='text/event-stream',
+                        headers={
+                            'Cache-Control': 'no-cache',
+                            'Connection': 'keep-alive',
+                            'Content-Type': 'text/event-stream',
+                            'X-Accel-Buffering': 'no'
+                        }
+                    )
                 
-                return Response(
-                    generate(),
-                    mimetype='text/event-stream',
-                    headers={
-                        'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
-                        'Content-Type': 'text/event-stream',
-                        'X-Accel-Buffering': 'no'
-                    }
+                # Handle regular response
+                try:
+                    response_json = response.json()
+                    return jsonify(response_json), response.status_code
+                except (json.JSONDecodeError, AttributeError):
+                    # If response is not JSON or has no json() method, return raw content
+                    content = response.content if hasattr(response, 'content') else response.get_data()
+                    
+                    # Handle gzipped content
+                    if response.headers.get('content-encoding', '').lower() == 'gzip':
+                        content = gzip.decompress(content)
+                    
+                    return Response(
+                        content,
+                        status=response.status_code,
+                        content_type=response.headers.get('content-type', 'application/json')
+                    )
+
+            except APIError as e:
+                logger.error(f"API Error in Google chat completions: {str(e)}")
+                response_time = (time.time() - start_time) * 1000
+                MetricsService.get_instance().track_request(
+                    provider='googleai',
+                    status_code=e.status_code,
+                    response_time=response_time
                 )
-            
-            # Handle regular response
-            try:
-                response_json = response.json()
-                return jsonify(response_json), response.status_code
-            except (json.JSONDecodeError, AttributeError):
-                # If response is not JSON or has no json() method, return raw content
-                content = response.content if hasattr(response, 'content') else response.get_data()
-                
-                # Handle gzipped content
-                if response.headers.get('content-encoding', '').lower() == 'gzip':
-                    content = gzip.decompress(content)
-                
-                return Response(
-                    content,
-                    status=response.status_code,
-                    content_type=response.headers.get('content-type', 'application/json')
+                return jsonify({'status': 'error', 'message': str(e)}), (
+                    401 if 'authentication' in str(e).lower() else 400
                 )
+            except Exception as e:
+                logger.error(f"Unexpected error in Google chat completions: {str(e)}")
+                response_time = (time.time() - start_time) * 1000
+                MetricsService.get_instance().track_request(
+                    provider='googleai',
+                    status_code=500,
+                    response_time=response_time
+                )
+                return jsonify({
+                    'status': 'error',
+                    'message': f"Internal server error: {str(e)}"
+                }), 500
 
         except APIError as e:
             logger.error(f"API Error in Google chat completions: {str(e)}")
