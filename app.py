@@ -104,7 +104,7 @@ def api_auth_required(func: Callable) -> Callable:
     return wrapper
 
 
-def check_provider(provider: str, details: Dict[str, Any]) -> Dict[str, Any]:
+def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Check the status of a provider by retrieving stats and verifying tokens.
     """
@@ -451,19 +451,18 @@ def create_app() -> Flask:
             }
 
             # Check each provider
-            with app.app_context():
-                for provider, details in PROVIDER_DETAILS.items():
-                    try:
-                        providers[provider] = check_provider(provider, details)
-                    except Exception as exc:
-                        logger.error(f"Failed to check {provider}: {str(exc)}")
-                        errors.append(f"Failed to check {provider}: {str(exc)}")
-                        providers[provider] = {
-                            'name': provider.upper(),
-                            'active': False,
-                            'status': 'error',
-                            'error': str(exc)
-                        }
+            for provider, details in PROVIDER_DETAILS.items():
+                try:
+                    providers[provider] = check_provider(provider, details, app.config)
+                except Exception as exc:
+                    logger.error(f"Failed to check {provider}: {str(exc)}")
+                    errors.append(f"Failed to check {provider}: {str(exc)}")
+                    providers[provider] = {
+                        'name': provider.upper(),
+                        'active': False,
+                        'status': 'error',
+                        'error': str(exc)
+                    }
 
             recent_activity = metrics_service.get_recent_activity()
 
@@ -669,17 +668,16 @@ def create_app() -> Flask:
                     # Provider status: update every 30 seconds
                     if current_time % 30 == 0:
                         providers_info = {}
-                        with app.app_context():
-                            for prov, det in PROVIDER_DETAILS.items():
-                                try:
-                                    providers_info[prov] = check_provider(prov, det)
-                                except Exception as e:
-                                    logger.error(f"Error checking provider {prov}: {str(e)}")
-                                    providers_info[prov] = {
-                                        'active': False,
-                                        'status': 'error',
-                                        'error': str(e)
-                                    }
+                        for prov, det in PROVIDER_DETAILS.items():
+                            try:
+                                providers_info[prov] = check_provider(prov, det, app.config)
+                            except Exception as e:
+                                logger.error(f"Error checking provider {prov}: {str(e)}")
+                                providers_info[prov] = {
+                                    'active': False,
+                                    'status': 'error',
+                                    'error': str(e)
+                                }
                         yield f"event: providers\ndata: {json.dumps(providers_info)}\n\n"
 
                     time.sleep(1)
@@ -849,12 +847,82 @@ def create_app() -> Flask:
                 response_time=response_time
             )
             
-            # Return the response
-            return Response(
-                response.content,
-                status=response.status_code,
-                content_type=response.headers.get('content-type', 'application/json')
-            )
+            # Handle streaming response
+            if request_data.get('stream', False):
+                def generate():
+                    try:
+                        # Get the raw response content
+                        if hasattr(response, 'iter_lines'):
+                            # For requests.Response objects
+                            for line in response.iter_lines():
+                                if line:
+                                    try:
+                                        line_str = line.decode('utf-8').strip()
+                                        if line_str:
+                                            json_data = json.loads(line_str)
+                                            yield f"data: {json.dumps(json_data)}\n\n"
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"Error parsing streaming response: {e}")
+                                        continue
+                                    except Exception as e:
+                                        logger.error(f"Error processing line: {e}")
+                                        continue
+                        elif hasattr(response, 'iter_content'):
+                            # For other response types
+                            for chunk in response.iter_content(chunk_size=None):
+                                if chunk:
+                                    try:
+                                        chunk_str = chunk.decode('utf-8').strip()
+                                        if chunk_str:
+                                            json_data = json.loads(chunk_str)
+                                            yield f"data: {json.dumps(json_data)}\n\n"
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"Error parsing streaming response: {e}")
+                                        continue
+                                    except Exception as e:
+                                        logger.error(f"Error processing chunk: {e}")
+                                        continue
+                        else:
+                            # For raw content
+                            content = response.content if hasattr(response, 'content') else response.get_data()
+                            if content:
+                                try:
+                                    content_str = content.decode('utf-8').strip()
+                                    if content_str:
+                                        json_data = json.loads(content_str)
+                                        yield f"data: {json.dumps(json_data)}\n\n"
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Error parsing response content: {e}")
+                                except Exception as e:
+                                    logger.error(f"Error processing content: {e}")
+                    except Exception as e:
+                        logger.error(f"Error in streaming response: {e}")
+                    finally:
+                        yield "data: [DONE]\n\n"
+                
+                return Response(
+                    generate(),
+                    mimetype='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Content-Type': 'text/event-stream',
+                        'X-Accel-Buffering': 'no'
+                    }
+                )
+            
+            # Handle regular response
+            try:
+                response_json = response.json()
+                return jsonify(response_json), response.status_code
+            except (json.JSONDecodeError, AttributeError):
+                # If response is not JSON or has no json() method, return raw content
+                content = response.content if hasattr(response, 'content') else response.get_data()
+                return Response(
+                    content,
+                    status=response.status_code,
+                    content_type=response.headers.get('content-type', 'application/json')
+                )
 
         except APIError as e:
             logger.error(f"API Error in Google chat completions: {str(e)}")
