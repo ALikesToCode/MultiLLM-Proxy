@@ -39,7 +39,8 @@ class ProxyService:
     _google_token_lock = threading.Lock()
 
     MODEL_MAPPINGS = {
-        "TheBloke/Rogue-Rose-103b-v0.2-AWQ": "unsloth/Llama-3.2-3B-Instruct"
+        "TheBloke/Rogue-Rose-103b-v0.2-AWQ": "unsloth/Meta-Llama-3.1-8B-Instruct",  # Map to a supported model
+        # Add more model mappings as needed
     }
 
     @classmethod
@@ -763,6 +764,27 @@ class ProxyService:
                     logger.error(f"Error processing response: {str(e)}")
                     raise APIError(f"Error processing response: {str(e)}", status_code=500)
             else:
+                # Check for token-related errors (401 Unauthorized)
+                if response.status_code == 401:
+                    logger.info("Google AI token error detected, refreshing token...")
+                    # Invalidate and refresh token
+                    cls.invalidate_google_token()
+                    # Update headers with new token
+                    new_token = cls.get_google_access_token()
+                    if new_token:
+                        headers['Authorization'] = f'Bearer {new_token}'
+                        # Retry the request with new token
+                        return cls._handle_googleai_request(
+                            method=method,
+                            url=url,
+                            headers=headers,
+                            params=params,
+                            data=data,
+                            request_data=request_data,
+                            use_cache=use_cache,
+                            retry_count=retry_count
+                        )
+                
                 # Log error response
                 try:
                     error_content = response.content.decode('utf-8')
@@ -814,13 +836,12 @@ class ProxyService:
                 "temperature": request_data.get("temperature", 0.7),
                 "max_tokens": request_data.get("max_tokens", 100),
                 "top_p": request_data.get("top_p", 1.0),
+                "stream": request_data.get("stream", False),
                 "frequency_penalty": request_data.get("frequency_penalty", 0),
                 "presence_penalty": request_data.get("presence_penalty", 0)
             }
 
             logger.info(f"Original request data: {request_data}")
-            logger.info(f"Original model: {request_data['model']}")
-            logger.info(f"Mapped model: {cls.MODEL_MAPPINGS[request_data['model']]}")
             logger.info(f"Completion data: {completion_data}")
 
             # Update URL to use completions endpoint while maintaining the nineteen path
@@ -833,7 +854,7 @@ class ProxyService:
             logger.info(f"Converted chat request to completion for Rogue Rose: {completion_data}")
             logger.info(f"New URL: {completion_url}")
 
-            # Make the completion request
+            # Make the request
             response = cls._make_base_request(
                 method=method,
                 url=completion_url,
@@ -841,10 +862,55 @@ class ProxyService:
                 params=params,
                 data=completion_data_bytes,
                 api_provider="nineteen",
-                use_cache=use_cache,
+                use_cache=use_cache
             )
 
-            # Convert completion response to chat format
+            # Handle streaming response
+            if completion_data.get("stream", False):
+                def generate():
+                    try:
+                        for line in response.iter_lines():
+                            if line:
+                                try:
+                                    completion_chunk = json.loads(line)
+                                    # Convert completion chunk to chat format
+                                    chat_chunk = {
+                                        "id": completion_chunk.get("id", str(uuid.uuid4())),
+                                        "object": "chat.completion.chunk",
+                                        "created": completion_chunk.get("created", int(time.time())),
+                                        "model": request_data["model"],  # Use original model name
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {
+                                                    "role": "assistant" if "role" not in completion_chunk else None,
+                                                    "content": completion_chunk["choices"][0]["text"]
+                                                },
+                                                "finish_reason": completion_chunk["choices"][0].get("finish_reason")
+                                            }
+                                        ]
+                                    }
+                                    yield f"data: {json.dumps(chat_chunk)}\n\n"
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Error parsing streaming response: {e}")
+                                    continue
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logger.error(f"Error in stream generation: {str(e)}")
+                        raise APIError(f"Error in stream generation: {str(e)}", status_code=500)
+
+                return flask.Response(
+                    generate(),
+                    mimetype='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Content-Type': 'text/event-stream',
+                        'X-Accel-Buffering': 'no'
+                    }
+                )
+
+            # Handle non-streaming response
             if response.status_code == 200:
                 try:
                     completion_response = response.json()
@@ -882,7 +948,6 @@ class ProxyService:
                     raise APIError(f"Error converting completion to chat response: {str(e)}", status_code=500)
 
             return response
-
         except Exception as e:
             error_msg = f"Error in Rogue Rose request handler: {str(e)}"
             logger.error(error_msg)
@@ -902,43 +967,44 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
+        logger.info(f"Making request to {url} with method {method}")
+        
         try:
-            request_data = {}
-            if data:
-                try:
-                    request_data = json.loads(data)
-                    logger.info(f"Request data: {request_data}")
+            # Special handling for different providers
+            if api_provider == "together":
+                return cls._handle_together_request(
+                    method, url, headers, params, data, json.loads(data), use_cache
+                )
+            elif api_provider == "groq":
+                return cls._handle_groq_request(
+                    method, url, headers, params, data, json.loads(data), use_cache
+                )
+            elif api_provider == "googleai":
+                return cls._handle_googleai_request(
+                    method, url, headers, params, data, json.loads(data), use_cache
+                )
+            elif api_provider == "nineteen":
+                request_data = json.loads(data)
+                model = request_data.get("model")
+                if model in cls.MODEL_MAPPINGS:
+                    # Map the model to a supported one
+                    request_data["model"] = cls.MODEL_MAPPINGS[model]
+                    data = json.dumps(request_data).encode('utf-8')
+                    headers["Content-Length"] = str(len(data))
+                    logger.info(f"Mapped model {model} to {request_data['model']}")
 
-                    # Check if model needs mapping
-                    model = request_data.get("model")
-                    if model in cls.MODEL_MAPPINGS:
-                        if "/nineteen/v1/chat/completions" in url:
-                            return cls._handle_rogue_rose_request(
-                                method=method,
-                                url=url,
-                                headers=headers,
-                                params=params,
-                                data=data,
-                                request_data=request_data,
-                                use_cache=use_cache
-                            )
-                        elif "/nineteen/v1/completions" in url:
-                            # For direct completions, just map the model
-                            request_data["model"] = cls.MODEL_MAPPINGS[model]
-                            data = json.dumps(request_data).encode('utf-8')
-                            headers["Content-Length"] = str(len(data))
-                except Exception:
-                    pass
+                # Make the base request
+                return cls._make_base_request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    params=params,
+                    data=data,
+                    api_provider=api_provider,
+                    use_cache=use_cache
+                )
 
-            if api_provider == 'groq' and method.upper() == 'POST':
-                return cls._handle_groq_request(method, url, headers, params, data, request_data, use_cache)
-
-            if api_provider == 'together' and method.upper() == 'POST':
-                return cls._handle_together_request(method, url, headers, params, data, request_data, use_cache)
-
-            if api_provider == 'googleai' and method.upper() == 'POST':
-                return cls._handle_googleai_request(method, url, headers, params, data, request_data, use_cache)
-
+            # Default handling
             return cls._make_base_request(
                 method=method,
                 url=url,
@@ -946,7 +1012,7 @@ class ProxyService:
                 params=params,
                 data=data,
                 api_provider=api_provider,
-                use_cache=use_cache,
+                use_cache=use_cache
             )
         except Exception as e:
             error_msg = f"Error in make_request: {str(e)}"

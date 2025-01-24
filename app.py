@@ -518,7 +518,11 @@ def create_app() -> Flask:
             elif api_provider == 'nineteen':
                 # Handle nineteen chat completions
                 if path == 'v1/chat/completions':
-                    path = 'v1/completions'
+                    # Keep the original path for the request
+                    pass
+                elif path == 'v1/completions':
+                    # Keep the original path for the request
+                    pass
             elif api_provider == 'googleai':
                 if path == 'models':
                     # Use models endpoint for listing models
