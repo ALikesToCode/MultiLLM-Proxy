@@ -28,7 +28,8 @@ class Config:
         'hyperbolic': 'https://api.hyperbolic.xyz/v1',
         'sambanova': 'https://api.sambanova.ai/v1',
         'openrouter': 'https://openrouter.ai/api/v1',
-        'palm': 'https://generativelanguage.googleapis.com/v1beta'
+        'palm': 'https://generativelanguage.googleapis.com/v1beta',
+        'nineteen': 'https://api.nineteen.ai'
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
@@ -45,6 +46,7 @@ class Config:
         'sambanova': (5, 120),  # SambaNova can take longer for larger models
         'openrouter': (5, 120),  # OpenRouter can take longer as it routes to various providers
         'palm': (10, 120),  # PaLM API can be slow to respond
+        'nineteen': (5, 120),
         'default': (5, 60)
     }
     
@@ -62,6 +64,7 @@ class Config:
         'sambanova': {'max_retries': 3, 'backoff_factor': 1},
         'openrouter': {'max_retries': 3, 'backoff_factor': 1},
         'palm': {'max_retries': 5, 'backoff_factor': 2},  # More retries for PaLM API
+        'nineteen': {'max_retries': 3, 'backoff_factor': 1},
         'default': {'max_retries': 3, 'backoff_factor': 1}
     }
     

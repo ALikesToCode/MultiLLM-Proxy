@@ -207,6 +207,32 @@ const ui = {
     }
 };
 
+// Endpoint copying functionality
+function toggleEndpoint(provider) {
+    const content = document.getElementById(`endpoint-${provider.replace(' ', '-')}`);
+    const icon = document.getElementById(`icon-${provider.replace(' ', '-')}`);
+    content.classList.toggle('hidden');
+    icon.classList.toggle('rotate-180');
+}
+
+function copyEndpoint(button) {
+    const input = button.parentElement.querySelector('input');
+    input.select();
+    document.execCommand('copy');
+    
+    // Change button text temporarily
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    button.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+    button.classList.add('bg-green-500', 'hover:bg-green-600');
+    
+    setTimeout(() => {
+        button.textContent = originalText;
+        button.classList.remove('bg-green-500', 'hover:bg-green-600');
+        button.classList.add('bg-blue-500', 'hover:bg-blue-600');
+    }, 2000);
+}
+
 // SSE connection management
 class EventSourceManager {
     constructor(url, options = {}) {

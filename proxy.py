@@ -99,6 +99,10 @@ PROVIDER_DETAILS = {
                 'curl': 'curl -X POST "http://localhost:1400/openrouter/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -H "HTTP-Referer: $YOUR_SITE_URL" -H "X-Title: $YOUR_APP_NAME" -d "{\\"model\\": \\"openai/gpt-3.5-turbo\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
             },
             {
+                'url': '/chat/completions',
+                'curl': 'curl -X POST "http://localhost:1400/openrouter/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"anthropic/claude-2\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
                 'url': '/models',
                 'curl': 'curl -X GET "http://localhost:1400/openrouter/models" -H "Authorization: Bearer $API_KEY"'
             }
@@ -107,6 +111,20 @@ PROVIDER_DETAILS = {
             'streaming': True,
             'function_calling': True,
             'json_mode': True
+        }
+    },
+    'nineteen': {
+        'description': 'Nineteen AI - High-performance inference for open-source models',
+        'endpoints': [
+            {
+                'url': '/v1/completions',
+                'curl': 'curl -X POST "http://localhost:1400/nineteen/v1/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"TheBloke/Rogue-Rose-103b-v0.2-AWQ\\", \\"prompt\\": \\"Hello!\\", \\"temperature\\": 0.5, \\"max_tokens\\": 50, \\"top_p\\": 0.5, \\"stream\\": true}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': False,
+            'json_mode': False
         }
     },
     'palm': {

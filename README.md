@@ -1,23 +1,32 @@
 # MultiLLM Proxy
 
-A powerful proxy server that provides a unified interface for multiple LLM providers including OpenAI, Groq, Together AI, Google AI, and more.
+A powerful proxy server that provides a unified interface for multiple LLM providers. This project simplifies the integration and management of various AI models by providing a single, consistent API endpoint while handling provider-specific requirements behind the scenes.
 
 ## Features
 
-- 🔒 Secure authentication system with user management
-- 🔑 Universal API key support for all providers
-- 🔄 Automatic token-based rate limiting
+- 🔒 Secure authentication system with user management and JWT tokens
+- 🔑 Universal API key support with provider-specific key management
+- 🔄 Automatic token-based rate limiting and request distribution
 - 🌐 Support for multiple LLM providers:
-  - OpenAI
-  - Groq
+  - OpenAI (GPT models)
+  - Groq (ultra-fast inference)
   - Together AI
-  - Google AI
+  - Google AI (Gemini models)
   - Cerebras
-  - XAI
+  - X.AI (formerly Twitter)
+  - Azure AI
+  - Scaleway
+  - Hyperbolic
+  - SambaNova
+  - OpenRouter
+  - PaLM API
+  - Nineteen AI
 - 🎨 Beautiful web dashboard with dark mode support
-- 🔄 Real-time status monitoring
+- 🔄 Real-time status monitoring and provider health checks
 - 📊 Request statistics and monitoring
 - 🚀 Streaming support for compatible providers
+- ⚡ Configurable timeouts and retry mechanisms per provider
+- 🔄 Automatic parameter handling and compatibility checks
 
 ## Setup
 
@@ -54,20 +63,47 @@ FLASK_SECRET_KEY=your-flask-secret-key
 JWT_SECRET=your-jwt-secret-key
 ```
 
-### Optional Provider-Specific Keys:
+### Provider-Specific Configuration:
 ```env
-# Provider API Keys (Optional - if you want to use different keys for different providers)
+# OpenAI
 OPENAI_API_KEY=your-openai-api-key
+
+# Cerebras
 CEREBRAS_API_KEY=your-cerebras-api-key
+
+# X.AI
 XAI_API_KEY=your-xai-api-key
+
+# Google AI
 GOOGLE_APPLICATION_CREDENTIALS=path-to-your-google-credentials.json
 
-# Multiple Groq API keys for token-based rate limiting
+# Groq (supports multiple keys for rate limiting)
 GROQ_API_KEY_1=your-first-groq-api-key
 GROQ_API_KEY_2=your-second-groq-api-key
 
-# Together AI API key
+# Together AI
 TOGETHER_API_KEY=your-together-api-key
+
+# Azure AI
+AZURE_API_KEY=your-azure-api-key
+
+# Scaleway
+SCALEWAY_API_KEY=your-scaleway-api-key
+
+# Hyperbolic
+HYPERBOLIC_API_KEY=your-hyperbolic-api-key
+
+# SambaNova
+SAMBANOVA_API_KEY=your-sambanova-api-key
+
+# OpenRouter
+OPENROUTER_API_KEY=your-openrouter-api-key
+
+# PaLM API
+PALM_API_KEY=your-palm-api-key
+
+# Nineteen AI
+NINETEEN_API_KEY=your-nineteen-api-key
 ```
 
 5. Run the server:
@@ -77,71 +113,126 @@ python app.py
 
 The server will start at `http://localhost:1400` (or your configured host/port).
 
-## Authentication
+## Usage
 
-The proxy uses a secure authentication system with the following features:
+### Authentication
 
-- Session-based authentication
+The proxy uses a secure authentication system with:
+- Session-based authentication for web dashboard
 - JWT token generation for API access
 - Universal API key system
 - Secure password hashing
 - CSRF protection
 
-### Login
+### API Endpoints
 
-1. Access the dashboard at `http://localhost:1400`
-2. Login with your configured credentials:
-   - Username: Value of `ADMIN_USERNAME` (defaults to "admin")
-   - API Key: Value of `ADMIN_API_KEY`
+Each provider is accessible through their respective endpoints:
 
-### API Usage
-
-After authentication, you can use the proxy with any supported provider. The universal API key will be used for all providers.
-
-Example using curl:
 ```bash
+# OpenAI-compatible endpoint
 curl -X POST "http://localhost:1400/openai/v1/chat/completions" \
-  -H "Authorization: Bearer your-universal-api-key" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-3.5-turbo",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
+
+# Groq endpoint
+curl -X POST "http://localhost:1400/groq/openai/v1/chat/completions" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3-70b-8192",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
-## Rate Limiting
+### Provider Endpoints
 
-- Default rate limit: 500 requests per minute per provider
-- Groq-specific token limit: 6000 tokens per minute per API key
-- Configurable rate limits in `config.py`
+Quick reference for all provider endpoint URLs:
 
-## Development
+```plaintext
+# OpenAI
+http://localhost:1400/openai/v1/chat/completions
 
-### Running Tests
-```bash
-pytest
+# Groq
+http://localhost:1400/groq/openai/v1/chat/completions
+
+# Together AI
+http://localhost:1400/together/v1/chat/completions
+
+# Google AI (Gemini)
+http://localhost:1400/googleai/predict
+
+# Cerebras
+http://localhost:1400/cerebras/v1/chat/completions
+
+# X.AI
+http://localhost:1400/xai/v1/chat/completions
+
+# Azure AI
+http://localhost:1400/azure/v1/chat/completions
+
+# Scaleway
+http://localhost:1400/scaleway/chat/completions
+
+# Hyperbolic
+http://localhost:1400/hyperbolic/chat/completions
+
+# SambaNova
+http://localhost:1400/sambanova/chat/completions
+http://localhost:1400/sambanova/completions
+
+# OpenRouter
+http://localhost:1400/openrouter/chat/completions
+http://localhost:1400/openrouter/models
+
+# PaLM
+http://localhost:1400/palm/models/chat-bison-001:generateText
+
+# Nineteen AI
+http://localhost:1400/nineteen/v1/completions
 ```
 
-### Code Style
-```bash
-black .
-flake8
-```
+For detailed usage examples with headers and request bodies, refer to the API Endpoints section above.
 
-## Security Considerations
+### Provider-Specific Features
 
-1. Always use strong, unique values for:
-   - `FLASK_SECRET_KEY`
-   - `JWT_SECRET`
-   - `ADMIN_API_KEY`
+- **OpenAI**: Full support for chat completions, embeddings, and function calling
+- **Groq**: Ultra-fast inference with token-based rate limiting
+- **Google AI**: Support for Gemini models and multimodal tasks
+- **Together AI**: Access to various open-source models
+- **Cerebras**: Text generation and chat capabilities
+- **X.AI**: Access to X-1 and other models
+- **Azure AI**: Support for Azure-hosted models
+- **SambaNova**: Text generation with streaming support
+- **OpenRouter**: Gateway to multiple AI providers
+- **PaLM API**: Google's PaLM language models
+- **Nineteen AI**: High-performance inference for open-source models with streaming support
 
-2. In production:
-   - Use HTTPS
-   - Set secure cookie flags
-   - Configure proper CORS settings
-   - Use a production-grade server (e.g., gunicorn)
-   - Use a proper database for user management
+## Configuration Options
+
+The proxy server supports extensive configuration through environment variables and the config.py file:
+
+- Custom timeouts per provider
+- Retry mechanisms with configurable backoff
+- Token rate limiting
+- Model-specific parameter handling
+- Development and production environment settings
+
+## Security
+
+- All API keys are securely handled and never exposed
+- Request validation and sanitization
+- Rate limiting and quota management
+- Secure session handling
+- CSRF protection
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT License - See LICENSE file for details
+This project is licensed under the MIT License - see the LICENSE file for details.
