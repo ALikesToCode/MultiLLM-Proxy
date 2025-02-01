@@ -526,10 +526,18 @@ def create_app() -> Flask:
             elif api_provider == 'googleai':
                 if path == 'models':
                     # Use models endpoint for listing models
-                    project_id = app.config.get('PROJECT_ID', '')
+                    project_id = os.environ.get('PROJECT_ID')
+                    location = os.environ.get('LOCATION')
+                    endpoint = os.environ.get('GOOGLE_ENDPOINT')
+                    if not project_id:
+                        raise APIError("PROJECT_ID environment variable not set", status_code=500)
+                    if not location:
+                        raise APIError("LOCATION environment variable not set", status_code=500)
+                    if not endpoint:
+                        raise APIError("ENDPOINT environment variable not set", status_code=500)
                     base_url = (
-                        f"https://us-central1-aiplatform.googleapis.com/v1beta1/projects/"
-                        f"{project_id}/locations/us-central1/models"
+                        f"https://{endpoint}/v1beta1/projects/"
+                        f"{project_id}/locations/{location}/models"
                     )
                     path = ''
 
@@ -818,9 +826,10 @@ def create_app() -> Flask:
                 proxy_service = ProxyService()
                 
                 # Prepare the request
-                project_id = "gen-lang-client-0290064683"
-                location = "us-central1"
-                url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
+                project_id = os.environ.get('PROJECT_ID')
+                location = os.environ.get('LOCATION')
+                endpoint = os.environ.get('GOOGLE_ENDPOINT')
+                url = f"https://{endpoint}/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
                 headers = ProxyService.prepare_headers(request.headers, 'googleai', google_token)
                 
                 # Prepare request data while preserving original messages and data

@@ -17,6 +17,7 @@ import flask
 import gzip
 import io
 import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,27 @@ class ProxyService:
             try:
                 import subprocess
                 import shutil
+                from flask import current_app
+
+                # Check if credentials file is configured
+                credentials_path = current_app.config.get('GOOGLE_APPLICATION_CREDENTIALS')
+                if not credentials_path:
+                    error_msg = "GOOGLE_APPLICATION_CREDENTIALS not configured in environment"
+                    logger.error(error_msg)
+                    raise APIError(error_msg, status_code=500)
+
+                if not os.path.exists(credentials_path):
+                    error_msg = f"Google credentials file not found at {credentials_path}"
+                    logger.error(error_msg)
+                    raise APIError(error_msg, status_code=500)
 
                 if not shutil.which('gcloud'):
                     error_msg = "gcloud CLI not found. Please install Google Cloud SDK"
                     logger.error(error_msg)
                     raise APIError(error_msg, status_code=500)
+
+                # Set credentials file for gcloud
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
 
                 result = subprocess.run(
                     ['gcloud', 'auth', 'print-access-token'],
@@ -669,10 +686,11 @@ class ProxyService:
         """
         try:
             # Update URL to use beta1 openapi chat completions endpoint
-            project_id = "gen-lang-client-0290064683"
-            location = "us-central1"
+            project_id = os.environ.get('PROJECT_ID')
+            location = os.environ.get('LOCATION')
+            ENDPOINT = os.environ.get('GOOGLE_ENDPOINT')
             url = (
-                f"https://{location}-aiplatform.googleapis.com/v1beta1/"
+                f"https://{ENDPOINT}/v1beta1/"
                 f"projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
             )
 

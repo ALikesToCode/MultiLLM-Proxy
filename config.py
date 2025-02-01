@@ -2,7 +2,10 @@ import os
 from datetime import timedelta
 
 class Config:
-    PROJECT_ID = 'gen-lang-client-0290064683'
+    PROJECT_ID = os.environ.get('PROJECT_ID')
+    GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    LOCATION = os.environ.get('LOCATION')
+    ENDPOINT = os.environ.get('GOOGLE_ENDPOINT')
     DEFAULT_PORT = 1400
     DEFAULT_HOST = '0.0.0.0'  # Listen on all interfaces
     REQUEST_TIMEOUT = 30
@@ -16,10 +19,11 @@ class Config:
     # Construct the base URL
     SERVER_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
     
+    
     API_BASE_URLS = {
         'openai': 'https://api.openai.com',
         'cerebras': 'https://api.cerebras.ai',
-        'googleai': f'https://us-central1-aiplatform.googleapis.com/v1beta1/projects/{PROJECT_ID}/locations/us-central1/endpoints/openapi',
+        'googleai': f'https://{ENDPOINT}/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi',
         'xai': 'https://api.x.ai',
         'groq': 'https://api.groq.com',
         'together': 'https://api.together.xyz',
