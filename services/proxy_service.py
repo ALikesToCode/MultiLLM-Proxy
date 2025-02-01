@@ -685,12 +685,12 @@ class ProxyService:
         Handle Google AI specific request processing
         """
         try:
-            # Update URL to use beta1 openapi chat completions endpoint
+            # Update URL to use chat completions endpoint
             project_id = os.environ.get('PROJECT_ID')
             location = os.environ.get('LOCATION')
             ENDPOINT = os.environ.get('GOOGLE_ENDPOINT')
             url = (
-                f"https://{ENDPOINT}/v1beta1/"
+                f"https://{ENDPOINT}/v1/"
                 f"projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
             )
 

@@ -23,7 +23,7 @@ class Config:
     API_BASE_URLS = {
         'openai': 'https://api.openai.com',
         'cerebras': 'https://api.cerebras.ai',
-        'googleai': f'https://{ENDPOINT}/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi',
+        'googleai': f'https://{ENDPOINT}/v1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi',
         'xai': 'https://api.x.ai',
         'groq': 'https://api.groq.com',
         'together': 'https://api.together.xyz',
