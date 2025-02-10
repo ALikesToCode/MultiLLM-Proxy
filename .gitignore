@@ -6,7 +6,6 @@
 
 node_modules/
 # Google Cloud credentials
-*.json
 !example-credentials.json
 
 # Python
