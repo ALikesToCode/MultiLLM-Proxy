@@ -172,5 +172,20 @@ PROVIDER_DETAILS = {
             'json_mode': True
         },
         'default_model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
+    },
+    'chutes': {
+        'description': 'Chutes AI - Access to DeepSeek and other models',
+        'endpoints': [
+            {
+                'url': '/v1/completions',
+                'curl': 'curl -X POST "http://localhost:1400/chutes/v1/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"deepseek-ai/DeepSeek-V3\\", \\"prompt\\": \\"Hello!\\", \\"temperature\\": 0.7, \\"max_tokens\\": 100, \\"stream\\": true}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': False,
+            'json_mode': False
+        },
+        'default_model': 'deepseek-ai/DeepSeek-V3'
     }
 } 

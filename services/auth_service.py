@@ -72,33 +72,53 @@ class AuthService:
         try:
             with cls._google_token_lock:
                 current_time = datetime.now()
+                # Check if token exists and is still valid (with 5-minute buffer)
                 if (cls._google_token and cls._google_token_expiry and 
-                    current_time < cls._google_token_expiry):
+                    current_time < cls._google_token_expiry - timedelta(minutes=5)):
+                    logger.debug("Using cached Google Cloud token")
                     return cls._google_token
 
-                # Get new token using gcloud command
+                logger.info("Getting new Google Cloud token via gcloud CLI")
+                # Get new token using gcloud command with --quiet flag to avoid interactive prompts
                 result = subprocess.run(
-                    ['gcloud', 'auth', 'print-access-token'],
+                    ['gcloud', 'auth', 'print-access-token', '--quiet'],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    timeout=30  # Add timeout to prevent hanging
                 )
 
                 token = result.stdout.strip()
                 if token:
                     cls._google_token = token
-                    cls._google_token_expiry = current_time + timedelta(minutes=45)
-                    logger.info("Successfully cached new Google Cloud token for 45 minutes")
+                    # Set expiry to 40 minutes instead of 45 to ensure we refresh before Google's actual expiry
+                    cls._google_token_expiry = current_time + timedelta(minutes=40)
+                    logger.info("Successfully cached new Google Cloud token for 40 minutes")
                     return token
                 else:
                     logger.error("Empty token received from gcloud command")
+                    cls._google_token = None
+                    cls._google_token_expiry = None
                     return None
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error getting Google token: {e.stderr}")
+            error_output = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else str(e.stderr)
+            logger.error(f"Error getting Google token: {error_output}")
+            # Clear token cache on error
+            cls._google_token = None
+            cls._google_token_expiry = None
+            return None
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout while getting Google token")
+            # Clear token cache on error
+            cls._google_token = None
+            cls._google_token_expiry = None
             return None
         except Exception as e:
             logger.error(f"Unexpected error getting Google token: {str(e)}")
+            # Clear token cache on error
+            cls._google_token = None
+            cls._google_token_expiry = None
             return None
 
     @classmethod

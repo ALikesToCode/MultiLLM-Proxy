@@ -51,18 +51,32 @@ class ProxyService:
         """
         with cls._google_token_lock:
             current_time = datetime.now()
-            if cls._google_token and cls._google_token_expiry and current_time < cls._google_token_expiry:
+            # Check if token exists and is still valid (with 5-minute buffer)
+            if cls._google_token and cls._google_token_expiry and current_time < cls._google_token_expiry - timedelta(minutes=5):
+                logger.debug("Using cached Google Cloud access token")
                 return cls._google_token
 
             try:
                 import subprocess
                 import shutil
-                from flask import current_app
-
-                # Check if credentials file is configured
-                credentials_path = current_app.config.get('GOOGLE_APPLICATION_CREDENTIALS')
+                
+                logger.info("Getting new Google Cloud access token")
+                
+                # Try to get credentials from environment first
+                credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+                
+                # If not in environment, try to get from Flask app config if available
                 if not credentials_path:
-                    error_msg = "GOOGLE_APPLICATION_CREDENTIALS not configured in environment"
+                    try:
+                        from flask import current_app
+                        credentials_path = current_app.config.get('GOOGLE_APPLICATION_CREDENTIALS')
+                    except RuntimeError:
+                        # Handle case when running outside Flask application context
+                        logger.warning("Running outside Flask application context, using environment variables only")
+                        pass
+                
+                if not credentials_path:
+                    error_msg = "GOOGLE_APPLICATION_CREDENTIALS not configured in environment or app config"
                     logger.error(error_msg)
                     raise APIError(error_msg, status_code=500)
 
@@ -79,8 +93,9 @@ class ProxyService:
                 # Set credentials file for gcloud
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
 
+                # Add --quiet flag to avoid interactive prompts
                 result = subprocess.run(
-                    ['gcloud', 'auth', 'print-access-token'],
+                    ['gcloud', 'auth', 'print-access-token', '--quiet'],
                     capture_output=True,
                     text=True,
                     check=True
@@ -94,11 +109,16 @@ class ProxyService:
 
                 logger.info("Successfully retrieved new Google Cloud access token")
                 cls._google_token = token
-                cls._google_token_expiry = current_time + timedelta(minutes=45)
+                # Set expiry to 40 minutes instead of 45 to ensure we refresh before Google's actual expiry
+                cls._google_token_expiry = current_time + timedelta(minutes=40)
                 return token
 
             except subprocess.CalledProcessError as e:
-                err_msg = str(e.stderr)
+                err_msg = e.stderr.decode('utf-8') if isinstance(e.stderr, bytes) else str(e.stderr)
+                # Clear token cache on error
+                cls._google_token = None
+                cls._google_token_expiry = None
+                
                 if "not logged in" in err_msg.lower():
                     raise APIError(
                         "Not logged in to gcloud. Please run 'gcloud auth login' first",
@@ -110,14 +130,20 @@ class ProxyService:
                         status_code=401
                     )
                 else:
-                    raise APIError(f"Error running gcloud command: {e.stderr}", status_code=500)
+                    raise APIError(f"Error running gcloud command: {err_msg}", status_code=500)
 
             except FileNotFoundError:
+                # Clear token cache on error
+                cls._google_token = None
+                cls._google_token_expiry = None
                 error_msg = "gcloud command not found. Please install Google Cloud SDK"
                 logger.error(error_msg)
                 raise APIError(error_msg, status_code=500)
 
             except Exception as e:
+                # Clear token cache on error
+                cls._google_token = None
+                cls._google_token_expiry = None
                 error_msg = f"Unexpected error getting Google token: {str(e)}"
                 logger.error(error_msg)
                 raise APIError(error_msg, status_code=500)
@@ -132,8 +158,9 @@ class ProxyService:
             cls._google_token_expiry = None
             logger.info("Invalidated Google Cloud token cache")
 
-    @staticmethod
+    @classmethod
     def prepare_headers(
+        cls,
         request_headers: Dict[str, str],
         api_provider: str,
         auth_token: Optional[str] = None
@@ -146,11 +173,22 @@ class ProxyService:
         if auth_token:
             headers['Authorization'] = f'Bearer {auth_token}'
         elif api_provider == 'googleai':
-            google_token = AuthService.get_google_token()
-            if google_token:
-                headers['Authorization'] = f'Bearer {google_token}'
-            else:
-                raise APIError("Failed to get Google Cloud access token", status_code=401)
+            # Try to get Google token from ProxyService first (which has better error handling)
+            try:
+                google_token = cls.get_google_access_token() if hasattr(cls, 'get_google_access_token') else None
+                if not google_token:
+                    # Fall back to AuthService if needed
+                    google_token = AuthService.get_google_token()
+                
+                if google_token:
+                    headers['Authorization'] = f'Bearer {google_token}'
+                    logger.debug("Added Google Cloud token to request headers")
+                else:
+                    logger.error("Failed to get Google Cloud access token")
+                    raise APIError("Failed to get Google Cloud access token", status_code=401)
+            except Exception as e:
+                logger.error(f"Error getting Google token for request: {str(e)}")
+                raise APIError(f"Failed to get Google Cloud access token: {str(e)}", status_code=401)
         elif api_provider == 'groq':
             groq_key = RateLimitService.get_next_groq_key()
             if groq_key:
@@ -685,10 +723,22 @@ class ProxyService:
         Handle Google AI specific request processing
         """
         try:
+            # Check retry count to prevent infinite loops
+            if retry_count >= 3:
+                raise APIError("Maximum retry count exceeded for Google AI request", status_code=500)
+                
             # Update URL to use chat completions endpoint
             project_id = os.environ.get('PROJECT_ID')
             location = os.environ.get('LOCATION')
             ENDPOINT = os.environ.get('GOOGLE_ENDPOINT')
+            
+            if not all([project_id, location, ENDPOINT]):
+                missing = []
+                if not project_id: missing.append("PROJECT_ID")
+                if not location: missing.append("LOCATION")
+                if not ENDPOINT: missing.append("GOOGLE_ENDPOINT")
+                raise APIError(f"Missing required Google AI environment variables: {', '.join(missing)}", status_code=500)
+                
             url = (
                 f"https://{ENDPOINT}/v1/"
                 f"projects/{project_id}/locations/{location}/endpoints/openapi/chat/completions"
@@ -718,7 +768,16 @@ class ProxyService:
             data = json.dumps(chat_request).encode('utf-8')
 
             logger.info(f"Google AI chat request URL: {url}")
-            logger.info(f"Google AI chat request data: {chat_request}")
+            logger.debug(f"Google AI chat request data: {chat_request}")
+
+            # Ensure we have a valid token before making the request
+            if 'Authorization' not in headers or not headers['Authorization'].startswith('Bearer '):
+                logger.info("No valid authorization token found, getting a fresh token")
+                token = cls.get_google_access_token()
+                if token:
+                    headers['Authorization'] = f'Bearer {token}'
+                else:
+                    raise APIError("Failed to get Google Cloud access token", status_code=401)
 
             response = cls._make_base_request(
                 method=method,
@@ -732,7 +791,7 @@ class ProxyService:
             )
 
             logger.info(f"Google AI raw response status: {response.status_code}")
-            logger.info(f"Google AI raw response headers: {response.headers}")
+            logger.debug(f"Google AI raw response headers: {response.headers}")
 
             if response.status_code == 200:
                 try:
@@ -742,10 +801,18 @@ class ProxyService:
                             for line in response.iter_lines():
                                 if line:
                                     try:
-                                        json_data = json.loads(line)
+                                        line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                                        if line_str.startswith('data: '):
+                                            line_str = line_str[6:]  # Remove 'data: ' prefix if present
+                                        
+                                        if line_str.strip() == '[DONE]':
+                                            yield "data: [DONE]\n\n"
+                                            continue
+                                            
+                                        json_data = json.loads(line_str)
                                         yield f"data: {json.dumps(json_data)}\n\n"
                                     except json.JSONDecodeError as e:
-                                        logger.error(f"Error parsing streaming response: {e}")
+                                        logger.error(f"Error parsing streaming response: {e}, line: {line}")
                                         continue
                             yield "data: [DONE]\n\n"
 
@@ -762,8 +829,13 @@ class ProxyService:
                         return streaming_response
                     else:
                         # Non-streaming response
-                        response_data = response.json()
-                        logger.info(f"Google AI parsed response: {response_data}")
+                        try:
+                            response_data = response.json()
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing JSON response: {e}, content: {response.content[:200]}")
+                            response_data = {"error": "Invalid JSON response from Google AI"}
+                            
+                        logger.debug(f"Google AI parsed response: {response_data}")
 
                         # Create new Response to unify return type
                         response_json = json.dumps(response_data)
@@ -800,7 +872,7 @@ class ProxyService:
                             data=data,
                             request_data=request_data,
                             use_cache=use_cache,
-                            retry_count=retry_count
+                            retry_count=retry_count + 1
                         )
                 
                 # Log error response

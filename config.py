@@ -33,7 +33,8 @@ class Config:
         'sambanova': 'https://api.sambanova.ai/v1',
         'openrouter': 'https://openrouter.ai/api/v1',
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
-        'nineteen': 'https://api.nineteen.ai'
+        'nineteen': 'https://api.nineteen.ai',
+        'chutes': 'https://llm.chutes.ai'
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
@@ -51,6 +52,7 @@ class Config:
         'openrouter': (5, 120),  # OpenRouter can take longer as it routes to various providers
         'palm': (10, 120),  # PaLM API can be slow to respond
         'nineteen': (5, 120),
+        'chutes': (5, 120),  # Chutes API can take longer for larger models
         'default': (5, 60)
     }
     
@@ -69,6 +71,7 @@ class Config:
         'openrouter': {'max_retries': 3, 'backoff_factor': 1},
         'palm': {'max_retries': 5, 'backoff_factor': 2},  # More retries for PaLM API
         'nineteen': {'max_retries': 3, 'backoff_factor': 1},
+        'chutes': {'max_retries': 3, 'backoff_factor': 1},
         'default': {'max_retries': 3, 'backoff_factor': 1}
     }
     
@@ -81,7 +84,8 @@ class Config:
         'hyperbolic': ['logit_bias'],  # Parameters not supported by Hyperbolic
         'sambanova': ['logit_bias', 'frequency_penalty', 'presence_penalty'],  # Parameters not supported by SambaNova
         'openrouter': ['logit_bias'],  # Parameters not supported by OpenRouter
-        'palm': ['logit_bias', 'frequency_penalty', 'presence_penalty']  # Parameters not supported by PaLM API
+        'palm': ['logit_bias', 'frequency_penalty', 'presence_penalty'],  # Parameters not supported by PaLM API
+        'chutes': ['logit_bias']  # Parameters not supported by Chutes
     }
 
     # Groq specific settings
@@ -120,6 +124,11 @@ class Config:
         'mistralai/Mistral-7B-Instruct-v0.2',
         'NousResearch/Nous-Hermes-2-Yi-34B',
         'openchat/openchat-3.5-1210'
+    ]
+    
+    # Chutes AI models
+    CHUTES_MODELS = [
+        'deepseek-ai/DeepSeek-V3'
     ]
     
     # Groq supported parameters and their defaults
