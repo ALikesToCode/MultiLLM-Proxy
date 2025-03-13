@@ -48,11 +48,22 @@ class AuthService:
         
         # Load provider API keys from environment
         for provider in ['openai', 'cerebras', 'xai', 'groq', 'azure', 'scaleway', 
-                        'hyperbolic', 'sambanova', 'openrouter', 'palm', 'together']:
+                        'hyperbolic', 'sambanova', 'openrouter', 'palm', 'together', 'nineteen']:
             env_key = f'{provider.upper()}_API_KEY'
             api_key = os.environ.get(env_key)
             if api_key:
                 cls._api_keys[provider] = api_key
+        
+        # Load Chutes API token from environment
+        chutes_token = os.environ.get('CHUTES_API_TOKEN')
+        if chutes_token:
+            cls._api_keys['chutes'] = chutes_token
+            
+        # Load Gemini API key from environment
+        gemini_key = os.environ.get('GEMINI_API_KEY')
+        if gemini_key:
+            cls._api_keys['gemini'] = gemini_key
+            cls._api_keys['gemma'] = gemini_key  # Gemma uses the same API key
 
     @classmethod
     def get_api_key(cls, provider: str) -> Optional[str]:

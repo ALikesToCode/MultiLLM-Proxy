@@ -187,5 +187,44 @@ PROVIDER_DETAILS = {
             'json_mode': False
         },
         'default_model': 'deepseek-ai/DeepSeek-V3'
+    },
+    'gemini': {
+        'description': 'Google Gemini models via Generative Language API',
+        'endpoints': [
+            {
+                'url': '/models/gemini-2.0-flash:generateContent',
+                'curl': 'curl -X POST "http://localhost:1400/gemini/models/gemini-2.0-flash:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
+            },
+            {
+                'url': '/models/gemini-2.0-pro:generateContent',
+                'curl': 'curl -X POST "http://localhost:1400/gemini/models/gemini-2.0-pro:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True,
+            'web_search': True  # Gemini has web search capability
+        },
+        'default_model': 'gemini-2.0-flash'
+    },
+    'gemma': {
+        'description': 'Google Gemma open-source models via Generative Language API',
+        'endpoints': [
+            {
+                'url': '/models/gemma-2-9b:generateContent',
+                'curl': 'curl -X POST "http://localhost:1400/gemma/models/gemma-2-9b:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
+            },
+            {
+                'url': '/models/gemma-1.1-7b-it:generateContent',
+                'curl': 'curl -X POST "http://localhost:1400/gemma/models/gemma-1.1-7b-it:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True
+        },
+        'default_model': 'gemma-2-9b'
     }
 } 

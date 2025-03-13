@@ -14,6 +14,7 @@ from services.auth_service import AuthService
 import time
 import uuid
 import flask
+from flask import Response
 import gzip
 import io
 import re
@@ -816,7 +817,7 @@ class ProxyService:
                                         continue
                             yield "data: [DONE]\n\n"
 
-                        streaming_response = flask.Response(
+                        streaming_response = Response(
                             generate(),
                             mimetype='text/event-stream',
                             headers={
@@ -989,7 +990,7 @@ class ProxyService:
                         logger.error(f"Error in stream generation: {str(e)}")
                         raise APIError(f"Error in stream generation: {str(e)}", status_code=500)
 
-                return flask.Response(
+                return Response(
                     generate(),
                     mimetype='text/event-stream',
                     headers={
@@ -1044,6 +1045,605 @@ class ProxyService:
             raise APIError(error_msg, status_code=500)
 
     @classmethod
+    def _handle_gemini_request(
+        cls,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        params: Dict[str, Any],
+        data: bytes,
+        request_data: Dict[str, Any],
+        use_cache: bool,
+        api_provider: str,
+        auth_token: Optional[str] = None,
+    ) -> requests.Response:
+        """
+        Handle Gemini requests with safety settings disabled
+        """
+        logger.info(f"Handling {api_provider} request to {url}")
+        
+        try:
+            # Extract API key from URL parameters and rebuild the URL without it
+            api_key = None
+            
+            # Check if key is in params
+            if params and 'key' in params:
+                api_key = params.pop('key')
+                logger.info(f"Found API key in URL parameters for {api_provider}")
+            
+            # If no key in params, check if it's in the URL
+            elif '?key=' in url:
+                base_url, query = url.split('?', 1)
+                query_params = {}
+                for param in query.split('&'):
+                    if '=' in param:
+                        k, v = param.split('=', 1)
+                        if k == 'key':
+                            api_key = v
+                            logger.info(f"Found API key in URL for {api_provider}")
+                        else:
+                            query_params[k] = v
+                
+                # Rebuild URL without the key
+                url = base_url
+                if query_params:
+                    url += '?' + '&'.join([f"{k}={v}" for k, v in query_params.items()])
+            
+            # If still no API key, use the auth token passed from make_request
+            # But first check if it's the admin API key - if so, use the Gemini key from env instead
+            if not api_key and auth_token:
+                admin_api_key = os.environ.get('ADMIN_API_KEY')
+                if auth_token == admin_api_key:
+                    # Using admin key, look up the actual provider key instead
+                    logger.info(f"Admin API key detected - using {api_provider} API key from env instead")
+                    api_key = AuthService.get_api_key(api_provider)
+                    if not api_key:
+                        # Try alternative keys
+                        if api_provider == 'gemma':
+                            api_key = AuthService.get_api_key('gemini')
+                        elif api_provider == 'gemini':
+                            api_key = AuthService.get_api_key('gemma')
+                else:
+                    # Not the admin key, might be a direct Gemini key
+                    api_key = auth_token
+                    logger.info(f"Using API key from Authorization header for {api_provider}")
+            
+            # If still no API key, get from auth service
+            if not api_key:
+                # First try with the exact api_provider
+                api_key = AuthService.get_api_key(api_provider)
+                
+                # If using 'gemma' as provider but no gemma key found, try with 'gemini' as they share the same key
+                if not api_key and api_provider == 'gemma':
+                    api_key = AuthService.get_api_key('gemini')
+                    logger.info("Using Gemini API key for Gemma model")
+                
+                # If using 'gemini' as provider but no gemini key found, try with 'gemma' as a fallback
+                elif not api_key and api_provider == 'gemini':
+                    api_key = AuthService.get_api_key('gemma')
+                    logger.info("Using Gemma API key for Gemini model")
+                
+                if not api_key:
+                    raise APIError(f"No API key found for {api_provider}. Please set {api_provider.upper()}_API_KEY in your .env file.", status_code=401)
+                
+                logger.info(f"Using API key from AuthService for {api_provider}")
+            
+            # Validate API key format - Gemini keys should start with "AIza"
+            if not api_key.startswith("AIza"):
+                logger.warning(f"API key for {api_provider} doesn't match expected format (should start with 'AIza')")
+                # Try to find a valid key from the environment
+                env_key = os.environ.get(f'{api_provider.upper()}_API_KEY')
+                if env_key and env_key.startswith("AIza"):
+                    logger.info(f"Found valid {api_provider} API key format in environment, using it instead")
+                    api_key = env_key
+            
+            # Log partial key for debugging (first 4 + last 4 chars)
+            if api_key and len(api_key) > 10:
+                masked_key = f"{api_key[:4]}...{api_key[-4:]}"
+                logger.info(f"Using API key: {masked_key}")
+            
+            # Add API key to params - THIS IS CRUCIAL FOR GEMINI API
+            if not params:
+                params = {}
+            params['key'] = api_key
+            
+            # Remove the Authorization header as Gemini doesn't use it
+            if 'Authorization' in headers:
+                headers.pop('Authorization')
+                logger.info("Removed Authorization header for Gemini API request")
+            
+            # Extract model if it's in the URL path for direct model invocation
+            # Format like /v1beta/models/gemini-1.5-pro:generateContent or /models/gemini-1.5-flash:generateContent
+            model = None
+            if '/models/' in url and ':' in url:
+                try:
+                    # Extract the model name from the URL
+                    model_part = url.split('/models/')[1].split(':')[0]
+                    if model_part:
+                        model = model_part
+                        logger.info(f"Extracted model from URL path: {model}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract model from URL: {str(e)}")
+            
+            # Transformation: Convert OpenAI-style endpoint to Google Generative Language API style
+            if '/chat/completions' in url:
+                # Extract the base URL and replace the path
+                parsed_url = url.split('/v1beta/')[0] if '/v1beta/' in url else url.split('/v1/')[0]
+                
+                # Default model to use for each provider
+                default_model = 'gemini-2.0-flash' if api_provider == 'gemini' else 'gemma-2-9b'
+                
+                # Get model from request data or use default
+                model = request_data.get('model', default_model)
+                
+                # Check if model is appropriate for the provider
+                if api_provider == 'gemini' and model.startswith('gemma-'):
+                    logger.warning(f"Using Gemma model ({model}) with Gemini API provider - this may cause auth issues")
+                elif api_provider == 'gemma' and model.startswith('gemini-'):
+                    logger.warning(f"Using Gemini model ({model}) with Gemma API provider - this may cause auth issues")
+                
+                # Build the correct endpoint URL for generateContent
+                url = f"{parsed_url}/v1beta/models/{model}:generateContent"
+                logger.info(f"Transformed URL to {url}")
+                
+                # Transform OpenAI-style request to Google Generative Language API format
+                if 'messages' in request_data:
+                    messages = request_data.get('messages', [])
+                    contents = []
+                    
+                    # Process messages to build 'contents'
+                    for message in messages:
+                        role = message.get('role', '')
+                        content = message.get('content', '')
+                        
+                        # Skip system messages for now or consider adding as context
+                        if role == 'system':
+                            continue
+                        
+                        # Add content from user or assistant messages
+                        contents.append({
+                            "parts": [{"text": content}]
+                        })
+                    
+                    # Create the new request format
+                    new_request_data = {
+                        "contents": contents
+                    }
+                    
+                    # Copy relevant parameters
+                    if 'temperature' in request_data:
+                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
+                        new_request_data['generationConfig']['temperature'] = request_data['temperature']
+                    
+                    if 'max_tokens' in request_data:
+                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
+                        new_request_data['generationConfig']['maxOutputTokens'] = request_data['max_tokens']
+                    
+                    if 'top_p' in request_data:
+                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
+                        new_request_data['generationConfig']['topP'] = request_data['top_p']
+                    
+                    # Use streaming if requested
+                    if 'stream' in request_data and request_data['stream']:
+                        new_request_data['stream'] = True
+                    
+                    # Update request data
+                    request_data = new_request_data
+                
+            # Process the request data to disable safety settings
+            if request_data:
+                # Make sure we have safety settings that disable content filtering
+                safety_settings = [
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                ]
+                
+                # Overwrite any existing safety settings
+                request_data["safetySettings"] = safety_settings
+                
+                # Add web search capability if needed for Gemini models
+                if 'webSearch' not in request_data and api_provider == 'gemini':
+                    # Only add web search for models that support it
+                    if model and 'gemini' in model and not 'gemma' in model:
+                        request_data["webSearch"] = True
+                        request_data["webSearchSpec"] = {"disableSearch": False}
+                        logger.info(f"Enabling web search for Gemini model: {model}")
+                
+                # Re-encode the modified data
+                data = json.dumps(request_data).encode('utf-8')
+                headers["Content-Length"] = str(len(data))
+                logger.info(f"Modified {api_provider} request data to disable safety settings")
+            
+            # Log the final URL with params
+            full_url = url
+            if params:
+                param_str = '&'.join([f"{k}={'REDACTED' if k=='key' else v}" for k, v in params.items()])
+                full_url = f"{url}?{param_str}" if '?' not in url else f"{url}&{param_str}"
+            logger.info(f"Making {api_provider} request to: {full_url}")
+            
+            # Make the request with the modified data
+            response = cls._make_base_request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
+                api_provider=api_provider,
+                use_cache=use_cache
+            )
+            
+            # Handle authentication errors with more detailed logging
+            if response.status_code == 401:
+                logger.error(f"Authentication failed for {api_provider}. Response: {response.text}")
+                # Try to parse the error response for more details
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
+                    logger.error(f"Detailed error: {error_message}")
+                    
+                    # Create a more informative error response
+                    error_response = requests.Response()
+                    error_response.status_code = 401
+                    error_data = {
+                        "error": {
+                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model ({model}). Error: {error_message}",
+                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
+                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
+                        }
+                    }
+                    error_response._content = json.dumps(error_data).encode('utf-8')
+                    error_response.headers.update({
+                        'Content-Type': 'application/json',
+                        'Content-Length': str(len(error_response._content))
+                    })
+                    return error_response
+                except Exception as e:
+                    logger.error(f"Could not parse error response: {response.text}, {str(e)}")
+                    
+                    # Return a generic error
+                    error_response = requests.Response()
+                    error_response.status_code = 401
+                    error_data = {
+                        "error": {
+                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model.",
+                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
+                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
+                        }
+                    }
+                    error_response._content = json.dumps(error_data).encode('utf-8')
+                    error_response.headers.update({
+                        'Content-Type': 'application/json',
+                        'Content-Length': str(len(error_response._content))
+                    })
+                    return error_response
+            
+            # Process response to convert from Google's format to OpenAI compatible format
+            if response.status_code == 200:
+                # Check if this is a streaming response
+                is_streaming = request_data.get('stream', False)
+                
+                if is_streaming:
+                    # Handle streaming response
+                    def generate_stream():
+                        try:
+                            for line in response.iter_lines():
+                                if line:
+                                    try:
+                                        line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                                        
+                                        # Strip 'data: ' prefix if present
+                                        if line_str.startswith('data: '):
+                                            line_str = line_str[6:]
+                                            
+                                        # Check for stream end marker
+                                        if line_str.strip() == '[DONE]':
+                                            yield "data: [DONE]\n\n"
+                                            continue
+                                        
+                                        # Parse Google's SSE format
+                                        google_chunk = json.loads(line_str)
+                                        
+                                        # For chat/completions endpoints, convert to OpenAI format
+                                        if '/chat/completions' in url:
+                                            # Extract content if available in this chunk
+                                            content = ""
+                                            finish_reason = None
+                                            
+                                            if 'candidates' in google_chunk and google_chunk['candidates']:
+                                                candidate = google_chunk['candidates'][0]
+                                                if 'content' in candidate and 'parts' in candidate['content']:
+                                                    for part in candidate['content']['parts']:
+                                                        if 'text' in part:
+                                                            content = part['text']
+                                                
+                                                if 'finishReason' in candidate:
+                                                    finish_reason = candidate['finishReason']
+                                            
+                                            # Create OpenAI-compatible chunk
+                                            openai_chunk = {
+                                                "id": google_chunk.get("id", str(uuid.uuid4())),
+                                                "object": "chat.completion.chunk",
+                                                "created": int(time.time()),
+                                                "model": model,
+                                                "choices": [
+                                                    {
+                                                        "index": 0,
+                                                        "delta": {
+                                                            "content": content
+                                                        },
+                                                        "finish_reason": finish_reason
+                                                    }
+                                                ]
+                                            }
+                                            
+                                            # First chunk should include role: assistant
+                                            if 'role' not in locals():
+                                                openai_chunk['choices'][0]['delta']['role'] = 'assistant'
+                                                role = 'sent'  # Mark that we've sent the role
+                                            
+                                            yield f"data: {json.dumps(openai_chunk)}\n\n"
+                                        else:
+                                            # For direct model endpoints, pass through the chunk with just the formatting needed
+                                            yield f"data: {json.dumps(google_chunk)}\n\n"
+                                            
+                                    except json.JSONDecodeError as e:
+                                        logger.error(f"Error parsing streaming response from Gemini: {e}, line: {line}")
+                                        continue
+                                    except Exception as e:
+                                        logger.error(f"Error processing Gemini streaming chunk: {e}")
+                                        continue
+                            
+                            # Make sure to send the final [DONE] marker
+                            yield "data: [DONE]\n\n"
+                        except Exception as e:
+                            logger.error(f"Error in Gemini streaming response: {str(e)}")
+                            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                            yield "data: [DONE]\n\n"
+                    
+                    # Return a streaming response
+                    streaming_response = Response(
+                        generate_stream(),
+                        mimetype='text/event-stream',
+                        headers={
+                            'Cache-Control': 'no-cache',
+                            'Connection': 'keep-alive',
+                            'Content-Type': 'text/event-stream',
+                            'X-Accel-Buffering': 'no'
+                        }
+                    )
+                    return streaming_response
+                elif '/chat/completions' in url:
+                    # Handle normal chat/completions response
+                    try:
+                        google_response = response.json()
+                        
+                        # Create OpenAI compatible response
+                        openai_response = {
+                            "id": google_response.get("id", str(uuid.uuid4())),
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": google_response.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                                    },
+                                    "finish_reason": google_response.get("candidates", [{}])[0].get("finishReason", "stop")
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": google_response.get("usageMetadata", {}).get("promptTokenCount", 0),
+                                "completion_tokens": google_response.get("usageMetadata", {}).get("candidatesTokenCount", 0),
+                                "total_tokens": google_response.get("usageMetadata", {}).get("totalTokenCount", 0)
+                            }
+                        }
+                        
+                        # Create new response with OpenAI format
+                        openai_response_bytes = json.dumps(openai_response).encode('utf-8')
+                        new_response = requests.Response()
+                        new_response.status_code = 200
+                        new_response._content = openai_response_bytes
+                        new_response.headers.update({
+                            'Content-Type': 'application/json',
+                            'Content-Length': str(len(openai_response_bytes))
+                        })
+                        
+                        return new_response
+                    except Exception as e:
+                        logger.error(f"Error converting Google response to OpenAI format: {str(e)}")
+            
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error in _handle_gemini_request: {str(e)}"
+            logger.error(error_msg)
+            if isinstance(e, APIError):
+                raise
+            raise APIError(error_msg, status_code=500)
+
+    @classmethod
+    def _handle_openrouter_request(
+        cls,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        params: Dict[str, Any],
+        data: bytes,
+        request_data: Dict[str, Any],
+        use_cache: bool,
+        auth_token: Optional[str] = None,
+    ) -> requests.Response:
+        """
+        Handle OpenRouter specific request processing.
+        OpenRouter provides access to hundreds of AI models through a single endpoint.
+        """
+        logger.info(f"Handling OpenRouter request to {url}")
+        
+        try:
+            # Get the OpenRouter API key
+            api_key = None
+            
+            # If auth token is provided and is the admin API key, use the OpenRouter key from env instead
+            if auth_token:
+                admin_api_key = os.environ.get('ADMIN_API_KEY')
+                if auth_token == admin_api_key:
+                    # Using admin key, look up the OpenRouter key from env
+                    logger.info("Admin API key detected - using OpenRouter API key from env instead")
+                    api_key = AuthService.get_api_key('openrouter')
+                else:
+                    # Not the admin key, use it directly as OpenRouter key
+                    api_key = auth_token
+                    logger.info("Using API key from Authorization header for OpenRouter")
+            
+            # If no API key yet, try to get from auth service
+            if not api_key:
+                api_key = AuthService.get_api_key('openrouter')
+                if not api_key:
+                    raise APIError("No API key found for OpenRouter. Please set OPENROUTER_API_KEY in your .env file.", status_code=401)
+                logger.info("Using API key from AuthService for OpenRouter")
+            
+            # Log partial key for debugging (first 4 + last 4 chars)
+            if api_key and len(api_key) > 10:
+                masked_key = f"{api_key[:4]}...{api_key[-4:]}"
+                logger.info(f"Using OpenRouter API key: {masked_key}")
+            
+            # Replace auth header with the real OpenRouter API key
+            headers['Authorization'] = f'Bearer {api_key}'
+            
+            # Add OpenRouter specific headers from environment if available
+            site_url = os.environ.get('OPENROUTER_SITE_URL')
+            app_name = os.environ.get('OPENROUTER_APP_NAME')
+            
+            if site_url:
+                headers['HTTP-Referer'] = site_url
+                logger.debug(f"Added HTTP-Referer header: {site_url}")
+            
+            if app_name:
+                headers['X-Title'] = app_name
+                logger.debug(f"Added X-Title header: {app_name}")
+            
+            # Transform the URL to use OpenRouter's base URL
+            # First extract the path portion from the URL
+            path = url
+            if '://' in url:
+                # Extract path from full URL
+                path = url.split('://', 1)[1].split('/', 1)[1] if '/' in url.split('://', 1)[1] else ''
+                path = f"/{path}" if path else ""
+            
+            # Build the OpenRouter URL
+            openrouter_url = f"https://openrouter.ai/api/v1{path}"
+            logger.info(f"Transformed URL to OpenRouter: {openrouter_url}")
+            
+            # Log the request details
+            logger.info(f"Making OpenRouter request to: {openrouter_url}")
+            logger.debug(f"Headers: {headers}")
+            if data:
+                logger.debug(f"Request data: {request_data}")
+            
+            # Make the request
+            response = cls._make_base_request(
+                method=method,
+                url=openrouter_url,
+                headers=headers,
+                params=params,
+                data=data,
+                api_provider='openrouter',
+                use_cache=use_cache
+            )
+            
+            # Handle authentication errors
+            if response.status_code == 401:
+                logger.error(f"Authentication failed for OpenRouter. Response: {response.text}")
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
+                    logger.error(f"Detailed error: {error_message}")
+                    
+                    error_response = requests.Response()
+                    error_response.status_code = 401
+                    error_data = {
+                        "error": {
+                            "message": f"Authentication failed for OpenRouter: {error_message}",
+                            "solution": "Please create a valid API key from OpenRouter (https://openrouter.ai) and update your .env file with OPENROUTER_API_KEY=your-key",
+                            "details": "The admin API key cannot be used directly - you need to obtain a specific OpenRouter API key and add it to your .env file."
+                        }
+                    }
+                    error_response._content = json.dumps(error_data).encode('utf-8')
+                    error_response.headers.update({
+                        'Content-Type': 'application/json',
+                        'Content-Length': str(len(error_response._content))
+                    })
+                    return error_response
+                except Exception as e:
+                    logger.error(f"Could not parse error response: {response.text}, {str(e)}")
+            
+            # Check for streaming response
+            if request_data.get('stream', False) and response.status_code == 200:
+                def generate():
+                    try:
+                        for line in response.iter_lines():
+                            if line:
+                                try:
+                                    line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                                    
+                                    # Skip comment lines in SSE
+                                    if line_str.startswith(':') or not line_str.strip():
+                                        continue
+                                    
+                                    # Strip 'data: ' prefix if present
+                                    if line_str.startswith('data: '):
+                                        line_str = line_str[6:]
+                                    
+                                    # Check for stream end marker
+                                    if line_str.strip() == '[DONE]':
+                                        yield "data: [DONE]\n\n"
+                                        continue
+                                    
+                                    # Parse the chunk and pass it through
+                                    json_data = json.loads(line_str)
+                                    yield f"data: {json.dumps(json_data)}\n\n"
+                                    
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Error parsing streaming response: {e}, line: {line}")
+                                    continue
+                                except Exception as e:
+                                    logger.error(f"Error processing streaming chunk: {e}")
+                                    continue
+                        
+                        # Ensure final [DONE] marker
+                        yield "data: [DONE]\n\n"
+                    except Exception as e:
+                        logger.error(f"Error in streaming generation: {str(e)}")
+                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                        yield "data: [DONE]\n\n"
+                
+                # Return a proper streaming response
+                streaming_response = Response(
+                    generate(),
+                    mimetype='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Content-Type': 'text/event-stream',
+                        'X-Accel-Buffering': 'no'
+                    }
+                )
+                return streaming_response
+            
+            return response
+            
+        except Exception as e:
+            error_msg = f"Error in _handle_openrouter_request: {str(e)}"
+            logger.error(error_msg)
+            if isinstance(e, APIError):
+                raise
+            raise APIError(error_msg, status_code=500)
+
+    @classmethod
     def make_request(
         cls,
         method: str,
@@ -1060,6 +1660,13 @@ class ProxyService:
         logger.info(f"Making request to {url} with method {method}")
         
         try:
+            # Extract authentication tokens/keys if needed
+            auth_token = None
+            auth_header = headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                auth_token = auth_header.replace('Bearer ', '').strip()
+                logger.debug(f"Extracted auth token from header: {auth_token[:5]}...")
+            
             # Special handling for different providers
             if api_provider == "together":
                 return cls._handle_together_request(
@@ -1072,6 +1679,11 @@ class ProxyService:
             elif api_provider == "googleai":
                 return cls._handle_googleai_request(
                     method, url, headers, params, data, json.loads(data), use_cache
+                )
+            elif api_provider == "gemini" or api_provider == "gemma":
+                # For Gemini/Gemma, pass the auth token extracted from header if available
+                return cls._handle_gemini_request(
+                    method, url, headers, params, data, json.loads(data) if data else {}, use_cache, api_provider, auth_token
                 )
             elif api_provider == "nineteen":
                 request_data = json.loads(data)
@@ -1092,6 +1704,10 @@ class ProxyService:
                     data=data,
                     api_provider=api_provider,
                     use_cache=use_cache
+                )
+            elif api_provider == "openrouter":
+                return cls._handle_openrouter_request(
+                    method, url, headers, params, data, json.loads(data) if data else {}, use_cache, auth_token
                 )
 
             # Default handling
