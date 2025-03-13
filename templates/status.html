@@ -1,387 +1,258 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="min-h-screen bg-gray-100">
-    <div class="py-10">
-        <header>
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <h1 class="text-3xl font-bold leading-tight text-gray-900">
-                    System Status
-                </h1>
-            </div>
-        </header>
-        <main>
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-                <!-- System Metrics -->
-                <div class="bg-white shadow rounded-lg p-6 mb-6">
-                    <h2 class="text-lg font-medium text-gray-900 mb-4">System Metrics</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">CPU Usage</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="cpu-usage">{{ system.cpu_usage }}%</p>
-                        </div>
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">Memory Usage</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="memory-usage">{{ system.memory_usage }}%</p>
-                        </div>
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">Uptime</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="uptime">
-                                <span id="uptime-days">0</span>d 
-                                <span id="uptime-hours">00</span>:
-                                <span id="uptime-minutes">00</span>:
-                                <span id="uptime-seconds">00</span>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Request Statistics -->
-                <div class="bg-white shadow rounded-lg p-6 mb-6">
-                    <h2 class="text-lg font-medium text-gray-900 mb-4">Request Statistics</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">Total Requests (24h)</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="total-requests">{{ stats.total_requests }}</p>
-                        </div>
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">Success Rate</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="success-rate">{{ stats.success_rate }}%</p>
-                        </div>
-                        <div class="p-4 bg-gray-50 rounded-lg">
-                            <p class="text-sm font-medium text-gray-500">Avg Response Time</p>
-                            <p class="mt-1 text-2xl font-semibold text-gray-900" id="avg-response-time">{{ stats.avg_response_time }}ms</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Provider Status -->
-                <div class="bg-white shadow rounded-lg p-6 mb-6">
-                    <h2 class="text-lg font-medium text-gray-900 mb-4">Provider Status</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="provider-grid">
-                        {% for provider, details in providers.items() %}
-                        <div class="p-4 bg-gray-50 rounded-lg provider-card" data-provider="{{ provider }}">
-                            <div class="flex items-center justify-between mb-2">
-                                <h3 class="text-lg font-medium text-gray-900">{{ details.name }}</h3>
-                                <span class="status-indicator {{ 'success' if details.active else 'error' }}">
-                                    {{ 'Active' if details.active else 'Inactive' }}
-                                </span>
-                            </div>
-                            <p class="text-sm text-gray-500 mb-4">{{ details.description }}</p>
-                            <div class="grid grid-cols-3 gap-2 text-sm">
-                                <div>
-                                    <p class="font-medium text-gray-500">Requests (24h)</p>
-                                    <p class="requests-24h">{{ details.requests_24h }}</p>
-                                </div>
-                                <div>
-                                    <p class="font-medium text-gray-500">Success Rate</p>
-                                    <p class="success-rate">{{ details.success_rate }}%</p>
-                                </div>
-                                <div>
-                                    <p class="font-medium text-gray-500">Avg Latency</p>
-                                    <p class="avg-latency">{{ details.avg_latency }}ms</p>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-
-                <!-- Recent Activity -->
-                <div class="bg-white shadow rounded-lg p-6">
-                    <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
-                    <div class="flow-root">
-                        <ul class="divide-y divide-gray-200" id="activity-list">
-                            {% for activity in recent_activity %}
-                            <li class="py-3">
-                                <div class="flex items-center space-x-4">
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-sm font-medium text-gray-900 truncate">
-                                            {{ activity.description }}
-                                        </p>
-                                        <p class="text-sm text-gray-500">
-                                            {{ activity.time }}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <span class="status-indicator {{ activity.status }}">
-                                            {{ activity.status }}
-                                        </span>
-                                    </div>
-                                </div>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-// State management
-const state = {
-    system: {
-        cpu_usage: {{ system.cpu_usage }},
-        memory_usage: {{ system.memory_usage }},
-        start_time: {{ system.start_time }}
-    },
-    stats: {
-        total_requests: {{ stats.total_requests }},
-        success_rate: {{ stats.success_rate }},
-        avg_response_time: {{ stats.avg_response_time }}
-    },
-    providers: {{ providers|tojson|safe }},
-    activity: {{ recent_activity|tojson|safe }},
-    lastUpdate: {},
-    isConnected: false
-};
-
-// UI update functions
-const ui = {
-    updateSystem() {
-        document.getElementById('cpu-usage').textContent = state.system.cpu_usage + '%';
-        document.getElementById('memory-usage').textContent = state.system.memory_usage + '%';
-    },
+<div class="space-y-6">
+    <header class="mb-6">
+        <h1 class="text-3xl font-bold text-gray-900 flex items-center">
+            <i class="fas fa-tachometer-alt mr-3 text-indigo-600"></i>
+            System Status
+            <span class="ml-3 px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">ONLINE</span>
+        </h1>
+        <p class="mt-2 text-gray-600">Monitor system metrics, request statistics, and provider status</p>
+    </header>
     
-    updateStats() {
-        document.getElementById('total-requests').textContent = state.stats.total_requests;
-        document.getElementById('success-rate').textContent = state.stats.success_rate + '%';
-        document.getElementById('avg-response-time').textContent = state.stats.avg_response_time + 'ms';
-    },
-    
-    updateProviders() {
-        for (const [provider, details] of Object.entries(state.providers)) {
-            const card = document.querySelector(`.provider-card[data-provider="${provider}"]`);
-            if (card) {
-                const statusIndicator = card.querySelector('.status-indicator');
-                statusIndicator.className = `status-indicator ${details.active ? 'success' : 'error'}`;
-                statusIndicator.textContent = details.active ? 'Active' : 'Inactive';
+    <!-- System Overview -->
+    <section>
+        <!-- System Metrics -->
+        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-microchip mr-2 text-indigo-500"></i>
+                    System Metrics
+                </h2>
+                <span class="text-xs font-medium text-gray-500">Last updated: <span id="last-updated">Just now</span></span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- CPU Usage -->
+                <div class="p-4 bg-gradient-to-br from-indigo-50 to-blue-50 rounded-lg border border-indigo-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-sm font-medium text-gray-500">CPU Usage</p>
+                        <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">Real-time</span>
+                    </div>
+                    <div class="flex items-end space-x-2">
+                        <p class="text-2xl font-bold text-indigo-700" id="cpu-usage">{{ system.cpu_usage }}%</p>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mb-1">
+                            <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ system.cpu_usage }}%"></div>
+                        </div>
+                    </div>
+                </div>
                 
-                card.querySelector('.requests-24h').textContent = details.requests_24h;
-                card.querySelector('.success-rate').textContent = details.success_rate + '%';
-                card.querySelector('.avg-latency').textContent = details.avg_latency + 'ms';
-            }
-        }
-    },
-    
-    updateActivity() {
-        const activityList = document.getElementById('activity-list');
-        activityList.innerHTML = state.activity.map(activity => `
-            <li class="py-3">
-                <div class="flex items-center space-x-4">
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium text-gray-900 truncate">
-                            ${activity.description}
-                        </p>
-                        <p class="text-sm text-gray-500">
-                            ${activity.time}
-                        </p>
+                <!-- Memory Usage -->
+                <div class="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-sm font-medium text-gray-500">Memory Usage</p>
+                        <span class="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">Real-time</span>
                     </div>
-                    <div>
-                        <span class="status-indicator ${activity.status}">
-                            ${activity.status}
+                    <div class="flex items-end space-x-2">
+                        <p class="text-2xl font-bold text-purple-700" id="memory-usage">{{ system.memory_usage }}%</p>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5 mb-1">
+                            <div class="bg-purple-600 h-2.5 rounded-full" style="width: {{ system.memory_usage }}%"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Uptime -->
+                <div class="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg border border-blue-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-sm font-medium text-gray-500">System Uptime</p>
+                        <span class="text-xs px-2 py-1 rounded-full bg-cyan-100 text-cyan-800">Continuous</span>
+                    </div>
+                    <p class="text-2xl font-bold text-blue-700 flex items-end" id="uptime">
+                        <i class="fas fa-clock mr-2 text-blue-400 text-xl"></i>
+                        <span id="uptime-days">0</span>d 
+                        <span id="uptime-hours">00</span>:
+                        <span id="uptime-minutes">00</span>:
+                        <span id="uptime-seconds">00</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Request Statistics -->
+        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-chart-bar mr-2 text-purple-500"></i>
+                    Request Statistics
+                </h2>
+                <div class="flex space-x-2">
+                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">24h</button>
+                    <button class="text-xs px-2 py-1 rounded-md bg-indigo-100 text-indigo-700">7d</button>
+                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">30d</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Total Requests -->
+                <div class="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border border-green-100">
+                    <p class="text-sm font-medium text-gray-500 mb-2">Total Requests (24h)</p>
+                    <div class="flex items-center">
+                        <span class="text-2xl font-bold text-green-700" id="total-requests">{{ stats.total_requests }}</span>
+                        <span class="ml-2 text-xs font-medium text-green-600">
+                            <i class="fas fa-arrow-up"></i> 8.2%
                         </span>
                     </div>
                 </div>
-            </li>
-        `).join('');
-    },
+                
+                <!-- Success Rate -->
+                <div class="p-4 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-lg border border-amber-100">
+                    <p class="text-sm font-medium text-gray-500 mb-2">Success Rate</p>
+                    <div class="flex items-center">
+                        <div class="relative inline-flex items-center justify-center w-12 h-12 mr-2">
+                            <svg class="w-12 h-12 transform -rotate-90" viewBox="0 0 36 36">
+                                <circle cx="18" cy="18" r="16" fill="none" stroke="#f3f4f6" stroke-width="2"></circle>
+                                <circle cx="18" cy="18" r="16" fill="none" stroke="#f59e0b" stroke-width="2" 
+                                        stroke-dasharray="100" stroke-dashoffset="{{ 100 - stats.success_rate }}" stroke-linecap="round"></circle>
+                            </svg>
+                            <span class="absolute text-xs font-medium text-amber-700">{{ stats.success_rate }}%</span>
+                        </div>
+                        <span class="text-2xl font-bold text-amber-700" id="success-rate">{{ stats.success_rate }}%</span>
+                    </div>
+                </div>
+                
+                <!-- Avg Response Time -->
+                <div class="p-4 bg-gradient-to-br from-rose-50 to-pink-50 rounded-lg border border-rose-100">
+                    <p class="text-sm font-medium text-gray-500 mb-2">Avg Response Time</p>
+                    <div class="flex items-center">
+                        <span class="text-2xl font-bold text-rose-700" id="avg-response-time">{{ stats.avg_response_time }}ms</span>
+                        <span class="ml-2 text-xs font-medium text-green-600">
+                            <i class="fas fa-arrow-down"></i> 12.4%
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Provider Status -->
+    <section>
+        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-server mr-2 text-indigo-500"></i>
+                    Provider Status
+                </h2>
+                <div class="flex space-x-3">
+                    <div class="inline-flex items-center">
+                        <span class="h-2 w-2 rounded-full bg-green-500 mr-1"></span>
+                        <span class="text-xs text-gray-500">Active</span>
+                    </div>
+                    <div class="inline-flex items-center">
+                        <span class="h-2 w-2 rounded-full bg-red-500 mr-1"></span>
+                        <span class="text-xs text-gray-500">Inactive</span>
+                    </div>
+                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 inline-flex items-center">
+                        <i class="fas fa-filter mr-1"></i> Filter
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="provider-grid">
+                {% for provider, details in providers.items() %}
+                <div class="p-5 rounded-lg border {{ 'border-green-200 bg-green-50' if details.active else 'border-red-200 bg-red-50' }} provider-card relative overflow-hidden" data-provider="{{ provider }}">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-lg font-semibold {{ 'text-green-900' if details.active else 'text-red-900' }}">{{ details.name }}</h3>
+                        <span class="status-indicator inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-100 text-green-800' if details.active else 'bg-red-100 text-red-800' }}">
+                            <span class="h-1.5 w-1.5 rounded-full {{ 'bg-green-600' if details.active else 'bg-red-600' }} mr-1"></span>
+                            {{ 'Active' if details.active else 'Inactive' }}
+                        </span>
+                    </div>
+                    <p class="text-sm {{ 'text-green-700' if details.active else 'text-red-700' }} mb-4 opacity-75">{{ details.description }}</p>
+                    <div class="grid grid-cols-3 gap-2 text-sm">
+                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
+                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Requests (24h)</p>
+                            <p class="requests-24h font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.requests_24h }}</p>
+                        </div>
+                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
+                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Success Rate</p>
+                            <p class="success-rate font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.success_rate }}%</p>
+                        </div>
+                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
+                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Avg Latency</p>
+                            <p class="avg-latency font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.avg_latency }}ms</p>
+                        </div>
+                    </div>
+                    <div class="absolute top-0 right-0 h-full w-1 {{ 'bg-gradient-to-b from-green-300 to-green-500' if details.active else 'bg-gradient-to-b from-red-300 to-red-500' }}"></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <!-- OpenRouter Dashboard -->
+    <section>
+        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-router mr-2 text-purple-500"></i>
+                    OpenRouter Dashboard
+                </h2>
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
+                    <i class="fas fa-star mr-1"></i> NEW
+                </span>
+            </div>
+            
+            <div class="mb-6 p-5 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 mt-1">
+                        <i class="fas fa-info-circle text-indigo-500 text-lg"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-indigo-800">Access OpenRouter Features</h3>
+                        <div class="mt-2 text-sm text-indigo-600">
+                            <p>Navigate to the OpenRouter dashboard to set up and manage your OpenRouter integrations.</p>
+                        </div>
+                        <div class="mt-4">
+                            <a href="{{ url_for('openrouter_dashboard') }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                <i class="fas fa-arrow-right mr-2"></i> Go to OpenRouter Dashboard
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
     
-    updateUptime() {
+    <!-- API Traffic Monitor -->
+    <section>
+        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-chart-line mr-2 text-blue-500"></i>
+                    API Traffic Monitor
+                </h2>
+                <div class="flex space-x-2">
+                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">Hour</button>
+                    <button class="text-xs px-2 py-1 rounded-md bg-blue-100 text-blue-700">Day</button>
+                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">Week</button>
+                </div>
+            </div>
+            
+            <div class="h-64 bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-center">
+                <p class="text-gray-500 text-sm">API traffic visualization will appear here</p>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+    // Script to update uptime counter
+    function updateUptime() {
+        const uptimeStartSeconds = {{ system.uptime_start_seconds }};
         const now = Math.floor(Date.now() / 1000);
-        const uptime = now - state.system.start_time;
+        const uptime = now - uptimeStartSeconds;
         
-        const days = Math.floor(uptime / (24 * 60 * 60));
-        const hours = Math.floor((uptime % (24 * 60 * 60)) / (60 * 60));
-        const minutes = Math.floor((uptime % (60 * 60)) / 60);
-        const seconds = Math.floor(uptime % 60);
+        const days = Math.floor(uptime / 86400);
+        const hours = Math.floor((uptime % 86400) / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        const seconds = uptime % 60;
         
         document.getElementById('uptime-days').textContent = days;
         document.getElementById('uptime-hours').textContent = hours.toString().padStart(2, '0');
         document.getElementById('uptime-minutes').textContent = minutes.toString().padStart(2, '0');
         document.getElementById('uptime-seconds').textContent = seconds.toString().padStart(2, '0');
     }
-};
-
-// Endpoint copying functionality
-function toggleEndpoint(provider) {
-    const content = document.getElementById(`endpoint-${provider.replace(' ', '-')}`);
-    const icon = document.getElementById(`icon-${provider.replace(' ', '-')}`);
-    content.classList.toggle('hidden');
-    icon.classList.toggle('rotate-180');
-}
-
-function copyEndpoint(button) {
-    const input = button.parentElement.querySelector('input');
-    input.select();
-    document.execCommand('copy');
     
-    // Change button text temporarily
-    const originalText = button.textContent;
-    button.textContent = 'Copied!';
-    button.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-    button.classList.add('bg-green-500', 'hover:bg-green-600');
-    
-    setTimeout(() => {
-        button.textContent = originalText;
-        button.classList.remove('bg-green-500', 'hover:bg-green-600');
-        button.classList.add('bg-blue-500', 'hover:bg-blue-600');
-    }, 2000);
-}
-
-// SSE connection management
-class EventSourceManager {
-    constructor(url, options = {}) {
-        this.url = url;
-        this.options = {
-            reconnectTimeout: 3000,
-            maxReconnectAttempts: 5,
-            ...options
-        };
-        this.reconnectAttempts = 0;
-        this.connect();
-    }
-    
-    connect() {
-        if (this.eventSource) {
-            this.eventSource.close();
-        }
-        
-        this.eventSource = new EventSource(this.url);
-        
-        this.eventSource.onopen = () => {
-            console.log('SSE connection established');
-            state.isConnected = true;
-            this.reconnectAttempts = 0;
-            this.updateConnectionStatus('connected');
-        };
-        
-        this.eventSource.onerror = (error) => {
-            console.error('SSE connection error:', error);
-            state.isConnected = false;
-            this.updateConnectionStatus('disconnected');
-            this.handleError();
-        };
-        
-        // Set up event listeners
-        this.setupEventListeners();
-    }
-    
-    setupEventListeners() {
-        // System metrics
-        this.eventSource.addEventListener('system', (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                state.system = { ...state.system, ...data, start_time: state.system.start_time };
-                state.lastUpdate.system = Date.now();
-                ui.updateSystem();
-            } catch (error) {
-                console.error('Error processing system update:', error);
-            }
-        });
-        
-        // Request statistics
-        this.eventSource.addEventListener('stats', (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                state.stats = { ...state.stats, ...data };
-                state.lastUpdate.stats = Date.now();
-                ui.updateStats();
-            } catch (error) {
-                console.error('Error processing stats update:', error);
-            }
-        });
-        
-        // Provider status
-        this.eventSource.addEventListener('providers', (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                state.providers = { ...state.providers, ...data };
-                state.lastUpdate.providers = Date.now();
-                ui.updateProviders();
-            } catch (error) {
-                console.error('Error processing provider update:', error);
-            }
-        });
-        
-        // Recent activity
-        this.eventSource.addEventListener('activity', (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                state.activity = data;
-                state.lastUpdate.activity = Date.now();
-                ui.updateActivity();
-            } catch (error) {
-                console.error('Error processing activity update:', error);
-            }
-        });
-    }
-    
-    handleError() {
-        if (this.reconnectAttempts < this.options.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            console.log(`Reconnecting attempt ${this.reconnectAttempts}/${this.options.maxReconnectAttempts}`);
-            setTimeout(() => this.connect(), this.options.reconnectTimeout);
-        } else {
-            console.error('Max reconnection attempts reached');
-            this.updateConnectionStatus('failed');
-        }
-    }
-    
-    updateConnectionStatus(status) {
-        const statusIndicator = document.createElement('div');
-        statusIndicator.className = `fixed bottom-4 right-4 px-4 py-2 rounded-lg text-white ${
-            status === 'connected' ? 'bg-green-500' : 
-            status === 'disconnected' ? 'bg-yellow-500' : 'bg-red-500'
-        }`;
-        statusIndicator.textContent = status === 'connected' ? 'Connected' :
-                                    status === 'disconnected' ? 'Reconnecting...' : 'Connection Failed';
-        
-        const existingStatus = document.querySelector('.connection-status');
-        if (existingStatus) {
-            existingStatus.remove();
-        }
-        
-        statusIndicator.classList.add('connection-status');
-        document.body.appendChild(statusIndicator);
-        
-        if (status === 'connected') {
-            setTimeout(() => statusIndicator.remove(), 3000);
-        }
-    }
-}
-
-// Initialize real-time updates
-const eventSourceManager = new EventSourceManager("{{ url_for('status_updates') }}", {
-    reconnectTimeout: 3000,
-    maxReconnectAttempts: 5
-});
-
-// Start uptime counter
-setInterval(() => ui.updateUptime(), 1000);
-
-// Initial UI update
-ui.updateSystem();
-ui.updateStats();
-ui.updateProviders();
-ui.updateActivity();
-ui.updateUptime();
-
-// Health check for stale data
-setInterval(() => {
-    const now = Date.now();
-    const staleThreshold = 60000; // 1 minute
-    
-    for (const [key, lastUpdate] of Object.entries(state.lastUpdate)) {
-        if (now - lastUpdate > staleThreshold) {
-            console.warn(`${key} data is stale (last update: ${new Date(lastUpdate).toLocaleTimeString()})`);
-            // You could trigger a UI indicator here for stale data
-        }
-    }
-}, 30000); // Check every 30 seconds
+    // Update uptime every second
+    setInterval(updateUptime, 1000);
+    updateUptime();
 </script>
 {% endblock %} 

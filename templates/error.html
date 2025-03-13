@@ -1,26 +1,47 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-md w-full space-y-8">
-        <div>
-            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                Error
-            </h2>
-            <div class="mt-4 rounded-md bg-red-50 p-4">
-                <div class="flex">
-                    <div class="ml-3">
-                        <h3 class="text-sm font-medium text-red-800">
-                            {{ error }}
-                        </h3>
-                    </div>
+<div class="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 animate-fade-in">
+    <div class="max-w-md w-full text-center">
+        <div class="mb-8">
+            <div class="mx-auto h-24 w-24 flex items-center justify-center rounded-full bg-red-100">
+                <i class="fas fa-exclamation-triangle text-red-500 text-4xl"></i>
+            </div>
+            <h1 class="mt-6 text-3xl font-bold text-gray-900">{{ error_title | default('Error') }}</h1>
+            <p class="mt-2 text-gray-600">{{ error_message }}</p>
+        </div>
+        
+        <div class="bg-white shadow-lg rounded-xl p-6 mb-6 border border-gray-100">
+            <div class="p-4 bg-red-50 rounded-lg mb-4 border-l-4 border-red-500">
+                <p class="text-sm text-red-700">{{ error_detail }}</p>
+            </div>
+            
+            {% if error_code %}
+            <div class="bg-gray-50 p-3 rounded-lg mb-4 text-left">
+                <pre class="text-xs text-gray-700 overflow-auto"><code>{{ error_code }}</code></pre>
+            </div>
+            {% endif %}
+            
+            {% if error_traceback %}
+            <div class="mt-4 text-left">
+                <div class="flex items-center mb-2">
+                    <h3 class="text-sm font-medium text-gray-700">Stack Trace</h3>
+                    <span class="ml-2 badge badge-error">Debug</span>
+                </div>
+                <div class="bg-gray-50 p-3 rounded-lg overflow-auto max-h-64">
+                    <pre class="text-xs text-gray-700 whitespace-pre-wrap"><code>{{ error_traceback }}</code></pre>
                 </div>
             </div>
-            <div class="mt-6 text-center">
-                <a href="{{ url_for('login') }}" class="text-indigo-600 hover:text-indigo-500">
-                    Return to login
-                </a>
-            </div>
+            {% endif %}
+        </div>
+        
+        <div class="flex justify-center space-x-4">
+            <a href="{{ url_for('status_page') }}" class="btn btn-outline inline-flex items-center">
+                <i class="fas fa-tachometer-alt mr-2"></i> Dashboard
+            </a>
+            <a href="javascript:history.back()" class="btn btn-primary inline-flex items-center">
+                <i class="fas fa-arrow-left mr-2"></i> Go Back
+            </a>
         </div>
     </div>
 </div>

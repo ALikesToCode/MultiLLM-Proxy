@@ -8,50 +8,135 @@
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/openrouter.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         [v-cloak] { display: none; }
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #6366f1;
+            --primary-dark: #4338ca;
+            --secondary: #9333ea;
+            --accent: #2563eb;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f9fafb;
+        }
+        .nav-link {
+            position: relative;
+            transition: all 0.3s;
+        }
+        .nav-link.active {
+            color: var(--primary);
+            font-weight: 500;
+        }
+        .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border-radius: 2px;
+        }
+        .nav-link:hover:not(.active) {
+            color: #4b5563;
+        }
+        .card {
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-radius: 0.75rem;
+        }
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 min-h-screen">
     <!-- Navigation Bar -->
     {% if session.get('user') and session.get('user').get('token') and session.get('authenticated') %}
-    <nav class="bg-white shadow-lg">
+    <nav class="bg-white shadow-md border-b border-gray-100">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
-                <div class="flex">
+                <div class="flex items-center">
                     <div class="flex-shrink-0 flex items-center">
-                        <a href="{{ url_for('status_page') }}" class="text-xl font-bold text-indigo-600">MultiLLM Proxy</a>
+                        <a href="{{ url_for('status_page') }}" class="flex items-center space-x-2">
+                            <div class="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-md flex items-center justify-center text-white font-bold">
+                                MP
+                            </div>
+                            <span class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">MultiLLM Proxy</span>
+                        </a>
                     </div>
-                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                    <div class="hidden sm:ml-8 sm:flex sm:space-x-8">
                         <a href="{{ url_for('status_page') }}" 
-                           class="{% if request.endpoint == 'status_page' %}border-indigo-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                            Status
+                           class="nav-link inline-flex items-center px-1 pt-1 text-sm font-medium {% if request.endpoint == 'status_page' %}active{% else %}text-gray-500{% endif %}">
+                           <i class="fas fa-chart-line mr-2"></i> Status
                         </a>
                         <a href="{{ url_for('manage_users') }}"
-                           class="{% if request.endpoint == 'manage_users' %}border-indigo-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium">
-                            Users
+                           class="nav-link inline-flex items-center px-1 pt-1 text-sm font-medium {% if request.endpoint == 'manage_users' %}active{% else %}text-gray-500{% endif %}">
+                           <i class="fas fa-users mr-2"></i> Users
+                        </a>
+                        <a href="{{ url_for('openrouter_dashboard') }}"
+                           class="nav-link inline-flex items-center px-1 pt-1 text-sm font-medium {% if request.endpoint == 'openrouter_dashboard' %}active{% else %}text-gray-500{% endif %}">
+                           <i class="fas fa-router mr-2"></i> OpenRouter
                         </a>
                     </div>
                 </div>
                 <div class="flex items-center">
                     {% if session.get('user').get('username') %}
-                    <span class="text-gray-500 mr-4">{{ session.get('user').get('username') }}</span>
-                    {% endif %}
-                    <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded text-sm">
-                        Logout
+                    <div class="relative group">
+                        <button class="flex items-center space-x-2 text-gray-700 focus:outline-none px-3 py-2 rounded-md hover:bg-gray-50">
+                            <span class="h-8 w-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center">
+                                {{ session.get('user').get('username')[0].upper() }}
+                            </span>
+                            <span class="font-medium">{{ session.get('user').get('username') }}</span>
+                            <i class="fas fa-chevron-down text-xs text-gray-400"></i>
+                        </button>
+                        <div class="absolute right-0 w-48 mt-2 py-2 bg-white rounded-md shadow-xl z-20 hidden group-hover:block">
+                            <a href="{{ url_for('logout') }}" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fas fa-sign-out-alt mr-2 text-red-500"></i> Sign out
+                            </a>
+                        </div>
+                    </div>
+                    {% else %}
+                    <a href="{{ url_for('logout') }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                        <i class="fas fa-sign-out-alt mr-2"></i> Logout
                     </a>
+                    {% endif %}
                 </div>
+            </div>
+        </div>
+        
+        <!-- Mobile menu, show/hide based on menu state -->
+        <div class="sm:hidden" id="mobile-menu">
+            <div class="pt-2 pb-3 space-y-1">
+                <a href="{{ url_for('status_page') }}" 
+                   class="{% if request.endpoint == 'status_page' %}bg-indigo-50 border-l-4 border-indigo-500 text-indigo-700{% else %}border-l-4 border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 text-base font-medium">
+                   <i class="fas fa-chart-line mr-2"></i> Status
+                </a>
+                <a href="{{ url_for('manage_users') }}"
+                   class="{% if request.endpoint == 'manage_users' %}bg-indigo-50 border-l-4 border-indigo-500 text-indigo-700{% else %}border-l-4 border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 text-base font-medium">
+                   <i class="fas fa-users mr-2"></i> Users
+                </a>
+                <a href="{{ url_for('openrouter_dashboard') }}"
+                   class="{% if request.endpoint == 'openrouter_dashboard' %}bg-indigo-50 border-l-4 border-indigo-500 text-indigo-700{% else %}border-l-4 border-transparent text-gray-600 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-800{% endif %} block pl-3 pr-4 py-2 text-base font-medium">
+                   <i class="fas fa-router mr-2"></i> OpenRouter
+                </a>
             </div>
         </div>
     </nav>
     {% endif %}
 
-    <div id="app" v-cloak>
+    <div id="app" v-cloak class="container mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {% block content %}{% endblock %}
     </div>
 
     {% block scripts %}{% endblock %}
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/openrouter.js') }}"></script>
 </body>
 </html> 

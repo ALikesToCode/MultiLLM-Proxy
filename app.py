@@ -493,6 +493,23 @@ def create_app() -> Flask:
                 return jsonify({'status': 'error', 'message': str(e)}), 500
             return render_template('500.html', error=str(e)), 500
 
+    @app.route('/openrouter')
+    @login_required
+    def openrouter_dashboard():
+        """
+        OpenRouter dashboard for testing and interacting with OpenRouter models.
+        """
+        try:
+            return render_template(
+                'openrouter.html',
+                user=AuthService.get_current_user()
+            )
+        except Exception as e:
+            logger.error(f"OpenRouter dashboard error: {str(e)}")
+            if 'application/json' in request.headers.get('Accept', ''):
+                return jsonify({'status': 'error', 'message': str(e)}), 500
+            return render_template('500.html', error=str(e)), 500
+
     @app.route('/<api_provider>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @app.route('/<api_provider>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
     @csrf.exempt
