@@ -20,6 +20,148 @@
         </div>
     </div>
 
+    <!-- OpenRouter Endpoints Section -->
+    <div class="mb-12">
+        <div class="bg-white shadow-md rounded-xl p-6 card hover:shadow-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                    <i class="fas fa-link mr-2 text-purple-500"></i>
+                    OpenRouter Endpoints
+                </h2>
+                <span class="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">Quick Access</span>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Chat Completions</h3>
+                        <span class="badge badge-primary">v1</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" value="http://localhost:8000/openrouter/v1/chat/completions" readonly
+                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
+                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/chat/completions"
+                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
+                            <i class="fas fa-copy mr-1"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Completions</h3>
+                        <span class="badge badge-primary">v1</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" value="http://localhost:8000/openrouter/v1/completions" readonly
+                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
+                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/completions"
+                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
+                            <i class="fas fa-copy mr-1"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Models</h3>
+                        <span class="badge badge-primary">v1</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" value="http://localhost:8000/openrouter/v1/models" readonly
+                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
+                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/models"
+                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
+                            <i class="fas fa-copy mr-1"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="p-4 bg-gradient-to-br from-green-50 to-blue-50 rounded-lg border border-green-100">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-medium text-indigo-800">Legacy Models Route</h3>
+                        <span class="badge badge-secondary">Compatibility</span>
+                    </div>
+                    <div class="relative">
+                        <input type="text" value="http://localhost:8000/openrouter/models" readonly
+                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
+                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/models"
+                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
+                            <i class="fas fa-copy mr-1"></i> Copy
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- CURL Examples -->
+            <div class="mt-6">
+                <div class="flex items-center mb-3">
+                    <h3 class="text-sm font-medium text-indigo-800">CURL Examples</h3>
+                    <span class="ml-2 badge badge-secondary">Usage</span>
+                </div>
+                
+                <!-- Example tabs -->
+                <div class="mb-4">
+                    <div class="flex space-x-2 border-b">
+                        <button id="tab-chat" class="px-3 py-2 text-sm font-medium text-indigo-600 border-b-2 border-indigo-500" onclick="showTab('chat')">
+                            Chat Completion
+                        </button>
+                        <button id="tab-models" class="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700" onclick="showTab('models')">
+                            List Models
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Chat completion example -->
+                <div id="example-chat" class="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto">
+                    <pre class="text-xs"><code>curl http://localhost:8000/openrouter/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "openai/gpt-3.5-turbo",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "Hello!"
+      }
+    ]
+  }'</code></pre>
+                </div>
+                
+                <!-- Models example (hidden by default) -->
+                <div id="example-models" class="hidden bg-gray-800 text-white p-4 rounded-lg overflow-x-auto">
+                    <pre class="text-xs"><code>curl http://localhost:8000/openrouter/v1/models \
+  -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
+                </div>
+            </div>
+            
+            <script>
+                function showTab(tab) {
+                    // Hide all examples
+                    document.getElementById('example-chat').classList.add('hidden');
+                    document.getElementById('example-models').classList.add('hidden');
+                    
+                    // Show selected example
+                    document.getElementById(`example-${tab}`).classList.remove('hidden');
+                    
+                    // Update tab styling
+                    document.getElementById('tab-chat').classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                    document.getElementById('tab-chat').classList.add('text-gray-500', 'hover:text-gray-700');
+                    document.getElementById('tab-models').classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                    document.getElementById('tab-models').classList.add('text-gray-500', 'hover:text-gray-700');
+                    
+                    // Apply active styling to selected tab
+                    document.getElementById(`tab-${tab}`).classList.remove('text-gray-500', 'hover:text-gray-700');
+                    document.getElementById(`tab-${tab}`).classList.add('text-indigo-600', 'border-b-2', 'border-indigo-500');
+                }
+            </script>
+        </div>
+    </div>
+
     <!-- Features Section -->
     <div class="pb-12">
         <div class="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
@@ -50,9 +192,9 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                         </svg>
                     </div>
-                    <h3 class="text-lg font-medium text-gray-900">Secure Access</h3>
+                    <h3 class="text-lg font-medium text-gray-900">Unified API</h3>
                     <p class="mt-2 text-base text-gray-500">
-                        Your messages are encrypted and securely proxied through OpenRouter, ensuring privacy and security.
+                        One consistent API format across all models. No need to adapt to different provider specifications.
                     </p>
                 </div>
             </div>
@@ -203,6 +345,77 @@
 
 {% block scripts %}
 <script>
-    // This block is empty as we're using openrouter.js for all the functionality
+    // Function to copy text to clipboard
+    function copyToClipboard(button) {
+        const textToCopy = button.getAttribute('data-value');
+        const tempInput = document.createElement('input');
+        tempInput.value = textToCopy;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        
+        // Change button text temporarily to indicate success
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check mr-1"></i> Copied!';
+        button.classList.remove('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
+        button.classList.add('bg-green-100', 'hover:bg-green-200', 'text-green-700');
+        
+        setTimeout(() => {
+            button.innerHTML = originalHTML;
+            button.classList.remove('bg-green-100', 'hover:bg-green-200', 'text-green-700');
+            button.classList.add('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
+        }, 2000);
+    }
+
+    // OpenRouter integration code
+    document.addEventListener('DOMContentLoaded', function() {
+        const apiKey = '{{ api_key }}';
+        const creditsDisplay = document.getElementById('credits-display');
+        
+        if (apiKey) {
+            fetch('https://openrouter.ai/api/v1/auth/key', {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.credit) {
+                    creditsDisplay.innerHTML = `
+                        <svg class="mr-1.5 h-2 w-2 text-green-400" fill="currentColor" viewBox="0 0 8 8">
+                            <circle cx="4" cy="4" r="3" />
+                        </svg>
+                        Credits Available: $${data.credit.toFixed(2)}
+                    `;
+                } else {
+                    creditsDisplay.innerHTML = `
+                        <svg class="mr-1.5 h-2 w-2 text-yellow-400" fill="currentColor" viewBox="0 0 8 8">
+                            <circle cx="4" cy="4" r="3" />
+                        </svg>
+                        Credits: Unable to fetch
+                    `;
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching credits:', error);
+                creditsDisplay.innerHTML = `
+                    <svg class="mr-1.5 h-2 w-2 text-red-400" fill="currentColor" viewBox="0 0 8 8">
+                        <circle cx="4" cy="4" r="3" />
+                    </svg>
+                    Credits: Error fetching
+                `;
+            });
+        } else {
+            creditsDisplay.innerHTML = `
+                <svg class="mr-1.5 h-2 w-2 text-yellow-400" fill="currentColor" viewBox="0 0 8 8">
+                    <circle cx="4" cy="4" r="3" />
+                </svg>
+                API Key not configured
+            `;
+        }
+    });
 </script>
 {% endblock %} 

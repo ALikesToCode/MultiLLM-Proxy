@@ -1535,7 +1535,18 @@ class ProxyService:
                 path = f"/{path}" if path else ""
             
             # Build the OpenRouter URL
-            openrouter_url = f"https://openrouter.ai/api/v1{path}"
+            # Check if the path already contains "api/v1" to avoid duplication
+            if path.startswith('/api/v1'):
+                openrouter_url = f"https://openrouter.ai{path}"
+            else:
+                # Fix the path for consistent API access - ensure v1 is in the path
+                # If path starts with /v1, add api prefix
+                if path.startswith('/v1'):
+                    openrouter_url = f"https://openrouter.ai/api{path}"
+                # If path doesn't have v1, add the full /api/v1 prefix
+                else:
+                    openrouter_url = f"https://openrouter.ai/api/v1{path}"
+            
             logger.info(f"Transformed URL to OpenRouter: {openrouter_url}")
             
             # Log the request details
