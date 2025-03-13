@@ -32,7 +32,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/MultiLLM-Proxy.git
+git clone https://github.com/ALikesToCode/MultiLLM-Proxy.git
 cd MultiLLM-Proxy
 ```
 
