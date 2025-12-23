@@ -602,14 +602,90 @@ def create_app() -> Flask:
 
             # Handle streaming
             if is_streaming and response.headers.get('content-type', '').startswith('text/event-stream'):
+                def standardize_streaming_chunk(chunk, provider):
+                    """Standardize streaming chunks to OpenAI format"""
+                    try:
+                        # If the chunk is already in OpenAI format, return as is
+                        if chunk.startswith('data: ') and ('delta' in chunk or chunk.strip() == 'data: [DONE]'):
+                            return chunk
+                            
+                        # If this is just the completion signal
+                        if chunk.strip() in ('[DONE]', 'data: [DONE]'):
+                            return 'data: [DONE]\n\n'
+                            
+                        # Extract content based on provider format
+                        content = None
+                        
+                        # Try to extract provider-specific formats
+                        try:
+                            if chunk.startswith('data: '):
+                                data_str = chunk[6:].strip()
+                                if data_str == '[DONE]':
+                                    return 'data: [DONE]\n\n'
+                                data = json.loads(data_str)
+                                
+                                # Handle different provider formats
+                                if provider == 'anthropic' and 'completion' in data:
+                                    content = data.get('completion', '')
+                                elif provider in ('gemini', 'gemma') and 'candidates' in data:
+                                    content = data['candidates'][0]['content']['parts'][0]['text']
+                                elif 'choices' in data and len(data['choices']) > 0:
+                                    # OpenAI-like format
+                                    choice = data['choices'][0]
+                                    if 'delta' in choice and 'content' in choice['delta']:
+                                        content = choice['delta']['content']
+                                    elif 'text' in choice:
+                                        content = choice['text']
+                                elif 'text' in data:
+                                    content = data['text']
+                            else:
+                                # Raw text chunk
+                                content = chunk
+                        except:
+                            # Fallback to raw text if parsing fails
+                            content = chunk
+                            
+                        # If we couldn't extract content, use the raw chunk
+                        if content is None:
+                            content = chunk
+                            
+                        # Format in OpenAI-compatible structure
+                        openai_chunk = {
+                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": f"{provider}-stream",
+                            "choices": [{"delta": {"content": content}}]
+                        }
+                        
+                        return f"data: {json.dumps(openai_chunk)}\n\n"
+                    except Exception as e:
+                        logger.error(f"Error standardizing chunk: {str(e)}")
+                        # Safe fallback
+                        fallback = {
+                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                            "object": "chat.completion.chunk",
+                            "choices": [{"delta": {"content": str(chunk)}}]
+                        }
+                        return f"data: {json.dumps(fallback)}\n\n"
+                
                 def generate_stream():
                     try:
                         for chunk in response.iter_lines(decode_unicode=True):
                             if chunk:
-                                yield f"{chunk}\n"
+                                # Standardize the chunk to OpenAI format
+                                yield standardize_streaming_chunk(chunk, api_provider)
+                        # Ensure final [DONE] marker
+                        yield 'data: [DONE]\n\n'
                     except Exception as e:
                         logger.error(f"Error in streaming response: {str(e)}")
-                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                        error_chunk = {
+                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                            "object": "chat.completion.chunk",
+                            "choices": [{"delta": {"content": f"Error: {str(e)}"}}]
+                        }
+                        yield f"data: {json.dumps(error_chunk)}\n\n"
+                        yield 'data: [DONE]\n\n'
 
                 return Response(
                     generate_stream(),
@@ -865,6 +941,11 @@ def create_app() -> Flask:
                     })
                 }
                 
+                # Ensure stream parameter is explicitly set if specified in the original request
+                if 'stream' in data:
+                    request_data['stream'] = bool(data['stream'])
+                    logger.debug(f"Google AI stream parameter explicitly set to: {request_data['stream']}")
+                
                 logger.debug(f"Prepared request data: {json.dumps(request_data)}")
                 
                 # Make the request with all required parameters
@@ -908,8 +989,114 @@ def create_app() -> Flask:
                 
                 # Handle streaming response
                 if request_data.get('stream', False):
+                    logger.info(f"Handling Google AI streaming response, status: {response.status_code}, headers: {response.headers}")
+                    
+                    # Check response status code and content type
+                    if response.status_code != 200:
+                        logger.error(f"Google AI streaming error: HTTP {response.status_code}")
+                        error_msg = "Google AI streaming failed with HTTP " + str(response.status_code)
+                        try:
+                            error_data = response.json()
+                            if isinstance(error_data, dict) and 'error' in error_data:
+                                error_msg = f"Google AI error: {error_data['error']}"
+                        except Exception:
+                            try:
+                                error_msg = f"Google AI error: {response.text[:200]}"
+                            except Exception:
+                                pass
+                            
+                        def error_stream():
+                            error_chunk = {
+                                "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": "googleai-stream",
+                                "choices": [{"delta": {"content": error_msg}}]
+                            }
+                            yield f"data: {json.dumps(error_chunk)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            
+                        return Response(
+                            error_stream(),
+                            mimetype='text/event-stream',
+                            headers={
+                                'Cache-Control': 'no-cache',
+                                'Connection': 'keep-alive',
+                                'Content-Type': 'text/event-stream',
+                                'X-Accel-Buffering': 'no'
+                            }
+                        )
+                    
                     def generate():
                         try:
+                            # Define helper function to standardize streaming chunks
+                            def standardize_streaming_chunk(chunk, provider):
+                                """Standardize streaming chunks to OpenAI format"""
+                                try:
+                                    # If the chunk is already in OpenAI format, return as is
+                                    if chunk.startswith('data: ') and ('delta' in chunk or chunk.strip() == 'data: [DONE]'):
+                                        return chunk
+                                        
+                                    # If this is just the completion signal
+                                    if chunk.strip() in ('[DONE]', 'data: [DONE]'):
+                                        return 'data: [DONE]\n\n'
+                                        
+                                    # Extract content based on provider format
+                                    content = None
+                                    
+                                    # Try to extract provider-specific formats
+                                    try:
+                                        if chunk.startswith('data: '):
+                                            data_str = chunk[6:].strip()
+                                            if data_str == '[DONE]':
+                                                return 'data: [DONE]\n\n'
+                                            data = json.loads(data_str)
+                                            
+                                            # Handle different provider formats
+                                            if provider == 'anthropic' and 'completion' in data:
+                                                content = data.get('completion', '')
+                                            elif provider in ('gemini', 'gemma') and 'candidates' in data:
+                                                content = data['candidates'][0]['content']['parts'][0]['text']
+                                            elif 'choices' in data and len(data['choices']) > 0:
+                                                # OpenAI-like format
+                                                choice = data['choices'][0]
+                                                if 'delta' in choice and 'content' in choice['delta']:
+                                                    content = choice['delta']['content']
+                                                elif 'text' in choice:
+                                                    content = choice['text']
+                                            elif 'text' in data:
+                                                content = data['text']
+                                        else:
+                                            # Raw text chunk
+                                            content = chunk
+                                    except:
+                                        # Fallback to raw text if parsing fails
+                                        content = chunk
+                                        
+                                    # If we couldn't extract content, use the raw chunk
+                                    if content is None:
+                                        content = chunk
+                                        
+                                    # Format in OpenAI-compatible structure
+                                    openai_chunk = {
+                                        "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": f"{provider}-stream",
+                                        "choices": [{"delta": {"content": content}}]
+                                    }
+                                    
+                                    return f"data: {json.dumps(openai_chunk)}\n\n"
+                                except Exception as e:
+                                    logger.error(f"Error standardizing chunk: {str(e)}")
+                                    # Safe fallback
+                                    fallback = {
+                                        "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                                        "object": "chat.completion.chunk",
+                                        "choices": [{"delta": {"content": str(chunk)}}]
+                                    }
+                                    return f"data: {json.dumps(fallback)}\n\n"
+                            
                             # Check if response is gzipped
                             is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
                             
@@ -933,17 +1120,9 @@ def create_app() -> Flask:
                                             if chunk_str:
                                                 for line in chunk_str.split('\n'):
                                                     line = line.strip()
-                                                    if line and line.startswith('data: '):
-                                                        try:
-                                                            json_str = line[6:].strip()
-                                                            if json_str == '[DONE]':
-                                                                yield 'data: [DONE]\n\n'
-                                                                continue
-                                                            json_data = json.loads(json_str)
-                                                            yield f"data: {json.dumps(json_data)}\n\n"
-                                                        except json.JSONDecodeError as e:
-                                                            logger.error(f"Error parsing JSON in stream: {e}")
-                                                            continue
+                                                    if line:
+                                                        # Use standardize_streaming_chunk to ensure OpenAI compatibility
+                                                        yield standardize_streaming_chunk(line, 'googleai')
                                         except Exception as e:
                                             logger.error(f"Error processing chunk: {e}")
                                             continue
@@ -956,25 +1135,29 @@ def create_app() -> Flask:
                                             decompressed = gz.read().decode('utf-8')
                                             for line in decompressed.split('\n'):
                                                 line = line.strip()
-                                                if line and line.startswith('data: '):
-                                                    try:
-                                                        json_str = line[6:].strip()
-                                                        if json_str == '[DONE]':
-                                                            yield 'data: [DONE]\n\n'
-                                                            continue
-                                                        json_data = json.loads(json_str)
-                                                        yield f"data: {json.dumps(json_data)}\n\n"
-                                                    except json.JSONDecodeError as e:
-                                                        logger.error(f"Error parsing JSON in decompressed stream: {e}")
-                                                        continue
+                                                if line:
+                                                    # Use standardize_streaming_chunk to ensure OpenAI compatibility
+                                                    yield standardize_streaming_chunk(line, 'googleai')
                                     except Exception as e:
                                         logger.error(f"Error decompressing gzipped response: {e}")
-                        
+                            else:
+                                # Regular response object, use iter_lines
+                                for line in response.iter_lines(decode_unicode=True):
+                                    if line:
+                                        yield standardize_streaming_chunk(line, 'googleai')
+                                        
+                            # Ensure final [DONE] marker
+                            yield 'data: [DONE]\n\n'
                         except Exception as e:
                             logger.error(f"Error in streaming response: {e}")
-                        finally:
-                            yield "data: [DONE]\n\n"
-                        
+                            error_chunk = {
+                                "id": f"chatcmpl-{str(int(time.time()))[:10]}",
+                                "object": "chat.completion.chunk",
+                                "choices": [{"delta": {"content": f"Error: {str(e)}"}}]
+                            }
+                            yield f"data: {json.dumps(error_chunk)}\n\n"
+                            yield 'data: [DONE]\n\n'
+
                     return Response(
                         generate(),
                         mimetype='text/event-stream',

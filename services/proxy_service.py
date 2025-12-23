@@ -1,7 +1,7 @@
 import json
 import logging
 import requests
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
 import tiktoken
 from error_handlers import APIError
@@ -167,41 +167,55 @@ class ProxyService:
         auth_token: Optional[str] = None
     ) -> Dict[str, str]:
         """
-        Prepare headers for the target provider.
+        Prepare headers for API requests, filtering out unnecessary ones.
         """
-        headers = {k: v for k, v in request_headers.items() if k.lower() not in ['host', 'content-length']}
+        # Create a copy of headers that will be sent
+        headers = {}
 
+        # Copy specific headers that should be preserved
+        header_whitelist = {
+            'Content-Type', 'Accept', 'Accept-Encoding', 'User-Agent',
+            'HTTP-Referer', 'X-Title', 'Anthropic-Version', 'OpenAI-Organization',
+            'X-Request-ID', 'Accept-Language'
+        }
+
+        # Special case for Google API
+        if api_provider in ['googleai', 'gemini', 'gemma']:
+            header_whitelist.add('X-Goog-User-Project')
+
+        # Copy allowed headers
+        for header, value in request_headers.items():
+            if header.lower() in [h.lower() for h in header_whitelist]:
+                headers[header] = value
+
+        # Set content type if not provided
+        if 'Content-Type' not in headers:
+            headers['Content-Type'] = 'application/json'
+
+        # Set accept header if not provided
+        if 'Accept' not in headers:
+            if 'stream=true' in request_headers.get('Cookie', '').lower() or \
+               request_headers.get('X-Stream', '').lower() == 'true':
+                # Request is for streaming
+                headers['Accept'] = 'text/event-stream'
+            else:
+                headers['Accept'] = 'application/json'
+
+        # Handle API key authentication
         if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
-        elif api_provider == 'googleai':
-            # Try to get Google token from ProxyService first (which has better error handling)
-            try:
-                google_token = cls.get_google_access_token() if hasattr(cls, 'get_google_access_token') else None
-                if not google_token:
-                    # Fall back to AuthService if needed
-                    google_token = AuthService.get_google_token()
-                
-                if google_token:
-                    headers['Authorization'] = f'Bearer {google_token}'
-                    logger.debug("Added Google Cloud token to request headers")
-                else:
-                    logger.error("Failed to get Google Cloud access token")
-                    raise APIError("Failed to get Google Cloud access token", status_code=401)
-            except Exception as e:
-                logger.error(f"Error getting Google token for request: {str(e)}")
-                raise APIError(f"Failed to get Google Cloud access token: {str(e)}", status_code=401)
-        elif api_provider == 'groq':
-            groq_key = RateLimitService.get_next_groq_key()
-            if groq_key:
-                headers['Authorization'] = f'Bearer {groq_key}'
-            else:
-                raise APIError("No available Groq API keys", status_code=401)
-        elif api_provider == 'together':
-            together_key = Config.TOGETHER_API_KEY
-            if together_key:
-                headers['Authorization'] = f'Bearer {together_key}'
-            else:
-                raise APIError("Together API key not configured", status_code=401)
+            headers['Authorization'] = f"Bearer {auth_token}"
+
+        # Add provider-specific headers
+        if api_provider == 'openrouter':
+            # OpenRouter requires HTTP-Referer and X-Title
+            if 'HTTP-Referer' not in headers:
+                headers['HTTP-Referer'] = os.environ.get('OPENROUTER_REFERER', 'https://multiproxy.example.com')
+            if 'X-Title' not in headers:
+                headers['X-Title'] = os.environ.get('APP_NAME', 'MultiLLM Proxy')
+        elif api_provider == 'anthropic':
+            # Anthropic specific headers
+            if 'Anthropic-Version' not in headers:
+                headers['Anthropic-Version'] = '2023-06-01'
 
         return headers
 
@@ -766,6 +780,11 @@ class ProxyService:
                 }
             }
 
+            # Ensure stream parameter is properly set
+            if "stream" in request_data:
+                chat_request["stream"] = bool(request_data["stream"])
+                logger.debug(f"Google AI stream parameter explicitly set to: {chat_request['stream']}")
+
             data = json.dumps(chat_request).encode('utf-8')
 
             logger.info(f"Google AI chat request URL: {url}")
@@ -798,24 +817,84 @@ class ProxyService:
                 try:
                     # For streaming responses
                     if chat_request.get("stream", False):
+                        logger.info("Handling Google AI streaming response")
+                        
                         def generate():
-                            for line in response.iter_lines():
-                                if line:
-                                    try:
-                                        line_str = line.decode('utf-8') if isinstance(line, bytes) else line
-                                        if line_str.startswith('data: '):
-                                            line_str = line_str[6:]  # Remove 'data: ' prefix if present
-                                        
-                                        if line_str.strip() == '[DONE]':
-                                            yield "data: [DONE]\n\n"
-                                            continue
+                            try:
+                                for line in response.iter_lines():
+                                    if line:
+                                        try:
+                                            line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                                            if line_str.startswith('data: '):
+                                                line_str = line_str[6:]  # Remove 'data: ' prefix if present
                                             
-                                        json_data = json.loads(line_str)
-                                        yield f"data: {json.dumps(json_data)}\n\n"
-                                    except json.JSONDecodeError as e:
-                                        logger.error(f"Error parsing streaming response: {e}, line: {line}")
-                                        continue
-                            yield "data: [DONE]\n\n"
+                                            if line_str.strip() == '[DONE]':
+                                                yield "data: [DONE]\n\n"
+                                                continue
+                                                
+                                            # Parse JSON and format as SSE
+                                            json_data = json.loads(line_str)
+                                            
+                                            # Ensure data is in OpenAI streaming format
+                                            if not json_data.get('choices'):
+                                                # Convert to OpenAI format
+                                                content = None
+                                                if 'candidates' in json_data:
+                                                    try:
+                                                        content = json_data['candidates'][0]['content']['parts'][0]['text']
+                                                    except (KeyError, IndexError):
+                                                        if json_data.get('candidates') and len(json_data['candidates']) > 0:
+                                                            # Try other possible structures
+                                                            candidate = json_data['candidates'][0]
+                                                            if 'text' in candidate:
+                                                                content = candidate['text']
+                                                            elif 'content' in candidate:
+                                                                if isinstance(candidate['content'], str):
+                                                                    content = candidate['content']
+                                                                elif isinstance(candidate['content'], dict) and 'text' in candidate['content']:
+                                                                    content = candidate['content']['text']
+                                                
+                                                if content is not None:
+                                                    # Format in OpenAI streaming format
+                                                    formatted_data = {
+                                                        "id": str(uuid.uuid4()),
+                                                        "object": "chat.completion.chunk",
+                                                        "created": int(time.time()),
+                                                        "model": "googleai-stream",
+                                                        "choices": [{"delta": {"content": content}}]
+                                                    }
+                                                    json_data = formatted_data
+                                            
+                                            yield f"data: {json.dumps(json_data)}\n\n"
+                                        except json.JSONDecodeError as e:
+                                            logger.error(f"Error parsing streaming response: {e}, line: {line}")
+                                            continue
+                                        except Exception as e:
+                                            logger.error(f"Error in Google AI streaming: {str(e)}")
+                                            # Try to recover by sending an error message in the stream
+                                            error_data = {
+                                                "id": str(uuid.uuid4()),
+                                                "object": "chat.completion.chunk",
+                                                "created": int(time.time()),
+                                                "model": "googleai-stream",
+                                                "choices": [{"delta": {"content": f"Error: {str(e)}"}}]
+                                            }
+                                            yield f"data: {json.dumps(error_data)}\n\n"
+                                            continue
+                                
+                                # Ensure we send the final [DONE] marker
+                                yield "data: [DONE]\n\n"
+                            except Exception as e:
+                                logger.error(f"Critical error in Google AI streaming: {str(e)}")
+                                error_data = {
+                                    "id": str(uuid.uuid4()),
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": "googleai-stream",
+                                    "choices": [{"delta": {"content": f"Critical streaming error: {str(e)}"}}]
+                                }
+                                yield f"data: {json.dumps(error_data)}\n\n"
+                                yield "data: [DONE]\n\n"
 
                         streaming_response = Response(
                             generate(),
@@ -833,8 +912,8 @@ class ProxyService:
                         try:
                             response_data = response.json()
                         except json.JSONDecodeError as e:
-                            logger.error(f"Error parsing JSON response: {e}, content: {response.content[:200]}")
-                            response_data = {"error": "Invalid JSON response from Google AI"}
+                                logger.error(f"Error parsing JSON response: {e}, content: {response.content[:200]}")
+                                response_data = {"error": "Invalid JSON response from Google AI"}
                             
                         logger.debug(f"Google AI parsed response: {response_data}")
 
@@ -1017,7 +1096,7 @@ class ProxyService:
                                     "role": "assistant",
                                     "content": completion_response["choices"][0]["text"]
                                 },
-                                "finish_reason": completion_response["choices"][0].get("finish_reason", "stop")
+                                "finish_reason": completion_response["choices"][0].get("finishReason", "stop")
                             }
                         ],
                         "usage": completion_response.get("usage", {})
@@ -1629,8 +1708,8 @@ class ProxyService:
                         yield "data: [DONE]\n\n"
                     except Exception as e:
                         logger.error(f"Error in streaming generation: {str(e)}")
-                        yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                        yield "data: [DONE]\n\n"
+                        yield f"data: {json.dumps({'choices': [{'delta': {'content': str(e)}}]})}\n\n"
+                        yield 'data: [DONE]\n\n'
                 
                 # Return a proper streaming response
                 streaming_response = Response(
@@ -1655,6 +1734,152 @@ class ProxyService:
             raise APIError(error_msg, status_code=500)
 
     @classmethod
+    def _standardize_streaming_chunk(cls, chunk: str, provider: str) -> str:
+        """
+        Standardize streaming response chunks from different providers to match OpenAI format.
+        
+        The OpenAI format for streaming is:
+        data: {"id":"...", "object":"chat.completion.chunk", "choices":[{"delta":{"content":"token"}}]}
+        
+        Args:
+            chunk: The chunk received from the provider
+            provider: The provider name
+            
+        Returns:
+            Standardized chunk in OpenAI-compatible SSE format
+        """
+        try:
+            # If the chunk is already in OpenAI format, return it as is
+            if chunk.startswith('data: ') and ('delta' in chunk or chunk.strip() == 'data: [DONE]'):
+                return chunk
+                
+            # If the chunk is the completion signal
+            if chunk.strip() in ('[DONE]', 'data: [DONE]'):
+                return 'data: [DONE]\n\n'
+                
+            # Extract content from provider-specific format
+            content = None
+            
+            # Handle provider-specific formats
+            if provider == 'anthropic':
+                # Anthropic format handling
+                if 'completion' in chunk:
+                    try:
+                        data = json.loads(chunk.replace('data: ', ''))
+                        content = data.get('completion', '')
+                    except json.JSONDecodeError:
+                        content = chunk
+            elif provider == 'gemini' or provider == 'gemma':
+                # Google Gemini/Gemma format handling
+                try:
+                    if chunk.startswith('data: '):
+                        data = json.loads(chunk.replace('data: ', ''))
+                        if 'candidates' in data:
+                            content = data['candidates'][0]['content']['parts'][0]['text']
+                    else:
+                        content = chunk
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    content = chunk
+            elif provider == 'together':
+                # Together AI format handling
+                try:
+                    if chunk.startswith('data: '):
+                        data = json.loads(chunk.replace('data: ', ''))
+                        if 'choices' in data and len(data['choices']) > 0:
+                            content = data['choices'][0].get('text', '') or data['choices'][0].get('delta', {}).get('content', '')
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    content = chunk
+            else:
+                # Generic handling for other providers
+                try:
+                    # Try to parse as JSON
+                    if chunk.startswith('data: '):
+                        chunk = chunk.replace('data: ', '')
+                    
+                    # Handle case where chunk is already JSON
+                    if chunk.strip().startswith('{'):
+                        data = json.loads(chunk)
+                        # Look for content in common places
+                        if 'choices' in data and len(data['choices']) > 0:
+                            content = data['choices'][0].get('text', '') or data['choices'][0].get('delta', {}).get('content', '')
+                        elif 'text' in data:
+                            content = data['text']
+                    else:
+                        # If not JSON, use the raw text
+                        content = chunk
+                except (json.JSONDecodeError, KeyError):
+                    content = chunk
+            
+            # If content extraction failed, use the raw chunk
+            if content is None:
+                content = chunk
+                
+            # Create OpenAI-compatible format
+            formatted_chunk = {
+                "id": str(uuid.uuid4()),
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "provider-stream",
+                "choices": [{"delta": {"content": content}}]
+            }
+            
+            return f"data: {json.dumps(formatted_chunk)}\n\n"
+        except Exception as e:
+            logger.error(f"Error standardizing streaming chunk: {str(e)}")
+            # Return a safe fallback
+            return f"data: {json.dumps({'choices': [{'delta': {'content': chunk}}]})}\n\n"
+
+    @classmethod
+    def _create_streaming_response(cls, response: requests.Response, provider: str) -> Generator:
+        """
+        Create a generator for streaming responses that standardizes the output format.
+        
+        Args:
+            response: The streaming response from the provider
+            provider: The provider name
+            
+        Returns:
+            A generator yielding standardized chunks
+        """
+        try:
+            is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
+            
+            # For gzipped responses, we need to accumulate and decompress
+            if is_gzipped:
+                buffer = io.BytesIO()
+                
+                # Read raw response in chunks
+                for chunk in response.iter_content(chunk_size=1024):
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+                
+                # Decompress and process
+                buffer.seek(0)
+                with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
+                    decompressed = gz.read().decode('utf-8')
+                    for line in decompressed.split('\n'):
+                        line = line.strip()
+                        if line:
+                            yield cls._standardize_streaming_chunk(line, provider)
+                
+                # Signal completion
+                yield 'data: [DONE]\n\n'
+            else:
+                # For non-gzipped responses
+                for line in response.iter_lines(decode_unicode=True):
+                    if line:
+                        yield cls._standardize_streaming_chunk(line, provider)
+                
+                # Signal completion
+                yield 'data: [DONE]\n\n'
+        except Exception as e:
+            logger.error(f"Error in streaming response processing: {str(e)}")
+            error_msg = f"Error: {str(e)}"
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': error_msg}}]})}\n\n"
+            yield 'data: [DONE]\n\n'
+
+    @classmethod
     def make_request(
         cls,
         method: str,
@@ -1671,6 +1896,15 @@ class ProxyService:
         logger.info(f"Making request to {url} with method {method}")
         
         try:
+            # Check if this is a streaming request
+            is_streaming = False
+            if data:
+                try:
+                    request_data = json.loads(data)
+                    is_streaming = bool(request_data.get('stream', False))
+                except Exception:
+                    pass
+            
             # Extract authentication tokens/keys if needed
             auth_token = None
             auth_header = headers.get('Authorization', '')
@@ -1705,24 +1939,13 @@ class ProxyService:
                     data = json.dumps(request_data).encode('utf-8')
                     headers["Content-Length"] = str(len(data))
                     logger.info(f"Mapped model {model} to {request_data['model']}")
-
-                # Make the base request
-                return cls._make_base_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=data,
-                    api_provider=api_provider,
-                    use_cache=use_cache
-                )
             elif api_provider == "openrouter":
                 return cls._handle_openrouter_request(
                     method, url, headers, params, data, json.loads(data) if data else {}, use_cache, auth_token
                 )
 
-            # Default handling
-            return cls._make_base_request(
+            # For all other providers, use the base request but prepare for streaming if needed
+            response = cls._make_base_request(
                 method=method,
                 url=url,
                 headers=headers,
@@ -1731,6 +1954,21 @@ class ProxyService:
                 api_provider=api_provider,
                 use_cache=use_cache
             )
+            
+            # If the response should be streamed, wrap it in a streaming response
+            if is_streaming and response.headers.get('content-type', '').startswith(('text/event-stream', 'application/json')):
+                # Create a Flask response that yields from our generator
+                return Response(
+                    cls._create_streaming_response(response, api_provider),
+                    content_type='text/event-stream',
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'X-Accel-Buffering': 'no'
+                    }
+                )
+            
+            return response
         except Exception as e:
             error_msg = f"Error in make_request: {str(e)}"
             logger.error(error_msg)
