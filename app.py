@@ -40,6 +40,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
+
+
+def is_api_request_path(path: str) -> bool:
+    """
+    Identify proxy/API paths that should participate in CORS handling.
+    """
+    stripped = path.strip("/")
+    if not stripped:
+        return False
+
+    first_segment = stripped.split("/", 1)[0]
+    return first_segment in Config.API_BASE_URLS or stripped == "health"
+
+
+def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Response:
+    """
+    Add permissive CORS headers for API routes when a browser origin is present.
+    """
+    request_origin = origin or request.headers.get("Origin")
+    if not request_origin or not is_api_request_path(request.path):
+        return response
+
+    response.headers["Access-Control-Allow-Origin"] = request_origin
+    response.headers["Access-Control-Allow-Methods"] = CORS_ALLOWED_METHODS
+    response.headers["Access-Control-Allow-Headers"] = request.headers.get(
+        "Access-Control-Request-Headers",
+        CORS_DEFAULT_HEADERS,
+    )
+    response.headers["Access-Control-Max-Age"] = "86400"
+
+    vary = response.headers.get("Vary")
+    response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
+    return response
+
+
+def build_cors_preflight_response(origin: Optional[str] = None) -> Response:
+    """
+    Return a 204 preflight response for browser API calls.
+    """
+    response = Response(status=204)
+    return apply_cors_headers(response, origin=origin)
+
 
 def login_required(func: Callable) -> Callable:
     """
@@ -61,6 +105,9 @@ def api_auth_required(func: Callable) -> Callable:
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return build_cors_preflight_response()
+
         auth_header = request.headers.get('Authorization')
         logger.debug(f"Raw Authorization header: {auth_header}")
 
@@ -388,6 +435,9 @@ def create_app() -> Flask:
         For every request (except login, static, favicon), enforce authentication.
         Also handle direct requests to /<provider> endpoints.
         """
+        if request.method == 'OPTIONS':
+            return
+
         # Skip auth for API routes with Authorization header
         if request.headers.get('Authorization'):
             return
@@ -407,6 +457,13 @@ def create_app() -> Flask:
         sanitized_path = request.path.rstrip('/')
         if sanitized_path in [f'/{prov}' for prov in app.config['API_BASE_URLS']]:
             return proxy(sanitized_path.strip('/'))
+
+    @app.after_request
+    def add_cors_headers(response):
+        """
+        Attach CORS headers to API responses so browser clients can consume them.
+        """
+        return apply_cors_headers(response)
 
     @app.route('/health')
     def health_check():
@@ -510,8 +567,8 @@ def create_app() -> Flask:
                 return jsonify({'status': 'error', 'message': str(e)}), 500
             return render_template('500.html', error=str(e)), 500
 
-    @app.route('/<api_provider>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-    @app.route('/<api_provider>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+    @app.route('/<api_provider>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+    @app.route('/<api_provider>/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
     @csrf.exempt
     @api_auth_required
     def proxy(api_provider: str, path: str = ''):
@@ -602,16 +659,38 @@ def create_app() -> Flask:
 
             # Handle streaming
             if is_streaming and response.headers.get('content-type', '').startswith('text/event-stream'):
+                if isinstance(response, Response):
+                    return response
+
                 def standardize_streaming_chunk(chunk, provider):
                     """Standardize streaming chunks to OpenAI format"""
                     try:
-                        # If the chunk is already in OpenAI format, return as is
-                        if chunk.startswith('data: ') and ('delta' in chunk or chunk.strip() == 'data: [DONE]'):
-                            return chunk
+                        if isinstance(chunk, bytes):
+                            chunk = chunk.decode("utf-8")
+
+                        stripped_chunk = chunk.strip()
+                        if not stripped_chunk or stripped_chunk.startswith(":"):
+                            return ""
+
+                        if chunk.startswith("data: "):
+                            data_payload = chunk[6:].strip()
+                        else:
+                            data_payload = stripped_chunk
                             
                         # If this is just the completion signal
-                        if chunk.strip() in ('[DONE]', 'data: [DONE]'):
+                        if data_payload == '[DONE]':
                             return 'data: [DONE]\n\n'
+
+                        if chunk.startswith("data: "):
+                            try:
+                                parsed_payload = json.loads(data_payload)
+                                if isinstance(parsed_payload, dict) and (
+                                    parsed_payload.get("object") == "chat.completion.chunk" or
+                                    "choices" in parsed_payload
+                                ):
+                                    return f"data: {data_payload}\n\n"
+                            except json.JSONDecodeError:
+                                pass
                             
                         # Extract content based on provider format
                         content = None
@@ -619,7 +698,7 @@ def create_app() -> Flask:
                         # Try to extract provider-specific formats
                         try:
                             if chunk.startswith('data: '):
-                                data_str = chunk[6:].strip()
+                                data_str = data_payload
                                 if data_str == '[DONE]':
                                     return 'data: [DONE]\n\n'
                                 data = json.loads(data_str)
@@ -670,13 +749,17 @@ def create_app() -> Flask:
                         return f"data: {json.dumps(fallback)}\n\n"
                 
                 def generate_stream():
+                    done_sent = False
                     try:
                         for chunk in response.iter_lines(decode_unicode=True):
-                            if chunk:
-                                # Standardize the chunk to OpenAI format
-                                yield standardize_streaming_chunk(chunk, api_provider)
+                            standardized_chunk = standardize_streaming_chunk(chunk, api_provider)
+                            if standardized_chunk:
+                                if standardized_chunk.strip() == "data: [DONE]":
+                                    done_sent = True
+                                yield standardized_chunk
                         # Ensure final [DONE] marker
-                        yield 'data: [DONE]\n\n'
+                        if not done_sent:
+                            yield 'data: [DONE]\n\n'
                     except Exception as e:
                         logger.error(f"Error in streaming response: {str(e)}")
                         error_chunk = {

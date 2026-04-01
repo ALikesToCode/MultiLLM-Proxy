@@ -1749,13 +1749,33 @@ class ProxyService:
             Standardized chunk in OpenAI-compatible SSE format
         """
         try:
-            # If the chunk is already in OpenAI format, return it as is
-            if chunk.startswith('data: ') and ('delta' in chunk or chunk.strip() == 'data: [DONE]'):
-                return chunk
+            if isinstance(chunk, bytes):
+                chunk = chunk.decode("utf-8")
+
+            stripped_chunk = chunk.strip()
+            if not stripped_chunk or stripped_chunk.startswith(":"):
+                return ""
+
+            if chunk.startswith("data: "):
+                data_payload = chunk[6:].strip()
+            else:
+                data_payload = stripped_chunk
                 
             # If the chunk is the completion signal
-            if chunk.strip() in ('[DONE]', 'data: [DONE]'):
+            if data_payload == '[DONE]':
                 return 'data: [DONE]\n\n'
+
+            # If the chunk is already an OpenAI-compatible SSE payload, preserve it
+            if chunk.startswith("data: "):
+                try:
+                    parsed_payload = json.loads(data_payload)
+                    if isinstance(parsed_payload, dict) and (
+                        parsed_payload.get("object") == "chat.completion.chunk" or
+                        "choices" in parsed_payload
+                    ):
+                        return f"data: {data_payload}\n\n"
+                except json.JSONDecodeError:
+                    pass
                 
             # Extract content from provider-specific format
             content = None
@@ -1794,7 +1814,7 @@ class ProxyService:
                 try:
                     # Try to parse as JSON
                     if chunk.startswith('data: '):
-                        chunk = chunk.replace('data: ', '')
+                        chunk = data_payload
                     
                     # Handle case where chunk is already JSON
                     if chunk.strip().startswith('{'):
@@ -1843,6 +1863,7 @@ class ProxyService:
         """
         try:
             is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
+            done_sent = False
             
             # For gzipped responses, we need to accumulate and decompress
             if is_gzipped:
@@ -1859,20 +1880,27 @@ class ProxyService:
                 with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
                     decompressed = gz.read().decode('utf-8')
                     for line in decompressed.split('\n'):
-                        line = line.strip()
-                        if line:
-                            yield cls._standardize_streaming_chunk(line, provider)
+                        standardized_chunk = cls._standardize_streaming_chunk(line, provider)
+                        if standardized_chunk:
+                            if standardized_chunk.strip() == "data: [DONE]":
+                                done_sent = True
+                            yield standardized_chunk
                 
                 # Signal completion
-                yield 'data: [DONE]\n\n'
+                if not done_sent:
+                    yield 'data: [DONE]\n\n'
             else:
                 # For non-gzipped responses
                 for line in response.iter_lines(decode_unicode=True):
-                    if line:
-                        yield cls._standardize_streaming_chunk(line, provider)
+                    standardized_chunk = cls._standardize_streaming_chunk(line, provider)
+                    if standardized_chunk:
+                        if standardized_chunk.strip() == "data: [DONE]":
+                            done_sent = True
+                        yield standardized_chunk
                 
                 # Signal completion
-                yield 'data: [DONE]\n\n'
+                if not done_sent:
+                    yield 'data: [DONE]\n\n'
         except Exception as e:
             logger.error(f"Error in streaming response processing: {str(e)}")
             error_msg = f"Error: {str(e)}"
