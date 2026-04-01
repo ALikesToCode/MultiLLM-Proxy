@@ -41,6 +41,7 @@ ENV/
 # IDE specific files
 .idea/
 .vscode/
+.vercel/
 *.swp
 *.swo
 .DS_Store
@@ -137,3 +138,4 @@ auth_tokens/
 credentials/
 api_keys.json
 user_data.json 
+.vercel

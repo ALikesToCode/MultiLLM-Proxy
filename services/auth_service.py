@@ -47,8 +47,8 @@ class AuthService:
                 logger.info("Initialized default admin user")
         
         # Load provider API keys from environment
-        for provider in ['openai', 'cerebras', 'xai', 'groq', 'azure', 'scaleway', 
-                        'hyperbolic', 'sambanova', 'openrouter', 'palm', 'together', 'nineteen']:
+        for provider in ['openai', 'cerebras', 'xai', 'groq', 'azure', 'scaleway',
+                        'hyperbolic', 'sambanova', 'openrouter', 'opencode', 'palm', 'together', 'nineteen']:
             env_key = f'{provider.upper()}_API_KEY'
             api_key = os.environ.get(env_key)
             if api_key:
