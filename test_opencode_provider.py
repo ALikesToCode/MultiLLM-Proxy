@@ -160,13 +160,62 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(
-            chunks,
-            [
-                'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
-                "data: [DONE]\n\n",
-            ],
+        first_chunk = json.loads(chunks[0][6:].strip())
+        self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Hello")
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
+
+    def test_streaming_normalizer_stops_after_done_marker(self):
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield 'data: {"choices":[{"delta":{"content":"Hello"}}]}'
+                yield "data: [DONE]"
+                yield 'data: {"choices":[{"delta":{"content":"should not arrive"}}]}'
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
         )
+
+        self.assertEqual(len(chunks), 2)
+        first_chunk = json.loads(chunks[0][6:].strip())
+        self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Hello")
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
+
+    def test_openrouter_streaming_handler_stops_after_done_marker(self):
+        class FakeStreamingResponse:
+            status_code = 200
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self):
+                yield b'data: {"choices":[{"delta":{"content":"Hello"}}]}'
+                yield b"data: [DONE]"
+                yield b'data: {"choices":[{"delta":{"content":"should not arrive"}}]}'
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=FakeStreamingResponse(),
+        ):
+            response = self.proxy_module.ProxyService._handle_openrouter_request(
+                method="POST",
+                url="https://opencode.ai/zen/go/v1/chat/completions",
+                headers={"Authorization": "Bearer provider-key"},
+                params={},
+                data=json.dumps({"stream": True}).encode("utf-8"),
+                request_data={"stream": True},
+                use_cache=False,
+                auth_token="provider-key",
+            )
+
+        chunks = list(response.response)
+        self.assertEqual(len(chunks), 2)
+        first_chunk = json.loads(chunks[0][6:].strip())
+        self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Hello")
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
 
 
 if __name__ == "__main__":

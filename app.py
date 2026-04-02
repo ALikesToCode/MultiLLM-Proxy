@@ -688,7 +688,8 @@ def create_app() -> Flask:
                                     parsed_payload.get("object") == "chat.completion.chunk" or
                                     "choices" in parsed_payload
                                 ):
-                                    return f"data: {data_payload}\n\n"
+                                    normalized_payload = ProxyService.normalize_json_text(parsed_payload)
+                                    return f"data: {json.dumps(normalized_payload)}\n\n"
                             except json.JSONDecodeError:
                                 pass
                             
@@ -727,6 +728,8 @@ def create_app() -> Flask:
                         # If we couldn't extract content, use the raw chunk
                         if content is None:
                             content = chunk
+                        elif isinstance(content, str):
+                            content = ProxyService._repair_mojibake_text(content)
                             
                         # Format in OpenAI-compatible structure
                         openai_chunk = {
@@ -756,6 +759,8 @@ def create_app() -> Flask:
                             if standardized_chunk:
                                 if standardized_chunk.strip() == "data: [DONE]":
                                     done_sent = True
+                                    yield standardized_chunk
+                                    break
                                 yield standardized_chunk
                         # Ensure final [DONE] marker
                         if not done_sent:

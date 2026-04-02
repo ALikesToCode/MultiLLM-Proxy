@@ -34,6 +34,7 @@ class ProxyService:
 
     _executor = ThreadPoolExecutor(max_workers=10)
     _tokenizer = None  # Lazy-load tokenizer
+    _mojibake_marker_pattern = re.compile(r"[\u0080-\u009f]|[ÃÂâðÐÑ]")
 
     # Class-level variables for token caching
     _google_token = None
@@ -268,11 +269,74 @@ class ProxyService:
         return cls._tokenizer
 
     @classmethod
+    def _mojibake_score(cls, text: str) -> int:
+        """
+        Estimate how likely a string is to contain mojibake.
+        """
+        if not text:
+            return 0
+
+        control_chars = sum(1 for char in text if 0x80 <= ord(char) <= 0x9F)
+        marker_chars = len(cls._mojibake_marker_pattern.findall(text))
+        replacement_chars = text.count("\ufffd")
+        return (control_chars * 4) + marker_chars + (replacement_chars * 2)
+
+    @classmethod
+    def _repair_mojibake_text(cls, text: str) -> str:
+        """
+        Repair obvious mojibake in a single string.
+        """
+        if not isinstance(text, str) or not text:
+            return text
+
+        best_text = text
+        best_score = cls._mojibake_score(text)
+        if best_score == 0:
+            return text
+
+        for source_encoding in ("latin-1", "cp1252"):
+            try:
+                candidate = text.encode(source_encoding).decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+
+            candidate_score = cls._mojibake_score(candidate)
+            if candidate_score < best_score:
+                best_text = candidate
+                best_score = candidate_score
+
+        return best_text
+
+    @classmethod
+    def normalize_json_text(cls, value: Any) -> Any:
+        """
+        Recursively repair mojibake in JSON-like structures.
+        """
+        if isinstance(value, str):
+            return cls._repair_mojibake_text(value)
+        if isinstance(value, list):
+            return [cls.normalize_json_text(item) for item in value]
+        if isinstance(value, dict):
+            return {key: cls.normalize_json_text(item) for key, item in value.items()}
+        return value
+
+    @classmethod
+    def normalize_text_for_token_count(cls, text: str) -> str:
+        """
+        Repair obvious mojibake before token counting.
+
+        This keeps token estimation aligned with the intended text without mutating
+        the message content that will be forwarded upstream.
+        """
+        return cls._repair_mojibake_text(text)
+
+    @classmethod
     def count_tokens(cls, text: str) -> int:
         """
         Count the number of tokens in a text string.
         """
-        return len(cls.get_tokenizer().encode(text))
+        normalized_text = cls.normalize_text_for_token_count(text)
+        return len(cls.get_tokenizer().encode(normalized_text))
 
     @classmethod
     def split_messages(cls, messages: List[Dict[str, str]], max_tokens: int = 4500) -> List[List[Dict[str, str]]]:
@@ -478,19 +542,21 @@ class ProxyService:
                         # Try to parse as JSON to validate
                         try:
                             # First try to parse the cleaned content
-                            json.loads(cleaned)
+                            parsed_cleaned = json.loads(cleaned)
                             # If JSON parsing succeeds, use the cleaned content
-                            response._content = cleaned.encode('utf-8')
+                            normalized_cleaned = cls.normalize_json_text(parsed_cleaned)
+                            response._content = json.dumps(normalized_cleaned).encode('utf-8')
                         except json.JSONDecodeError:
                             # If the response is not JSON, wrap it in a JSON structure
                             try:
                                 # Try to parse the original decoded content
-                                json.loads(decoded)
-                                response._content = decoded.encode('utf-8')
+                                parsed_decoded = json.loads(decoded)
+                                normalized_decoded = cls.normalize_json_text(parsed_decoded)
+                                response._content = json.dumps(normalized_decoded).encode('utf-8')
                             except json.JSONDecodeError:
                                 # If neither is valid JSON, wrap the content in a JSON structure
                                 wrapped_json = {
-                                    "data": cleaned,
+                                    "data": cls._repair_mojibake_text(cleaned),
                                     "status": response.status_code,
                                     "headers": dict(response.headers)
                                 }
@@ -1674,6 +1740,7 @@ class ProxyService:
             # Check for streaming response
             if request_data.get('stream', False) and response.status_code == 200:
                 def generate():
+                    done_sent = False
                     try:
                         for line in response.iter_lines():
                             if line:
@@ -1690,12 +1757,14 @@ class ProxyService:
                                     
                                     # Check for stream end marker
                                     if line_str.strip() == '[DONE]':
+                                        done_sent = True
                                         yield "data: [DONE]\n\n"
-                                        continue
+                                        break
                                     
                                     # Parse the chunk and pass it through
                                     json_data = json.loads(line_str)
-                                    yield f"data: {json.dumps(json_data)}\n\n"
+                                    normalized_data = cls.normalize_json_text(json_data)
+                                    yield f"data: {json.dumps(normalized_data)}\n\n"
                                     
                                 except json.JSONDecodeError as e:
                                     logger.error(f"Error parsing streaming response: {e}, line: {line}")
@@ -1705,7 +1774,8 @@ class ProxyService:
                                     continue
                         
                         # Ensure final [DONE] marker
-                        yield "data: [DONE]\n\n"
+                        if not done_sent:
+                            yield "data: [DONE]\n\n"
                     except Exception as e:
                         logger.error(f"Error in streaming generation: {str(e)}")
                         yield f"data: {json.dumps({'choices': [{'delta': {'content': str(e)}}]})}\n\n"
@@ -1773,7 +1843,8 @@ class ProxyService:
                         parsed_payload.get("object") == "chat.completion.chunk" or
                         "choices" in parsed_payload
                     ):
-                        return f"data: {data_payload}\n\n"
+                        normalized_payload = cls.normalize_json_text(parsed_payload)
+                        return f"data: {json.dumps(normalized_payload)}\n\n"
                 except json.JSONDecodeError:
                     pass
                 
@@ -1833,6 +1904,8 @@ class ProxyService:
             # If content extraction failed, use the raw chunk
             if content is None:
                 content = chunk
+            elif isinstance(content, str):
+                content = cls._repair_mojibake_text(content)
                 
             # Create OpenAI-compatible format
             formatted_chunk = {
@@ -1884,6 +1957,8 @@ class ProxyService:
                         if standardized_chunk:
                             if standardized_chunk.strip() == "data: [DONE]":
                                 done_sent = True
+                                yield standardized_chunk
+                                break
                             yield standardized_chunk
                 
                 # Signal completion
@@ -1896,6 +1971,8 @@ class ProxyService:
                     if standardized_chunk:
                         if standardized_chunk.strip() == "data: [DONE]":
                             done_sent = True
+                            yield standardized_chunk
+                            break
                         yield standardized_chunk
                 
                 # Signal completion
