@@ -967,7 +967,6 @@ class ProxyService:
                             mimetype='text/event-stream',
                             headers={
                                 'Cache-Control': 'no-cache',
-                                'Connection': 'keep-alive',
                                 'Content-Type': 'text/event-stream',
                                 'X-Accel-Buffering': 'no'
                             }
@@ -1140,7 +1139,6 @@ class ProxyService:
                     mimetype='text/event-stream',
                     headers={
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
                         'Content-Type': 'text/event-stream',
                         'X-Accel-Buffering': 'no'
                     }
@@ -1553,7 +1551,6 @@ class ProxyService:
                         mimetype='text/event-stream',
                         headers={
                             'Cache-Control': 'no-cache',
-                            'Connection': 'keep-alive',
                             'Content-Type': 'text/event-stream',
                             'X-Accel-Buffering': 'no'
                         }
@@ -1759,7 +1756,9 @@ class ProxyService:
                                     if line_str.strip() == '[DONE]':
                                         done_sent = True
                                         yield "data: [DONE]\n\n"
-                                        break
+                                        if hasattr(response, "close"):
+                                            response.close()
+                                        return
                                     
                                     # Parse the chunk and pass it through
                                     json_data = json.loads(line_str)
@@ -1780,6 +1779,9 @@ class ProxyService:
                         logger.error(f"Error in streaming generation: {str(e)}")
                         yield f"data: {json.dumps({'choices': [{'delta': {'content': str(e)}}]})}\n\n"
                         yield 'data: [DONE]\n\n'
+                    finally:
+                        if hasattr(response, "close"):
+                            response.close()
                 
                 # Return a proper streaming response
                 streaming_response = Response(
@@ -1787,7 +1789,6 @@ class ProxyService:
                     mimetype='text/event-stream',
                     headers={
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
                         'Content-Type': 'text/event-stream',
                         'X-Accel-Buffering': 'no'
                     }
@@ -1958,7 +1959,9 @@ class ProxyService:
                             if standardized_chunk.strip() == "data: [DONE]":
                                 done_sent = True
                                 yield standardized_chunk
-                                break
+                                if hasattr(response, "close"):
+                                    response.close()
+                                return
                             yield standardized_chunk
                 
                 # Signal completion
@@ -1972,7 +1975,9 @@ class ProxyService:
                         if standardized_chunk.strip() == "data: [DONE]":
                             done_sent = True
                             yield standardized_chunk
-                            break
+                            if hasattr(response, "close"):
+                                response.close()
+                            return
                         yield standardized_chunk
                 
                 # Signal completion
@@ -1983,6 +1988,9 @@ class ProxyService:
             error_msg = f"Error: {str(e)}"
             yield f"data: {json.dumps({'choices': [{'delta': {'content': error_msg}}]})}\n\n"
             yield 'data: [DONE]\n\n'
+        finally:
+            if hasattr(response, "close"):
+                response.close()
 
     @classmethod
     def make_request(
@@ -2068,7 +2076,6 @@ class ProxyService:
                     content_type='text/event-stream',
                     headers={
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
                         'X-Accel-Buffering': 'no'
                     }
                 )

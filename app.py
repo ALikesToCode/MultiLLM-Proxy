@@ -760,7 +760,9 @@ def create_app() -> Flask:
                                 if standardized_chunk.strip() == "data: [DONE]":
                                     done_sent = True
                                     yield standardized_chunk
-                                    break
+                                    if hasattr(response, "close"):
+                                        response.close()
+                                    return
                                 yield standardized_chunk
                         # Ensure final [DONE] marker
                         if not done_sent:
@@ -774,6 +776,9 @@ def create_app() -> Flask:
                         }
                         yield f"data: {json.dumps(error_chunk)}\n\n"
                         yield 'data: [DONE]\n\n'
+                    finally:
+                        if hasattr(response, "close"):
+                            response.close()
 
                 return Response(
                     generate_stream(),
@@ -781,7 +786,6 @@ def create_app() -> Flask:
                     content_type='text/event-stream',
                     headers={
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
                         'X-Accel-Buffering': 'no'
                     }
                 )
@@ -890,7 +894,6 @@ def create_app() -> Flask:
             mimetype='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
                 'X-Accel-Buffering': 'no'
             }
         )
@@ -1109,7 +1112,6 @@ def create_app() -> Flask:
                             mimetype='text/event-stream',
                             headers={
                                 'Cache-Control': 'no-cache',
-                                'Connection': 'keep-alive',
                                 'Content-Type': 'text/event-stream',
                                 'X-Accel-Buffering': 'no'
                             }
@@ -1251,7 +1253,6 @@ def create_app() -> Flask:
                         mimetype='text/event-stream',
                         headers={
                             'Cache-Control': 'no-cache',
-                            'Connection': 'keep-alive',
                             'Content-Type': 'text/event-stream',
                             'X-Accel-Buffering': 'no'
                         }

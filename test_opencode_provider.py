@@ -167,15 +167,20 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
     def test_streaming_normalizer_stops_after_done_marker(self):
         class FakeStreamingResponse:
             headers = {"content-type": "text/event-stream"}
+            closed = False
 
             def iter_lines(self, decode_unicode=True):
                 yield 'data: {"choices":[{"delta":{"content":"Hello"}}]}'
                 yield "data: [DONE]"
                 yield 'data: {"choices":[{"delta":{"content":"should not arrive"}}]}'
 
+            def close(self):
+                self.closed = True
+
+        fake_response = FakeStreamingResponse()
         chunks = list(
             self.proxy_module.ProxyService._create_streaming_response(
-                FakeStreamingResponse(),
+                fake_response,
                 "opencode",
             )
         )
@@ -184,6 +189,7 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
         first_chunk = json.loads(chunks[0][6:].strip())
         self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Hello")
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
+        self.assertTrue(fake_response.closed)
 
     def test_openrouter_streaming_handler_stops_after_done_marker(self):
         class FakeStreamingResponse:
