@@ -223,6 +223,45 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
         self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Hello")
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
 
+    def test_make_base_request_rewrites_brotli_accept_encoding(self):
+        fake_response = requests.Response()
+        fake_response.status_code = 200
+        fake_response._content = json.dumps(
+            {
+                "id": "chatcmpl-opencode",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hello from OpenCode"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ).encode("utf-8")
+        fake_response.headers["Content-Type"] = "application/json"
+
+        with patch("services.proxy_service.requests.Session.request", return_value=fake_response) as request_mock:
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="POST",
+                url="https://opencode.ai/zen/go/v1/chat/completions",
+                headers={
+                    "Authorization": "Bearer provider-key",
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "gzip, br",
+                },
+                params={},
+                data=json.dumps({"stream": False}).encode("utf-8"),
+                api_provider="opencode",
+                use_cache=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            request_mock.call_args.kwargs["headers"]["Accept-Encoding"],
+            "gzip, deflate",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

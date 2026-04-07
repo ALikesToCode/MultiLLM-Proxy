@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "multillm-proxy",
+  "main": "./cloudflare-worker.mjs",
+  "compatibility_date": "2026-04-07",
+  "containers": [
+    {
+      "class_name": "MultiLLMProxyContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "lite"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MULTILLM_PROXY_CONTAINER",
+        "class_name": "MultiLLMProxyContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "MultiLLMProxyContainer"
+      ]
+    }
+  ],
+  "vars": {
+    "FLASK_ENV": "production",
+    "SERVER_HOST": "0.0.0.0",
+    "SERVER_PORT": "8080",
+    "APP_NAME": "MultiLLM Proxy"
+  }
+}

@@ -99,6 +99,62 @@ class TokenizerNormalizationTest(unittest.TestCase):
         self.assertEqual(first_chunk["choices"][0]["delta"]["content"], clean_text)
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
 
+    def test_normalize_json_text_repairs_partial_mojibake_substrings(self):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "OOC: Oh my heart! ♡(ŐωŐäºº)",
+                    }
+                }
+            ],
+            "meta": ["~(ï¿£▽ï¿£)~*"],
+        }
+
+        normalized = self.proxy_module.ProxyService.normalize_json_text(payload)
+
+        self.assertEqual(
+            normalized["choices"][0]["message"]["content"],
+            "OOC: Oh my heart! ♡(ŐωŐ人)",
+        )
+        self.assertEqual(normalized["meta"][0], "~(￣▽￣)~*")
+
+    def test_create_streaming_response_repairs_partial_mojibake_substrings(self):
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield (
+                    "data: "
+                    + json.dumps(
+                        {
+                            "choices": [
+                                {
+                                    "delta": {
+                                        "content": "OOC: Oh my heart! ♡(ŐωŐäºº) ~(ï¿£▽ï¿£)~*",
+                                    }
+                                }
+                            ]
+                        }
+                    )
+                )
+                yield "data: [DONE]"
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
+        )
+
+        first_chunk = json.loads(chunks[0][6:].strip())
+        self.assertEqual(
+            first_chunk["choices"][0]["delta"]["content"],
+            "OOC: Oh my heart! ♡(ŐωŐ人) ~(￣▽￣)~*",
+        )
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
+
 
 if __name__ == "__main__":
     unittest.main()

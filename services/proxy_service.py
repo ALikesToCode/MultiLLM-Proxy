@@ -35,6 +35,12 @@ class ProxyService:
     _executor = ThreadPoolExecutor(max_workers=10)
     _tokenizer = None  # Lazy-load tokenizer
     _mojibake_marker_pattern = re.compile(r"[\u0080-\u009f]|[ÃÂâðÐÑ]")
+    _cp1252_utf8_continuation_chars = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
+    _utf8_as_single_byte_sequence_pattern = re.compile(
+        r"[\u00C2-\u00F4][\u0080-\u00BF"
+        + re.escape(_cp1252_utf8_continuation_chars)
+        + r"]+"
+    )
 
     # Class-level variables for token caching
     _google_token = None
@@ -175,7 +181,7 @@ class ProxyService:
 
         # Copy specific headers that should be preserved
         header_whitelist = {
-            'Content-Type', 'Accept', 'Accept-Encoding', 'User-Agent',
+            'Content-Type', 'Accept', 'User-Agent',
             'HTTP-Referer', 'X-Title', 'Anthropic-Version', 'OpenAI-Organization',
             'X-Request-ID', 'Accept-Language'
         }
@@ -279,7 +285,46 @@ class ProxyService:
         control_chars = sum(1 for char in text if 0x80 <= ord(char) <= 0x9F)
         marker_chars = len(cls._mojibake_marker_pattern.findall(text))
         replacement_chars = text.count("\ufffd")
-        return (control_chars * 4) + marker_chars + (replacement_chars * 2)
+        utf8_sequence_chars = sum(
+            len(match.group(0))
+            for match in cls._utf8_as_single_byte_sequence_pattern.finditer(text)
+        )
+        return (control_chars * 4) + marker_chars + (replacement_chars * 2) + (utf8_sequence_chars * 2)
+
+    @classmethod
+    def _repair_mojibake_substrings(cls, text: str) -> str:
+        """
+        Repair mojibake substrings inside otherwise valid Unicode text.
+        """
+        if not text:
+            return text
+
+        def replace_match(match: re.Match[str]) -> str:
+            segment = match.group(0)
+            best_segment = segment
+            best_score = cls._mojibake_score(segment)
+
+            for source_encoding in ("latin-1", "cp1252"):
+                try:
+                    candidate = segment.encode(source_encoding).decode("utf-8")
+                except (UnicodeEncodeError, UnicodeDecodeError):
+                    continue
+
+                candidate_score = cls._mojibake_score(candidate)
+                if candidate_score < best_score:
+                    best_segment = candidate
+                    best_score = candidate_score
+
+            return best_segment
+
+        repaired = text
+        for _ in range(3):
+            updated = cls._utf8_as_single_byte_sequence_pattern.sub(replace_match, repaired)
+            if updated == repaired:
+                break
+            repaired = updated
+
+        return repaired
 
     @classmethod
     def _repair_mojibake_text(cls, text: str) -> str:
@@ -304,6 +349,10 @@ class ProxyService:
             if candidate_score < best_score:
                 best_text = candidate
                 best_score = candidate_score
+
+        substring_repaired = cls._repair_mojibake_substrings(best_text)
+        if cls._mojibake_score(substring_repaired) < best_score:
+            return substring_repaired
 
         return best_text
 
@@ -483,10 +532,9 @@ class ProxyService:
                 session.mount('http://', adapter)
                 session.mount('https://', adapter)
 
-                # Only add Accept-Encoding for non-localhost requests
+                # Only advertise encodings we can reliably decode in this runtime.
                 if not url.startswith(('http://localhost:', 'http://127.0.0.1:', 'http://[::1]:')):
-                    if 'Accept-Encoding' not in headers:
-                        headers['Accept-Encoding'] = 'gzip, deflate'
+                    headers['Accept-Encoding'] = 'gzip, deflate'
                 else:
                     # For localhost, explicitly disable compression
                     headers['Accept-Encoding'] = 'identity'
