@@ -356,6 +356,95 @@ class ProxyService:
 
         return best_text
 
+    @staticmethod
+    def _is_retryable_timeout_payload(
+        api_provider: str,
+        status_code: int,
+        payload: Any,
+    ) -> bool:
+        """
+        Detect provider error payloads that should be retried automatically.
+        """
+        if api_provider != "opencode" or status_code != 400 or not isinstance(payload, dict):
+            return False
+
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return False
+
+        message = str(error.get("message", "")).strip().lower()
+        code = str(error.get("code", "")).strip()
+        return message == "timeout" and code in {"", "400"}
+
+    @classmethod
+    def _strip_embedded_stream_chunk_payload(cls, chunk: str) -> Optional[str]:
+        """
+        Remove leaked OpenAI-style chunk payloads embedded inside raw text lines.
+        """
+        if not chunk or chunk.startswith("data: "):
+            return None
+
+        marker = '"chat.completion.chunk"'
+        marker_index = chunk.find(marker)
+        if marker_index == -1:
+            return None
+
+        object_start = chunk.rfind("{", 0, marker_index)
+        if object_start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape_next = False
+        object_end = None
+
+        for index in range(object_start, len(chunk)):
+            char = chunk[index]
+
+            if escape_next:
+                escape_next = False
+                continue
+
+            if char == "\\":
+                escape_next = True
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    object_end = index + 1
+                    break
+
+        if object_end is None:
+            return None
+
+        try:
+            parsed_payload = json.loads(chunk[object_start:object_end])
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(parsed_payload, dict) or parsed_payload.get("object") != "chat.completion.chunk":
+            return None
+
+        cleaned_outer_text = (chunk[:object_start] + chunk[object_end:]).strip()
+        repaired_outer_text = cls._repair_mojibake_text(cleaned_outer_text).strip()
+
+        if cls._mojibake_score(repaired_outer_text) == 0 and any(
+            char.isalnum() for char in repaired_outer_text
+        ):
+            return repaired_outer_text
+
+        return ""
+
     @classmethod
     def normalize_json_text(cls, value: Any) -> Any:
         """
@@ -586,29 +675,55 @@ class ProxyService:
                         # Remove any ANSI escape sequences
                         ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]')
                         cleaned = ansi_escape.sub('', decoded)
-                        
+
+                        normalized_payload = None
+
                         # Try to parse as JSON to validate
                         try:
-                            # First try to parse the cleaned content
                             parsed_cleaned = json.loads(cleaned)
-                            # If JSON parsing succeeds, use the cleaned content
-                            normalized_cleaned = cls.normalize_json_text(parsed_cleaned)
-                            response._content = json.dumps(normalized_cleaned).encode('utf-8')
+                            normalized_payload = cls.normalize_json_text(parsed_cleaned)
                         except json.JSONDecodeError:
-                            # If the response is not JSON, wrap it in a JSON structure
                             try:
-                                # Try to parse the original decoded content
                                 parsed_decoded = json.loads(decoded)
-                                normalized_decoded = cls.normalize_json_text(parsed_decoded)
-                                response._content = json.dumps(normalized_decoded).encode('utf-8')
+                                normalized_payload = cls.normalize_json_text(parsed_decoded)
                             except json.JSONDecodeError:
-                                # If neither is valid JSON, wrap the content in a JSON structure
-                                wrapped_json = {
-                                    "data": cls._repair_mojibake_text(cleaned),
-                                    "status": response.status_code,
-                                    "headers": dict(response.headers)
-                                }
-                                response._content = json.dumps(wrapped_json).encode('utf-8')
+                                normalized_payload = None
+
+                        if normalized_payload is not None:
+                            if (
+                                cls._is_retryable_timeout_payload(
+                                    api_provider,
+                                    response.status_code,
+                                    normalized_payload,
+                                )
+                                and retry_count < MAX_RETRIES
+                            ):
+                                logger.warning(
+                                    "Retrying %s request after timeout payload (attempt %s/%s)",
+                                    api_provider,
+                                    retry_count + 1,
+                                    MAX_RETRIES,
+                                )
+                                time.sleep(RETRY_DELAY * (retry_count + 1))
+                                return cls._make_base_request(
+                                    method=method,
+                                    url=url,
+                                    headers=headers,
+                                    params=params,
+                                    data=data,
+                                    api_provider=api_provider,
+                                    use_cache=use_cache,
+                                    retry_count=retry_count + 1,
+                                )
+
+                            response._content = json.dumps(normalized_payload).encode('utf-8')
+                        else:
+                            wrapped_json = {
+                                "data": cls._repair_mojibake_text(cleaned),
+                                "status": response.status_code,
+                                "headers": dict(response.headers)
+                            }
+                            response._content = json.dumps(wrapped_json).encode('utf-8')
                                 
                         # Ensure Content-Type is application/json
                         response.headers['Content-Type'] = 'application/json'
@@ -1896,6 +2011,14 @@ class ProxyService:
                         return f"data: {json.dumps(normalized_payload)}\n\n"
                 except json.JSONDecodeError:
                     pass
+
+            stripped_embedded_payload = cls._strip_embedded_stream_chunk_payload(stripped_chunk)
+            if stripped_embedded_payload is not None:
+                if not stripped_embedded_payload:
+                    return ""
+                chunk = stripped_embedded_payload
+                stripped_chunk = chunk.strip()
+                data_payload = stripped_chunk
                 
             # Extract content from provider-specific format
             content = None

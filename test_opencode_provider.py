@@ -262,6 +262,58 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
             "gzip, deflate",
         )
 
+    def test_make_base_request_retries_opencode_timeout_payloads(self):
+        timeout_response = requests.Response()
+        timeout_response.status_code = 400
+        timeout_response._content = json.dumps(
+            {
+                "error": {
+                    "message": "timeout",
+                    "code": 400,
+                },
+                "user_id": "user_2z4xm5LomaIHfsnVqMhFsWrVrGY",
+            }
+        ).encode("utf-8")
+        timeout_response.headers["Content-Type"] = "application/json"
+
+        success_response = requests.Response()
+        success_response.status_code = 200
+        success_response._content = json.dumps(
+            {
+                "id": "chatcmpl-opencode-retry",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Recovered after retry"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ).encode("utf-8")
+        success_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "services.proxy_service.requests.Session.request",
+            side_effect=[timeout_response, success_response],
+        ) as request_mock:
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="POST",
+                url="https://opencode.ai/zen/go/v1/chat/completions",
+                headers={
+                    "Authorization": "Bearer provider-key",
+                    "Content-Type": "application/json",
+                },
+                params={},
+                data=json.dumps({"stream": False}).encode("utf-8"),
+                api_provider="opencode",
+                use_cache=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["choices"][0]["message"]["content"], "Recovered after retry")
+        self.assertEqual(request_mock.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

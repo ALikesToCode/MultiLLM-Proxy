@@ -155,6 +155,35 @@ class TokenizerNormalizationTest(unittest.TestCase):
         )
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
 
+    def test_create_streaming_response_skips_embedded_chunk_json_leaks(self):
+        leaked_chunk = (
+            '(ï½¡ï¾{"id":"gen-1776013195-X3nP5i1xO5vJQcOoiTPO","object":"chat.completion.chunk",'
+            '"created":1776013195,"model":"moonshotai/kimi-k2.5-0127","provider":"Moonshot AI",'
+            '"choices":[{"index":0,"delta":{"content":"Ã","role":"assistant"},"finish_reason":null}]}'
+            '¸Ã¢—•Ã¢€¿Ã¢—•ï½¡)]'
+        )
+
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield leaked_chunk
+                yield 'data: {"choices":[{"delta":{"content":"Katla"}}]}'
+                yield "data: [DONE]"
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
+        )
+
+        self.assertEqual(len(chunks), 2)
+        first_chunk = json.loads(chunks[0][6:].strip())
+        self.assertEqual(first_chunk["choices"][0]["delta"]["content"], "Katla")
+        self.assertNotIn("chat.completion.chunk", chunks[0])
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
+
 
 if __name__ == "__main__":
     unittest.main()
