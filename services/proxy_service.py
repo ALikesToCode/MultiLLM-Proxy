@@ -300,22 +300,7 @@ class ProxyService:
             return text
 
         def replace_match(match: re.Match[str]) -> str:
-            segment = match.group(0)
-            best_segment = segment
-            best_score = cls._mojibake_score(segment)
-
-            for source_encoding in ("latin-1", "cp1252"):
-                try:
-                    candidate = segment.encode(source_encoding).decode("utf-8")
-                except (UnicodeEncodeError, UnicodeDecodeError):
-                    continue
-
-                candidate_score = cls._mojibake_score(candidate)
-                if candidate_score < best_score:
-                    best_segment = candidate
-                    best_score = candidate_score
-
-            return best_segment
+            return cls._repair_mojibake_fragment(match.group(0))
 
         repaired = text
         for _ in range(3):
@@ -325,6 +310,52 @@ class ProxyService:
             repaired = updated
 
         return repaired
+
+    @classmethod
+    def _decode_mojibake_candidate(cls, text: str) -> Tuple[str, int]:
+        """
+        Try the supported single-byte interpretations and return the best candidate.
+        """
+        best_text = text
+        best_score = cls._mojibake_score(text)
+
+        for source_encoding in ("latin-1", "cp1252"):
+            try:
+                candidate = text.encode(source_encoding).decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+
+            candidate_score = cls._mojibake_score(candidate)
+            if candidate_score < best_score:
+                best_text = candidate
+                best_score = candidate_score
+
+        return best_text, best_score
+
+    @classmethod
+    def _repair_mojibake_fragment(cls, text: str) -> str:
+        """
+        Repair a suspicious substring, even when a valid trailing character was swallowed.
+        """
+        if not text:
+            return text
+
+        best_text, best_score = cls._decode_mojibake_candidate(text)
+
+        for split_index in range(len(text) - 1, 1, -1):
+            prefix = text[:split_index]
+            repaired_prefix, prefix_score = cls._decode_mojibake_candidate(prefix)
+            if prefix_score >= cls._mojibake_score(prefix):
+                continue
+
+            suffix = text[split_index:]
+            candidate = repaired_prefix + cls._repair_mojibake_fragment(suffix)
+            candidate_score = cls._mojibake_score(candidate)
+            if candidate_score < best_score:
+                best_text = candidate
+                best_score = candidate_score
+
+        return best_text
 
     @classmethod
     def _repair_mojibake_text(cls, text: str) -> str:
@@ -339,16 +370,7 @@ class ProxyService:
         if best_score == 0:
             return text
 
-        for source_encoding in ("latin-1", "cp1252"):
-            try:
-                candidate = text.encode(source_encoding).decode("utf-8")
-            except (UnicodeEncodeError, UnicodeDecodeError):
-                continue
-
-            candidate_score = cls._mojibake_score(candidate)
-            if candidate_score < best_score:
-                best_text = candidate
-                best_score = candidate_score
+        best_text, best_score = cls._decode_mojibake_candidate(text)
 
         substring_repaired = cls._repair_mojibake_substrings(best_text)
         if cls._mojibake_score(substring_repaired) < best_score:
@@ -452,17 +474,15 @@ class ProxyService:
             return False
 
         alnum_chars = sum(char.isalnum() for char in text)
+        ascii_word_chars = sum(char.isascii() and char.isalnum() for char in text)
         if alnum_chars == 0:
             return False
 
         mojibake_score = cls._mojibake_score(text)
-        if mojibake_score == 0:
-            return True
-
         if any(char.isspace() for char in text):
-            return alnum_chars >= 8 and mojibake_score <= max(8, len(text) // 3)
+            return ascii_word_chars >= 4 and mojibake_score <= max(8, len(text) // 3)
 
-        return alnum_chars >= 4 and mojibake_score <= max(4, len(text) // 4)
+        return ascii_word_chars >= 4 and mojibake_score <= max(4, len(text) // 4)
 
     @classmethod
     def normalize_json_text(cls, value: Any) -> Any:

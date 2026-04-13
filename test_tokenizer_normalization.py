@@ -120,6 +120,25 @@ class TokenizerNormalizationTest(unittest.TestCase):
         )
         self.assertEqual(normalized["meta"][0], "~(￣▽￣)~*")
 
+    def test_normalize_text_for_token_count_repairs_cp1252_and_latin1_utf8_mojibake(self):
+        clean_text = "It’s working — really €"
+
+        for encoding in ("latin-1", "cp1252"):
+            with self.subTest(encoding=encoding):
+                mojibake_text = clean_text.encode("utf-8").decode(encoding)
+                self.assertEqual(
+                    self.proxy_module.ProxyService.normalize_text_for_token_count(mojibake_text),
+                    clean_text,
+                )
+
+    def test_normalize_text_for_token_count_repairs_split_utf8_fragments_inside_emoticon(self):
+        mojibake_text = "(ï½¡•́ï¸¿•̀ï½¡)"
+
+        self.assertEqual(
+            self.proxy_module.ProxyService.normalize_text_for_token_count(mojibake_text),
+            "(｡•́︿•̀｡)",
+        )
+
     def test_create_streaming_response_repairs_partial_mojibake_substrings(self):
         class FakeStreamingResponse:
             headers = {"content-type": "text/event-stream"}
