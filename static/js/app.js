@@ -46,12 +46,26 @@ function initializeVue() {
     }
 }
 
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        return;
+    }
+
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js').catch((err) => {
+            console.error('Service worker registration failed:', err);
+        });
+    });
+}
+
 // Start initialization when DOM is loaded
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeVue);
 } else {
     initializeVue();
 }
+
+registerServiceWorker();
 
 // Copy text to clipboard
 function copyToClipboard(button) {

@@ -184,6 +184,44 @@ class TokenizerNormalizationTest(unittest.TestCase):
         self.assertNotIn("chat.completion.chunk", chunks[0])
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
 
+    def test_create_streaming_response_preserves_prose_while_stripping_embedded_chunk_json(self):
+        mixed_chunk = (
+            "She's a Desi queen trying to maintain her respectable married image while falling apart~ "
+            "(ï½¡•́ï¸¿•̀ï½¡)\n\n"
+            "Ready to resume whenever Human is! Just say the word and Celia will dive back into the "
+            "simulation! (ﾉ>ω<)ﾉ :ï½¡ï½¥:*:ï½¥ﾟ’"
+            '{"id":"gen-1776050894-GzfFOVxmNQJqMtzO6fHn","object":"chat.completion.chunk",'
+            '"created":1776050894,"model":"moonshotai/kimi-k2.5-0127","provider":"Moonshot AI",'
+            '"system_fingerprint":"fpv0_ec10c667","choices":[{"index":0,"delta":{"content":"â",'
+            '"role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}-'
+        )
+
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield mixed_chunk
+                yield "data: [DONE]"
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
+        )
+
+        self.assertEqual(len(chunks), 2)
+        first_chunk = json.loads(chunks[0][6:].strip())
+        content = first_chunk["choices"][0]["delta"]["content"]
+        self.assertIn(
+            "She's a Desi queen trying to maintain her respectable married image while falling apart",
+            content,
+        )
+        self.assertIn("Ready to resume whenever Human is!", content)
+        self.assertNotIn("chat.completion.chunk", content)
+        self.assertNotIn("gen-1776050894", content)
+        self.assertEqual(chunks[1], "data: [DONE]\n\n")
+
 
 if __name__ == "__main__":
     unittest.main()

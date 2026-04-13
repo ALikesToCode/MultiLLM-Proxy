@@ -438,12 +438,31 @@ class ProxyService:
         cleaned_outer_text = (chunk[:object_start] + chunk[object_end:]).strip()
         repaired_outer_text = cls._repair_mojibake_text(cleaned_outer_text).strip()
 
-        if cls._mojibake_score(repaired_outer_text) == 0 and any(
-            char.isalnum() for char in repaired_outer_text
-        ):
+        if cls._looks_like_meaningful_stream_text(repaired_outer_text):
             return repaired_outer_text
 
         return ""
+
+    @classmethod
+    def _looks_like_meaningful_stream_text(cls, text: str) -> bool:
+        """
+        Distinguish real leaked-prose lines from noise left behind after chunk stripping.
+        """
+        if not text:
+            return False
+
+        alnum_chars = sum(char.isalnum() for char in text)
+        if alnum_chars == 0:
+            return False
+
+        mojibake_score = cls._mojibake_score(text)
+        if mojibake_score == 0:
+            return True
+
+        if any(char.isspace() for char in text):
+            return alnum_chars >= 8 and mojibake_score <= max(8, len(text) // 3)
+
+        return alnum_chars >= 4 and mojibake_score <= max(4, len(text) // 4)
 
     @classmethod
     def normalize_json_text(cls, value: Any) -> Any:

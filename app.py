@@ -422,6 +422,42 @@ def create_app() -> Flask:
             mimetype='image/vnd.microsoft.icon'
         )
 
+    @app.route('/manifest.webmanifest')
+    def web_manifest():
+        """
+        Serve the PWA web manifest from the app root.
+        """
+        return send_from_directory(
+            os.path.join(app.root_path, 'static'),
+            'manifest.webmanifest',
+            mimetype='application/manifest+json'
+        )
+
+    @app.route('/service-worker.js')
+    def service_worker():
+        """
+        Serve the PWA service worker from the app root so it can control the whole app.
+        """
+        response = send_from_directory(
+            os.path.join(app.root_path, 'static'),
+            'service-worker.js',
+            mimetype='application/javascript'
+        )
+        response.headers['Service-Worker-Allowed'] = '/'
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+    @app.route('/apple-touch-icon.png')
+    def apple_touch_icon():
+        """
+        Serve the iOS home screen icon from the app root.
+        """
+        return send_from_directory(
+            os.path.join(app.root_path, 'static', 'icons'),
+            'apple-touch-icon.png',
+            mimetype='image/png'
+        )
+
     @app.route('/static/<path:filename>')
     def static_files(filename: str):
         """
@@ -443,7 +479,14 @@ def create_app() -> Flask:
             return
             
         # Skip auth for static files and login
-        if request.endpoint in ['login', 'static_files', 'favicon'] or request.path.startswith('/static/'):
+        if request.endpoint in [
+            'login',
+            'static_files',
+            'favicon',
+            'web_manifest',
+            'service_worker',
+            'apple_touch_icon',
+        ] or request.path.startswith('/static/'):
             return
 
         if not AuthService.is_authenticated():
@@ -663,84 +706,9 @@ def create_app() -> Flask:
                     return response
 
                 def standardize_streaming_chunk(chunk, provider):
-                    """Standardize streaming chunks to OpenAI format"""
+                    """Use ProxyService's shared stream normalizer to avoid drift."""
                     try:
-                        if isinstance(chunk, bytes):
-                            chunk = chunk.decode("utf-8")
-
-                        stripped_chunk = chunk.strip()
-                        if not stripped_chunk or stripped_chunk.startswith(":"):
-                            return ""
-
-                        if chunk.startswith("data: "):
-                            data_payload = chunk[6:].strip()
-                        else:
-                            data_payload = stripped_chunk
-                            
-                        # If this is just the completion signal
-                        if data_payload == '[DONE]':
-                            return 'data: [DONE]\n\n'
-
-                        if chunk.startswith("data: "):
-                            try:
-                                parsed_payload = json.loads(data_payload)
-                                if isinstance(parsed_payload, dict) and (
-                                    parsed_payload.get("object") == "chat.completion.chunk" or
-                                    "choices" in parsed_payload
-                                ):
-                                    normalized_payload = ProxyService.normalize_json_text(parsed_payload)
-                                    return f"data: {json.dumps(normalized_payload)}\n\n"
-                            except json.JSONDecodeError:
-                                pass
-                            
-                        # Extract content based on provider format
-                        content = None
-                        
-                        # Try to extract provider-specific formats
-                        try:
-                            if chunk.startswith('data: '):
-                                data_str = data_payload
-                                if data_str == '[DONE]':
-                                    return 'data: [DONE]\n\n'
-                                data = json.loads(data_str)
-                                
-                                # Handle different provider formats
-                                if provider == 'anthropic' and 'completion' in data:
-                                    content = data.get('completion', '')
-                                elif provider in ('gemini', 'gemma') and 'candidates' in data:
-                                    content = data['candidates'][0]['content']['parts'][0]['text']
-                                elif 'choices' in data and len(data['choices']) > 0:
-                                    # OpenAI-like format
-                                    choice = data['choices'][0]
-                                    if 'delta' in choice and 'content' in choice['delta']:
-                                        content = choice['delta']['content']
-                                    elif 'text' in choice:
-                                        content = choice['text']
-                                elif 'text' in data:
-                                    content = data['text']
-                            else:
-                                # Raw text chunk
-                                content = chunk
-                        except:
-                            # Fallback to raw text if parsing fails
-                            content = chunk
-                            
-                        # If we couldn't extract content, use the raw chunk
-                        if content is None:
-                            content = chunk
-                        elif isinstance(content, str):
-                            content = ProxyService._repair_mojibake_text(content)
-                            
-                        # Format in OpenAI-compatible structure
-                        openai_chunk = {
-                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": f"{provider}-stream",
-                            "choices": [{"delta": {"content": content}}]
-                        }
-                        
-                        return f"data: {json.dumps(openai_chunk)}\n\n"
+                        return ProxyService._standardize_streaming_chunk(chunk, provider)
                     except Exception as e:
                         logger.error(f"Error standardizing chunk: {str(e)}")
                         # Safe fallback

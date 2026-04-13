@@ -96,6 +96,37 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         self.assertIn("POST", response.headers["Access-Control-Allow-Methods"])
         self.assertIn("Authorization", response.headers["Access-Control-Allow-Headers"])
 
+    def test_login_page_advertises_pwa_manifest(self):
+        response = self.client.get("/login")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn('rel="manifest"', html)
+        self.assertIn("/manifest.webmanifest", html)
+        self.assertIn("/apple-touch-icon.png", html)
+
+    def test_manifest_route_serves_install_metadata(self):
+        response = self.client.get("/manifest.webmanifest")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/manifest+json", response.content_type)
+        manifest = response.get_json()
+        self.assertEqual(manifest["name"], "MultiLLM Proxy")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual(manifest["start_url"], "/")
+        self.assertTrue(any(icon["sizes"] == "192x192" for icon in manifest["icons"]))
+        self.assertTrue(any(icon["sizes"] == "512x512" for icon in manifest["icons"]))
+
+    def test_service_worker_route_is_root_scoped(self):
+        response = self.client.get("/service-worker.js")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response.content_type)
+        self.assertEqual(response.headers.get("Service-Worker-Allowed"), "/")
+        script = response.get_data(as_text=True)
+        self.assertIn("self.addEventListener('install'", script)
+        self.assertIn("offline.html", script)
+
     def test_streaming_proxy_response_is_returned_without_rewrapping(self):
         upstream_stream = Response(
             'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n',
@@ -123,6 +154,58 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://example.com")
         self.assertIn('data: {"choices":[{"delta":{"content":"Hello"}}]}', response.get_data(as_text=True))
         self.assertIn("data: [DONE]", response.get_data(as_text=True))
+
+    def test_streaming_route_strips_embedded_chunk_json_from_raw_upstream_lines(self):
+        mixed_chunk = (
+            "She's a Desi queen trying to maintain her respectable married image while falling apart~ "
+            "(ï½¡•́ï¸¿•̀ï½¡)\n\n"
+            "Ready to resume whenever Human is! Just say the word and Celia will dive back into the "
+            "simulation! (ﾉ>ω<)ﾉ :ï½¡ï½¥:*:ï½¥ﾟ’"
+            '{"id":"gen-1776050894-GzfFOVxmNQJqMtzO6fHn","object":"chat.completion.chunk",'
+            '"created":1776050894,"model":"moonshotai/kimi-k2.5-0127","provider":"Moonshot AI",'
+            '"system_fingerprint":"fpv0_ec10c667","choices":[{"index":0,"delta":{"content":"â",'
+            '"role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}-'
+        )
+
+        class FakeRawStreamingResponse:
+            status_code = 200
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield mixed_chunk
+                yield "data: [DONE]"
+
+            def close(self):
+                return None
+
+        with patch("app.ProxyService.make_request", return_value=FakeRawStreamingResponse()):
+            response = self.client.post(
+                "/opencode/chat/completions",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "Content-Type": "application/json",
+                    "Origin": "https://example.com",
+                },
+                json={
+                    "model": "kimi-k2.5",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 128,
+                    "stream": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        chunks = [chunk for chunk in response.get_data(as_text=True).split("\n\n") if chunk]
+        first_chunk = json.loads(chunks[0][6:])
+        content = first_chunk["choices"][0]["delta"]["content"]
+        self.assertIn(
+            "She's a Desi queen trying to maintain her respectable married image while falling apart",
+            content,
+        )
+        self.assertIn("Ready to resume whenever Human is!", content)
+        self.assertNotIn("chat.completion.chunk", content)
+        self.assertNotIn("gen-1776050894", content)
+        self.assertEqual(chunks[1], "data: [DONE]")
 
 
 class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
