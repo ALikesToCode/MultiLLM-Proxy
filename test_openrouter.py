@@ -20,7 +20,19 @@ load_dotenv()
 DEFAULT_HOST = "http://localhost:1400"
 DEFAULT_MODEL = "openai/gpt-3.5-turbo"
 DEFAULT_PROMPT = "Write a short poem about artificial intelligence"
-DEFAULT_ADMIN_KEY = "MjM0NTY3ODkwMTI"  # Default admin key for MultiLLM-Proxy
+DEFAULT_ADMIN_KEY = os.environ.get("ADMIN_API_KEY")
+
+
+def resolve_api_key(args):
+    """Resolve the API key from CLI flags or the environment."""
+    if args.key:
+        return args.key
+
+    env_admin_key = os.environ.get("ADMIN_API_KEY")
+    if env_admin_key:
+        return env_admin_key
+
+    raise ValueError("Provide --key or set ADMIN_API_KEY in the environment before running this script")
 
 def test_openrouter_non_streaming(host, model, prompt, api_key):
     """Test OpenRouter with a non-streaming request"""
@@ -173,12 +185,16 @@ def main():
     parser.add_argument("--host", default=DEFAULT_HOST, help=f"Host URL (default: {DEFAULT_HOST})")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model to test (default: {DEFAULT_MODEL})")
     parser.add_argument("--prompt", default=DEFAULT_PROMPT, help=f"Prompt to use (default: {DEFAULT_PROMPT})")
-    parser.add_argument("--key", default=DEFAULT_ADMIN_KEY, help=f"API key (default: {DEFAULT_ADMIN_KEY})")
+    parser.add_argument("--key", default=None, help="API key (default: $ADMIN_API_KEY)")
     parser.add_argument("--no-stream", action="store_true", help="Skip streaming test")
     parser.add_argument("--no-regular", action="store_true", help="Skip regular (non-streaming) test")
     parser.add_argument("--no-credits", action="store_true", help="Skip credits check")
     
     args = parser.parse_args()
+    try:
+        api_key = resolve_api_key(args)
+    except ValueError as error:
+        parser.error(str(error))
     
     print("🚀 OpenRouter Integration Test")
     print(f"🔗 Host: {args.host}")
@@ -188,17 +204,17 @@ def main():
     
     # Test credits endpoint
     if not args.no_credits:
-        if not test_openrouter_credits(args.host, args.key):
+        if not test_openrouter_credits(args.host, api_key):
             success = False
     
     # Test non-streaming request
     if not args.no_regular:
-        if not test_openrouter_non_streaming(args.host, args.model, args.prompt, args.key):
+        if not test_openrouter_non_streaming(args.host, args.model, args.prompt, api_key):
             success = False
     
     # Test streaming request
     if not args.no_stream:
-        if not test_openrouter_streaming(args.host, args.model, args.prompt, args.key):
+        if not test_openrouter_streaming(args.host, args.model, args.prompt, api_key):
             success = False
     
     if success:
