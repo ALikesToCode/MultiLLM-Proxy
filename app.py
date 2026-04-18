@@ -32,6 +32,7 @@ from services.cache_service import CacheService
 from error_handlers import init_error_handlers, APIError
 from config import DevelopmentConfig, ProductionConfig, Config
 from proxy import PROVIDER_DETAILS
+from security_config import validate_runtime_secrets
 
 # Configure basic logging
 logging.basicConfig(
@@ -245,6 +246,7 @@ def create_app() -> Flask:
     Create and configure the Flask application.
     """
     load_dotenv()
+    runtime_secrets = validate_runtime_secrets()
 
     app = Flask(
         __name__,
@@ -253,7 +255,8 @@ def create_app() -> Flask:
     )
 
     # Secure session handling
-    app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'your-secret-key')
+    app.secret_key = runtime_secrets['FLASK_SECRET_KEY']
+    app.config['JWT_SECRET'] = runtime_secrets['JWT_SECRET']
 
     # Initialize CSRF protection
     csrf = CSRFProtect()
