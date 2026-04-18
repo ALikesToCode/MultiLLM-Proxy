@@ -349,7 +349,7 @@ def create_app() -> Flask:
         try:
             if request.method == 'POST':
                 current_user = AuthService.get_current_user()
-                if not current_user or not getattr(current_user, 'is_admin', False):
+                if not current_user or not current_user.get('is_admin', False):
                     raise APIError("Only admin users can create new users", status_code=403)
 
                 username = request.form.get('username')
@@ -544,7 +544,7 @@ def create_app() -> Flask:
 
             stats = metrics_service.get_stats()
             users_info = {
-                'total': len(AuthService.list_users()),
+                'total': AuthService.count_users(),
                 'active_sessions': len(session.keys()) if session else 1,
                 'recent_activity': len(metrics_service.get_recent_activity())
             }
