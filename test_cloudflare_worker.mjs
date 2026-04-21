@@ -339,7 +339,7 @@ test("worker renders a safe visible <think> block for non-streaming opencode res
   }
 });
 
-test("worker prettifies non-stream think text around quotes and sentence boundaries", async () => {
+test("worker preserves raw non-stream think text apart from think wrapping", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("opencode fallback should bypass the container");
@@ -393,13 +393,10 @@ test("worker prettifies non-stream think text around quotes and sentence boundar
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.match(
+    assert.equal(
       payload.choices[0].message.content,
-      /^<think>The user wants me to reply with exactly "pong"\. So I should output just the word "pong" without any punctuation\. No, "exactly pong" implies just the word\.<\/think>\n\npong$/,
+      '<think>The user wants me to reply with exactly "pong".So I should output just the word "pong "without any punctuation. No,"exactly pong "implies just the word.</think>\n\npong',
     );
-    assert.doesNotMatch(payload.choices[0].message.content, /\."So/);
-    assert.doesNotMatch(payload.choices[0].message.content, /"pong "without/);
-    assert.doesNotMatch(payload.choices[0].message.content, /No,"exactly/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -551,7 +548,7 @@ test("worker ignores later reasoning deltas after visible streaming content star
   }
 });
 
-test("worker coalesces streamed thinking fragments into human-readable text", async () => {
+test("worker preserves streamed thinking fragments literally", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -572,17 +569,17 @@ test("worker coalesces streamed thinking fragments into human-readable text", as
       );
       controller.enqueue(
         encoder.encode(
-          'data: {"id":"gen-think-2","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"user"}}]}\n',
+          'data: {"id":"gen-think-2","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":" user"}}]}\n',
         ),
       );
       controller.enqueue(
         encoder.encode(
-          'data: {"id":"gen-think-3","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"wants"}}]}\n',
+          'data: {"id":"gen-think-3","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":" wants"}}]}\n',
         ),
       );
       controller.enqueue(
         encoder.encode(
-          'data: {"id":"gen-think-4","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"pong."}}]}\n',
+          'data: {"id":"gen-think-4","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":" pong."}}]}\n',
         ),
       );
       controller.enqueue(
@@ -622,7 +619,6 @@ test("worker coalesces streamed thinking fragments into human-readable text", as
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
     assert.match(text, /The user wants pong\./);
-    assert.doesNotMatch(text, /Theuserwantspong\./);
     assert.match(text, /"content":"<\/think>\\n\\n"/);
     assert.match(text, /"content":"pong"/);
   } finally {
@@ -630,7 +626,7 @@ test("worker coalesces streamed thinking fragments into human-readable text", as
   }
 });
 
-test("worker prettifies quoted and colon-prefixed split thinking words", async () => {
+test("worker preserves quoted and colon-prefixed streamed thinking text", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -666,12 +662,7 @@ test("worker prettifies quoted and colon-prefixed split thinking words", async (
       );
       controller.enqueue(
         encoder.encode(
-          'data: {"id":"gen-think-5","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"p"}}]}\n',
-        ),
-      );
-      controller.enqueue(
-        encoder.encode(
-          'data: {"id":"gen-think-6","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"ong."}}]}\n',
+          'data: {"id":"gen-think-5","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":" pong"}}]}\n',
         ),
       );
       controller.enqueue(
@@ -710,9 +701,7 @@ test("worker prettifies quoted and colon-prefixed split thinking words", async (
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.match(text, /\\"pong\\"\. The answer is simply: pong\./);
-    assert.doesNotMatch(text, /" p ong "/);
-    assert.doesNotMatch(text, /simply: p ong/);
+    assert.match(text, /\\"pong\\"\. The answer is simply: pong/);
   } finally {
     globalThis.fetch = originalFetch;
   }

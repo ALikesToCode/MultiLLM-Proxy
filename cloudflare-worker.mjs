@@ -263,31 +263,38 @@ function looksLikeMeaningfulStreamText(text) {
   return alnumChars > 0 && asciiWordChars >= 4;
 }
 
-function normalizeReasoningCandidate(value) {
+function sanitizeReasoningCandidate(value, { trimEdges = false } = {}) {
   if (typeof value !== "string") {
     return "";
   }
 
-  let normalized = value.replace(/<\/?think>/gi, " ");
-  const strippedEmbeddedPayload = stripEmbeddedStreamChunkPayload(normalized);
+  let sanitized = value.replace(/<\/?think>/gi, "");
+  const strippedEmbeddedPayload = stripEmbeddedStreamChunkPayload(sanitized);
   if (strippedEmbeddedPayload !== null) {
-    normalized = strippedEmbeddedPayload;
+    sanitized = strippedEmbeddedPayload;
   }
 
-  return normalized.replace(/\s+/g, " ").trim();
+  if (!trimEdges) {
+    return sanitized;
+  }
+
+  return sanitized.trim();
 }
 
-function extractReasoningPreview(source) {
+function extractReasoningPreview(source, { trimEdges = true } = {}) {
   if (!source || typeof source !== "object") {
     return "";
   }
 
   const parts = [];
+  const seen = new Set();
   const maybePush = (value) => {
-    const normalized = normalizeReasoningCandidate(value);
-    if (normalized && !parts.includes(normalized)) {
-      parts.push(normalized);
+    const sanitized = sanitizeReasoningCandidate(value, { trimEdges });
+    if (!sanitized || seen.has(sanitized)) {
+      return;
     }
+    seen.add(sanitized);
+    parts.push(sanitized);
   };
 
   maybePush(source.reasoning_content);
@@ -308,103 +315,11 @@ function extractReasoningPreview(source) {
     }
   }
 
-  return parts.join(" ").trim();
-}
-
-function prettifyVisibleThinkingText(text) {
-  if (typeof text !== "string" || !text) {
-    return "";
-  }
-
-  const normalizedText = text
-    .replace(/\s+([.,!?;:)\]}])/g, "$1")
-    .replace(/([(\[{])\s+/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  let prettified = "";
-  let insideQuote = false;
-
-  for (let index = 0; index < normalizedText.length; index += 1) {
-    const character = normalizedText[index];
-
-    if (character === '"') {
-      if (!insideQuote) {
-        const previousCharacter = prettified.at(-1) ?? "";
-        if (previousCharacter && !/\s/.test(previousCharacter) && !/[([{]/.test(previousCharacter)) {
-          prettified += " ";
-        }
-
-        prettified += '"';
-        insideQuote = true;
-
-        while (normalizedText[index + 1] === " ") {
-          index += 1;
-        }
-        continue;
-      }
-
-      prettified = prettified.replace(/\s+$/u, "");
-      prettified += '"';
-      insideQuote = false;
-
-      while (normalizedText[index + 1] === " ") {
-        index += 1;
-      }
-
-      if (/[A-Za-z]/.test(normalizedText[index + 1] ?? "")) {
-        prettified += " ";
-      }
-      continue;
-    }
-
-    if (character === " ") {
-      if (!prettified || prettified.endsWith(" ")) {
-        continue;
-      }
-      prettified += " ";
-      continue;
-    }
-
-    prettified += character;
-  }
-
-  prettified = prettified
-    .replace(/\s+([.,!?;:)\]}])/g, "$1")
-    .replace(/([(\[{])\s+/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  prettified = prettified.replace(/"([^"\n]+)"/g, (match, innerText) => {
-    const normalizedInner = innerText.replace(/\s+/g, " ").trim();
-    if (!normalizedInner) {
-      return '""';
-    }
-
-    const innerTokens = normalizedInner.split(" ");
-    const shouldCollapseSubwords =
-      innerTokens.length > 1 &&
-      innerTokens.length <= 4 &&
-      innerTokens.every((token) => /^[A-Za-z]+$/.test(token)) &&
-      innerTokens.some((token) => token.length <= 2) &&
-      innerTokens.join("").length <= 16;
-
-    return `"${shouldCollapseSubwords ? innerTokens.join("") : normalizedInner}"`;
-  });
-
-  prettified = prettified
-    .replace(/([.!?])([A-Z])/g, (_, punctuation, nextLetter) => `${punctuation} ${nextLetter}`);
-
-  prettified = prettified.replace(
-    /(:\s+)([b-hj-z])\s+([a-z]{2,6})(?=[.,!?;:]?(?:\s|$))/g,
-    (_, prefix, firstPart, secondPart) => `${prefix}${firstPart}${secondPart}`,
-  );
-
-  return prettified;
+  return parts.join("");
 }
 
 function formatVisibleThinkBlock(reasoningPreview, content = "") {
-  const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
+  const normalizedPreview = sanitizeReasoningCandidate(reasoningPreview, { trimEdges: true });
   if (!normalizedPreview) {
     return typeof content === "string" ? content : "";
   }
@@ -413,10 +328,9 @@ function formatVisibleThinkBlock(reasoningPreview, content = "") {
     normalizedPreview.length > MAX_VISIBLE_THINK_CHARS
       ? `${normalizedPreview.slice(0, MAX_VISIBLE_THINK_CHARS - 1).trimEnd()}…`
       : normalizedPreview;
-  const prettifiedPreview = prettifyVisibleThinkingText(trimmedPreview);
   const normalizedContent = typeof content === "string" ? content : "";
 
-  return `<think>${prettifiedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
+  return `<think>${trimmedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
 }
 
 function flushVisibleThinkingBuffer(state) {
@@ -424,13 +338,7 @@ function flushVisibleThinkingBuffer(state) {
     return "";
   }
 
-  let combinedPreview = state.thinkingBuffer.join(" ");
-  combinedPreview = combinedPreview
-    .replace(/\s+([.,!?;:)\]}])/g, "$1")
-    .replace(/([(\[{])\s+/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
-  combinedPreview = prettifyVisibleThinkingText(combinedPreview);
+  const combinedPreview = state.thinkingBuffer.join("");
 
   state.thinkingBuffer = [];
   state.thinkingBufferedChars = 0;
@@ -450,7 +358,7 @@ function flushVisibleThinkingBuffer(state) {
 }
 
 function appendVisibleThinkingChunk(reasoningPreview, state) {
-  const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
+  const normalizedPreview = sanitizeReasoningCandidate(reasoningPreview);
   if (
     !normalizedPreview ||
     state.thinkingClosed ||
@@ -474,7 +382,7 @@ function appendVisibleThinkingChunk(reasoningPreview, state) {
     : previewChunk.length;
 
   state.thinkingBuffer.push(previewChunk);
-  state.thinkingBufferedChars += previewChunk.length + (state.thinkingBuffer.length > 1 ? 1 : 0);
+  state.thinkingBufferedChars += previewChunk.length;
 
   if (
     /[.!?…]$/.test(previewChunk) ||
@@ -518,7 +426,7 @@ function extractTaggedReasoningContent(chunk, insideReasoningBlock) {
       reasoningParts.push(remaining);
       return {
         contentChunk: "",
-        reasoningChunk: reasoningParts.join(" "),
+        reasoningChunk: reasoningParts.join(""),
         insideReasoningBlock: true,
       };
     }
@@ -552,7 +460,7 @@ function extractTaggedReasoningContent(chunk, insideReasoningBlock) {
 
   return {
     contentChunk: contentParts.join("").trim(),
-    reasoningChunk: reasoningParts.join(" ").trim(),
+    reasoningChunk: reasoningParts.join(""),
     insideReasoningBlock,
   };
 }
@@ -754,9 +662,9 @@ function standardizeOpencodeStreamingChunk(chunk, state) {
         let output = "";
         const reasoningPreview = Array.isArray(parsedPayload.choices)
           ? parsedPayload.choices
-              .map((choice) => extractReasoningPreview(choice?.delta))
+              .map((choice) => extractReasoningPreview(choice?.delta, { trimEdges: false }))
               .filter(Boolean)
-              .join(" ")
+              .join("")
           : "";
         output += appendVisibleThinkingChunk(reasoningPreview, state);
 
