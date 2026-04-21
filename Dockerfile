@@ -23,9 +23,7 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 COPY . .
-COPY scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
-
-RUN chmod +x /usr/local/bin/cloudflare-entrypoint.sh
+COPY --chmod=755 scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
 
 EXPOSE 8080
 
