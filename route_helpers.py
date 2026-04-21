@@ -143,75 +143,59 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
     except Exception as error:
         logger.error("Error fetching provider stats for %s: %s", provider, error)
 
+    base_payload = {
+        "name": provider.upper(),
+        "description": details.get("description", ""),
+        "endpoints": details.get("endpoints", []),
+        "requests_24h": provider_stats.get("requests_24h", 0),
+        "success_rate": provider_stats.get("success_rate", 0),
+        "error_rate": provider_stats.get("error_rate", 0),
+        "errors": provider_stats.get("errors", 0),
+        "avg_latency": provider_stats.get("avg_latency", 0),
+        "p95_latency": provider_stats.get("p95_latency", 0),
+        "last_request_at": provider_stats.get("last_request_at"),
+        "example_curl": details.get("example_curl", ""),
+    }
+
     try:
         if provider == "googleai":
             token = AuthService.get_google_token()
             if not token:
                 return {
-                    "name": provider.upper(),
-                    "description": details.get("description", ""),
+                    **base_payload,
                     "active": False,
                     "is_configured": False,
-                    "endpoints": details.get("endpoints", []),
                     "status": "error",
                     "error": "Google AI token not configured",
-                    "requests_24h": provider_stats.get("requests_24h", 0),
-                    "success_rate": provider_stats.get("success_rate", 0),
-                    "avg_latency": provider_stats.get("avg_latency", 0),
-                    "example_curl": details.get("example_curl", ""),
                 }
             return {
-                "name": provider.upper(),
-                "description": details.get("description", ""),
+                **base_payload,
                 "active": True,
                 "is_configured": True,
-                "endpoints": details.get("endpoints", []),
                 "status": "ok",
-                "requests_24h": provider_stats.get("requests_24h", 0),
-                "success_rate": provider_stats.get("success_rate", 0),
-                "avg_latency": provider_stats.get("avg_latency", 0),
-                "example_curl": details.get("example_curl", ""),
             }
 
         api_key = AuthService.get_api_key(provider)
         if not api_key:
             return {
-                "name": provider.upper(),
-                "description": details.get("description", ""),
+                **base_payload,
                 "active": False,
                 "is_configured": False,
-                "endpoints": details.get("endpoints", []),
                 "status": "error",
                 "error": f"{provider.upper()} API key not configured",
-                "requests_24h": provider_stats.get("requests_24h", 0),
-                "success_rate": provider_stats.get("success_rate", 0),
-                "avg_latency": provider_stats.get("avg_latency", 0),
-                "example_curl": details.get("example_curl", ""),
             }
         return {
-            "name": provider.upper(),
-            "description": details.get("description", ""),
+            **base_payload,
             "active": True,
             "is_configured": True,
-            "endpoints": details.get("endpoints", []),
             "status": "ok",
-            "requests_24h": provider_stats.get("requests_24h", 0),
-            "success_rate": provider_stats.get("success_rate", 0),
-            "avg_latency": provider_stats.get("avg_latency", 0),
-            "example_curl": details.get("example_curl", ""),
         }
     except Exception as error:
         logger.error("Error checking provider %s: %s", provider, error)
         return {
-            "name": provider.upper(),
-            "description": details.get("description", ""),
+            **base_payload,
             "active": False,
             "is_configured": False,
-            "endpoints": details.get("endpoints", []),
             "status": "error",
             "error": str(error),
-            "requests_24h": provider_stats.get("requests_24h", 0),
-            "success_rate": provider_stats.get("success_rate", 0),
-            "avg_latency": provider_stats.get("avg_latency", 0),
-            "example_curl": details.get("example_curl", ""),
         }

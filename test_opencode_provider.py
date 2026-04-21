@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -126,6 +127,41 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         script = response.get_data(as_text=True)
         self.assertIn("self.addEventListener('install'", script)
         self.assertIn("offline.html", script)
+
+    def test_status_json_includes_dashboard_analytics(self):
+        metrics_service = self.app_module.MetricsService.get_instance()
+        metrics_service.requests.clear()
+        current_time = time.time()
+        metrics_service.track_request("openai", 200, 120, timestamp=current_time - 30)
+        metrics_service.track_request("openrouter", 500, 450, timestamp=current_time - 15)
+
+        with self.client.session_transaction() as session:
+            session["authenticated"] = True
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key": "admin-test-key",
+            }
+
+        with patch("app.check_provider", side_effect=lambda provider, details, app_config: {
+            "name": provider.upper(),
+            "active": True,
+            "description": details.get("description", ""),
+            "requests_24h": 1,
+            "success_rate": 100.0,
+            "avg_latency": 120.0,
+            "p95_latency": 120.0,
+            "error_rate": 0.0,
+        }):
+            response = self.client.get("/", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("analytics", payload)
+        self.assertIn("provider_breakdown", payload["analytics"])
+        self.assertIn("recent_failures", payload["analytics"])
+        self.assertIn("traffic_series", payload["stats"])
+        self.assertEqual(payload["stats"]["failed_requests"], 1)
 
     def test_streaming_proxy_response_is_returned_without_rewrapping(self):
         upstream_stream = Response(

@@ -17,6 +17,42 @@ from services.metrics_service import MetricsService
 logger = logging.getLogger(__name__)
 
 
+def build_system_metrics(metrics_service: MetricsService) -> dict:
+    """Collect system metrics used by the dashboard and SSE stream."""
+    return {
+        "cpu_usage": round(psutil.cpu_percent(interval=1), 1),
+        "memory_usage": round(psutil.virtual_memory().percent, 1),
+        "start_time": metrics_service.start_time,
+        "uptime_start_seconds": int(metrics_service.start_time),
+    }
+
+
+def build_dashboard_analytics(metrics_service: MetricsService, providers: dict, stats: dict | None = None) -> dict:
+    """Assemble dashboard-focused analytics derived from request and provider data."""
+    stats = stats or metrics_service.get_stats()
+    provider_breakdown = metrics_service.get_provider_breakdown()
+    recent_failures = metrics_service.get_recent_failures(limit=6)
+
+    configured_providers = sum(
+        1 for details in providers.values()
+        if details.get("is_configured", details.get("active", False))
+    )
+    active_providers = sum(1 for details in providers.values() if details.get("active"))
+
+    traffic_series = stats.get("traffic_series", [])
+    peak_hour = max(traffic_series, key=lambda item: item.get("requests", 0), default=None)
+
+    return {
+        "provider_breakdown": provider_breakdown,
+        "recent_failures": recent_failures,
+        "configured_providers": configured_providers,
+        "active_providers": active_providers,
+        "inactive_providers": max(configured_providers - active_providers, 0),
+        "providers_with_traffic": len(provider_breakdown),
+        "peak_hour": peak_hour,
+    }
+
+
 def register_core_routes(app) -> None:
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error: CSRFError):
@@ -270,11 +306,7 @@ def register_core_routes(app) -> None:
             errors = []
 
             metrics_service = MetricsService.get_instance()
-            system = {
-                "cpu_usage": round(psutil.cpu_percent(interval=1), 1),
-                "memory_usage": round(psutil.virtual_memory().percent, 1),
-                "start_time": metrics_service.start_time,
-            }
+            system = build_system_metrics(metrics_service)
 
             stats = metrics_service.get_stats()
             users_info = {
@@ -292,11 +324,20 @@ def register_core_routes(app) -> None:
                     providers[provider] = {
                         "name": provider.upper(),
                         "active": False,
+                        "is_configured": False,
                         "status": "error",
                         "error": str(error),
+                        "requests_24h": 0,
+                        "success_rate": 0,
+                        "error_rate": 0,
+                        "errors": 0,
+                        "avg_latency": 0,
+                        "p95_latency": 0,
+                        "last_request_at": None,
                     }
 
             recent_activity = metrics_service.get_recent_activity()
+            analytics = build_dashboard_analytics(metrics_service, providers, stats)
 
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(
@@ -304,6 +345,7 @@ def register_core_routes(app) -> None:
                         "status": "running",
                         "system": system,
                         "stats": stats,
+                        "analytics": analytics,
                         "users": users_info,
                         "providers": providers,
                         "recent_activity": recent_activity,
@@ -315,6 +357,7 @@ def register_core_routes(app) -> None:
                 "status.html",
                 system=system,
                 stats=stats,
+                analytics=analytics,
                 users=users_info,
                 providers=providers,
                 recent_activity=recent_activity,
@@ -373,11 +416,7 @@ def register_core_routes(app) -> None:
                 current_time = int(time.time())
                 try:
                     if current_time % 5 == 0:
-                        system_data = {
-                            "cpu_usage": round(psutil.cpu_percent(interval=1), 1),
-                            "memory_usage": round(psutil.virtual_memory().percent, 1),
-                            "start_time": metrics_service.start_time,
-                        }
+                        system_data = build_system_metrics(metrics_service)
                         yield f"event: system\ndata: {json.dumps(system_data)}\n\n"
 
                     if current_time % 10 == 0:
@@ -397,10 +436,24 @@ def register_core_routes(app) -> None:
                                 logger.error("Error checking provider %s: %s", provider, error)
                                 providers_info[provider] = {
                                     "active": False,
+                                    "is_configured": False,
                                     "status": "error",
                                     "error": str(error),
+                                    "requests_24h": 0,
+                                    "success_rate": 0,
+                                    "error_rate": 0,
+                                    "errors": 0,
+                                    "avg_latency": 0,
+                                    "p95_latency": 0,
+                                    "last_request_at": None,
                                 }
                         yield f"event: providers\ndata: {json.dumps(providers_info)}\n\n"
+                        analytics_data = build_dashboard_analytics(
+                            metrics_service,
+                            providers_info,
+                            stats=metrics_service.get_stats(),
+                        )
+                        yield f"event: analytics\ndata: {json.dumps(analytics_data)}\n\n"
 
                     time.sleep(1)
 

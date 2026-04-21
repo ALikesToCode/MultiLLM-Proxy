@@ -2,381 +2,715 @@
 
 {% block content %}
 <div class="space-y-6">
-    <header class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 flex items-center">
-            <i class="fas fa-tachometer-alt mr-3 text-indigo-600"></i>
-            System Status
-            <span class="ml-3 px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">ONLINE</span>
-        </h1>
-        <p class="mt-2 text-gray-600">Monitor system metrics, request statistics, and provider status</p>
-    </header>
-    
-    <!-- Local Endpoints -->
-    <section>
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-link mr-2 text-indigo-500"></i>
-                    Local Endpoints
-                </h2>
-                <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">Quick Access</span>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-gray-700">Chat Completions</h3>
-                        <span class="badge badge-primary">v1</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/v1/chat/completions" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-gray-300 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/v1/chat/completions"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-gray-700">Completions</h3>
-                        <span class="badge badge-primary">v1</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/v1/completions" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-gray-300 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/v1/completions"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
+    <section class="relative overflow-hidden rounded-[2rem] bg-slate-950 px-6 py-7 text-white shadow-2xl sm:px-8">
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(129,140,248,0.28),_transparent_35%),radial-gradient(circle_at_80%_20%,_rgba(244,114,182,0.18),_transparent_30%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(30,41,59,0.96))]"></div>
+        <div class="absolute -left-16 top-20 h-48 w-48 rounded-full bg-indigo-500/10 blur-3xl"></div>
+        <div class="absolute -right-10 bottom-6 h-40 w-40 rounded-full bg-cyan-400/10 blur-3xl"></div>
+
+        <div class="relative z-10">
+            <div class="flex flex-col gap-8 xl:flex-row xl:items-start xl:justify-between">
+                <div class="max-w-3xl">
+                    <p class="text-xs uppercase tracking-[0.35em] text-indigo-200/80">Operations Dashboard</p>
+                    <h1 class="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                        Telemetry that explains what the proxy is doing right now
+                    </h1>
+                    <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                        See traffic, failure pressure, provider health, and latency drift without hunting through empty cards.
+                    </p>
+
+                    <div class="mt-5 flex flex-wrap gap-3 text-sm text-slate-200">
+                        <span class="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5">
+                            <span class="h-2 w-2 rounded-full bg-emerald-300"></span>
+                            Proxy online
+                        </span>
+                        <span class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                            <i class="fas fa-layer-group text-indigo-300"></i>
+                            <span><span data-metric="active-providers">{{ analytics.active_providers }}</span>/<span data-metric="configured-providers">{{ analytics.configured_providers }}</span> providers active</span>
+                        </span>
+                        <span class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                            <i class="fas fa-fire text-rose-300"></i>
+                            <span data-metric="peak-hour-summary">
+                                {% if analytics.peak_hour and analytics.peak_hour.requests %}
+                                Peak {{ analytics.peak_hour.label }}: {{ analytics.peak_hour.requests }} req
+                                {% else %}
+                                No peak traffic recorded yet
+                                {% endif %}
+                            </span>
+                        </span>
                     </div>
                 </div>
-                
-                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-gray-700">Embeddings</h3>
-                        <span class="badge badge-primary">v1</span>
+
+                <div class="grid w-full max-w-2xl grid-cols-2 gap-3 md:grid-cols-3">
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Requests / 24h</p>
+                        <p class="mt-3 text-3xl font-semibold text-white" data-metric="total-requests">{{ stats.total_requests }}</p>
+                        <p class="mt-2 text-sm text-slate-300">Top provider: <span data-metric="top-provider">{{ stats.top_provider or "None" }}</span></p>
                     </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/v1/embeddings" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-gray-300 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/v1/embeddings"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Error Rate</p>
+                        <p class="mt-3 text-3xl font-semibold text-rose-300" data-metric="error-rate">{{ stats.error_rate }}%</p>
+                        <p class="mt-2 text-sm text-slate-300"><span data-metric="failed-requests">{{ stats.failed_requests }}</span> failed requests</p>
                     </div>
-                </div>
-                
-                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-gray-700">Models</h3>
-                        <span class="badge badge-primary">v1</span>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">P95 Latency</p>
+                        <p class="mt-3 text-3xl font-semibold text-amber-300" data-metric="p95-latency">{{ stats.p95_response_time }}ms</p>
+                        <p class="mt-2 text-sm text-slate-300">Median <span data-metric="p50-latency">{{ stats.p50_response_time }}</span>ms</p>
                     </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/v1/models" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-gray-300 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/v1/models"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Throughput</p>
+                        <p class="mt-3 text-3xl font-semibold text-cyan-300" data-metric="requests-per-minute">{{ stats.requests_per_minute }}</p>
+                        <p class="mt-2 text-sm text-slate-300">requests / minute</p>
                     </div>
-                </div>
-            </div>
-            
-            <!-- CURL Examples -->
-            <div class="mt-6">
-                <div class="flex items-center mb-3">
-                    <h3 class="text-sm font-medium text-gray-700">CURL Examples</h3>
-                    <span class="ml-2 badge badge-secondary">Usage</span>
-                </div>
-                <div class="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto">
-                    <pre class="text-xs"><code>curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "model": "gpt-3.5-turbo",
-    "messages": [
-      {
-        "role": "system",
-        "content": "You are a helpful assistant."
-      },
-      {
-        "role": "user",
-        "content": "Hello!"
-      }
-    ]
-  }'</code></pre>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">System Load</p>
+                        <p class="mt-3 text-lg font-semibold text-white">
+                            CPU <span data-metric="cpu-usage">{{ system.cpu_usage }}</span>%
+                            <span class="mx-2 text-slate-500">/</span>
+                            RAM <span data-metric="memory-usage">{{ system.memory_usage }}</span>%
+                        </p>
+                        <p class="mt-2 text-sm text-slate-300">Host saturation snapshot</p>
+                    </div>
+                    <div class="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Last Request</p>
+                        <p class="mt-3 text-lg font-semibold text-white" data-metric="last-request">{{ stats.last_request_at or "No requests yet" }}</p>
+                        <p class="mt-2 text-sm text-slate-300">Uptime <span data-metric="uptime-inline">starting...</span></p>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
-    
-    <!-- System Overview -->
-    <section>
-        <!-- System Metrics -->
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-microchip mr-2 text-indigo-500"></i>
-                    System Metrics
-                </h2>
-                <span class="text-xs font-medium text-gray-500">Last updated: <span id="last-updated">Just now</span></span>
+
+    {% if errors %}
+    <section class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900 shadow-sm">
+        <div class="flex items-start gap-3">
+            <i class="fas fa-triangle-exclamation mt-1 text-amber-500"></i>
+            <div>
+                <h2 class="font-semibold">Provider checks reported problems</h2>
+                <ul class="mt-2 space-y-1 text-sm">
+                    {% for error in errors %}
+                    <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- CPU Usage -->
-                <div class="p-4 bg-gradient-to-br from-indigo-50 to-blue-50 rounded-lg border border-indigo-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <p class="text-sm font-medium text-gray-500">CPU Usage</p>
-                        <span class="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-800">Real-time</span>
-                    </div>
-                    <div class="flex items-end space-x-2">
-                        <p class="text-2xl font-bold text-indigo-700" id="cpu-usage">{{ system.cpu_usage }}%</p>
-                        <div class="w-full bg-gray-200 rounded-full h-2.5 mb-1">
-                            <div class="bg-indigo-600 h-2.5 rounded-full" style="width: {{ system.cpu_usage }}%"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Memory Usage -->
-                <div class="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <p class="text-sm font-medium text-gray-500">Memory Usage</p>
-                        <span class="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">Real-time</span>
-                    </div>
-                    <div class="flex items-end space-x-2">
-                        <p class="text-2xl font-bold text-purple-700" id="memory-usage">{{ system.memory_usage }}%</p>
-                        <div class="w-full bg-gray-200 rounded-full h-2.5 mb-1">
-                            <div class="bg-purple-600 h-2.5 rounded-full" style="width: {{ system.memory_usage }}%"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Uptime -->
-                <div class="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg border border-blue-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <p class="text-sm font-medium text-gray-500">System Uptime</p>
-                        <span class="text-xs px-2 py-1 rounded-full bg-cyan-100 text-cyan-800">Continuous</span>
-                    </div>
-                    <p class="text-2xl font-bold text-blue-700 flex items-end" id="uptime">
-                        <i class="fas fa-clock mr-2 text-blue-400 text-xl"></i>
-                        <span id="uptime-days">0</span>d 
-                        <span id="uptime-hours">00</span>:
-                        <span id="uptime-minutes">00</span>:
-                        <span id="uptime-seconds">00</span>
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="grid gap-6 xl:grid-cols-[1.7fr_1fr]">
+        <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Traffic</p>
+                    <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Last 24 hours</h2>
+                    <p class="mt-2 max-w-2xl text-sm text-slate-600">
+                        Request volume is charted by hour with the failed slice layered on the same bar so spikes and bad windows show up together.
                     </p>
                 </div>
+                <div class="flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                    <span class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-indigo-700">
+                        <span class="h-2 w-2 rounded-full bg-indigo-500"></span> Requests
+                    </span>
+                    <span class="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1.5 text-rose-700">
+                        <span class="h-2 w-2 rounded-full bg-rose-500"></span> Errors
+                    </span>
+                </div>
             </div>
-        </div>
 
-        <!-- Request Statistics -->
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-chart-bar mr-2 text-purple-500"></i>
-                    Request Statistics
-                </h2>
-                <div class="flex space-x-2">
-                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">24h</button>
-                    <button class="text-xs px-2 py-1 rounded-md bg-indigo-100 text-indigo-700">7d</button>
-                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">30d</button>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- Total Requests -->
-                <div class="p-4 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg border border-green-100">
-                    <p class="text-sm font-medium text-gray-500 mb-2">Total Requests (24h)</p>
-                    <div class="flex items-center">
-                        <span class="text-2xl font-bold text-green-700" id="total-requests">{{ stats.total_requests }}</span>
-                        <span class="ml-2 text-xs font-medium text-green-600">
-                            <i class="fas fa-arrow-up"></i> 8.2%
-                        </span>
+            <div class="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+                <div id="traffic-series" class="flex min-h-[15rem] items-end gap-2 rounded-[1.5rem] bg-slate-950 px-4 py-5 shadow-inner"></div>
+                <div class="space-y-3 rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4">
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+                        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Peak Window</p>
+                        <p class="mt-3 text-2xl font-semibold text-slate-900" data-metric="peak-hour-label">
+                            {% if analytics.peak_hour and analytics.peak_hour.requests %}
+                            {{ analytics.peak_hour.label }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </p>
+                        <p class="mt-2 text-sm text-slate-600">
+                            <span data-metric="peak-hour-requests">
+                                {% if analytics.peak_hour %}{{ analytics.peak_hour.requests }}{% else %}0{% endif %}
+                            </span>
+                            requests in the busiest hour
+                        </p>
                     </div>
-                </div>
-                
-                <!-- Success Rate -->
-                <div class="p-4 bg-gradient-to-br from-amber-50 to-yellow-50 rounded-lg border border-amber-100">
-                    <p class="text-sm font-medium text-gray-500 mb-2">Success Rate</p>
-                    <div class="flex items-center">
-                        <div class="relative inline-flex items-center justify-center w-12 h-12 mr-2">
-                            <svg class="w-12 h-12 transform -rotate-90" viewBox="0 0 36 36">
-                                <circle cx="18" cy="18" r="16" fill="none" stroke="#f3f4f6" stroke-width="2"></circle>
-                                <circle cx="18" cy="18" r="16" fill="none" stroke="#f59e0b" stroke-width="2" 
-                                        stroke-dasharray="100" stroke-dashoffset="{{ 100 - stats.success_rate }}" stroke-linecap="round"></circle>
-                            </svg>
-                            <span class="absolute text-xs font-medium text-amber-700">{{ stats.success_rate }}%</span>
-                        </div>
-                        <span class="text-2xl font-bold text-amber-700" id="success-rate">{{ stats.success_rate }}%</span>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+                        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Failure Pressure</p>
+                        <p class="mt-3 text-2xl font-semibold text-slate-900" data-metric="traffic-error-share">{{ stats.error_rate }}%</p>
+                        <p class="mt-2 text-sm text-slate-600">of requests are currently failing in the 24-hour window</p>
                     </div>
-                </div>
-                
-                <!-- Avg Response Time -->
-                <div class="p-4 bg-gradient-to-br from-rose-50 to-pink-50 rounded-lg border border-rose-100">
-                    <p class="text-sm font-medium text-gray-500 mb-2">Avg Response Time</p>
-                    <div class="flex items-center">
-                        <span class="text-2xl font-bold text-rose-700" id="avg-response-time">{{ stats.avg_response_time }}ms</span>
-                        <span class="ml-2 text-xs font-medium text-green-600">
-                            <i class="fas fa-arrow-down"></i> 12.4%
-                        </span>
+                    <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+                        <p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Operators Should Watch</p>
+                        <p class="mt-3 text-sm leading-6 text-slate-700">
+                            P95 latency tells you if tail behavior is getting worse before averages look bad. Error rate and recent failures tell you whether the issue is provider-specific or global.
+                        </p>
                     </div>
                 </div>
             </div>
+        </article>
+
+        <div class="space-y-6">
+            <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Response Mix</p>
+                        <h2 class="mt-2 text-xl font-semibold text-slate-900">Status Code Breakdown</h2>
+                    </div>
+                    <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                        24h window
+                    </span>
+                </div>
+                <div id="status-code-breakdown" class="mt-5 space-y-3"></div>
+            </article>
+
+            <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Attention Queue</p>
+                        <h2 class="mt-2 text-xl font-semibold text-slate-900">Recent Failures</h2>
+                    </div>
+                    <span class="rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700">
+                        <span data-metric="recent-failure-count">{{ analytics.recent_failures|length }}</span> surfaced
+                    </span>
+                </div>
+                <div id="recent-failures" class="mt-5 space-y-3"></div>
+            </article>
         </div>
     </section>
 
-    <!-- Provider Status -->
-    <section>
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-server mr-2 text-indigo-500"></i>
-                    Provider Status
-                </h2>
-                <div class="flex space-x-3">
-                    <div class="inline-flex items-center">
-                        <span class="h-2 w-2 rounded-full bg-green-500 mr-1"></span>
-                        <span class="text-xs text-gray-500">Active</span>
-                    </div>
-                    <div class="inline-flex items-center">
-                        <span class="h-2 w-2 rounded-full bg-red-500 mr-1"></span>
-                        <span class="text-xs text-gray-500">Inactive</span>
-                    </div>
-                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200 inline-flex items-center">
-                        <i class="fas fa-filter mr-1"></i> Filter
-                    </button>
+    <section class="grid gap-6 lg:grid-cols-[1.45fr_0.95fr]">
+        <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Provider Health</p>
+                    <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Provider leaderboard</h2>
+                    <p class="mt-2 text-sm text-slate-600">
+                        Request share, error rate, and latency are shown together so you can see whether the busy providers are also the unstable ones.
+                    </p>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div><span class="font-semibold text-slate-900" data-metric="providers-with-traffic">{{ analytics.providers_with_traffic }}</span> providers saw traffic</div>
+                    <div class="mt-1"><span class="font-semibold text-slate-900" data-metric="inactive-providers">{{ analytics.inactive_providers }}</span> configured providers are inactive</div>
                 </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="provider-grid">
-                {% for provider, details in providers.items() %}
-                <div class="p-5 rounded-lg border {{ 'border-green-200 bg-green-50' if details.active else 'border-red-200 bg-red-50' }} provider-card relative overflow-hidden" data-provider="{{ provider }}">
-                    <div class="flex items-center justify-between mb-3">
-                        <h3 class="text-lg font-semibold {{ 'text-green-900' if details.active else 'text-red-900' }}">{{ details.name }}</h3>
-                        <span class="status-indicator inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ 'bg-green-100 text-green-800' if details.active else 'bg-red-100 text-red-800' }}">
-                            <span class="h-1.5 w-1.5 rounded-full {{ 'bg-green-600' if details.active else 'bg-red-600' }} mr-1"></span>
-                            {{ 'Active' if details.active else 'Inactive' }}
-                        </span>
-                    </div>
-                    <p class="text-sm {{ 'text-green-700' if details.active else 'text-red-700' }} mb-4 opacity-75">{{ details.description }}</p>
-                    <div class="grid grid-cols-3 gap-2 text-sm">
-                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
-                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Requests (24h)</p>
-                            <p class="requests-24h font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.requests_24h }}</p>
-                        </div>
-                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
-                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Success Rate</p>
-                            <p class="success-rate font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.success_rate }}%</p>
-                        </div>
-                        <div class="text-center p-2 rounded-lg {{ 'bg-green-100' if details.active else 'bg-red-100' }}">
-                            <p class="font-medium {{ 'text-green-600' if details.active else 'text-red-600' }} mb-1">Avg Latency</p>
-                            <p class="avg-latency font-bold {{ 'text-green-800' if details.active else 'text-red-800' }}">{{ details.avg_latency }}ms</p>
-                        </div>
-                    </div>
-                    <div class="absolute top-0 right-0 h-full w-1 {{ 'bg-gradient-to-b from-green-300 to-green-500' if details.active else 'bg-gradient-to-b from-red-300 to-red-500' }}"></div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-    </section>
 
-    <!-- OpenRouter Dashboard -->
-    <section>
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-router mr-2 text-purple-500"></i>
-                    OpenRouter Dashboard
-                </h2>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
-                    <i class="fas fa-star mr-1"></i> NEW
-                </span>
+            <div class="mt-5 overflow-x-auto rounded-[1.5rem] border border-slate-200">
+                <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                        <tr>
+                            <th class="px-4 py-3">Provider</th>
+                            <th class="px-4 py-3">Status</th>
+                            <th class="px-4 py-3">Requests</th>
+                            <th class="px-4 py-3">Error Rate</th>
+                            <th class="px-4 py-3">Avg</th>
+                            <th class="px-4 py-3">P95</th>
+                            <th class="px-4 py-3">Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="provider-leaderboard" class="divide-y divide-slate-100 bg-white"></tbody>
+                </table>
             </div>
-            
-            <div class="mb-6 p-5 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
-                <div class="flex items-start">
-                    <div class="flex-shrink-0 mt-1">
-                        <i class="fas fa-info-circle text-indigo-500 text-lg"></i>
+        </article>
+
+        <div class="space-y-6">
+            <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Recent Activity</p>
+                        <h2 class="mt-2 text-xl font-semibold text-slate-900">Latest request log</h2>
                     </div>
-                    <div class="ml-3">
-                        <h3 class="text-sm font-medium text-indigo-800">Access OpenRouter Features</h3>
-                        <div class="mt-2 text-sm text-indigo-600">
-                            <p>Navigate to the OpenRouter dashboard to set up and manage your OpenRouter integrations.</p>
+                    <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                        <span data-metric="activity-count">{{ recent_activity|length }}</span> events
+                    </span>
+                </div>
+                <div id="recent-activity-list" class="mt-5 space-y-3"></div>
+            </article>
+
+            <article class="rounded-[1.75rem] bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Quick Access</p>
+                        <h2 class="mt-2 text-xl font-semibold text-slate-900">Proxy endpoints</h2>
+                    </div>
+                    <a href="{{ url_for('openrouter_dashboard') }}" class="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700">
+                        <i class="fas fa-router"></i>
+                        OpenRouter tools
+                    </a>
+                </div>
+
+                <div class="mt-5 space-y-3">
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-sm font-medium text-slate-900">Chat completions</p>
+                                <p class="mt-1 text-sm text-slate-600" data-endpoint-text="/v1/chat/completions"></p>
+                            </div>
+                            <button type="button" data-copy-path="/v1/chat/completions" class="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700">
+                                Copy
+                            </button>
                         </div>
-                        <div class="mt-4">
-                            <a href="{{ url_for('openrouter_dashboard') }}" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                                <i class="fas fa-arrow-right mr-2"></i> Go to OpenRouter Dashboard
-                            </a>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-sm font-medium text-slate-900">Completions</p>
+                                <p class="mt-1 text-sm text-slate-600" data-endpoint-text="/v1/completions"></p>
+                            </div>
+                            <button type="button" data-copy-path="/v1/completions" class="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700">
+                                Copy
+                            </button>
+                        </div>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-sm font-medium text-slate-900">Embeddings</p>
+                                <p class="mt-1 text-sm text-slate-600" data-endpoint-text="/v1/embeddings"></p>
+                            </div>
+                            <button type="button" data-copy-path="/v1/embeddings" class="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700">
+                                Copy
+                            </button>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </section>
-    
-    <!-- API Traffic Monitor -->
-    <section>
-        <div class="bg-white shadow-md rounded-xl p-6 mb-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-chart-line mr-2 text-blue-500"></i>
-                    API Traffic Monitor
-                </h2>
-                <div class="flex space-x-2">
-                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">Hour</button>
-                    <button class="text-xs px-2 py-1 rounded-md bg-blue-100 text-blue-700">Day</button>
-                    <button class="text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-600 hover:bg-gray-200">Week</button>
+
+                <div class="mt-5 rounded-[1.5rem] bg-slate-950 p-4 text-xs text-slate-200">
+                    <p class="mb-2 font-semibold text-white">Example request</p>
+                    <pre class="overflow-x-auto leading-6"><code>curl $BASE_URL/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Ping"}]}'</code></pre>
                 </div>
-            </div>
-            
-            <div class="h-64 bg-gray-50 rounded-lg border border-gray-200 p-4 flex items-center justify-center">
-                <p class="text-gray-500 text-sm">API traffic visualization will appear here</p>
-            </div>
+            </article>
         </div>
     </section>
 </div>
 
 <script>
-    // Script to update uptime counter
+    const dashboardState = {
+        system: {{ system | tojson }},
+        stats: {{ stats | tojson }},
+        analytics: {{ analytics | tojson }},
+        providers: {{ providers | tojson }},
+        recentActivity: {{ recent_activity | tojson }},
+    };
+
+    function formatNumber(value) {
+        return new Intl.NumberFormat().format(Number(value || 0));
+    }
+
+    function formatPercent(value) {
+        return `${Number(value || 0).toFixed(1)}%`;
+    }
+
+    function formatLatency(value) {
+        return `${Math.round(Number(value || 0))}ms`;
+    }
+
+    function setText(selector, value) {
+        const node = document.querySelector(selector);
+        if (node) {
+            node.textContent = value;
+        }
+    }
+
+    function endpointUrl(path) {
+        return `${window.location.origin}${path}`;
+    }
+
+    function safeDateString(value) {
+        if (!value) {
+            return null;
+        }
+        return new Date(value.replace(" ", "T"));
+    }
+
+    function relativeTime(value) {
+        const parsed = safeDateString(value);
+        if (!parsed || Number.isNaN(parsed.getTime())) {
+            return value || "Never";
+        }
+
+        const diffSeconds = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 1000));
+        if (diffSeconds < 60) {
+            return `${diffSeconds}s ago`;
+        }
+        if (diffSeconds < 3600) {
+            return `${Math.floor(diffSeconds / 60)}m ago`;
+        }
+        if (diffSeconds < 86400) {
+            return `${Math.floor(diffSeconds / 3600)}h ago`;
+        }
+        return `${Math.floor(diffSeconds / 86400)}d ago`;
+    }
+
+    function uptimeParts() {
+        const uptimeStartSeconds = Number(dashboardState.system.uptime_start_seconds || 0);
+        const uptimeSeconds = Math.max(0, Math.floor(Date.now() / 1000) - uptimeStartSeconds);
+        const days = Math.floor(uptimeSeconds / 86400);
+        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+        const seconds = uptimeSeconds % 60;
+        return { days, hours, minutes, seconds };
+    }
+
     function updateUptime() {
-        const uptimeStartSeconds = {{ system.uptime_start_seconds }};
-        const now = Math.floor(Date.now() / 1000);
-        const uptime = now - uptimeStartSeconds;
-        
-        const days = Math.floor(uptime / 86400);
-        const hours = Math.floor((uptime % 86400) / 3600);
-        const minutes = Math.floor((uptime % 3600) / 60);
-        const seconds = uptime % 60;
-        
-        document.getElementById('uptime-days').textContent = days;
-        document.getElementById('uptime-hours').textContent = hours.toString().padStart(2, '0');
-        document.getElementById('uptime-minutes').textContent = minutes.toString().padStart(2, '0');
-        document.getElementById('uptime-seconds').textContent = seconds.toString().padStart(2, '0');
+        const { days, hours, minutes, seconds } = uptimeParts();
+        setText('[data-metric="uptime-inline"]', `${days}d ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`);
     }
-    
-    // Function to copy text to clipboard
-    function copyToClipboard(button) {
-        const textToCopy = button.getAttribute('data-value');
-        const tempInput = document.createElement('input');
-        tempInput.value = textToCopy;
-        document.body.appendChild(tempInput);
-        tempInput.select();
-        document.execCommand('copy');
-        document.body.removeChild(tempInput);
-        
-        // Change button text temporarily to indicate success
-        const originalHTML = button.innerHTML;
-        button.innerHTML = '<i class="fas fa-check mr-1"></i> Copied!';
-        button.classList.remove('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
-        button.classList.add('bg-green-100', 'hover:bg-green-200', 'text-green-700');
-        
-        setTimeout(() => {
-            button.innerHTML = originalHTML;
-            button.classList.remove('bg-green-100', 'hover:bg-green-200', 'text-green-700');
-            button.classList.add('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
-        }, 2000);
+
+    function updateOverview() {
+        const stats = dashboardState.stats || {};
+        const analytics = dashboardState.analytics || {};
+
+        setText('[data-metric="total-requests"]', formatNumber(stats.total_requests));
+        setText('[data-metric="error-rate"]', formatPercent(stats.error_rate));
+        setText('[data-metric="failed-requests"]', formatNumber(stats.failed_requests));
+        setText('[data-metric="p95-latency"]', formatLatency(stats.p95_response_time));
+        setText('[data-metric="p50-latency"]', Math.round(Number(stats.p50_response_time || 0)));
+        setText('[data-metric="requests-per-minute"]', Number(stats.requests_per_minute || 0).toFixed(2));
+        setText('[data-metric="cpu-usage"]', Number(dashboardState.system.cpu_usage || 0).toFixed(1));
+        setText('[data-metric="memory-usage"]', Number(dashboardState.system.memory_usage || 0).toFixed(1));
+        setText('[data-metric="active-providers"]', formatNumber(analytics.active_providers));
+        setText('[data-metric="configured-providers"]', formatNumber(analytics.configured_providers));
+        setText('[data-metric="inactive-providers"]', formatNumber(analytics.inactive_providers));
+        setText('[data-metric="providers-with-traffic"]', formatNumber(analytics.providers_with_traffic));
+        setText('[data-metric="top-provider"]', stats.top_provider || "None");
+        setText('[data-metric="last-request"]', stats.last_request_at || "No requests yet");
+        setText('[data-metric="traffic-error-share"]', formatPercent(stats.error_rate));
+        setText('[data-metric="recent-failure-count"]', formatNumber((analytics.recent_failures || []).length));
+        setText('[data-metric="activity-count"]', formatNumber((dashboardState.recentActivity || []).length));
+
+        const peakHour = analytics.peak_hour;
+        if (peakHour && peakHour.requests) {
+            setText('[data-metric="peak-hour-label"]', peakHour.label);
+            setText('[data-metric="peak-hour-requests"]', formatNumber(peakHour.requests));
+            setText('[data-metric="peak-hour-summary"]', `Peak ${peakHour.label}: ${formatNumber(peakHour.requests)} req`);
+        } else {
+            setText('[data-metric="peak-hour-label"]', "-");
+            setText('[data-metric="peak-hour-requests"]', "0");
+            setText('[data-metric="peak-hour-summary"]', "No peak traffic recorded yet");
+        }
     }
-    
-    // Update uptime every second
+
+    function renderTrafficSeries() {
+        const container = document.getElementById("traffic-series");
+        const series = dashboardState.stats?.traffic_series || [];
+
+        if (!container) {
+            return;
+        }
+
+        if (!series.length) {
+            container.innerHTML = '<div class="flex w-full items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 text-sm text-slate-400">No request traffic recorded in the last 24 hours.</div>';
+            return;
+        }
+
+        const maxRequests = Math.max(...series.map((bucket) => Number(bucket.requests || 0)), 1);
+
+        container.innerHTML = series.map((bucket, index) => {
+            const requests = Number(bucket.requests || 0);
+            const errors = Number(bucket.errors || 0);
+            const requestHeight = requests ? Math.max(8, (requests / maxRequests) * 100) : 0;
+            const errorHeight = errors ? Math.max(6, (errors / maxRequests) * 100) : 0;
+            const label = bucket.label === "-0h" ? "now" : bucket.label;
+            const showLabel = index % 4 === 0 || index === series.length - 1;
+
+            return `
+                <div class="group flex min-w-0 flex-1 flex-col items-center justify-end gap-3">
+                    <div class="relative flex h-44 w-full items-end justify-center rounded-2xl bg-slate-900/80 px-1.5 py-2">
+                        <div class="absolute inset-x-0 top-0 rounded-2xl bg-gradient-to-b from-white/5 to-transparent"></div>
+                        <div class="relative w-4 overflow-hidden rounded-full bg-slate-800 sm:w-5" title="${label}: ${requests} requests, ${errors} errors">
+                            <div class="absolute inset-x-0 bottom-0 rounded-full bg-indigo-400/95" style="height: ${requestHeight}%"></div>
+                            <div class="absolute inset-x-0 bottom-0 rounded-full bg-rose-400/95" style="height: ${errorHeight}%"></div>
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-[11px] font-medium text-slate-300">${requests}</div>
+                        <div class="text-[10px] uppercase tracking-[0.2em] text-slate-500">${showLabel ? label : ""}</div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function renderStatusCodeBreakdown() {
+        const container = document.getElementById("status-code-breakdown");
+        const breakdown = dashboardState.stats?.status_code_breakdown || {};
+        const total = Object.values(breakdown).reduce((sum, value) => sum + Number(value || 0), 0);
+        const tones = {
+            "2xx": { barClass: "bg-emerald-500" },
+            "3xx": { barClass: "bg-sky-500" },
+            "4xx": { barClass: "bg-amber-500" },
+            "5xx": { barClass: "bg-rose-500" },
+            "other": { barClass: "bg-slate-500" },
+        };
+
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML = Object.entries(tones).map(([bucket, tone]) => {
+            const value = Number(breakdown[bucket] || 0);
+            const share = total ? ((value / total) * 100).toFixed(1) : "0.0";
+            const barWidth = total ? Math.max(4, (value / total) * 100) : 0;
+
+            return `
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm font-semibold text-slate-900">${bucket}</div>
+                        <div class="text-sm text-slate-500">${value} <span class="text-slate-400">(${share}%)</span></div>
+                    </div>
+                    <div class="mt-3 h-2 rounded-full bg-white">
+                        <div class="h-2 rounded-full ${tone.barClass}" style="width: ${barWidth}%"></div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function renderRecentFailures() {
+        const container = document.getElementById("recent-failures");
+        const failures = dashboardState.analytics?.recent_failures || [];
+
+        if (!container) {
+            return;
+        }
+
+        if (!failures.length) {
+            container.innerHTML = `
+                <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <div class="flex items-center gap-2 font-medium">
+                        <i class="fas fa-circle-check text-emerald-500"></i>
+                        No recent failures in the current dashboard window.
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = failures.map((failure) => `
+            <div class="rounded-2xl border border-rose-100 bg-rose-50/70 p-4">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="rounded-full bg-rose-100 px-2 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-rose-700">${failure.provider}</span>
+                            <span class="text-sm font-semibold text-rose-900">${failure.status_code}</span>
+                        </div>
+                        <p class="mt-2 text-sm text-rose-900">${failure.status_bucket} response after ${formatLatency(failure.response_time)}</p>
+                    </div>
+                    <span class="text-xs text-rose-700">${relativeTime(failure.time)}</span>
+                </div>
+            </div>
+        `).join("");
+    }
+
+    function providerStatusBadge(details) {
+        if (details.active) {
+            return { label: "Active", classes: "bg-emerald-100 text-emerald-800" };
+        }
+        if (details.is_configured === false) {
+            return { label: "Missing key", classes: "bg-amber-100 text-amber-800" };
+        }
+        return { label: "Error", classes: "bg-rose-100 text-rose-800" };
+    }
+
+    function renderProviderLeaderboard() {
+        const container = document.getElementById("provider-leaderboard");
+        const providers = dashboardState.providers || {};
+        const breakdownMap = new Map((dashboardState.analytics?.provider_breakdown || []).map((item) => [item.provider, item]));
+
+        if (!container) {
+            return;
+        }
+
+        const rows = Object.entries(providers).sort((left, right) => {
+            const leftTraffic = breakdownMap.get(left[0])?.requests || left[1].requests_24h || 0;
+            const rightTraffic = breakdownMap.get(right[0])?.requests || right[1].requests_24h || 0;
+            const leftActive = left[1].active ? 1 : 0;
+            const rightActive = right[1].active ? 1 : 0;
+            const leftConfigured = left[1].is_configured === false ? 0 : 1;
+            const rightConfigured = right[1].is_configured === false ? 0 : 1;
+
+            return (
+                rightActive - leftActive ||
+                rightConfigured - leftConfigured ||
+                rightTraffic - leftTraffic ||
+                left[0].localeCompare(right[0])
+            );
+        });
+
+        container.innerHTML = rows.map(([providerKey, details]) => {
+            const traffic = breakdownMap.get(providerKey) || {};
+            const badge = providerStatusBadge(details);
+            const requests = traffic.requests ?? details.requests_24h ?? 0;
+            const errorRate = traffic.error_rate ?? details.error_rate ?? 0;
+            const avgLatency = traffic.avg_latency ?? details.avg_latency ?? 0;
+            const p95Latency = traffic.p95_latency ?? details.p95_latency ?? 0;
+            const lastSeen = traffic.last_request_at || details.last_request_at;
+
+            return `
+                <tr class="align-top">
+                    <td class="px-4 py-4">
+                        <div class="font-semibold text-slate-900">${details.name || providerKey.toUpperCase()}</div>
+                        <div class="mt-1 max-w-xs text-xs text-slate-500">${details.description || "No description"}</div>
+                    </td>
+                    <td class="px-4 py-4">
+                        <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${badge.classes}">
+                            ${badge.label}
+                        </span>
+                    </td>
+                    <td class="px-4 py-4 font-medium text-slate-900">${formatNumber(requests)}</td>
+                    <td class="px-4 py-4 text-slate-700">${formatPercent(errorRate)}</td>
+                    <td class="px-4 py-4 text-slate-700">${formatLatency(avgLatency)}</td>
+                    <td class="px-4 py-4 text-slate-700">${formatLatency(p95Latency)}</td>
+                    <td class="px-4 py-4 text-slate-500">${lastSeen ? relativeTime(lastSeen) : "No traffic"}</td>
+                </tr>
+            `;
+        }).join("");
+    }
+
+    function renderRecentActivity() {
+        const container = document.getElementById("recent-activity-list");
+        const activity = dashboardState.recentActivity || [];
+
+        if (!container) {
+            return;
+        }
+
+        if (!activity.length) {
+            container.innerHTML = `
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    No activity has been recorded yet.
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = activity.map((item) => {
+            const ok = item.status === "success";
+            return `
+                <div class="rounded-2xl border ${ok ? "border-emerald-100 bg-emerald-50/60" : "border-rose-100 bg-rose-50/60"} p-4">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <span class="rounded-full px-2 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${ok ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}">${item.provider}</span>
+                                <span class="text-sm font-semibold ${ok ? "text-emerald-900" : "text-rose-900"}">${item.status_code}</span>
+                            </div>
+                            <p class="mt-2 text-sm ${ok ? "text-emerald-900" : "text-rose-900"}">${item.description}</p>
+                            <p class="mt-1 text-xs ${ok ? "text-emerald-700" : "text-rose-700"}">${formatLatency(item.response_time)} response time</p>
+                        </div>
+                        <span class="text-xs text-slate-500">${relativeTime(item.time)}</span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function renderEndpoints() {
+        document.querySelectorAll("[data-endpoint-text]").forEach((node) => {
+            const path = node.getAttribute("data-endpoint-text");
+            node.textContent = endpointUrl(path);
+        });
+    }
+
+    async function copyEndpoint(button) {
+        const path = button.getAttribute("data-copy-path");
+        const value = endpointUrl(path);
+        const originalText = button.textContent;
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(value);
+            } else {
+                const tempInput = document.createElement("input");
+                tempInput.value = value;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand("copy");
+                document.body.removeChild(tempInput);
+            }
+
+            button.textContent = "Copied";
+            button.classList.remove("bg-slate-900", "hover:bg-slate-700");
+            button.classList.add("bg-emerald-600", "hover:bg-emerald-700");
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.classList.remove("bg-emerald-600", "hover:bg-emerald-700");
+                button.classList.add("bg-slate-900", "hover:bg-slate-700");
+            }, 1500);
+        } catch (error) {
+            console.error("Failed to copy endpoint", error);
+        }
+    }
+
+    function renderDashboard() {
+        updateOverview();
+        renderTrafficSeries();
+        renderStatusCodeBreakdown();
+        renderRecentFailures();
+        renderProviderLeaderboard();
+        renderRecentActivity();
+        renderEndpoints();
+        updateUptime();
+    }
+
+    function setLastUpdated() {
+        const now = new Date();
+        setText('[data-metric="last-request"]', dashboardState.stats?.last_request_at || "No requests yet");
+        document.documentElement.dataset.lastUpdated = now.toISOString();
+    }
+
+    function startStatusStream() {
+        if (!window.EventSource) {
+            return;
+        }
+
+        const source = new EventSource("{{ url_for('status_updates') }}");
+
+        source.addEventListener("system", (event) => {
+            dashboardState.system = JSON.parse(event.data);
+            renderDashboard();
+            setLastUpdated();
+        });
+
+        source.addEventListener("stats", (event) => {
+            dashboardState.stats = JSON.parse(event.data);
+            renderDashboard();
+            setLastUpdated();
+        });
+
+        source.addEventListener("providers", (event) => {
+            dashboardState.providers = JSON.parse(event.data);
+            renderDashboard();
+            setLastUpdated();
+        });
+
+        source.addEventListener("analytics", (event) => {
+            dashboardState.analytics = JSON.parse(event.data);
+            renderDashboard();
+            setLastUpdated();
+        });
+
+        source.addEventListener("activity", (event) => {
+            dashboardState.recentActivity = JSON.parse(event.data);
+            renderDashboard();
+            setLastUpdated();
+        });
+
+        source.onerror = () => {
+            source.close();
+            setTimeout(startStatusStream, 5000);
+        };
+    }
+
+    document.querySelectorAll("[data-copy-path]").forEach((button) => {
+        button.addEventListener("click", () => copyEndpoint(button));
+    });
+
+    renderDashboard();
+    startStatusStream();
     setInterval(updateUptime, 1000);
-    updateUptime();
 </script>
-{% endblock %} 
+{% endblock %}

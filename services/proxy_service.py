@@ -406,64 +406,102 @@ class ProxyService:
         if not chunk or chunk.startswith("data: "):
             return None
 
+        cleaned_chunk = chunk
+        stripped_any_payload = False
         marker = '"chat.completion.chunk"'
-        marker_index = chunk.find(marker)
-        if marker_index == -1:
+
+        while True:
+            marker_index = cleaned_chunk.find(marker)
+            if marker_index == -1:
+                break
+
+            object_start = cleaned_chunk.rfind("{", 0, marker_index)
+            if object_start == -1:
+                break
+
+            depth = 0
+            in_string = False
+            escape_next = False
+            object_end = None
+
+            for index in range(object_start, len(cleaned_chunk)):
+                char = cleaned_chunk[index]
+
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == "\\":
+                    escape_next = True
+                    continue
+
+                if char == '"':
+                    in_string = not in_string
+                    continue
+
+                if in_string:
+                    continue
+
+                if char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        object_end = index + 1
+                        break
+
+            if object_end is None:
+                break
+
+            try:
+                parsed_payload = json.loads(cleaned_chunk[object_start:object_end])
+            except json.JSONDecodeError:
+                break
+
+            if not isinstance(parsed_payload, dict) or parsed_payload.get("object") != "chat.completion.chunk":
+                break
+
+            cleaned_chunk = (cleaned_chunk[:object_start] + cleaned_chunk[object_end:]).strip()
+            cleaned_chunk = cls._repair_mojibake_text(cleaned_chunk).strip()
+            stripped_any_payload = True
+
+        if not stripped_any_payload:
             return None
 
-        object_start = chunk.rfind("{", 0, marker_index)
-        if object_start == -1:
-            return None
-
-        depth = 0
-        in_string = False
-        escape_next = False
-        object_end = None
-
-        for index in range(object_start, len(chunk)):
-            char = chunk[index]
-
-            if escape_next:
-                escape_next = False
-                continue
-
-            if char == "\\":
-                escape_next = True
-                continue
-
-            if char == '"':
-                in_string = not in_string
-                continue
-
-            if in_string:
-                continue
-
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    object_end = index + 1
-                    break
-
-        if object_end is None:
-            return None
-
-        try:
-            parsed_payload = json.loads(chunk[object_start:object_end])
-        except json.JSONDecodeError:
-            return None
-
-        if not isinstance(parsed_payload, dict) or parsed_payload.get("object") != "chat.completion.chunk":
-            return None
-
-        cleaned_outer_text = (chunk[:object_start] + chunk[object_end:]).strip()
-        repaired_outer_text = cls._repair_mojibake_text(cleaned_outer_text).strip()
-
-        if cls._looks_like_meaningful_stream_text(repaired_outer_text):
-            return repaired_outer_text
+        if cls._looks_like_meaningful_stream_text(cleaned_chunk):
+            return cleaned_chunk
 
         return ""
+
+    @classmethod
+    def _strip_reasoning_block_markup(
+        cls,
+        chunk: str,
+        inside_reasoning_block: bool,
+    ) -> Tuple[str, bool]:
+        """
+        Remove provider-specific <think>...</think> reasoning markup from raw text lines.
+        """
+        cleaned_chunk = chunk
+
+        if inside_reasoning_block:
+            if "</think>" not in cleaned_chunk:
+                return "", True
+            cleaned_chunk = cleaned_chunk.split("</think>", 1)[1]
+            inside_reasoning_block = False
+
+        while "<think>" in cleaned_chunk:
+            prefix, _, remainder = cleaned_chunk.partition("<think>")
+            if "</think>" in remainder:
+                _, _, suffix = remainder.partition("</think>")
+                cleaned_chunk = prefix + suffix
+                continue
+
+            cleaned_chunk = prefix
+            inside_reasoning_block = True
+            break
+
+        return cleaned_chunk.strip(), inside_reasoning_block
 
     @classmethod
     def _looks_like_meaningful_stream_text(cls, text: str) -> bool:
@@ -2148,6 +2186,7 @@ class ProxyService:
         try:
             is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
             done_sent = False
+            inside_reasoning_block = False
             
             # For gzipped responses, we need to accumulate and decompress
             if is_gzipped:
@@ -2164,6 +2203,13 @@ class ProxyService:
                 with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
                     decompressed = gz.read().decode('utf-8')
                     for line in decompressed.split('\n'):
+                        if provider == "opencode":
+                            line, inside_reasoning_block = cls._strip_reasoning_block_markup(
+                                line,
+                                inside_reasoning_block,
+                            )
+                            if not line:
+                                continue
                         standardized_chunk = cls._standardize_streaming_chunk(line, provider)
                         if standardized_chunk:
                             if standardized_chunk.strip() == "data: [DONE]":
@@ -2180,6 +2226,13 @@ class ProxyService:
             else:
                 # For non-gzipped responses
                 for line in response.iter_lines(decode_unicode=True):
+                    if provider == "opencode":
+                        line, inside_reasoning_block = cls._strip_reasoning_block_markup(
+                            line,
+                            inside_reasoning_block,
+                        )
+                        if not line:
+                            continue
                     standardized_chunk = cls._standardize_streaming_chunk(line, provider)
                     if standardized_chunk:
                         if standardized_chunk.strip() == "data: [DONE]":

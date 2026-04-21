@@ -1,5 +1,27 @@
 import { Container } from "@cloudflare/containers";
 
+const API_ROUTE_PREFIXES = new Set([
+  "azure",
+  "cerebras",
+  "chutes",
+  "gemini",
+  "gemma",
+  "googleai",
+  "groq",
+  "hyperbolic",
+  "nineteen",
+  "openai",
+  "opencode",
+  "openrouter",
+  "palm",
+  "sambanova",
+  "scaleway",
+  "together",
+  "xai",
+]);
+const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
+const CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With";
+
 const DIRECT_ENV_KEYS = [
   "ADMIN_USERNAME",
   "ADMIN_API_KEY",
@@ -62,6 +84,80 @@ function collectContainerEnv(source) {
   return envVars;
 }
 
+function isApiRequestPath(pathname) {
+  const stripped = pathname.replace(/^\/+|\/+$/g, "");
+  if (!stripped) {
+    return false;
+  }
+
+  if (stripped === "health") {
+    return true;
+  }
+
+  const [firstSegment] = stripped.split("/", 1);
+  return API_ROUTE_PREFIXES.has(firstSegment);
+}
+
+function buildCorsHeaders(request) {
+  const origin = request.headers.get("Origin");
+  const { pathname } = new URL(request.url);
+
+  if (!origin || !isApiRequestPath(pathname)) {
+    return null;
+  }
+
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": CORS_ALLOWED_METHODS,
+    "Access-Control-Allow-Headers":
+      request.headers.get("Access-Control-Request-Headers") ?? CORS_DEFAULT_HEADERS,
+    "Access-Control-Max-Age": "86400",
+  };
+}
+
+function appendVaryHeader(headers, value) {
+  const current = headers.get("Vary");
+  if (!current) {
+    headers.set("Vary", value);
+    return;
+  }
+
+  const values = current
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!values.includes(value)) {
+    values.push(value);
+    headers.set("Vary", values.join(", "));
+  }
+}
+
+function applyCorsHeaders(request, response) {
+  const corsHeaders = buildCorsHeaders(request);
+  if (!corsHeaders) {
+    return response;
+  }
+
+  const responseWithCors = new Response(response.body, response);
+  for (const [header, value] of Object.entries(corsHeaders)) {
+    responseWithCors.headers.set(header, value);
+  }
+  appendVaryHeader(responseWithCors.headers, "Origin");
+  return responseWithCors;
+}
+
+function buildPreflightResponse(request) {
+  const headers = buildCorsHeaders(request) ?? {};
+  const response = new Response(null, { status: 204 });
+
+  for (const [header, value] of Object.entries(headers)) {
+    response.headers.set(header, value);
+  }
+  response.headers.set("Allow", CORS_ALLOWED_METHODS);
+  appendVaryHeader(response.headers, "Origin");
+  return response;
+}
+
 export class MultiLLMProxyContainer extends Container {
   defaultPort = 8080;
   sleepAfter = "15m";
@@ -70,6 +166,34 @@ export class MultiLLMProxyContainer extends Container {
 
 export default {
   async fetch(request, env) {
-    return env.MULTILLM_PROXY_CONTAINER.getByName("primary").fetch(request);
+    if (request.method === "OPTIONS" && isApiRequestPath(new URL(request.url).pathname)) {
+      return buildPreflightResponse(request);
+    }
+
+    try {
+      const response = await env.MULTILLM_PROXY_CONTAINER.getByName("primary").fetch(request);
+      return applyCorsHeaders(request, response);
+    } catch (error) {
+      if (!buildCorsHeaders(request)) {
+        throw error;
+      }
+
+      console.error("Container fetch failed", error);
+      return applyCorsHeaders(
+        request,
+        new Response(
+          JSON.stringify({
+            error: "Proxy unavailable",
+            message: "The proxy container could not handle the request.",
+          }),
+          {
+            status: 502,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      );
+    }
   },
 };
