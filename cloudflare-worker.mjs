@@ -22,7 +22,6 @@ const API_ROUTE_PREFIXES = new Set([
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With";
 const OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1";
-const MAX_VISIBLE_THINK_CHARS = 1200;
 const UPSTREAM_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -324,13 +323,9 @@ function formatVisibleThinkBlock(reasoningPreview, content = "") {
     return typeof content === "string" ? content : "";
   }
 
-  const trimmedPreview =
-    normalizedPreview.length > MAX_VISIBLE_THINK_CHARS
-      ? `${normalizedPreview.slice(0, MAX_VISIBLE_THINK_CHARS - 1).trimEnd()}…`
-      : normalizedPreview;
   const normalizedContent = typeof content === "string" ? content : "";
 
-  return `<think>${trimmedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
+  return `<think>${normalizedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
 }
 
 function flushVisibleThinkingBuffer(state) {
@@ -359,34 +354,15 @@ function flushVisibleThinkingBuffer(state) {
 
 function appendVisibleThinkingChunk(reasoningPreview, state) {
   const normalizedPreview = sanitizeReasoningCandidate(reasoningPreview);
-  if (
-    !normalizedPreview ||
-    state.thinkingClosed ||
-    state.visibleThinkingChars >= MAX_VISIBLE_THINK_CHARS
-  ) {
+  if (!normalizedPreview || state.thinkingClosed) {
     return "";
   }
 
-  const remainingBudget = MAX_VISIBLE_THINK_CHARS - state.visibleThinkingChars;
-  let previewChunk = normalizedPreview;
-  if (previewChunk.length > remainingBudget) {
-    previewChunk = `${previewChunk.slice(0, Math.max(remainingBudget - 1, 0)).trimEnd()}…`;
-  }
-
-  if (!previewChunk) {
-    return "";
-  }
-
-  state.visibleThinkingChars += previewChunk.endsWith("…")
-    ? previewChunk.length - 1
-    : previewChunk.length;
-
-  state.thinkingBuffer.push(previewChunk);
-  state.thinkingBufferedChars += previewChunk.length;
+  state.thinkingBuffer.push(normalizedPreview);
+  state.thinkingBufferedChars += normalizedPreview.length;
 
   if (
-    /[.!?…]$/.test(previewChunk) ||
-    previewChunk.endsWith("…") ||
+    /[.!?…]$/.test(normalizedPreview) ||
     state.thinkingBufferedChars >= 160
   ) {
     return flushVisibleThinkingBuffer(state);
@@ -722,7 +698,6 @@ function createOpencodeStreamResponse(upstreamResponse) {
     thinkingClosed: false,
     thinkingBuffer: [],
     thinkingBufferedChars: 0,
-    visibleThinkingChars: 0,
   };
 
   return new ReadableStream({

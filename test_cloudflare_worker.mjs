@@ -402,6 +402,68 @@ test("worker preserves raw non-stream think text apart from think wrapping", asy
   }
 });
 
+test("worker does not truncate long non-stream think text", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("opencode fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const longReasoning = `start-${"x".repeat(1300)}-end`;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        id: "chatcmpl-long-think",
+        object: "chat.completion",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "pong",
+              reasoning: longReasoning,
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const payload = await response.json();
+    const visibleThink = payload.choices[0].message.content;
+    assert.equal(response.status, 200);
+    assert.equal(stub.getCalls(), 0);
+    assert.equal(visibleThink, `<think>${longReasoning}</think>\n\npong`);
+    assert.doesNotMatch(visibleThink, /…<\/think>/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("worker renders a safe visible <think> block for streaming opencode responses", async () => {
   const stub = makeEnv(
     async () => {
@@ -620,6 +682,75 @@ test("worker preserves streamed thinking fragments literally", async () => {
     assert.equal(stub.getCalls(), 0);
     assert.match(text, /The user wants pong\./);
     assert.match(text, /"content":"<\/think>\\n\\n"/);
+    assert.match(text, /"content":"pong"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("worker does not truncate long streamed think text", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("streaming fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const longReasoning = `start-${"x".repeat(1300)}-end.`;
+  const streamBody = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: "gen-long-think",
+            object: "chat.completion.chunk",
+            choices: [{ delta: { content: "", role: "assistant", reasoning: longReasoning } }],
+          })}\n`,
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-content","object":"chat.completion.chunk","choices":[{"delta":{"content":"pong"}}]}\n',
+        ),
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n"));
+      controller.close();
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(streamBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    });
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", stream: true, messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(stub.getCalls(), 0);
+    assert.match(text, /"content":"<think>"/);
+    assert.match(text, new RegExp(longReasoning));
+    assert.doesNotMatch(text, /…<\/think>/);
     assert.match(text, /"content":"pong"/);
   } finally {
     globalThis.fetch = originalFetch;
