@@ -22,6 +22,7 @@ const API_ROUTE_PREFIXES = new Set([
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With";
 const OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1";
+const MAX_VISIBLE_THINK_CHARS = 1200;
 const UPSTREAM_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -262,6 +263,163 @@ function looksLikeMeaningfulStreamText(text) {
   return alnumChars > 0 && asciiWordChars >= 4;
 }
 
+function normalizeReasoningCandidate(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  let normalized = value.replace(/<\/?think>/gi, " ");
+  const strippedEmbeddedPayload = stripEmbeddedStreamChunkPayload(normalized);
+  if (strippedEmbeddedPayload !== null) {
+    normalized = strippedEmbeddedPayload;
+  }
+
+  return normalized.replace(/\s+/g, " ").trim();
+}
+
+function extractReasoningPreview(source) {
+  if (!source || typeof source !== "object") {
+    return "";
+  }
+
+  const parts = [];
+  const maybePush = (value) => {
+    const normalized = normalizeReasoningCandidate(value);
+    if (normalized && !parts.includes(normalized)) {
+      parts.push(normalized);
+    }
+  };
+
+  maybePush(source.reasoning_content);
+  maybePush(source.reasoning);
+
+  if (Array.isArray(source.reasoning_details)) {
+    for (const detail of source.reasoning_details) {
+      if (typeof detail === "string") {
+        maybePush(detail);
+        continue;
+      }
+
+      if (detail && typeof detail === "object") {
+        maybePush(detail.text);
+        maybePush(detail.reasoning);
+        maybePush(detail.reasoning_content);
+      }
+    }
+  }
+
+  return parts.join(" ").trim();
+}
+
+function formatVisibleThinkBlock(reasoningPreview, content = "") {
+  const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
+  if (!normalizedPreview) {
+    return typeof content === "string" ? content : "";
+  }
+
+  const trimmedPreview =
+    normalizedPreview.length > MAX_VISIBLE_THINK_CHARS
+      ? `${normalizedPreview.slice(0, MAX_VISIBLE_THINK_CHARS - 1).trimEnd()}…`
+      : normalizedPreview;
+  const normalizedContent = typeof content === "string" ? content : "";
+
+  return `<think>${trimmedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
+}
+
+function appendVisibleThinkingChunk(reasoningPreview, state) {
+  const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
+  if (
+    !normalizedPreview ||
+    state.thinkingClosed ||
+    state.visibleThinkingChars >= MAX_VISIBLE_THINK_CHARS
+  ) {
+    return "";
+  }
+
+  const remainingBudget = MAX_VISIBLE_THINK_CHARS - state.visibleThinkingChars;
+  let previewChunk = normalizedPreview;
+  if (previewChunk.length > remainingBudget) {
+    previewChunk = `${previewChunk.slice(0, Math.max(remainingBudget - 1, 0)).trimEnd()}…`;
+  }
+
+  if (!previewChunk) {
+    return "";
+  }
+
+  state.visibleThinkingChars += previewChunk.endsWith("…")
+    ? previewChunk.length - 1
+    : previewChunk.length;
+
+  let output = "";
+  if (!state.thinkingOpen) {
+    output += buildStreamingChunk("<think>");
+    state.thinkingOpen = true;
+  }
+
+  output += buildStreamingChunk(previewChunk);
+  return output;
+}
+
+function closeVisibleThinkingChunk(state) {
+  if (!state.thinkingOpen || state.thinkingClosed) {
+    return "";
+  }
+
+  state.thinkingOpen = false;
+  state.thinkingClosed = true;
+  return buildStreamingChunk("</think>\n\n");
+}
+
+function extractTaggedReasoningContent(chunk, insideReasoningBlock) {
+  let remaining = chunk;
+  const reasoningParts = [];
+  const contentParts = [];
+
+  if (insideReasoningBlock) {
+    const closingIndex = remaining.indexOf("</think>");
+    if (closingIndex === -1) {
+      reasoningParts.push(remaining);
+      return {
+        contentChunk: "",
+        reasoningChunk: reasoningParts.join(" "),
+        insideReasoningBlock: true,
+      };
+    }
+
+    reasoningParts.push(remaining.slice(0, closingIndex));
+    remaining = remaining.slice(closingIndex + "</think>".length);
+    insideReasoningBlock = false;
+  }
+
+  while (true) {
+    const openingIndex = remaining.indexOf("<think>");
+    if (openingIndex === -1) {
+      contentParts.push(remaining);
+      break;
+    }
+
+    contentParts.push(remaining.slice(0, openingIndex));
+    remaining = remaining.slice(openingIndex + "<think>".length);
+    const closingIndex = remaining.indexOf("</think>");
+
+    if (closingIndex === -1) {
+      reasoningParts.push(remaining);
+      insideReasoningBlock = true;
+      remaining = "";
+      break;
+    }
+
+    reasoningParts.push(remaining.slice(0, closingIndex));
+    remaining = remaining.slice(closingIndex + "</think>".length);
+  }
+
+  return {
+    contentChunk: contentParts.join("").trim(),
+    reasoningChunk: reasoningParts.join(" ").trim(),
+    insideReasoningBlock,
+  };
+}
+
 function stripEmbeddedStreamChunkPayload(chunk) {
   if (!chunk || chunk.startsWith("data: ")) {
     return null;
@@ -350,36 +508,6 @@ function stripEmbeddedStreamChunkPayload(chunk) {
   return "";
 }
 
-function stripReasoningBlockMarkup(chunk, insideReasoningBlock) {
-  let cleanedChunk = chunk;
-
-  if (insideReasoningBlock) {
-    if (!cleanedChunk.includes("</think>")) {
-      return { cleanedChunk: "", insideReasoningBlock: true };
-    }
-    cleanedChunk = cleanedChunk.split("</think>", 2)[1];
-    insideReasoningBlock = false;
-  }
-
-  while (cleanedChunk.includes("<think>")) {
-    const [prefix, remainder] = cleanedChunk.split("<think>", 2);
-    if (remainder.includes("</think>")) {
-      const [, suffix] = remainder.split("</think>", 2);
-      cleanedChunk = `${prefix}${suffix}`;
-      continue;
-    }
-
-    cleanedChunk = prefix;
-    insideReasoningBlock = true;
-    break;
-  }
-
-  return {
-    cleanedChunk: cleanedChunk.trim(),
-    insideReasoningBlock,
-  };
-}
-
 function buildStreamingChunk(content) {
   return `data: ${JSON.stringify({
     id: crypto.randomUUID(),
@@ -452,8 +580,11 @@ function sanitizeOpenAiCompletionPayload(payload) {
       const sanitizedChoice = { ...choice };
       if (sanitizedChoice.message && typeof sanitizedChoice.message === "object") {
         const sanitizedMessage = { ...sanitizedChoice.message };
+        const reasoningPreview = extractReasoningPreview(sanitizedMessage);
         delete sanitizedMessage.reasoning;
         delete sanitizedMessage.reasoning_details;
+        delete sanitizedMessage.reasoning_content;
+        sanitizedMessage.content = formatVisibleThinkBlock(reasoningPreview, sanitizedMessage.content);
         sanitizedChoice.message = sanitizedMessage;
       }
       return sanitizedChoice;
@@ -461,7 +592,14 @@ function sanitizeOpenAiCompletionPayload(payload) {
   };
 }
 
-function standardizeOpencodeStreamingChunk(chunk) {
+function payloadHasVisibleContent(payload) {
+  return Array.isArray(payload?.choices) && payload.choices.some((choice) => {
+    const delta = choice?.delta;
+    return Boolean(typeof delta?.content === "string" && delta.content.length > 0);
+  });
+}
+
+function standardizeOpencodeStreamingChunk(chunk, state) {
   const strippedChunk = chunk.trim();
   if (!strippedChunk || strippedChunk.startsWith(":")) {
     return "";
@@ -476,11 +614,26 @@ function standardizeOpencodeStreamingChunk(chunk) {
     try {
       const parsedPayload = JSON.parse(dataPayload);
       if (parsedPayload && typeof parsedPayload === "object" && (parsedPayload.object === "chat.completion.chunk" || parsedPayload.choices)) {
+        let output = "";
+        const reasoningPreview = Array.isArray(parsedPayload.choices)
+          ? parsedPayload.choices
+              .map((choice) => extractReasoningPreview(choice?.delta))
+              .filter(Boolean)
+              .join(" ")
+          : "";
+        output += appendVisibleThinkingChunk(reasoningPreview, state);
+
         const sanitizedPayload = sanitizeOpenAiStreamingPayload(parsedPayload);
         if (!sanitizedPayload) {
-          return "";
+          return output;
         }
-        return `data: ${JSON.stringify(sanitizedPayload)}\n\n`;
+
+        if (payloadHasVisibleContent(sanitizedPayload)) {
+          output += closeVisibleThinkingChunk(state);
+        }
+
+        output += `data: ${JSON.stringify(sanitizedPayload)}\n\n`;
+        return output;
       }
     } catch {
       // Fall through to text cleanup below.
@@ -512,13 +665,18 @@ function standardizeOpencodeStreamingChunk(chunk) {
     }
   }
 
-  return buildStreamingChunk(content);
+  return `${closeVisibleThinkingChunk(state)}${buildStreamingChunk(content)}`;
 }
 
 function createOpencodeStreamResponse(upstreamResponse) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let insideReasoningBlock = false;
+  const streamState = {
+    thinkingOpen: false,
+    thinkingClosed: false,
+    visibleThinkingChars: 0,
+  };
 
   return new ReadableStream({
     async start(controller) {
@@ -532,13 +690,19 @@ function createOpencodeStreamResponse(upstreamResponse) {
           buffered = lines.pop() ?? "";
 
           for (const line of lines) {
-            const stripped = stripReasoningBlockMarkup(line, insideReasoningBlock);
-            insideReasoningBlock = stripped.insideReasoningBlock;
-            if (!stripped.cleanedChunk) {
+            const extracted = extractTaggedReasoningContent(line, insideReasoningBlock);
+            insideReasoningBlock = extracted.insideReasoningBlock;
+
+            const visibleThinkingChunk = appendVisibleThinkingChunk(extracted.reasoningChunk, streamState);
+            if (visibleThinkingChunk) {
+              controller.enqueue(encoder.encode(visibleThinkingChunk));
+            }
+
+            if (!extracted.contentChunk) {
               continue;
             }
 
-            const standardizedChunk = standardizeOpencodeStreamingChunk(stripped.cleanedChunk);
+            const standardizedChunk = standardizeOpencodeStreamingChunk(extracted.contentChunk, streamState);
             if (!standardizedChunk) {
               continue;
             }
@@ -554,9 +718,14 @@ function createOpencodeStreamResponse(upstreamResponse) {
 
         buffered += decoder.decode();
         if (buffered) {
-          const stripped = stripReasoningBlockMarkup(buffered, insideReasoningBlock);
-          if (stripped.cleanedChunk) {
-            const standardizedChunk = standardizeOpencodeStreamingChunk(stripped.cleanedChunk);
+          const extracted = extractTaggedReasoningContent(buffered, insideReasoningBlock);
+          const visibleThinkingChunk = appendVisibleThinkingChunk(extracted.reasoningChunk, streamState);
+          if (visibleThinkingChunk) {
+            controller.enqueue(encoder.encode(visibleThinkingChunk));
+          }
+
+          if (extracted.contentChunk) {
+            const standardizedChunk = standardizeOpencodeStreamingChunk(extracted.contentChunk, streamState);
             if (standardizedChunk) {
               controller.enqueue(encoder.encode(standardizedChunk));
               if (standardizedChunk.trim() === "data: [DONE]") {
@@ -564,6 +733,11 @@ function createOpencodeStreamResponse(upstreamResponse) {
               }
             }
           }
+        }
+
+        const closingThinkChunk = closeVisibleThinkingChunk(streamState);
+        if (closingThinkChunk) {
+          controller.enqueue(encoder.encode(closingThinkChunk));
         }
 
         if (!doneSent) {

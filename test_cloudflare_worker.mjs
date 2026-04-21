@@ -277,7 +277,7 @@ test("worker proxies opencode requests directly when the container is unavailabl
   }
 });
 
-test("worker strips opencode reasoning artifacts from non-streaming fallback responses", async () => {
+test("worker renders a safe visible <think> block for non-streaming opencode responses", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("opencode fallback should bypass the container");
@@ -331,7 +331,7 @@ test("worker strips opencode reasoning artifacts from non-streaming fallback res
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.equal(payload.choices[0].message.content, "Pong!");
+    assert.match(payload.choices[0].message.content, /^<think>private<\/think>\n\nPong!$/);
     assert.equal("reasoning" in payload.choices[0].message, false);
     assert.equal("reasoning_details" in payload.choices[0].message, false);
   } finally {
@@ -339,7 +339,7 @@ test("worker strips opencode reasoning artifacts from non-streaming fallback res
   }
 });
 
-test("worker strips opencode reasoning artifacts from streaming fallback responses", async () => {
+test("worker renders a safe visible <think> block for streaming opencode responses", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -398,13 +398,88 @@ test("worker strips opencode reasoning artifacts from streaming fallback respons
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
+    assert.match(text, /<think>/);
+    assert.match(text, /private reasoning/);
+    assert.match(text, /The/);
+    assert.match(text, /<\/think>/);
     assert.match(text, /\*The ascent was a brutal ballet of desperation and calculated intent\.\*/);
-    assert.doesNotMatch(text, /<think>/);
-    assert.doesNotMatch(text, /private reasoning/);
     assert.doesNotMatch(text, /"reasoning":/);
     assert.doesNotMatch(text, /reasoning_details/);
     assert.doesNotMatch(text, /gen-1776744934/);
     assert.match(text, /data: \[DONE\]/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("worker ignores later reasoning deltas after visible streaming content starts", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("streaming fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const streamBody = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think","object":"chat.completion.chunk","choices":[{"delta":{"content":"","role":"assistant","reasoning":"first pass"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-content","object":"chat.completion.chunk","choices":[{"delta":{"content":"Visible answer"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-late-think","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"late hidden thought"}}]}\n',
+        ),
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n"));
+      controller.close();
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(streamBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    });
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", stream: true, messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    const contentChunks = [...text.matchAll(/"content":"((?:\\.|[^"])*)"/g)].map(([, content]) => content);
+    assert.deepEqual(contentChunks.slice(0, 4), [
+      "<think>",
+      "first pass",
+      "</think>\\n\\n",
+      "Visible answer",
+    ]);
+    assert.match(text, /Visible answer/);
+    assert.doesNotMatch(text, /late hidden thought/);
   } finally {
     globalThis.fetch = originalFetch;
   }
