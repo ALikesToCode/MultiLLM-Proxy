@@ -484,3 +484,82 @@ test("worker ignores later reasoning deltas after visible streaming content star
     globalThis.fetch = originalFetch;
   }
 });
+
+test("worker coalesces streamed thinking fragments into human-readable text", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("streaming fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const streamBody = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-1","object":"chat.completion.chunk","choices":[{"delta":{"content":"","role":"assistant","reasoning":"The"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-2","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"user"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-3","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"wants"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-4","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"pong."}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-content","object":"chat.completion.chunk","choices":[{"delta":{"content":"pong"}}]}\n',
+        ),
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n"));
+      controller.close();
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(streamBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    });
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", stream: true, messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(stub.getCalls(), 0);
+    assert.match(text, /The user wants pong\./);
+    assert.doesNotMatch(text, /Theuserwantspong\./);
+    assert.match(text, /"content":"<\/think>\\n\\n"/);
+    assert.match(text, /"content":"pong"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -326,6 +326,35 @@ function formatVisibleThinkBlock(reasoningPreview, content = "") {
   return `<think>${trimmedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
 }
 
+function flushVisibleThinkingBuffer(state) {
+  if (!Array.isArray(state.thinkingBuffer) || state.thinkingBuffer.length === 0) {
+    return "";
+  }
+
+  let combinedPreview = state.thinkingBuffer.join(" ");
+  combinedPreview = combinedPreview
+    .replace(/\s+([.,!?;:)\]}])/g, "$1")
+    .replace(/([(\[{])\s+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  state.thinkingBuffer = [];
+  state.thinkingBufferedChars = 0;
+
+  if (!combinedPreview) {
+    return "";
+  }
+
+  let output = "";
+  if (!state.thinkingOpen) {
+    output += buildStreamingChunk("<think>");
+    state.thinkingOpen = true;
+  }
+
+  output += buildStreamingChunk(combinedPreview);
+  return output;
+}
+
 function appendVisibleThinkingChunk(reasoningPreview, state) {
   const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
   if (
@@ -350,24 +379,38 @@ function appendVisibleThinkingChunk(reasoningPreview, state) {
     ? previewChunk.length - 1
     : previewChunk.length;
 
-  let output = "";
-  if (!state.thinkingOpen) {
-    output += buildStreamingChunk("<think>");
-    state.thinkingOpen = true;
+  state.thinkingBuffer.push(previewChunk);
+  state.thinkingBufferedChars += previewChunk.length + (state.thinkingBuffer.length > 1 ? 1 : 0);
+
+  if (
+    /[.!?…]$/.test(previewChunk) ||
+    previewChunk.endsWith("…") ||
+    state.thinkingBufferedChars >= 160
+  ) {
+    return flushVisibleThinkingBuffer(state);
   }
 
-  output += buildStreamingChunk(previewChunk);
-  return output;
+  return "";
 }
 
 function closeVisibleThinkingChunk(state) {
-  if (!state.thinkingOpen || state.thinkingClosed) {
+  if (state.thinkingClosed) {
     return "";
+  }
+
+  let output = flushVisibleThinkingBuffer(state);
+  if (!state.thinkingOpen) {
+    if (!output) {
+      return "";
+    }
+
+    state.thinkingOpen = true;
   }
 
   state.thinkingOpen = false;
   state.thinkingClosed = true;
-  return buildStreamingChunk("</think>\n\n");
+  output += buildStreamingChunk("</think>\n\n");
+  return output;
 }
 
 function extractTaggedReasoningContent(chunk, insideReasoningBlock) {
@@ -675,6 +718,8 @@ function createOpencodeStreamResponse(upstreamResponse) {
   const streamState = {
     thinkingOpen: false,
     thinkingClosed: false,
+    thinkingBuffer: [],
+    thinkingBufferedChars: 0,
     visibleThinkingChars: 0,
   };
 
