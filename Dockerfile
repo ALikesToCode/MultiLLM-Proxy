@@ -7,14 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    gnupg && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /etc/apt/keyrings/google-cloud-cli.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/google-cloud-cli.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    apt-get update && apt-get install -y --no-install-recommends google-cloud-cli && \
+    ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
@@ -24,6 +17,12 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 COPY --chmod=755 scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
+
+# Cloudflare Containers run as a non-root user, so app sources must be
+# world-readable and the Flask instance directory must be writable.
+RUN mkdir -p /app/instance && \
+    chmod -R a+rX /app && \
+    chmod 1777 /app/instance
 
 EXPOSE 8080
 

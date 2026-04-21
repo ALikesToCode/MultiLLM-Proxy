@@ -6,8 +6,8 @@ async function loadWorkerModule() {
   const workerUrl = new URL("./cloudflare-worker.mjs", import.meta.url);
   const source = await readFile(workerUrl, "utf8");
   const patchedSource = source.replace(
-    'import { Container } from "@cloudflare/containers";',
-    "class Container {}",
+    /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
+    "class Container {}\nconst getContainer = (binding, name) => binding.getByName(name);",
   );
 
   return import(

@@ -4,12 +4,16 @@ import secrets
 import sqlite3
 import string
 import subprocess
+import json
+import shutil
 import threading
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import service_account
 from flask import session
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -243,6 +247,27 @@ class AuthService:
             return api_key
         return cls._api_keys.get(provider)
 
+    @staticmethod
+    def _build_google_service_account_credentials():
+        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+        credentials_json = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip()
+        credentials_path = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+
+        if credentials_json:
+            credentials_info = json.loads(credentials_json)
+            return service_account.Credentials.from_service_account_info(
+                credentials_info,
+                scopes=scopes,
+            )
+
+        if credentials_path and Path(credentials_path).is_file():
+            return service_account.Credentials.from_service_account_file(
+                credentials_path,
+                scopes=scopes,
+            )
+
+        return None
+
     @classmethod
     def get_google_token(cls) -> Optional[str]:
         """Get Google Cloud access token."""
@@ -257,7 +282,38 @@ class AuthService:
                     logger.debug("Using cached Google Cloud token")
                     return cls._google_token
 
-                logger.info("Getting new Google Cloud token via gcloud CLI")
+                credentials = cls._build_google_service_account_credentials()
+                if credentials is not None:
+                    logger.info("Getting new Google Cloud token via service account credentials")
+                    credentials.refresh(GoogleAuthRequest())
+                    token = (credentials.token or "").strip()
+                    expiry = credentials.expiry
+
+                    if token:
+                        cls._google_token = token
+                        if expiry is not None:
+                            if expiry.tzinfo is None:
+                                expiry = expiry.replace(tzinfo=timezone.utc)
+                            cls._google_token_expiry = expiry
+                        else:
+                            cls._google_token_expiry = current_time + timedelta(minutes=40)
+                        logger.info("Successfully cached new Google Cloud token")
+                        return token
+
+                    logger.error("Empty token received from service account credentials")
+                    cls._google_token = None
+                    cls._google_token_expiry = None
+                    return None
+
+                if not shutil.which("gcloud"):
+                    logger.error(
+                        "No Google service account credentials configured and gcloud is not available"
+                    )
+                    cls._google_token = None
+                    cls._google_token_expiry = None
+                    return None
+
+                logger.info("Getting new Google Cloud token via gcloud CLI fallback")
                 result = subprocess.run(
                     ["gcloud", "auth", "print-access-token", "--quiet"],
                     capture_output=True,

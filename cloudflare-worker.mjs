@@ -1,4 +1,12 @@
-import { Container } from "@cloudflare/containers";
+import { Container, getContainer } from "@cloudflare/containers";
+
+let workerEnv = {};
+
+try {
+  ({ env: workerEnv } = await import("cloudflare:workers"));
+} catch {
+  workerEnv = globalThis.__CLOUDFLARE_ENV__ ?? {};
+}
 
 const API_ROUTE_PREFIXES = new Set([
   "azure",
@@ -25,6 +33,7 @@ const CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Req
 const DIRECT_ENV_KEYS = [
   "ADMIN_USERNAME",
   "ADMIN_API_KEY",
+  "AUTH_DB_PATH",
   "FLASK_SECRET_KEY",
   "JWT_SECRET",
   "PROJECT_ID",
@@ -61,8 +70,9 @@ function shouldPassThroughKey(key) {
   return DIRECT_ENV_KEYS.includes(key) || DYNAMIC_ENV_PATTERNS.some((pattern) => pattern.test(key));
 }
 
-function collectContainerEnv(source) {
+function collectContainerEnv(source = {}) {
   const envVars = {
+    AUTH_DB_PATH: source.AUTH_DB_PATH ?? "/tmp/auth.sqlite3",
     FLASK_ENV: source.FLASK_ENV ?? "production",
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
@@ -160,18 +170,49 @@ function buildPreflightResponse(request) {
 
 export class MultiLLMProxyContainer extends Container {
   defaultPort = 8080;
+  requiredPorts = [8080];
   sleepAfter = "15m";
-  envVars = collectContainerEnv(this.env);
+  envVars = collectContainerEnv(workerEnv);
+  entrypoint = ["/usr/local/bin/cloudflare-entrypoint.sh"];
+
+  onStart() {
+    console.log("Container starting", {
+      envKeys: Object.keys(this.envVars).sort(),
+      hasAdminApiKey: Boolean(this.envVars.ADMIN_API_KEY),
+      hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
+      hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
+      hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
+    });
+  }
+
+  onError(error) {
+    console.error("Container startup error", {
+      message: error instanceof Error ? error.message : String(error),
+      envKeys: Object.keys(this.envVars).sort(),
+      hasAdminApiKey: Boolean(this.envVars.ADMIN_API_KEY),
+      hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
+      hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
+      hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
+    });
+  }
 }
 
 export default {
   async fetch(request, env) {
+    console.log("Worker env check", {
+      hasAdminApiKey: Boolean(env.ADMIN_API_KEY),
+      hasFlaskSecretKey: Boolean(env.FLASK_SECRET_KEY),
+      hasJwtSecret: Boolean(env.JWT_SECRET),
+      hasOpenCodeApiKey: Boolean(env.OPENCODE_API_KEY),
+    });
+
     if (request.method === "OPTIONS" && isApiRequestPath(new URL(request.url).pathname)) {
       return buildPreflightResponse(request);
     }
 
     try {
-      const response = await env.MULTILLM_PROXY_CONTAINER.getByName("primary").fetch(request);
+      const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+      const response = await container.fetch(request);
       return applyCorsHeaders(request, response);
     } catch (error) {
       if (!buildCorsHeaders(request)) {
