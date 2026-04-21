@@ -176,7 +176,7 @@ test("container envVars are derived from the live Durable Object env", () => {
 
 test("worker answers /health directly without touching the container", async () => {
   const stub = makeEnv(async () => {
-    throw new Error("health should not reach the container");
+    throw new Error("health container unavailable");
   });
 
   const response = await worker.fetch(
@@ -192,9 +192,14 @@ test("worker answers /health directly without touching the container", async () 
   });
 });
 
-test("worker answers / directly without touching the container", async () => {
+test("worker serves / from the container when it is available", async () => {
   const stub = makeEnv(async () => {
-    throw new Error("root should not reach the container");
+    return new Response("<html><body>container dashboard</body></html>", {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=UTF-8",
+      },
+    });
   });
 
   const response = await worker.fetch(
@@ -203,11 +208,26 @@ test("worker answers / directly without touching the container", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(stub.getCalls(), 0);
+  assert.equal(stub.getCalls(), 1);
+  assert.match(await response.text(), /container dashboard/);
+});
+
+test("worker falls back on / when the container is unavailable", async () => {
+  const stub = makeEnv(async () => {
+    throw new Error("root container unavailable");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/"),
+    stub.env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(stub.getCalls(), 1);
   assert.match(await response.text(), /MultiLLM Proxy/);
 });
 
-test("worker proxies opencode requests directly when container is unavailable", async () => {
+test("worker proxies opencode requests directly when the container is unavailable", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("opencode fallback should bypass the container");

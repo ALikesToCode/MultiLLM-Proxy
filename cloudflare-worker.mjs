@@ -727,6 +727,9 @@ export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
     const apiPath = isApiRequestPath(requestUrl.pathname);
+    const rootPath = requestUrl.pathname === "/";
+    const healthPath = isDirectHealthPath(requestUrl.pathname);
+    const opencodePath = isDirectOpencodePath(requestUrl.pathname);
 
     console.log("Worker env check", {
       hasAdminApiKey: Boolean(env.ADMIN_API_KEY),
@@ -739,15 +742,11 @@ export default {
       return buildPreflightResponse(request);
     }
 
-    if (requestUrl.pathname === "/") {
-      return buildRootFallbackResponse();
-    }
-
-    if (isDirectHealthPath(requestUrl.pathname)) {
+    if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse());
     }
 
-    if (isDirectOpencodePath(requestUrl.pathname)) {
+    if (opencodePath) {
       try {
         return await handleDirectOpencodeRequest(request, env, requestUrl);
       } catch (error) {
@@ -789,6 +788,11 @@ export default {
       );
       return applyCorsHeaders(request, response);
     } catch (error) {
+      if (rootPath) {
+        console.error("Container fetch failed", error);
+        return buildRootFallbackResponse();
+      }
+
       if (!apiPath) {
         console.error("Container fetch failed", error);
         return new Response("Proxy unavailable", {
