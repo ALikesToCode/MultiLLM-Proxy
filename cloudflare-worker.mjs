@@ -311,6 +311,98 @@ function extractReasoningPreview(source) {
   return parts.join(" ").trim();
 }
 
+function prettifyVisibleThinkingText(text) {
+  if (typeof text !== "string" || !text) {
+    return "";
+  }
+
+  const normalizedText = text
+    .replace(/\s+([.,!?;:)\]}])/g, "$1")
+    .replace(/([(\[{])\s+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let prettified = "";
+  let insideQuote = false;
+
+  for (let index = 0; index < normalizedText.length; index += 1) {
+    const character = normalizedText[index];
+
+    if (character === '"') {
+      if (!insideQuote) {
+        const previousCharacter = prettified.at(-1) ?? "";
+        if (previousCharacter && !/\s/.test(previousCharacter) && !/[([{]/.test(previousCharacter)) {
+          prettified += " ";
+        }
+
+        prettified += '"';
+        insideQuote = true;
+
+        while (normalizedText[index + 1] === " ") {
+          index += 1;
+        }
+        continue;
+      }
+
+      prettified = prettified.replace(/\s+$/u, "");
+      prettified += '"';
+      insideQuote = false;
+
+      while (normalizedText[index + 1] === " ") {
+        index += 1;
+      }
+
+      if (/[A-Za-z]/.test(normalizedText[index + 1] ?? "")) {
+        prettified += " ";
+      }
+      continue;
+    }
+
+    if (character === " ") {
+      if (!prettified || prettified.endsWith(" ")) {
+        continue;
+      }
+      prettified += " ";
+      continue;
+    }
+
+    prettified += character;
+  }
+
+  prettified = prettified
+    .replace(/\s+([.,!?;:)\]}])/g, "$1")
+    .replace(/([(\[{])\s+/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  prettified = prettified.replace(/"([^"\n]+)"/g, (match, innerText) => {
+    const normalizedInner = innerText.replace(/\s+/g, " ").trim();
+    if (!normalizedInner) {
+      return '""';
+    }
+
+    const innerTokens = normalizedInner.split(" ");
+    const shouldCollapseSubwords =
+      innerTokens.length > 1 &&
+      innerTokens.length <= 4 &&
+      innerTokens.every((token) => /^[A-Za-z]+$/.test(token)) &&
+      innerTokens.some((token) => token.length <= 2) &&
+      innerTokens.join("").length <= 16;
+
+    return `"${shouldCollapseSubwords ? innerTokens.join("") : normalizedInner}"`;
+  });
+
+  prettified = prettified
+    .replace(/([.!?])([A-Z])/g, (_, punctuation, nextLetter) => `${punctuation} ${nextLetter}`);
+
+  prettified = prettified.replace(
+    /(:\s+)([b-hj-z])\s+([a-z]{2,6})(?=[.,!?;:]?(?:\s|$))/g,
+    (_, prefix, firstPart, secondPart) => `${prefix}${firstPart}${secondPart}`,
+  );
+
+  return prettified;
+}
+
 function formatVisibleThinkBlock(reasoningPreview, content = "") {
   const normalizedPreview = normalizeReasoningCandidate(reasoningPreview);
   if (!normalizedPreview) {
@@ -321,9 +413,10 @@ function formatVisibleThinkBlock(reasoningPreview, content = "") {
     normalizedPreview.length > MAX_VISIBLE_THINK_CHARS
       ? `${normalizedPreview.slice(0, MAX_VISIBLE_THINK_CHARS - 1).trimEnd()}…`
       : normalizedPreview;
+  const prettifiedPreview = prettifyVisibleThinkingText(trimmedPreview);
   const normalizedContent = typeof content === "string" ? content : "";
 
-  return `<think>${trimmedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
+  return `<think>${prettifiedPreview}</think>${normalizedContent ? `\n\n${normalizedContent}` : ""}`;
 }
 
 function flushVisibleThinkingBuffer(state) {
@@ -337,6 +430,7 @@ function flushVisibleThinkingBuffer(state) {
     .replace(/([(\[{])\s+/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+  combinedPreview = prettifyVisibleThinkingText(combinedPreview);
 
   state.thinkingBuffer = [];
   state.thinkingBufferedChars = 0;

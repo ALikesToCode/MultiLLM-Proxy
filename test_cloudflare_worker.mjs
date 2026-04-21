@@ -339,6 +339,72 @@ test("worker renders a safe visible <think> block for non-streaming opencode res
   }
 });
 
+test("worker prettifies non-stream think text around quotes and sentence boundaries", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("opencode fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        id: "chatcmpl-1",
+        object: "chat.completion",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "pong",
+              reasoning:
+                'The user wants me to reply with exactly "pong".So I should output just the word "pong "without any punctuation. No,"exactly pong "implies just the word.',
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(stub.getCalls(), 0);
+    assert.match(
+      payload.choices[0].message.content,
+      /^<think>The user wants me to reply with exactly "pong"\. So I should output just the word "pong" without any punctuation\. No, "exactly pong" implies just the word\.<\/think>\n\npong$/,
+    );
+    assert.doesNotMatch(payload.choices[0].message.content, /\."So/);
+    assert.doesNotMatch(payload.choices[0].message.content, /"pong "without/);
+    assert.doesNotMatch(payload.choices[0].message.content, /No,"exactly/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("worker renders a safe visible <think> block for streaming opencode responses", async () => {
   const stub = makeEnv(
     async () => {
@@ -559,6 +625,94 @@ test("worker coalesces streamed thinking fragments into human-readable text", as
     assert.doesNotMatch(text, /Theuserwantspong\./);
     assert.match(text, /"content":"<\/think>\\n\\n"/);
     assert.match(text, /"content":"pong"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("worker prettifies quoted and colon-prefixed split thinking words", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("streaming fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const streamBody = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-1","object":"chat.completion.chunk","choices":[{"delta":{"content":"","role":"assistant","reasoning":"The user wants \\""}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-2","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"p"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-3","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"ong"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-4","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"\\". The answer is simply:"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-5","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"p"}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-think-6","object":"chat.completion.chunk","choices":[{"delta":{"content":"","reasoning":"ong."}}]}\n',
+        ),
+      );
+      controller.enqueue(
+        encoder.encode(
+          'data: {"id":"gen-content","object":"chat.completion.chunk","choices":[{"delta":{"content":"pong"}}]}\n',
+        ),
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n"));
+      controller.close();
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(streamBody, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/event-stream",
+      },
+    });
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", stream: true, messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(stub.getCalls(), 0);
+    assert.match(text, /\\"pong\\"\. The answer is simply: pong\./);
+    assert.doesNotMatch(text, /" p ong "/);
+    assert.doesNotMatch(text, /simply: p ong/);
   } finally {
     globalThis.fetch = originalFetch;
   }
