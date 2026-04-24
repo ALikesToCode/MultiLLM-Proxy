@@ -684,7 +684,7 @@ class ProxyService:
         url: str,
         headers: Dict[str, str],
         params: Dict[str, Any],
-        data: bytes,
+        data: Optional[bytes],
         api_provider: str,
         use_cache: bool = True,
         retry_count: int = 0
@@ -705,13 +705,19 @@ class ProxyService:
                     # For localhost, explicitly disable compression
                     headers['Accept-Encoding'] = 'identity'
 
+                timeout = Config.API_TIMEOUTS.get(
+                    api_provider,
+                    Config.API_TIMEOUTS.get("default", (5, 60)),
+                )
+
                 response = session.request(
                     method=method,
                     url=url,
                     headers=headers,
                     params=params,
                     data=data,
-                    stream=True  # always enable streaming
+                    stream=True,  # always enable streaming
+                    timeout=timeout,
                 )
 
                 # Handle response content
@@ -2262,7 +2268,7 @@ class ProxyService:
         url: str,
         headers: Dict[str, str],
         params: Dict[str, Any],
-        data: bytes,
+        data: Optional[bytes],
         api_provider: str,
         use_cache: bool = True,
     ) -> requests.Response:
@@ -2273,13 +2279,8 @@ class ProxyService:
         
         try:
             # Check if this is a streaming request
-            is_streaming = False
-            if data:
-                try:
-                    request_data = json.loads(data)
-                    is_streaming = bool(request_data.get('stream', False))
-                except Exception:
-                    pass
+            request_data = cls._decode_json_request_data(data)
+            is_streaming = bool(request_data.get('stream', False))
             
             # Extract authentication tokens/keys if needed
             auth_token = None
@@ -2291,23 +2292,32 @@ class ProxyService:
             # Special handling for different providers
             if api_provider == "together":
                 return cls._handle_together_request(
-                    method, url, headers, params, data, json.loads(data), use_cache
+                    method, url, headers, params, data, request_data, use_cache
                 )
             elif api_provider == "groq":
                 return cls._handle_groq_request(
-                    method, url, headers, params, data, json.loads(data), use_cache
+                    method, url, headers, params, data, request_data, use_cache
                 )
             elif api_provider == "googleai":
+                if not request_data:
+                    return cls._make_base_request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        params=params,
+                        data=data,
+                        api_provider=api_provider,
+                        use_cache=use_cache,
+                    )
                 return cls._handle_googleai_request(
-                    method, url, headers, params, data, json.loads(data), use_cache
+                    method, url, headers, params, data, request_data, use_cache
                 )
             elif api_provider == "gemini" or api_provider == "gemma":
                 # For Gemini/Gemma, pass the auth token extracted from header if available
                 return cls._handle_gemini_request(
-                    method, url, headers, params, data, json.loads(data) if data else {}, use_cache, api_provider, auth_token
+                    method, url, headers, params, data, request_data, use_cache, api_provider, auth_token
                 )
             elif api_provider == "nineteen":
-                request_data = json.loads(data)
                 model = request_data.get("model")
                 if model in cls.MODEL_MAPPINGS:
                     # Map the model to a supported one
@@ -2317,7 +2327,7 @@ class ProxyService:
                     logger.info(f"Mapped model {model} to {request_data['model']}")
             elif api_provider == "openrouter":
                 return cls._handle_openrouter_request(
-                    method, url, headers, params, data, json.loads(data) if data else {}, use_cache, auth_token
+                    method, url, headers, params, data, request_data, use_cache, auth_token
                 )
 
             # For all other providers, use the base request but prepare for streaming if needed
@@ -2350,6 +2360,19 @@ class ProxyService:
             if isinstance(e, APIError):
                 raise
             raise APIError(error_msg, status_code=500)
+
+    @staticmethod
+    def _decode_json_request_data(data: Optional[bytes]) -> Dict[str, Any]:
+        """
+        Decode an optional JSON request body for provider-specific dispatch.
+        """
+        if not data:
+            return {}
+
+        parsed = json.loads(data)
+        if isinstance(parsed, dict):
+            return parsed
+        return {}
 
     @classmethod
     def shutdown(cls):

@@ -380,6 +380,33 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
             request_mock.call_args.kwargs["headers"]["Accept-Encoding"],
             "gzip, deflate",
         )
+        self.assertEqual(request_mock.call_args.kwargs["timeout"], (5, 120))
+
+    def test_special_provider_get_requests_do_not_require_json_body(self):
+        fake_response = requests.Response()
+        fake_response.status_code = 200
+        fake_response._content = b'{"data":[]}'
+        fake_response.headers["Content-Type"] = "application/json"
+
+        for provider in ("together", "groq", "googleai", "nineteen"):
+            with self.subTest(provider=provider):
+                with patch.object(
+                    self.proxy_module.ProxyService,
+                    "_make_base_request",
+                    return_value=fake_response,
+                ) as base_request:
+                    response = self.proxy_module.ProxyService.make_request(
+                        method="GET",
+                        url="https://example.invalid/v1/models",
+                        headers={},
+                        params={},
+                        data=None,
+                        api_provider=provider,
+                        use_cache=False,
+                    )
+
+                self.assertEqual(response.status_code, 200)
+                base_request.assert_called()
 
     def test_make_base_request_retries_opencode_timeout_payloads(self):
         timeout_response = requests.Response()
