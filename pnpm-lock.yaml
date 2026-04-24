@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@cloudflare/containers':
-        specifier: ^0.0.20
-        version: 0.0.20
+        specifier: ^0.3.2
+        version: 0.3.3
       autoprefixer:
         specifier: ^10.4.14
         version: 10.4.27(postcss@8.5.8)
@@ -30,8 +30,8 @@ packages:
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
     engines: {node: '>=10'}
 
-  '@cloudflare/containers@0.0.20':
-    resolution: {integrity: sha512-Se6rHVgNBSZJ+MR+XQ5lY/LsCiecnZdOS1gFYUr5Jxu/xezaMzD0dIE7n5/OUo3KwObC1fmXAjZHYZbzeFh1yA==}
+  '@cloudflare/containers@0.3.3':
+    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
 
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution: {integrity: sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ==}
@@ -839,7 +839,7 @@ snapshots:
 
   '@alloc/quick-lru@5.2.0': {}
 
-  '@cloudflare/containers@0.0.20': {}
+  '@cloudflare/containers@0.3.3': {}
 
   '@cloudflare/kv-asset-handler@0.4.2': {}
 
