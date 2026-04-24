@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+from urllib.parse import urlsplit
 
 import psutil
 from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
@@ -15,6 +16,21 @@ from services.auth_service import AuthService
 from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
+
+
+def is_safe_redirect_target(target: str | None) -> bool:
+    """Allow only local, absolute-path redirects after login."""
+    if not target:
+        return False
+
+    parsed = urlsplit(target)
+    return (
+        not parsed.scheme
+        and not parsed.netloc
+        and target.startswith("/")
+        and not target.startswith("//")
+        and "\\" not in target
+    )
 
 
 def build_system_metrics(metrics_service: MetricsService) -> dict:
@@ -76,7 +92,9 @@ def register_core_routes(app) -> None:
                 api_key = request.form.get("api_key")
                 if AuthService.authenticate_user(username, api_key):
                     next_page = request.args.get("next")
-                    return redirect(next_page or url_for("status_page"))
+                    if is_safe_redirect_target(next_page):
+                        return redirect(next_page)
+                    return redirect(url_for("status_page"))
                 return render_template("login.html", error="Invalid username or API key")
 
             logger.info("Rendering login template")
