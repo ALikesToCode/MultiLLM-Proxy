@@ -10,31 +10,9 @@ from flask import Response, jsonify, request
 from error_handlers import APIError
 from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
-from route_helpers import api_auth_required, login_required
+from route_helpers import api_auth_required, copy_upstream_response_headers, login_required
 
 logger = logging.getLogger(__name__)
-
-HOP_BY_HOP_RESPONSE_HEADERS = {
-    "connection",
-    "content-encoding",
-    "content-length",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-}
-
-
-def _safe_response_headers(headers):
-    return {
-        key: value
-        for key, value in headers.items()
-        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
-    }
-
 
 def _dashboard_chat_completions_url(app, provider):
     if provider == "googleai":
@@ -286,7 +264,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 response.content,
                 status=status_code,
                 content_type=response.headers.get("content-type", "application/json"),
-                headers=_safe_response_headers(response.headers),
+                headers=copy_upstream_response_headers(response.headers),
             )
 
         except APIError as error:

@@ -1,7 +1,7 @@
 import logging
 import os
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 from urllib.parse import urlparse
 
 from flask import Response, g, jsonify, redirect, request, url_for
@@ -16,6 +16,29 @@ logger = logging.getLogger(__name__)
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
 LOCAL_DEVELOPMENT_HOSTS = {"localhost", "127.0.0.1", "::1"}
+HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
+    {
+        "connection",
+        "content-encoding",
+        "content-length",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
+
+
+def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy only response headers that are safe for Flask to emit downstream."""
+    return {
+        key: value
+        for key, value in upstream_headers.items()
+        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
+    }
 
 
 def mask_secret(value: Optional[str]) -> str:

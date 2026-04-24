@@ -7,6 +7,7 @@ from route_helpers import (
     api_auth_required,
     apply_cors_headers,
     build_cors_preflight_response,
+    copy_upstream_response_headers,
     extract_bearer_token,
     is_cors_origin_allowed,
     mask_authorization_header,
@@ -36,6 +37,24 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
         self.assertIsNone(extract_bearer_token(None))
         self.assertIsNone(extract_bearer_token("Basic token-value"))
         self.assertIsNone(extract_bearer_token("Bearer "))
+
+    def test_copy_upstream_response_headers_drops_hop_by_hop_values(self):
+        headers = copy_upstream_response_headers(
+            {
+                "Content-Type": "application/json",
+                "Connection": "keep-alive",
+                "Transfer-Encoding": "chunked",
+                "X-Request-ID": "req_123",
+            }
+        )
+
+        self.assertEqual(
+            headers,
+            {
+                "Content-Type": "application/json",
+                "X-Request-ID": "req_123",
+            },
+        )
 
 
 class RouteHelperCorsTest(unittest.TestCase):

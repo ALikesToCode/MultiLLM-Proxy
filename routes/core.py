@@ -12,25 +12,11 @@ from flask_wtf.csrf import CSRFError
 from config import Config
 from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
-from route_helpers import apply_cors_headers, check_provider, login_required
+from route_helpers import apply_cors_headers, check_provider, copy_upstream_response_headers, login_required
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
-
-
-HOP_BY_HOP_RESPONSE_HEADERS = {
-    "connection",
-    "content-encoding",
-    "content-length",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-}
 
 
 def is_safe_redirect_target(target: str | None) -> bool:
@@ -112,15 +98,6 @@ def build_openrouter_dashboard_headers() -> dict:
         headers["X-OpenRouter-Title"] = app_name
 
     return headers
-
-
-def copy_upstream_response_headers(upstream_headers: requests.structures.CaseInsensitiveDict) -> dict:
-    """Copy only response headers that are safe for Flask to emit downstream."""
-    return {
-        key: value
-        for key, value in upstream_headers.items()
-        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
-    }
 
 
 def register_core_routes(app) -> None:
