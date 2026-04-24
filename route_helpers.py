@@ -59,7 +59,18 @@ def is_api_request_path(path: str) -> bool:
         return False
 
     first_segment = stripped.split("/", 1)[0]
-    return first_segment in Config.API_BASE_URLS or stripped == "health"
+    return first_segment in Config.API_BASE_URLS or first_segment == "v1" or stripped == "health"
+
+
+def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
+    first_segment = path.strip("/").split("/", 1)[0]
+    if first_segment == "v1" and isinstance(payload_json, dict):
+        model = payload_json.get("model")
+        if isinstance(model, str) and ":" in model:
+            provider = model.split(":", 1)[0].strip().lower()
+            if provider:
+                return provider
+    return first_segment
 
 
 def parse_allowed_origins(raw_value: Optional[str] = None) -> set[str]:
@@ -192,9 +203,9 @@ def api_auth_required(func: Callable) -> Callable:
             )
             g.authenticated_user = authenticated_user
 
-            provider = request.path.strip("/").split("/", 1)[0]
             payload_bytes = request.get_data(cache=True) or b""
             payload_json = request.get_json(silent=True) if request.is_json else None
+            provider = provider_from_request_path(request.path, payload_json)
             limit_decision = RateLimitService.enforce_request(
                 provider=provider,
                 user=authenticated_user,

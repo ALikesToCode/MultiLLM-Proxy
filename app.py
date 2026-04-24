@@ -17,6 +17,7 @@ from route_helpers import (
 )
 from routes.core import register_core_routes
 from routes.proxy import register_proxy_routes
+from routes.unified import register_unified_routes
 from security_config import validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
@@ -71,6 +72,7 @@ def create_app() -> Flask:
     AuthService.initialize()
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_core_routes(app)
 
     return app
