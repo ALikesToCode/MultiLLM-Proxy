@@ -36,7 +36,7 @@ def is_safe_redirect_target(target: str | None) -> bool:
 def build_system_metrics(metrics_service: MetricsService) -> dict:
     """Collect system metrics used by the dashboard and SSE stream."""
     return {
-        "cpu_usage": round(psutil.cpu_percent(interval=1), 1),
+        "cpu_usage": round(psutil.cpu_percent(interval=None), 1),
         "memory_usage": round(psutil.virtual_memory().percent, 1),
         "start_time": metrics_service.start_time,
         "uptime_start_seconds": int(metrics_service.start_time),
