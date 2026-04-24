@@ -164,6 +164,39 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         self.assertIn("traffic_series", payload["stats"])
         self.assertEqual(payload["stats"]["failed_requests"], 1)
 
+    def test_admin_request_metrics_returns_request_records(self):
+        metrics_service = self.app_module.MetricsService.get_instance()
+        metrics_service.requests.clear()
+        metrics_service.track_request(
+            "opencode",
+            200,
+            45,
+            request_id="req-admin-test",
+            user_id="admin",
+            api_key_prefix="mllm_live_admin",
+            model="opencode:kimi-k2.5",
+            input_tokens=4,
+            output_tokens=8,
+        )
+
+        with self.client.session_transaction() as session:
+            session["authenticated"] = True
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key_prefix": "mllm_live_admin",
+                "scopes": ["admin"],
+            }
+
+        response = self.client.get("/admin/metrics/requests?limit=1")
+
+        self.assertEqual(response.status_code, 200)
+        record = response.get_json()["requests"][0]
+        self.assertEqual(record["request_id"], "req-admin-test")
+        self.assertEqual(record["model"], "opencode:kimi-k2.5")
+        self.assertEqual(record["input_tokens"], 4)
+        self.assertNotIn("prompt", record)
+
     def test_streaming_proxy_response_is_returned_without_rewrapping(self):
         upstream_stream = Response(
             'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\ndata: [DONE]\n\n',

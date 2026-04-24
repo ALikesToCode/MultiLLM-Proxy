@@ -461,6 +461,20 @@ def register_core_routes(app) -> None:
                 return jsonify({"status": "error", "message": str(error)}), 500
             return render_template("500.html", error=str(error)), 500
 
+    @app.route("/admin/metrics/requests")
+    @login_required
+    def admin_request_metrics():
+        require_admin_dashboard_user()
+        try:
+            limit = max(1, min(int(request.args.get("limit", 100)), 500))
+        except ValueError:
+            limit = 100
+        return jsonify(
+            {
+                "requests": MetricsService.get_instance().get_request_records(limit=limit),
+            }
+        )
+
     @app.route("/dashboard/openrouter/chat-completions", methods=["POST"])
     @login_required
     def dashboard_openrouter_chat_completions():
