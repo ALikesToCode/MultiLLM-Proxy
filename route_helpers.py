@@ -15,6 +15,25 @@ CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
 
 
+def mask_secret(value: Optional[str]) -> str:
+    """Return a short, non-sensitive representation of a secret value."""
+    if not value:
+        return "<missing>"
+    if len(value) <= 8:
+        return "<redacted>"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def mask_authorization_header(value: Optional[str]) -> str:
+    """Mask an Authorization header while preserving the scheme for debugging."""
+    if not value:
+        return "<missing>"
+    scheme, separator, token = value.partition(" ")
+    if not separator:
+        return mask_secret(value)
+    return f"{scheme} {mask_secret(token.strip())}"
+
+
 def is_api_request_path(path: str) -> bool:
     """
     Identify proxy/API paths that should participate in CORS handling.
@@ -83,7 +102,7 @@ def api_auth_required(func: Callable) -> Callable:
             return build_cors_preflight_response()
 
         auth_header = request.headers.get("Authorization")
-        logger.debug("Raw Authorization header: %s", auth_header)
+        logger.debug("Authorization header: %s", mask_authorization_header(auth_header))
 
         if not auth_header:
             logger.error("No Authorization header found")
@@ -98,7 +117,7 @@ def api_auth_required(func: Callable) -> Callable:
             ), 401
 
         api_key = auth_header.replace("Bearer ", "").strip()
-        logger.debug("Extracted API key: %s...", api_key[:5])
+        logger.debug("Extracted API key: %s", mask_secret(api_key))
 
         admin_api_key = os.environ.get("ADMIN_API_KEY")
         if not admin_api_key:
@@ -110,7 +129,7 @@ def api_auth_required(func: Callable) -> Callable:
                 }
             ), 500
 
-        logger.debug("Admin key first 5 chars: %s...", admin_api_key[:5])
+        logger.debug("Admin API key: %s", mask_secret(admin_api_key))
         if api_key == admin_api_key:
             logger.info("Request authenticated with admin API key")
             return func(*args, **kwargs)
@@ -121,7 +140,7 @@ def api_auth_required(func: Callable) -> Callable:
                 logger.info("Request authenticated with user API key for %s", username)
                 return func(*args, **kwargs)
 
-        logger.error("Invalid API key provided: %s...", api_key[:5])
+        logger.error("Invalid API key provided: %s", mask_secret(api_key))
         return jsonify(
             {
                 "error": "Invalid API key",
