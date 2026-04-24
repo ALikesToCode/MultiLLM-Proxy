@@ -1,11 +1,11 @@
 import os
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+from env_loader import load_runtime_env
 
 def init_vercel():
     """Initialize Vercel-specific configuration"""
+    load_runtime_env()
+
     # Set default environment variables if not set
     if not os.environ.get('FLASK_ENV'):
         os.environ['FLASK_ENV'] = 'production'

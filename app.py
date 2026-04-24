@@ -1,11 +1,11 @@
 import logging
 import os
 
-from dotenv import load_dotenv
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
 
 from config import Config, DevelopmentConfig, ProductionConfig
+from env_loader import load_runtime_env
 from error_handlers import init_error_handlers
 from route_helpers import (
     api_auth_required,
@@ -34,7 +34,7 @@ def create_app() -> Flask:
     """
     Create and configure the Flask application.
     """
-    load_dotenv()
+    load_runtime_env()
     runtime_secrets = validate_runtime_secrets()
 
     app = Flask(

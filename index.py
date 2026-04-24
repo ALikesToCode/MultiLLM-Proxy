@@ -1,9 +1,10 @@
-from flask import Flask, request
-from app import create_app
 from vercel import init_vercel
 
 # Initialize Vercel environment
 init_vercel()
+
+# Import after Vercel env initialization because app import validates secrets.
+from app import create_app
 
 # Create Flask app
 app = create_app()
@@ -38,4 +39,4 @@ def handler(request):
             'statusCode': 500,
             'body': str(e),
             'headers': {'Content-Type': 'text/plain'}
-        } 
+        }
