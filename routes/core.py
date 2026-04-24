@@ -10,7 +10,7 @@ from flask import Response, jsonify, redirect, render_template, request, send_fr
 from flask_wtf.csrf import CSRFError
 
 from config import Config
-from error_handlers import APIError
+from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
 from route_helpers import apply_cors_headers, check_provider, login_required
 from services.auth_service import AuthService
@@ -549,8 +549,15 @@ def register_core_routes(app) -> None:
         """
         Handle 500 errors.
         """
-        logger.error("Internal server error: %s", error)
-        return render_template("500.html"), 500
+        request_id = get_request_id()
+        logger.exception("Internal server error request_id=%s", request_id)
+        if request.is_json or "application/json" in request.headers.get("Accept", ""):
+            return jsonify(internal_error_payload()), 500
+        return render_template(
+            "500.html",
+            error=INTERNAL_ERROR_MESSAGE,
+            request_id=request_id,
+        ), 500
 
     @app.route("/status/updates")
     @login_required

@@ -59,6 +59,10 @@ def create_app() -> Flask:
     else:
         app.config.from_object(ProductionConfig)
 
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = flask_env != "development"
+
     for key in dir(Config):
         if not key.startswith("_"):
             app.config[key] = getattr(Config, key)
