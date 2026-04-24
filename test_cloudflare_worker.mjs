@@ -27,7 +27,6 @@ function makeEnv(fetchImpl, envOverrides = {}) {
       return calls;
     },
     env: {
-      ALLOWED_ORIGINS: "https://janitorai.com,https://example.com",
       MULTILLM_PROXY_CONTAINER: {
         getByName(name) {
           assert.equal(name, "primary");
@@ -91,6 +90,32 @@ test("worker answers API CORS preflight without forwarding to the container", as
   );
 });
 
+test("worker deploy config allows arbitrary API CORS preflight", async () => {
+  const configUrl = new URL("./wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+  const origin = "https://client.example";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Authorization, Content-Type",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(config.vars?.ALLOWED_ORIGINS, undefined);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+});
+
 test("worker treats unified v1 routes as API paths for CORS preflight", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -148,7 +173,7 @@ test("worker returns CORS-safe v1 API errors when the container fetch fails", as
   });
 });
 
-test("worker rejects disallowed API CORS preflight without forwarding", async () => {
+test("worker allows arbitrary API CORS preflight without forwarding", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("preflight should not reach the container");
@@ -160,16 +185,16 @@ test("worker rejects disallowed API CORS preflight without forwarding", async ()
     new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
       method: "OPTIONS",
       headers: {
-        Origin: "https://evil.example",
+        Origin: "https://client.example",
         "Access-Control-Request-Method": "POST",
       },
     }),
     stub.env,
   );
 
-  assert.equal(response.status, 403);
+  assert.equal(response.status, 204);
   assert.equal(stub.getCalls(), 0);
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://client.example");
 });
 
 test("worker adds CORS headers to proxied API responses", async () => {
@@ -201,7 +226,7 @@ test("worker adds CORS headers to proxied API responses", async () => {
   assert.deepEqual(await response.json(), { ok: true });
 });
 
-test("worker omits CORS headers for disallowed proxied origins", async () => {
+test("worker adds CORS headers for arbitrary proxied origins", async () => {
   const stub = makeEnv(
     async () => {
       return new Response(JSON.stringify({ ok: true }), {
@@ -218,7 +243,7 @@ test("worker omits CORS headers for disallowed proxied origins", async () => {
     new Request("https://multillm-proxy.cserules.workers.dev/openai/chat/completions", {
       method: "POST",
       headers: {
-        Origin: "https://evil.example",
+        Origin: "https://client.example",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model: "kimi-k2.5" }),
@@ -228,7 +253,7 @@ test("worker omits CORS headers for disallowed proxied origins", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(stub.getCalls(), 1);
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://client.example");
   assert.deepEqual(await response.json(), { ok: true });
 });
 

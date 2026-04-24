@@ -9,10 +9,8 @@ from route_helpers import (
     build_cors_preflight_response,
     copy_upstream_response_headers,
     extract_bearer_token,
-    is_cors_origin_allowed,
     mask_authorization_header,
     mask_secret,
-    parse_allowed_origins,
     provider_from_request_path,
 )
 from services.rate_limit_service import LimitDecision
@@ -62,24 +60,17 @@ class RouteHelperCorsTest(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
 
-    def test_parse_allowed_origins_trims_values(self):
-        self.assertEqual(
-            parse_allowed_origins(" https://one.example,https://two.example/ "),
-            {"https://one.example", "https://two.example"},
-        )
+    def test_any_browser_origin_gets_cors_headers(self):
+        with self.app.test_request_context(
+            "/openai/chat/completions",
+            headers={"Origin": "https://client.example"},
+        ):
+            response = apply_cors_headers(Response(status=200))
 
-    def test_allowed_origin_gets_cors_headers(self):
-        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
-            with self.app.test_request_context(
-                "/openai/chat/completions",
-                headers={"Origin": "https://allowed.example"},
-            ):
-                response = apply_cors_headers(Response(status=200))
-
-        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://allowed.example")
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://client.example")
         self.assertEqual(response.headers["Vary"], "Origin")
 
-    def test_denied_origin_gets_no_cors_headers(self):
+    def test_configured_allowlist_does_not_restrict_api_provider_cors(self):
         with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
             with self.app.test_request_context(
                 "/openai/chat/completions",
@@ -87,26 +78,22 @@ class RouteHelperCorsTest(unittest.TestCase):
             ):
                 response = apply_cors_headers(Response(status=200))
 
-        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://evil.example")
         self.assertEqual(response.headers["Vary"], "Origin")
 
-    def test_denied_preflight_returns_403(self):
-        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
-            with self.app.test_request_context(
-                "/openai/chat/completions",
-                method="OPTIONS",
-                headers={"Origin": "https://evil.example"},
-            ):
-                response = build_cors_preflight_response()
+    def test_preflight_allows_any_browser_origin(self):
+        with self.app.test_request_context(
+            "/openai/chat/completions",
+            method="OPTIONS",
+            headers={
+                "Origin": "https://client.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        ):
+            response = build_cors_preflight_response()
 
-        self.assertEqual(response.status_code, 403)
-        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
-
-    def test_development_allows_localhost_when_unconfigured(self):
-        with patch.dict("os.environ", {"FLASK_ENV": "development", "ALLOWED_ORIGINS": ""}, clear=False):
-            self.assertTrue(is_cors_origin_allowed("http://localhost:5173"))
-            self.assertTrue(is_cors_origin_allowed("http://127.0.0.1:3000"))
-            self.assertFalse(is_cors_origin_allowed("https://evil.example"))
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://client.example")
 
     def test_no_origin_server_to_server_requests_are_not_cors_responses(self):
         with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
