@@ -4,11 +4,12 @@ from functools import wraps
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
-from flask import Response, jsonify, redirect, request, url_for
+from flask import Response, g, jsonify, redirect, request, url_for
 
 from config import Config
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
+from services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,29 @@ def api_auth_required(func: Callable) -> Callable:
                 authenticated_user.get("api_key_prefix"),
                 authenticated_user.get("username"),
             )
+            g.authenticated_user = authenticated_user
+
+            provider = request.path.strip("/").split("/", 1)[0]
+            payload_bytes = request.get_data(cache=True) or b""
+            payload_json = request.get_json(silent=True) if request.is_json else None
+            limit_decision = RateLimitService.enforce_request(
+                provider=provider,
+                user=authenticated_user,
+                payload_bytes=payload_bytes,
+                payload_json=payload_json,
+                remote_addr=request.remote_addr,
+            )
+            g.rate_limit = limit_decision.metadata
+            if not limit_decision.allowed:
+                response = jsonify(
+                    {
+                        "error": limit_decision.error,
+                        "message": limit_decision.message,
+                    }
+                )
+                if limit_decision.retry_after:
+                    response.headers["Retry-After"] = str(limit_decision.retry_after)
+                return response, limit_decision.status_code
             return func(*args, **kwargs)
 
         logger.error("Invalid API key provided: %s", mask_secret(api_key))

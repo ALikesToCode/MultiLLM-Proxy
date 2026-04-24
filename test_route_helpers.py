@@ -4,6 +4,7 @@ from unittest.mock import patch
 from flask import Flask, Response
 
 from route_helpers import (
+    api_auth_required,
     apply_cors_headers,
     build_cors_preflight_response,
     extract_bearer_token,
@@ -12,6 +13,7 @@ from route_helpers import (
     mask_secret,
     parse_allowed_origins,
 )
+from services.rate_limit_service import LimitDecision
 
 
 class RouteHelperSecretMaskingTest(unittest.TestCase):
@@ -92,6 +94,46 @@ class RouteHelperCorsTest(unittest.TestCase):
                 response = apply_cors_headers(Response(status=200))
 
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+
+class RouteHelperRateLimitTest(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+
+        @self.app.route("/openai/chat/completions", methods=["POST"])
+        @api_auth_required
+        def protected_route():
+            return {"ok": True}
+
+    def test_api_auth_required_enforces_rate_limit_before_handler(self):
+        with patch(
+            "route_helpers.AuthService.verify_api_key",
+            return_value={
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+                "scopes": ["chat"],
+            },
+        ), patch(
+            "route_helpers.RateLimitService.enforce_request",
+            return_value=LimitDecision(
+                allowed=False,
+                status_code=429,
+                error="rate_limit_exceeded",
+                message="Request-per-minute limit exceeded.",
+                retry_after=60,
+            ),
+        ) as enforce_request:
+            response = self.app.test_client().post(
+                "/openai/chat/completions",
+                headers={"Authorization": "Bearer user-key"},
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.get_json()["error"], "rate_limit_exceeded")
+        self.assertEqual(response.headers["Retry-After"], "60")
+        enforce_request.assert_called_once()
+        self.assertEqual(enforce_request.call_args.kwargs["provider"], "openai")
 
 
 if __name__ == "__main__":
