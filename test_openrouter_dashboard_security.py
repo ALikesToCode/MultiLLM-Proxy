@@ -96,6 +96,27 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         self.assertNotIn("EventSource", script)
         self.assertNotIn("responseArea.innerHTML = formatResponse", script)
 
+    def test_openrouter_model_output_is_rendered_as_text(self):
+        script = Path("static/js/openrouter.js").read_text(encoding="utf-8")
+        malicious_output = "<img src=x onerror=alert(1)>"
+        set_plain_text = script[
+            script.index("function setPlainText"):
+            script.index("function setResponseText")
+        ]
+        set_response_text = script[
+            script.index("function setResponseText"):
+            script.index("function setLoading")
+        ]
+
+        self.assertIn("wrapper.textContent = text", set_plain_text)
+        self.assertIn("setPlainText(responseArea, text, className);", set_response_text)
+        self.assertNotIn(
+            "innerHTML",
+            set_plain_text + set_response_text,
+            msg=f"malicious model output must not be rendered as HTML: {malicious_output}",
+        )
+        self.assertNotIn("formatResponse", script)
+
     def test_openrouter_template_does_not_render_provider_key(self):
         template = Path("templates/openrouter.html").read_text(encoding="utf-8")
 
