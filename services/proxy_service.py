@@ -38,6 +38,10 @@ class ProxyService:
 
     _executor = ThreadPoolExecutor(max_workers=10)
     _tokenizer = None  # Lazy-load tokenizer
+    _sessions: Dict[str, requests.Session] = {}
+    _session_lock = threading.RLock()
+    _circuit_breakers: Dict[str, Dict[str, Any]] = {}
+    _circuit_lock = threading.RLock()
     _mojibake_marker_pattern = re.compile(r"[\u0080-\u009f]|[ÃÂâðÐÑ]")
     _cp1252_utf8_continuation_chars = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
     _utf8_as_single_byte_sequence_pattern = re.compile(
@@ -55,6 +59,98 @@ class ProxyService:
         "TheBloke/Rogue-Rose-103b-v0.2-AWQ": "unsloth/Meta-Llama-3.1-8B-Instruct",  # Map to a supported model
         # Add more model mappings as needed
     }
+
+    RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+    SAFE_RETRY_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+    @classmethod
+    def _get_provider_session(cls, api_provider: str) -> requests.Session:
+        with cls._session_lock:
+            session = cls._sessions.get(api_provider)
+            if session is not None:
+                return session
+
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=100,
+                pool_maxsize=100,
+                max_retries=0,
+            )
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            cls._sessions[api_provider] = session
+            return session
+
+    @classmethod
+    def _has_idempotency_key(cls, headers: Dict[str, str]) -> bool:
+        return any(key.lower() == "idempotency-key" for key in headers)
+
+    @classmethod
+    def _should_retry_status(cls, method: str, headers: Dict[str, str], status_code: int, is_streaming: bool) -> bool:
+        if status_code not in cls.RETRYABLE_STATUS_CODES or is_streaming:
+            return False
+        if method.upper() in cls.SAFE_RETRY_METHODS:
+            return True
+        return cls._has_idempotency_key(headers)
+
+    @classmethod
+    def _should_retry_exception(cls, method: str, data: Optional[bytes], error: requests.exceptions.RequestException) -> bool:
+        if isinstance(error, requests.exceptions.ConnectTimeout):
+            return True
+        return method.upper() in cls.SAFE_RETRY_METHODS and not data
+
+    @classmethod
+    def _circuit_settings(cls) -> tuple[int, int]:
+        try:
+            failure_threshold = int(os.environ.get("CIRCUIT_BREAKER_FAILURES", "5"))
+        except ValueError:
+            failure_threshold = 5
+        try:
+            cooldown_seconds = int(os.environ.get("CIRCUIT_BREAKER_COOLDOWN_SECONDS", "30"))
+        except ValueError:
+            cooldown_seconds = 30
+        return max(1, failure_threshold), max(1, cooldown_seconds)
+
+    @classmethod
+    def _circuit_open_response(cls, api_provider: str) -> Optional[requests.Response]:
+        with cls._circuit_lock:
+            state = cls._circuit_breakers.get(api_provider)
+            if not state:
+                return None
+            opened_until = state.get("opened_until", 0)
+            if opened_until <= time.time():
+                state["opened_until"] = 0
+                return None
+
+        response = requests.Response()
+        response.status_code = 503
+        payload = {
+            "error": {
+                "message": f"Circuit breaker is open for {api_provider}",
+                "type": "circuit_open",
+                "code": 503,
+            }
+        }
+        response._content = json.dumps(payload).encode("utf-8")
+        response.headers["Content-Type"] = "application/json"
+        return response
+
+    @classmethod
+    def _record_circuit_result(cls, api_provider: str, status_code: int) -> None:
+        failure_threshold, cooldown_seconds = cls._circuit_settings()
+        with cls._circuit_lock:
+            state = cls._circuit_breakers.setdefault(
+                api_provider,
+                {"failures": 0, "opened_until": 0},
+            )
+            if status_code in cls.RETRYABLE_STATUS_CODES:
+                state["failures"] += 1
+                if state["failures"] >= failure_threshold:
+                    state["opened_until"] = time.time() + cooldown_seconds
+                return
+
+            state["failures"] = 0
+            state["opened_until"] = 0
 
     @classmethod
     def get_google_access_token(cls) -> Optional[str]:
@@ -697,111 +793,142 @@ class ProxyService:
         Make a base request with retries and error handling
         """
         try:
-            with requests.Session() as session:
-                adapter = requests.adapters.HTTPAdapter()
-                session.mount('http://', adapter)
-                session.mount('https://', adapter)
+            circuit_response = cls._circuit_open_response(api_provider)
+            if circuit_response is not None:
+                return circuit_response
 
-                # Only advertise encodings we can reliably decode in this runtime.
-                if not url.startswith(('http://localhost:', 'http://127.0.0.1:', 'http://[::1]:')):
-                    headers['Accept-Encoding'] = 'gzip, deflate'
+            session = cls._get_provider_session(api_provider)
+
+            # Only advertise encodings we can reliably decode in this runtime.
+            if not url.startswith(('http://localhost:', 'http://127.0.0.1:', 'http://[::1]:')):
+                headers['Accept-Encoding'] = 'gzip, deflate'
+            else:
+                # For localhost, explicitly disable compression
+                headers['Accept-Encoding'] = 'identity'
+
+            timeout = Config.API_TIMEOUTS.get(
+                api_provider,
+                Config.API_TIMEOUTS.get("default", (5, 60)),
+            )
+
+            response = session.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=data,
+                stream=True,  # always enable streaming
+                timeout=timeout,
+            )
+
+            # Handle response content
+            try:
+                if data:
+                    # Attempt to see if 'stream' is set to true in JSON
+                    parsed_body = json.loads(data)
+                    is_streaming = bool(parsed_body.get('stream', False))
                 else:
-                    # For localhost, explicitly disable compression
-                    headers['Accept-Encoding'] = 'identity'
+                    is_streaming = False
+            except Exception:
+                is_streaming = False
 
-                timeout = Config.API_TIMEOUTS.get(
+            if (
+                cls._should_retry_status(method, headers, response.status_code, is_streaming)
+                and retry_count < MAX_RETRIES
+            ):
+                logger.warning(
+                    "Retrying %s request after status %s (attempt %s/%s)",
                     api_provider,
-                    Config.API_TIMEOUTS.get("default", (5, 60)),
+                    response.status_code,
+                    retry_count + 1,
+                    MAX_RETRIES,
                 )
-
-                response = session.request(
+                time.sleep(RETRY_DELAY * (retry_count + 1))
+                return cls._make_base_request(
                     method=method,
                     url=url,
                     headers=headers,
                     params=params,
                     data=data,
-                    stream=True,  # always enable streaming
-                    timeout=timeout,
+                    api_provider=api_provider,
+                    use_cache=use_cache,
+                    retry_count=retry_count + 1,
                 )
 
-                # Handle response content
+            if not is_streaming:
                 try:
-                    if data:
-                        # Attempt to see if 'stream' is set to true in JSON
-                        parsed_body = json.loads(data)
-                        is_streaming = bool(parsed_body.get('stream', False))
-                    else:
-                        is_streaming = False
-                except Exception:
-                    is_streaming = False
-
-                if not is_streaming:
-                    try:
-                        # Let requests handle decompression automatically
-                        content = response.content
-                        content_type = response.headers.get('content-type', '').lower()
-                        if not content or "json" not in content_type:
-                            return response
-
-                        decoded = content.decode('utf-8') if isinstance(content, bytes) else str(content)
-                        ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]')
-                        cleaned = ansi_escape.sub('', decoded)
-
-                        normalized_payload = None
-
-                        # Try to parse as JSON to validate
-                        try:
-                            parsed_cleaned = json.loads(cleaned)
-                            normalized_payload = cls.normalize_json_text(parsed_cleaned)
-                        except json.JSONDecodeError:
-                            try:
-                                parsed_decoded = json.loads(decoded)
-                                normalized_payload = cls.normalize_json_text(parsed_decoded)
-                            except json.JSONDecodeError:
-                                normalized_payload = None
-
-                        if normalized_payload is None:
-                            return response
-
-                        if (
-                            cls._is_retryable_timeout_payload(
-                                api_provider,
-                                response.status_code,
-                                normalized_payload,
-                            )
-                            and retry_count < MAX_RETRIES
-                        ):
-                            logger.warning(
-                                "Retrying %s request after timeout payload (attempt %s/%s)",
-                                api_provider,
-                                retry_count + 1,
-                                MAX_RETRIES,
-                            )
-                            time.sleep(RETRY_DELAY * (retry_count + 1))
-                            return cls._make_base_request(
-                                method=method,
-                                url=url,
-                                headers=headers,
-                                params=params,
-                                data=data,
-                                api_provider=api_provider,
-                                use_cache=use_cache,
-                                retry_count=retry_count + 1,
-                            )
-
-                        response._content = json.dumps(normalized_payload).encode('utf-8')
-                        response.headers['Content-Type'] = 'application/json'
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing response: {str(e)}")
+                    # Let requests handle decompression automatically
+                    content = response.content
+                    content_type = response.headers.get('content-type', '').lower()
+                    if not content or "json" not in content_type:
+                        cls._record_circuit_result(api_provider, response.status_code)
                         return response
 
-                return response
+                    decoded = content.decode('utf-8') if isinstance(content, bytes) else str(content)
+                    ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]')
+                    cleaned = ansi_escape.sub('', decoded)
+
+                    normalized_payload = None
+
+                    # Try to parse as JSON to validate
+                    try:
+                        parsed_cleaned = json.loads(cleaned)
+                        normalized_payload = cls.normalize_json_text(parsed_cleaned)
+                    except json.JSONDecodeError:
+                        try:
+                            parsed_decoded = json.loads(decoded)
+                            normalized_payload = cls.normalize_json_text(parsed_decoded)
+                        except json.JSONDecodeError:
+                            normalized_payload = None
+
+                    if normalized_payload is None:
+                        cls._record_circuit_result(api_provider, response.status_code)
+                        return response
+
+                    if (
+                        cls._is_retryable_timeout_payload(
+                            api_provider,
+                            response.status_code,
+                            normalized_payload,
+                        )
+                        and retry_count < MAX_RETRIES
+                    ):
+                        logger.warning(
+                            "Retrying %s request after timeout payload (attempt %s/%s)",
+                            api_provider,
+                            retry_count + 1,
+                            MAX_RETRIES,
+                        )
+                        time.sleep(RETRY_DELAY * (retry_count + 1))
+                        return cls._make_base_request(
+                            method=method,
+                            url=url,
+                            headers=headers,
+                            params=params,
+                            data=data,
+                            api_provider=api_provider,
+                            use_cache=use_cache,
+                            retry_count=retry_count + 1,
+                        )
+
+                    response._content = json.dumps(normalized_payload).encode('utf-8')
+                    response.headers['Content-Type'] = 'application/json'
+
+                except Exception as e:
+                    logger.error(f"Error processing response: {str(e)}")
+                    cls._record_circuit_result(api_provider, response.status_code)
+                    return response
+
+            cls._record_circuit_result(api_provider, response.status_code)
+            return response
 
         except requests.exceptions.RequestException as e:
             error_msg = f"Request failed: {str(e)}"
             logger.error(error_msg)
-            if retry_count < MAX_RETRIES:
+            if (
+                cls._should_retry_exception(method, data, e)
+                and retry_count < MAX_RETRIES
+            ):
                 logger.info(f"Retrying request (attempt {retry_count + 1}/{MAX_RETRIES})")
                 time.sleep(RETRY_DELAY * (retry_count + 1))
                 return cls._make_base_request(
@@ -814,6 +941,7 @@ class ProxyService:
                     use_cache=use_cache,
                     retry_count=retry_count + 1
                 )
+            cls._record_circuit_result(api_provider, 503)
             
             # If all retries fail, return a JSON error response
             error_response = requests.Response()
