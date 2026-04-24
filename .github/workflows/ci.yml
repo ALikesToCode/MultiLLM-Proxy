@@ -35,7 +35,7 @@ jobs:
           app.py routes services providers streaming
       - name: Bandit security scan
         run: >
-          bandit -q --skip B104,B110,B404,B603,B607,B608
+          bandit -q -c .bandit
           -r app.py config.py error_handlers.py route_helpers.py routes services providers streaming
       - name: Dependency audit
         run: pip-audit -r requirements.lock
