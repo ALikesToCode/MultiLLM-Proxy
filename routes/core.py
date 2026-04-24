@@ -5,7 +5,8 @@ import time
 from urllib.parse import urlsplit
 
 import psutil
-from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+import requests
+from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -16,6 +17,20 @@ from services.auth_service import AuthService
 from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
+
+
+HOP_BY_HOP_RESPONSE_HEADERS = {
+    "connection",
+    "content-encoding",
+    "content-length",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
 
 
 def is_safe_redirect_target(target: str | None) -> bool:
@@ -66,6 +81,45 @@ def build_dashboard_analytics(metrics_service: MetricsService, providers: dict, 
         "inactive_providers": max(configured_providers - active_providers, 0),
         "providers_with_traffic": len(provider_breakdown),
         "peak_hour": peak_hour,
+    }
+
+
+def require_admin_dashboard_user() -> dict:
+    """Return the current admin user or raise a client-safe API error."""
+    current_user = AuthService.get_current_user()
+    if not current_user or not current_user.get("is_admin", False):
+        raise APIError("Only admin users can perform this action", status_code=403)
+    return current_user
+
+
+def build_openrouter_dashboard_headers() -> dict:
+    """Build provider headers for dashboard BFF requests without exposing keys to browsers."""
+    api_key = AuthService.get_api_key("openrouter")
+    if not api_key:
+        raise APIError("OpenRouter API key is not configured", status_code=500)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    site_url = os.environ.get("OPENROUTER_SITE_URL")
+    app_name = os.environ.get("OPENROUTER_APP_NAME")
+    if site_url:
+        headers["HTTP-Referer"] = site_url
+    if app_name:
+        headers["X-OpenRouter-Title"] = app_name
+
+    return headers
+
+
+def copy_upstream_response_headers(upstream_headers: requests.structures.CaseInsensitiveDict) -> dict:
+    """Copy only response headers that are safe for Flask to emit downstream."""
+    return {
+        key: value
+        for key, value in upstream_headers.items()
+        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
     }
 
 
@@ -401,6 +455,80 @@ def register_core_routes(app) -> None:
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify({"status": "error", "message": str(error)}), 500
             return render_template("500.html", error=str(error)), 500
+
+    @app.route("/dashboard/openrouter/chat-completions", methods=["POST"])
+    @login_required
+    def dashboard_openrouter_chat_completions():
+        """
+        Server-side dashboard proxy for OpenRouter chat completions.
+        Browser clients authenticate with the Flask session and never receive provider keys.
+        """
+        require_admin_dashboard_user()
+        payload = request.get_json(silent=True) or {}
+        if not payload.get("model"):
+            raise APIError("Model is required", status_code=400)
+        if not isinstance(payload.get("messages"), list) or not payload["messages"]:
+            raise APIError("At least one message is required", status_code=400)
+
+        is_streaming = bool(payload.get("stream", False))
+        headers = build_openrouter_dashboard_headers()
+        if is_streaming:
+            headers["Accept"] = "text/event-stream"
+
+        timeout = Config.API_TIMEOUTS.get("openrouter", Config.API_TIMEOUTS.get("default", (5, 60)))
+        upstream_response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            stream=is_streaming,
+            timeout=timeout,
+        )
+
+        response_headers = copy_upstream_response_headers(upstream_response.headers)
+        if is_streaming:
+            content_type = upstream_response.headers.get("Content-Type", "text/event-stream")
+
+            def stream_response():
+                try:
+                    for chunk in upstream_response.iter_content(chunk_size=None):
+                        if chunk:
+                            yield chunk
+                finally:
+                    upstream_response.close()
+
+            return Response(
+                stream_with_context(stream_response()),
+                status=upstream_response.status_code,
+                headers=response_headers,
+                content_type=content_type,
+            )
+
+        return Response(
+            upstream_response.content,
+            status=upstream_response.status_code,
+            headers=response_headers,
+            content_type=upstream_response.headers.get("Content-Type", "application/json"),
+        )
+
+    @app.route("/dashboard/openrouter/credits", methods=["GET"])
+    @login_required
+    def dashboard_openrouter_credits():
+        """
+        Server-side OpenRouter credit lookup for the dashboard.
+        """
+        require_admin_dashboard_user()
+        timeout = Config.API_TIMEOUTS.get("openrouter", Config.API_TIMEOUTS.get("default", (5, 60)))
+        upstream_response = requests.get(
+            "https://openrouter.ai/api/v1/auth/key",
+            headers=build_openrouter_dashboard_headers(),
+            timeout=timeout,
+        )
+        return Response(
+            upstream_response.content,
+            status=upstream_response.status_code,
+            headers=copy_upstream_response_headers(upstream_response.headers),
+            content_type=upstream_response.headers.get("Content-Type", "application/json"),
+        )
 
     @app.errorhandler(404)
     def not_found_error(error):

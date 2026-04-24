@@ -368,54 +368,5 @@
         }, 2000);
     }
 
-    // OpenRouter integration code
-    document.addEventListener('DOMContentLoaded', function() {
-        const apiKey = '{{ api_key }}';
-        const creditsDisplay = document.getElementById('credits-display');
-        
-        if (apiKey) {
-            fetch('https://openrouter.ai/api/v1/auth/key', {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.credit) {
-                    creditsDisplay.innerHTML = `
-                        <svg class="mr-1.5 h-2 w-2 text-green-400" fill="currentColor" viewBox="0 0 8 8">
-                            <circle cx="4" cy="4" r="3" />
-                        </svg>
-                        Credits Available: $${data.credit.toFixed(2)}
-                    `;
-                } else {
-                    creditsDisplay.innerHTML = `
-                        <svg class="mr-1.5 h-2 w-2 text-yellow-400" fill="currentColor" viewBox="0 0 8 8">
-                            <circle cx="4" cy="4" r="3" />
-                        </svg>
-                        Credits: Unable to fetch
-                    `;
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching credits:', error);
-                creditsDisplay.innerHTML = `
-                    <svg class="mr-1.5 h-2 w-2 text-red-400" fill="currentColor" viewBox="0 0 8 8">
-                        <circle cx="4" cy="4" r="3" />
-                    </svg>
-                    Credits: Error fetching
-                `;
-            });
-        } else {
-            creditsDisplay.innerHTML = `
-                <svg class="mr-1.5 h-2 w-2 text-yellow-400" fill="currentColor" viewBox="0 0 8 8">
-                    <circle cx="4" cy="4" r="3" />
-                </svg>
-                API Key not configured
-            `;
-        }
-    });
 </script>
 {% endblock %} 
