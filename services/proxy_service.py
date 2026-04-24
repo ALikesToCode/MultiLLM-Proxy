@@ -1415,6 +1415,377 @@ class ProxyService:
             logger.error(error_msg)
             raise APIError(error_msg, status_code=500)
 
+    @staticmethod
+    def _gemini_native_part(part: Dict[str, Any]) -> bool:
+        native_keys = {
+            "text",
+            "inlineData",
+            "inline_data",
+            "fileData",
+            "file_data",
+            "functionCall",
+            "function_call",
+            "functionResponse",
+            "function_response",
+            "thoughtSignature",
+            "thought_signature",
+            "thought",
+            "videoMetadata",
+            "video_metadata",
+            "executableCode",
+            "codeExecutionResult",
+        }
+        return any(key in part for key in native_keys)
+
+    @staticmethod
+    def _normalize_gemini_part(part: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = {key: value for key, value in part.items() if key != "type"}
+        snake_to_camel = {
+            "inline_data": "inlineData",
+            "file_data": "fileData",
+            "function_call": "functionCall",
+            "function_response": "functionResponse",
+            "thought_signature": "thoughtSignature",
+            "video_metadata": "videoMetadata",
+        }
+
+        for snake_key, camel_key in snake_to_camel.items():
+            if snake_key in normalized and camel_key not in normalized:
+                normalized[camel_key] = normalized[snake_key]
+            normalized.pop(snake_key, None)
+
+        for media_key in ("inlineData", "fileData"):
+            media = normalized.get(media_key)
+            if isinstance(media, dict):
+                if "mime_type" in media and "mimeType" not in media:
+                    media["mimeType"] = media["mime_type"]
+                media.pop("mime_type", None)
+                if "file_uri" in media and "fileUri" not in media:
+                    media["fileUri"] = media["file_uri"]
+                media.pop("file_uri", None)
+
+        return normalized
+
+    @staticmethod
+    def _extract_google_thought_signature(value: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(value, dict):
+            return None
+
+        signature = value.get("thoughtSignature") or value.get("thought_signature")
+        if signature:
+            return signature
+
+        extra_content = value.get("extra_content") or value.get("extraContent") or {}
+        google_extra = extra_content.get("google", {}) if isinstance(extra_content, dict) else {}
+        if isinstance(google_extra, dict):
+            return google_extra.get("thought_signature") or google_extra.get("thoughtSignature")
+
+        return None
+
+    @staticmethod
+    def _parse_gemini_function_args(value: Any) -> Dict[str, Any]:
+        if value is None or value == "":
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {"value": parsed}
+            except json.JSONDecodeError:
+                return {"value": value}
+        return {"value": value}
+
+    @staticmethod
+    def _parse_gemini_function_response(value: Any) -> Dict[str, Any]:
+        if value is None or value == "":
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {"content": parsed}
+            except json.JSONDecodeError:
+                return {"content": value}
+        return {"content": value}
+
+    @staticmethod
+    def _data_uri_to_gemini_inline_data(url: str) -> Optional[Dict[str, Any]]:
+        match = re.match(r"^data:([^;,]+);base64,(.*)$", url, flags=re.DOTALL)
+        if not match:
+            return None
+        return {"mimeType": match.group(1), "data": match.group(2)}
+
+    @classmethod
+    def _openai_content_to_gemini_parts(cls, content: Any) -> List[Dict[str, Any]]:
+        if content is None:
+            return []
+        if isinstance(content, str):
+            return [{"text": content}] if content else []
+        if isinstance(content, dict):
+            content = [content]
+        if not isinstance(content, list):
+            return [{"text": str(content)}]
+
+        parts: List[Dict[str, Any]] = []
+        for item in content:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                if item:
+                    parts.append({"text": item})
+                continue
+            if not isinstance(item, dict):
+                parts.append({"text": str(item)})
+                continue
+
+            item_type = item.get("type")
+            if item_type in ("text", "input_text"):
+                part = {"text": item.get("text", "")}
+                signature = cls._extract_google_thought_signature(item)
+                if signature:
+                    part["thoughtSignature"] = signature
+                if "thought" in item:
+                    part["thought"] = item["thought"]
+                parts.append(part)
+                continue
+
+            if item_type in ("image_url", "input_image", "image"):
+                image_value = item.get("image_url") or item.get("image") or item.get("url")
+                image_url = image_value.get("url") if isinstance(image_value, dict) else image_value
+                mime_type = item.get("mime_type") or item.get("mimeType")
+                if isinstance(image_value, dict):
+                    mime_type = (
+                        mime_type
+                        or image_value.get("mime_type")
+                        or image_value.get("mimeType")
+                    )
+                if isinstance(image_url, str):
+                    inline_data = cls._data_uri_to_gemini_inline_data(image_url)
+                    if inline_data:
+                        parts.append({"inlineData": inline_data})
+                    else:
+                        file_data = {"fileUri": image_url}
+                        if mime_type:
+                            file_data["mimeType"] = mime_type
+                        parts.append({"fileData": file_data})
+                continue
+
+            if cls._gemini_native_part(item):
+                parts.append(cls._normalize_gemini_part(item))
+                continue
+
+            if "text" in item:
+                parts.append({"text": item.get("text", "")})
+
+        return parts
+
+    @classmethod
+    def _openai_tool_calls_to_gemini_parts(cls, tool_calls: Any) -> List[Dict[str, Any]]:
+        if not isinstance(tool_calls, list):
+            return []
+
+        parts: List[Dict[str, Any]] = []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            if "functionCall" in tool_call or "function_call" in tool_call:
+                parts.append(cls._normalize_gemini_part(tool_call))
+                continue
+
+            function_data = tool_call.get("function", {})
+            if not isinstance(function_data, dict):
+                continue
+
+            function_call = {
+                "name": function_data.get("name") or tool_call.get("name") or "function",
+                "args": cls._parse_gemini_function_args(function_data.get("arguments", {})),
+            }
+            if tool_call.get("id"):
+                function_call["id"] = tool_call["id"]
+
+            part = {"functionCall": function_call}
+            signature = cls._extract_google_thought_signature(tool_call)
+            if signature:
+                part["thoughtSignature"] = signature
+            parts.append(part)
+
+        return parts
+
+    @classmethod
+    def _openai_tool_message_to_gemini_parts(cls, message: Dict[str, Any]) -> List[Dict[str, Any]]:
+        function_response = {
+            "name": message.get("name") or message.get("tool_call_id") or "tool_response",
+            "response": cls._parse_gemini_function_response(message.get("content")),
+        }
+        if message.get("tool_call_id"):
+            function_response["id"] = message["tool_call_id"]
+
+        return [{"functionResponse": function_response}]
+
+    @classmethod
+    def _openai_tools_to_gemini_tools(cls, tools: Any) -> Any:
+        if not isinstance(tools, list):
+            return tools
+
+        native_tools: List[Dict[str, Any]] = []
+        function_declarations: List[Dict[str, Any]] = []
+
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            if "functionDeclarations" in tool or "google_search" in tool or "codeExecution" in tool:
+                native_tools.append(tool)
+                continue
+
+            if tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+                function_data = tool["function"]
+                declaration = {
+                    "name": function_data.get("name"),
+                }
+                if function_data.get("description"):
+                    declaration["description"] = function_data["description"]
+                if function_data.get("parameters"):
+                    declaration["parameters"] = function_data["parameters"]
+                if declaration["name"]:
+                    function_declarations.append(declaration)
+
+        if function_declarations:
+            native_tools.append({"functionDeclarations": function_declarations})
+
+        return native_tools
+
+    @classmethod
+    def _openai_messages_to_gemini_request(cls, request_data: Dict[str, Any]) -> Dict[str, Any]:
+        messages = request_data.get("messages", [])
+        contents: List[Dict[str, Any]] = []
+        system_parts: List[Dict[str, Any]] = []
+
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+
+            role = message.get("role", "user")
+            content = message.get("content", message.get("parts"))
+
+            if role in ("system", "developer"):
+                system_parts.extend(cls._openai_content_to_gemini_parts(content))
+                continue
+
+            if role in ("tool", "function"):
+                parts = cls._openai_tool_message_to_gemini_parts(message)
+                gemini_role = "user"
+            else:
+                parts = cls._openai_content_to_gemini_parts(content)
+                parts.extend(cls._openai_tool_calls_to_gemini_parts(message.get("tool_calls")))
+                gemini_role = "model" if role in ("assistant", "model") else "user"
+
+            if parts:
+                contents.append({"role": gemini_role, "parts": parts})
+
+        new_request_data: Dict[str, Any] = {"contents": contents}
+        if system_parts:
+            new_request_data["system_instruction"] = {"parts": system_parts}
+
+        generation_config = dict(request_data.get("generationConfig") or {})
+        parameter_map = {
+            "temperature": "temperature",
+            "max_tokens": "maxOutputTokens",
+            "max_output_tokens": "maxOutputTokens",
+            "top_p": "topP",
+            "top_k": "topK",
+            "stop": "stopSequences",
+        }
+        for openai_key, gemini_key in parameter_map.items():
+            if openai_key in request_data:
+                generation_config[gemini_key] = request_data[openai_key]
+        if generation_config:
+            new_request_data["generationConfig"] = generation_config
+
+        if "tools" in request_data:
+            new_request_data["tools"] = cls._openai_tools_to_gemini_tools(request_data["tools"])
+        if "toolConfig" in request_data:
+            new_request_data["toolConfig"] = request_data["toolConfig"]
+        if "tool_config" in request_data and "toolConfig" not in new_request_data:
+            new_request_data["toolConfig"] = request_data["tool_config"]
+        if "safetySettings" in request_data:
+            new_request_data["safetySettings"] = request_data["safetySettings"]
+
+        return new_request_data
+
+    @staticmethod
+    def _gemini_count_tokens_url(url: str) -> str:
+        if ":streamGenerateContent" in url:
+            return url.replace(":streamGenerateContent", ":countTokens", 1)
+        return url.replace(":generateContent", ":countTokens", 1)
+
+    @staticmethod
+    def _gemini_count_tokens_payload(request_data: Dict[str, Any]) -> Dict[str, Any]:
+        count_payload = {
+            "generateContentRequest": {
+                key: value
+                for key, value in request_data.items()
+                if key in {
+                    "contents",
+                    "system_instruction",
+                    "systemInstruction",
+                    "tools",
+                    "toolConfig",
+                    "generationConfig",
+                    "cachedContent",
+                }
+            }
+        }
+        return count_payload
+
+    @classmethod
+    def _gemini_parts_to_openai_message(cls, parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        text_parts: List[str] = []
+        tool_calls: List[Dict[str, Any]] = []
+        message_extra: Dict[str, Any] = {}
+
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+
+            if "text" in part and part.get("text"):
+                text_parts.append(part["text"])
+
+            signature = cls._extract_google_thought_signature(part)
+            if signature and "functionCall" not in part:
+                message_extra.setdefault("google", {})["thought_signature"] = signature
+
+            function_call = part.get("functionCall") or part.get("function_call")
+            if isinstance(function_call, dict):
+                call_id = function_call.get("id") or f"call_{uuid.uuid4().hex}"
+                tool_call: Dict[str, Any] = {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": function_call.get("name", "function"),
+                        "arguments": json.dumps(function_call.get("args", {})),
+                    },
+                }
+                if signature:
+                    tool_call["extra_content"] = {
+                        "google": {"thought_signature": signature}
+                    }
+                tool_calls.append(tool_call)
+
+        message: Dict[str, Any] = {
+            "role": "assistant",
+            "content": "".join(text_parts),
+        }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+            if not message["content"]:
+                message["content"] = None
+        if message_extra:
+            message["extra_content"] = message_extra
+
+        return message
+
     @classmethod
     def _handle_gemini_request(
         cls,
@@ -1440,6 +1811,7 @@ class ProxyService:
             original_url = url
             should_convert_to_openai_response = "/chat/completions" in original_url
             is_streaming_request = bool(request_data.pop("stream", False)) or ":streamGenerateContent" in url
+            preflight_count_tokens = bool(request_data.pop("preflight_count_tokens", False))
             enable_google_search = bool(
                 request_data.pop("webSearch", False)
                 or request_data.pop("enable_google_search", False)
@@ -1575,43 +1947,7 @@ class ProxyService:
                 
                 # Transform OpenAI-style request to Google Generative Language API format
                 if 'messages' in request_data:
-                    messages = request_data.get('messages', [])
-                    contents = []
-                    
-                    # Process messages to build 'contents'
-                    for message in messages:
-                        role = message.get('role', '')
-                        content = message.get('content', '')
-                        
-                        # Skip system messages for now or consider adding as context
-                        if role == 'system':
-                            continue
-                        
-                        # Add content from user or assistant messages
-                        contents.append({
-                            "parts": [{"text": content}]
-                        })
-                    
-                    # Create the new request format
-                    new_request_data = {
-                        "contents": contents
-                    }
-                    
-                    # Copy relevant parameters
-                    if 'temperature' in request_data:
-                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
-                        new_request_data['generationConfig']['temperature'] = request_data['temperature']
-                    
-                    if 'max_tokens' in request_data:
-                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
-                        new_request_data['generationConfig']['maxOutputTokens'] = request_data['max_tokens']
-                    
-                    if 'top_p' in request_data:
-                        new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
-                        new_request_data['generationConfig']['topP'] = request_data['top_p']
-                    
-                    # Update request data
-                    request_data = new_request_data
+                    request_data = cls._openai_messages_to_gemini_request(request_data)
 
             if is_streaming_request:
                 if ":generateContent" in url:
@@ -1641,6 +1977,41 @@ class ProxyService:
                     if not any(isinstance(tool, dict) and "google_search" in tool for tool in tools):
                         tools.append({"google_search": {}})
                     logger.info(f"Enabled Google Search grounding for Gemini model: {model}")
+
+                if preflight_count_tokens and (
+                    ":generateContent" in url or ":streamGenerateContent" in url
+                ):
+                    count_url = cls._gemini_count_tokens_url(url)
+                    count_payload = cls._gemini_count_tokens_payload(request_data)
+                    count_data = json.dumps(count_payload).encode("utf-8")
+                    count_headers = dict(headers)
+                    count_headers["Content-Length"] = str(len(count_data))
+                    count_response = cls._make_base_request(
+                        method="POST",
+                        url=count_url,
+                        headers=count_headers,
+                        params=params,
+                        data=count_data,
+                        api_provider=api_provider,
+                        use_cache=False,
+                    )
+                    if count_response.status_code >= 400:
+                        logger.warning(
+                            "Gemini countTokens preflight failed provider=%s status=%s",
+                            api_provider,
+                            count_response.status_code,
+                        )
+                        return count_response
+                    try:
+                        token_count = count_response.json().get("totalTokens")
+                        logger.info(
+                            "Gemini countTokens preflight provider=%s model=%s total_tokens=%s",
+                            api_provider,
+                            model,
+                            token_count,
+                        )
+                    except ValueError:
+                        logger.warning("Gemini countTokens preflight returned non-JSON response")
                 
                 # Re-encode the modified data
                 data = json.dumps(request_data).encode('utf-8')
@@ -1823,6 +2194,12 @@ class ProxyService:
                     try:
                         google_response = response.json()
                         
+                        candidates = google_response.get("candidates", [{}])
+                        first_candidate = candidates[0] if candidates else {}
+                        content = first_candidate.get("content", {})
+                        parts = content.get("parts", []) if isinstance(content, dict) else []
+                        message = cls._gemini_parts_to_openai_message(parts)
+
                         # Create OpenAI compatible response
                         openai_response = {
                             "id": google_response.get("id", str(uuid.uuid4())),
@@ -1832,11 +2209,8 @@ class ProxyService:
                             "choices": [
                                 {
                                     "index": 0,
-                                    "message": {
-                                        "role": "assistant",
-                                        "content": google_response.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                                    },
-                                    "finish_reason": google_response.get("candidates", [{}])[0].get("finishReason", "stop")
+                                    "message": message,
+                                    "finish_reason": first_candidate.get("finishReason", "stop")
                                 }
                             ],
                             "usage": {
