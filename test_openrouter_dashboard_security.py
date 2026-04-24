@@ -57,7 +57,7 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
     def test_dashboard_chat_completions_uses_server_side_openrouter_key(self):
         fake_response = FakeOpenRouterResponse(content=b'{"choices":[]}')
 
-        with patch("routes.core.requests.post", return_value=fake_response) as post:
+        with patch("routes.core.ProxyService.make_request", return_value=fake_response) as make_request:
             response = self.client.post(
                 "/dashboard/openrouter/chat-completions",
                 json={
@@ -69,9 +69,22 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_data(), b'{"choices":[]}')
-        post.assert_called_once()
-        headers = post.call_args.kwargs["headers"]
+        make_request.assert_called_once()
+        headers = make_request.call_args.kwargs["headers"]
         self.assertEqual(headers["Authorization"], "Bearer openrouter-live-key")
+        self.assertEqual(make_request.call_args.kwargs["api_provider"], "openrouter")
+        self.assertEqual(make_request.call_args.kwargs["method"], "POST")
+
+    def test_dashboard_credits_uses_proxy_service(self):
+        fake_response = FakeOpenRouterResponse(content=b'{"data":{"limit":10}}')
+
+        with patch("routes.core.ProxyService.make_request", return_value=fake_response) as make_request:
+            response = self.client.get("/dashboard/openrouter/credits")
+
+        self.assertEqual(response.status_code, 200)
+        make_request.assert_called_once()
+        self.assertEqual(make_request.call_args.kwargs["api_provider"], "openrouter")
+        self.assertEqual(make_request.call_args.kwargs["method"], "GET")
 
     def test_dashboard_chat_completions_requires_admin_session(self):
         with self.client.session_transaction() as session:
@@ -116,6 +129,18 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
             msg=f"malicious model output must not be rendered as HTML: {malicious_output}",
         )
         self.assertNotIn("formatResponse", script)
+
+    def test_openrouter_stream_parser_handles_empty_choices(self):
+        script = Path("static/js/openrouter.js").read_text(encoding="utf-8")
+
+        self.assertIn("data.choices?.[0]?.delta?.content", script)
+        self.assertIn("data.choices?.[0]?.message?.content", script)
+
+    def test_dashboard_fetch_sends_csrf_token(self):
+        script = Path("static/js/openrouter.js").read_text(encoding="utf-8")
+
+        self.assertIn("meta[name=\"csrf-token\"]", script)
+        self.assertIn("headers.set('X-CSRFToken', csrfToken)", script)
 
     def test_openrouter_template_does_not_render_provider_key(self):
         template = Path("templates/openrouter.html").read_text(encoding="utf-8")

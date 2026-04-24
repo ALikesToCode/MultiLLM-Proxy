@@ -137,6 +137,28 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertIn("request_id", payload)
         self.assertNotIn("sk-live", response.get_data(as_text=True))
 
+    def test_json_user_create_parses_is_admin_strings_strictly(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/users",
+            headers={"Accept": "application/json"},
+            json={"username": "jsonfalse", "is_admin": "false"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()["user"]["is_admin"])
+
+    def test_json_user_create_rejects_ambiguous_is_admin_string(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/users",
+            headers={"Accept": "application/json"},
+            json={"username": "badflag", "is_admin": "definitely"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("is_admin must be a boolean", response.get_json()["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

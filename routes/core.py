@@ -5,8 +5,7 @@ import time
 from urllib.parse import urlsplit
 
 import psutil
-import requests
-from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
+from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -15,8 +14,29 @@ from proxy import PROVIDER_DETAILS
 from route_helpers import apply_cors_headers, check_provider, copy_upstream_response_headers, login_required
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
+from services.proxy_service import ProxyService
 
 logger = logging.getLogger(__name__)
+
+TRUE_JSON_VALUES = {"1", "true", "yes", "on"}
+FALSE_JSON_VALUES = {"", "0", "false", "no", "off"}
+
+
+def parse_json_bool(value, field_name: str) -> bool:
+    """Parse JSON boolean-ish values without treating arbitrary strings as true."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in TRUE_JSON_VALUES:
+            return True
+        if normalized in FALSE_JSON_VALUES:
+            return False
+    raise APIError(f"{field_name} must be a boolean", status_code=400)
 
 
 def is_safe_redirect_target(target: str | None) -> bool:
@@ -172,7 +192,7 @@ def register_core_routes(app) -> None:
                 payload = request.get_json(silent=True) or {}
                 username = payload.get("username") or request.form.get("username")
                 is_admin = (
-                    bool(payload.get("is_admin"))
+                    parse_json_bool(payload.get("is_admin"), "is_admin")
                     if payload
                     else request.form.get("is_admin") == "on"
                 )
@@ -466,45 +486,45 @@ def register_core_routes(app) -> None:
         if not isinstance(payload.get("messages"), list) or not payload["messages"]:
             raise APIError("At least one message is required", status_code=400)
 
+        start_time = time.time()
         is_streaming = bool(payload.get("stream", False))
         headers = build_openrouter_dashboard_headers()
         if is_streaming:
             headers["Accept"] = "text/event-stream"
 
-        timeout = Config.API_TIMEOUTS.get("openrouter", Config.API_TIMEOUTS.get("default", (5, 60)))
-        upstream_response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            stream=is_streaming,
-            timeout=timeout,
-        )
-
-        response_headers = copy_upstream_response_headers(upstream_response.headers)
-        if is_streaming:
-            content_type = upstream_response.headers.get("Content-Type", "text/event-stream")
-
-            def stream_response():
-                try:
-                    for chunk in upstream_response.iter_content(chunk_size=None):
-                        if chunk:
-                            yield chunk
-                finally:
-                    upstream_response.close()
-
-            return Response(
-                stream_with_context(stream_response()),
-                status=upstream_response.status_code,
-                headers=response_headers,
-                content_type=content_type,
+        try:
+            upstream_response = ProxyService.make_request(
+                method="POST",
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                params=request.args,
+                data=json.dumps(payload).encode("utf-8"),
+                api_provider="openrouter",
+                use_cache=False,
+            )
+            MetricsService.get_instance().track_request(
+                provider="openrouter",
+                status_code=upstream_response.status_code,
+                response_time=(time.time() - start_time) * 1000,
             )
 
-        return Response(
-            upstream_response.content,
-            status=upstream_response.status_code,
-            headers=response_headers,
-            content_type=upstream_response.headers.get("Content-Type", "application/json"),
-        )
+            if isinstance(upstream_response, Response):
+                return upstream_response
+
+            return Response(
+                upstream_response.content,
+                status=upstream_response.status_code,
+                headers=copy_upstream_response_headers(upstream_response.headers),
+                content_type=upstream_response.headers.get("Content-Type", "application/json"),
+            )
+        except Exception as error:
+            status_code = error.status_code if isinstance(error, APIError) else 502
+            MetricsService.get_instance().track_request(
+                provider="openrouter",
+                status_code=status_code,
+                response_time=(time.time() - start_time) * 1000,
+            )
+            raise
 
     @app.route("/dashboard/openrouter/credits", methods=["GET"])
     @login_required
@@ -513,18 +533,36 @@ def register_core_routes(app) -> None:
         Server-side OpenRouter credit lookup for the dashboard.
         """
         require_admin_dashboard_user()
-        timeout = Config.API_TIMEOUTS.get("openrouter", Config.API_TIMEOUTS.get("default", (5, 60)))
-        upstream_response = requests.get(
-            "https://openrouter.ai/api/v1/auth/key",
-            headers=build_openrouter_dashboard_headers(),
-            timeout=timeout,
-        )
-        return Response(
-            upstream_response.content,
-            status=upstream_response.status_code,
-            headers=copy_upstream_response_headers(upstream_response.headers),
-            content_type=upstream_response.headers.get("Content-Type", "application/json"),
-        )
+        start_time = time.time()
+        try:
+            upstream_response = ProxyService.make_request(
+                method="GET",
+                url="https://openrouter.ai/api/v1/auth/key",
+                headers=build_openrouter_dashboard_headers(),
+                params=request.args,
+                data=None,
+                api_provider="openrouter",
+                use_cache=False,
+            )
+            MetricsService.get_instance().track_request(
+                provider="openrouter",
+                status_code=upstream_response.status_code,
+                response_time=(time.time() - start_time) * 1000,
+            )
+            return Response(
+                upstream_response.content,
+                status=upstream_response.status_code,
+                headers=copy_upstream_response_headers(upstream_response.headers),
+                content_type=upstream_response.headers.get("Content-Type", "application/json"),
+            )
+        except Exception as error:
+            status_code = error.status_code if isinstance(error, APIError) else 502
+            MetricsService.get_instance().track_request(
+                provider="openrouter",
+                status_code=status_code,
+                response_time=(time.time() - start_time) * 1000,
+            )
+            raise
 
     @app.errorhandler(404)
     def not_found_error(error):

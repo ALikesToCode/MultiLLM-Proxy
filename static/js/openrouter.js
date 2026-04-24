@@ -214,7 +214,7 @@ async function testOpenRouterModel(model, prompt, stream) {
             let responseText = '';
             setResponseText('');
             await readSseStream(response, data => {
-                const content = data.choices && data.choices[0].delta && data.choices[0].delta.content;
+                const content = data.choices?.[0]?.delta?.content;
                 if (content) {
                     responseText += content;
                     setResponseText(responseText);
@@ -225,9 +225,8 @@ async function testOpenRouterModel(model, prompt, stream) {
             });
         } else {
             const data = await response.json();
-            const content = data.choices && data.choices[0].message
-                ? data.choices[0].message.content
-                : JSON.stringify(data, null, 2);
+            const content = data.choices?.[0]?.message?.content
+                ?? JSON.stringify(data, null, 2);
             setResponseText(content);
             if (data.usage) {
                 updateTokensInfo(data.usage);
