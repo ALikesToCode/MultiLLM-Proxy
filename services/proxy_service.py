@@ -11,6 +11,7 @@ from services.rate_limit_service import RateLimitService
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
+from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
 import time
 import uuid
 import flask
@@ -258,7 +259,7 @@ class ProxyService:
                     "topK": data.get('top_k', 40)
                 }
                 data = formatted_data
-                logger.info(f"Formatted Google AI request data: {data}")
+                logger.info("Formatted Google AI request data: %s", redact_payload(data))
 
         try:
             return json.dumps(data).encode('utf-8')
@@ -667,12 +668,12 @@ class ProxyService:
             if not is_streaming:
                 _ = response.content
                 try:
-                    logger.info(f"Response status: {response.status_code}")
-                    logger.info(f"Response headers: {response.headers}")
+                    logger.info("Response status: %s", response.status_code)
+                    logger.info("Response headers: %s", redact_headers(response.headers))
                     if response.headers.get('content-type', '').startswith('application/json'):
-                        logger.info(f"Response content: {response.json()}")
+                        logger.info("Response content: %s", redact_payload(response.json()))
                     else:
-                        logger.info(f"Response content length: {len(response.content)}")
+                        logger.info("Response content length: %s", len(response.content))
                 except Exception as e:
                     logger.error(f"Error logging response: {str(e)}")
 
@@ -879,9 +880,16 @@ class ProxyService:
                 data = json.dumps(request_data).encode('utf-8')
 
             is_streaming = request_data.get('stream', False)
-            logger.info(f"Together AI request URL: {url}")
-            logger.info(f"Together AI request headers: {headers}")
-            logger.info(f"Together AI request data: {request_data}")
+            logger.info(
+                "Together AI request provider=%s url=%s model=%s stream=%s headers=%s params=%s payload=%s",
+                "together",
+                url,
+                request_data.get("model"),
+                is_streaming,
+                redact_headers(headers),
+                redact_query_params(params),
+                redact_payload(request_data),
+            )
 
             response = cls._make_base_request(
                 method=method,
@@ -894,8 +902,12 @@ class ProxyService:
                 retry_count=retry_count
             )
 
-            logger.info(f"Together AI raw response status: {response.status_code}")
-            logger.info(f"Together AI raw response headers: {response.headers}")
+            logger.info(
+                "Together AI response provider=%s status_code=%s headers=%s",
+                "together",
+                response.status_code,
+                redact_headers(response.headers),
+            )
 
             if response.status_code == 200:
                 try:
@@ -904,7 +916,7 @@ class ProxyService:
                     else:
                         if response.content:
                             response_data = response.json()
-                            logger.info(f"Together AI parsed response: {response_data}")
+                            logger.info("Together AI parsed response: %s", redact_payload(response_data))
 
                             # If listing /models, do not attempt to parse choices
                             if url.endswith('/models'):
@@ -940,7 +952,7 @@ class ProxyService:
                         return response
                 except json.JSONDecodeError as e:
                     logger.error(f"JSON decode error: {str(e)}")
-                    logger.error(f"Raw content: {response.content}")
+                    logger.error("Together AI raw content length: %s", len(response.content))
                     raise APIError("Invalid JSON response from Together AI", status_code=500)
                 except Exception as e:
                     logger.error(f"Error processing Together AI response: {str(e)}")
@@ -949,7 +961,7 @@ class ProxyService:
                 # Log error response
                 try:
                     error_content = response.content.decode('utf-8')
-                    logger.error(f"Together AI error response: {error_content}")
+                    logger.error("Together AI error response: %s", redact_text(error_content))
                 except Exception as e:
                     logger.error(f"Error decoding error response: {str(e)}")
                 raise APIError(
@@ -1101,7 +1113,7 @@ class ProxyService:
             data = json.dumps(chat_request).encode('utf-8')
 
             logger.info(f"Google AI chat request URL: {url}")
-            logger.debug(f"Google AI chat request data: {chat_request}")
+            logger.debug("Google AI chat request data: %s", redact_payload(chat_request))
 
             # Ensure we have a valid token before making the request
             if 'Authorization' not in headers or not headers['Authorization'].startswith('Bearer '):
@@ -1124,7 +1136,7 @@ class ProxyService:
             )
 
             logger.info(f"Google AI raw response status: {response.status_code}")
-            logger.debug(f"Google AI raw response headers: {response.headers}")
+            logger.debug("Google AI raw response headers: %s", redact_headers(response.headers))
 
             if response.status_code == 200:
                 try:
@@ -1227,7 +1239,7 @@ class ProxyService:
                                 logger.error(f"Error parsing JSON response: {e}, content: {response.content[:200]}")
                                 response_data = {"error": "Invalid JSON response from Google AI"}
                             
-                        logger.debug(f"Google AI parsed response: {response_data}")
+                        logger.debug("Google AI parsed response: %s", redact_payload(response_data))
 
                         # Create new Response to unify return type
                         response_json = json.dumps(response_data)
@@ -1270,7 +1282,7 @@ class ProxyService:
                 # Log error response
                 try:
                     error_content = response.content.decode('utf-8')
-                    logger.error(f"Google AI error response: {error_content}")
+                    logger.error("Google AI error response: %s", redact_text(error_content))
                 except Exception as e:
                     logger.error(f"Error decoding error response: {str(e)}")
 
@@ -1323,8 +1335,8 @@ class ProxyService:
                 "presence_penalty": request_data.get("presence_penalty", 0)
             }
 
-            logger.info(f"Original request data: {request_data}")
-            logger.info(f"Completion data: {completion_data}")
+            logger.info("Original request data: %s", redact_payload(request_data))
+            logger.info("Completion data: %s", redact_payload(completion_data))
 
             # Update URL to use completions endpoint while maintaining the nineteen path
             completion_url = url.replace("/chat/completions", "/completions")
@@ -1686,7 +1698,12 @@ class ProxyService:
             
             # Handle authentication errors with more detailed logging
             if response.status_code == 401:
-                logger.error(f"Authentication failed for {api_provider}. Response: {response.text}")
+                logger.error(
+                    "Authentication failed for %s status=%s response=%s",
+                    api_provider,
+                    response.status_code,
+                    redact_text(response.text),
+                )
                 # Try to parse the error response for more details
                 try:
                     error_data = response.json()
@@ -1710,7 +1727,11 @@ class ProxyService:
                     })
                     return error_response
                 except Exception as e:
-                    logger.error(f"Could not parse error response: {response.text}, {str(e)}")
+                    logger.error(
+                        "Could not parse error response: %s, %s",
+                        redact_text(response.text),
+                        str(e),
+                    )
                     
                     # Return a generic error
                     error_response = requests.Response()
@@ -1965,9 +1986,9 @@ class ProxyService:
             
             # Log the request details
             logger.info(f"Making OpenRouter request to: {openrouter_url}")
-            logger.debug(f"Headers: {headers}")
+            logger.debug("Headers: %s", redact_headers(headers))
             if data:
-                logger.debug(f"Request data: {request_data}")
+                logger.debug("Request data: %s", redact_payload(request_data))
             
             # Make the request
             response = cls._make_base_request(
@@ -1982,7 +2003,11 @@ class ProxyService:
             
             # Handle authentication errors
             if response.status_code == 401:
-                logger.error(f"Authentication failed for OpenRouter. Response: {response.text}")
+                logger.error(
+                    "Authentication failed for OpenRouter status=%s response=%s",
+                    response.status_code,
+                    redact_text(response.text),
+                )
                 try:
                     error_data = response.json()
                     error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
@@ -2004,7 +2029,11 @@ class ProxyService:
                     })
                     return error_response
                 except Exception as e:
-                    logger.error(f"Could not parse error response: {response.text}, {str(e)}")
+                    logger.error(
+                        "Could not parse error response: %s, %s",
+                        redact_text(response.text),
+                        str(e),
+                    )
             
             # Check for streaming response
             if request_data.get('stream', False) and response.status_code == 200:
