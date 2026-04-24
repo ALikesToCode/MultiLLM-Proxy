@@ -350,6 +350,40 @@ test("worker serves / from the container when it is available", async () => {
   assert.match(await response.text(), /container dashboard/);
 });
 
+test("worker preserves container redirects for dashboard form posts", async () => {
+  const stub = makeEnv(async (request) => {
+    assert.equal(request.method, "POST");
+    assert.equal(request.redirect, "manual");
+    assert.equal(await request.text(), "username=admin");
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: "/",
+        "Set-Cookie": "session=authenticated; HttpOnly; Path=/; SameSite=Lax",
+      },
+    });
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "username=admin",
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("Location"), "/");
+  assert.equal(
+    response.headers.get("Set-Cookie"),
+    "session=authenticated; HttpOnly; Path=/; SameSite=Lax",
+  );
+  assert.equal(stub.getCalls(), 1);
+});
+
 test("worker falls back on / when the container is unavailable", async () => {
   const stub = makeEnv(async () => {
     throw new Error("root container unavailable");

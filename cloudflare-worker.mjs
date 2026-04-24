@@ -983,6 +983,7 @@ export default {
         method: request.method,
         headers,
         body: bodyAllowed ? await request.clone().arrayBuffer() : undefined,
+        redirect: "manual",
       });
       const response = await container.fetch(
         switchPort(forwardedRequest, 8080),
