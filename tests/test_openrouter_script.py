@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 class OpenRouterScriptConfigTest(unittest.TestCase):
     def setUp(self):
-        script_path = Path(__file__).resolve().parent / "scripts" / "openrouter_integration.py"
+        script_path = Path(__file__).resolve().parents[1] / "scripts" / "openrouter_integration.py"
         spec = importlib.util.spec_from_file_location("openrouter_integration", script_path)
         self.script_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.script_module)

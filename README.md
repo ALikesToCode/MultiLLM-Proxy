@@ -221,6 +221,20 @@ The proxy server supports extensive configuration through environment variables 
 - Model-specific parameter handling
 - Development and production environment settings
 
+## Testing
+
+Python tests live in `tests/` and can be run with:
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+The Cloudflare Worker test suite uses Node's built-in runner:
+
+```bash
+node --test tests/test_cloudflare_worker.mjs
+```
+
 ## Security
 
 - All API keys are securely handled and never exposed

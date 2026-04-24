@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function loadWorkerModule() {
-  const workerUrl = new URL("./cloudflare-worker.mjs", import.meta.url);
+  const workerUrl = new URL("../cloudflare-worker.mjs", import.meta.url);
   const source = await readFile(workerUrl, "utf8");
   const patchedSource = source.replace(
     /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
@@ -91,7 +91,7 @@ test("worker answers API CORS preflight without forwarding to the container", as
 });
 
 test("worker deploy config allows arbitrary API CORS preflight", async () => {
-  const configUrl = new URL("./wrangler.jsonc", import.meta.url);
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
   const origin = "https://client.example";
   const stub = makeEnv(async () => {

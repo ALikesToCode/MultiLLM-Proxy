@@ -23,7 +23,7 @@ GEMINI_API_KEY=AIza...your-key-here...
 Test your setup using the provided test script:
 
 ```bash
-./test_gemini.sh
+./tests/test_gemini.sh
 ```
 
 Or use curl directly:
@@ -75,4 +75,4 @@ Make sure:
 
 - Gemini API keys must start with "AIza" - this is different from the MultiLLM-Proxy admin key
 - The admin API key is used for authenticating with the proxy service, but a separate Gemini API key is needed for the actual Gemini API calls
-- For Gemma models, use the same API key from Google AI Studio 
+- For Gemma models, use the same API key from Google AI Studio

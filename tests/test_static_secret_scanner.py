@@ -8,7 +8,7 @@ from scripts.check_static_secrets import main as check_static_secrets
 class StaticSecretScannerTest(unittest.TestCase):
     def setUp(self):
         self.original_cwd = Path.cwd()
-        self.repo_root = Path(__file__).resolve().parent
+        self.repo_root = Path(__file__).resolve().parents[1]
         os.chdir(self.repo_root)
 
     def tearDown(self):

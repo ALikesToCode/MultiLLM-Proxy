@@ -4,7 +4,7 @@ import unittest
 
 class AppStructureTest(unittest.TestCase):
     def test_app_factory_file_is_below_500_lines(self):
-        app_py = Path(__file__).resolve().parent / "app.py"
+        app_py = Path(__file__).resolve().parents[1] / "app.py"
         with app_py.open("r", encoding="utf-8") as handle:
             line_count = sum(1 for _ in handle)
         self.assertLessEqual(

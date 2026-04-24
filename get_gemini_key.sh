@@ -52,7 +52,7 @@ if [[ "$choice" =~ ^[Yy]$ ]]; then
     fi
     
     echo -e "\n${GREEN}Success!${NC} Your Gemini API key has been added to the .env file."
-    echo -e "\nYou can now test your Gemini API setup with: ${YELLOW}./test_gemini.sh${NC}"
+    echo -e "\nYou can now test your Gemini API setup with: ${YELLOW}./tests/test_gemini.sh${NC}"
     echo -e "Or read more about Gemini usage in ${YELLOW}docs/gemini_setup.md${NC}"
 else
     echo -e "\nYou can manually add your Gemini API key to the .env file:"
@@ -61,4 +61,4 @@ else
     echo -e "\nSee ${YELLOW}docs/gemini_setup.md${NC} for more information."
 fi
 
-echo -e "\n${BLUE}${BOLD}=== Setup Guide Complete ===${NC}" 
+echo -e "\n${BLUE}${BOLD}=== Setup Guide Complete ===${NC}"
