@@ -7,6 +7,7 @@ import subprocess
 import json
 import shutil
 import threading
+import hmac
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+DEFAULT_USER_SCOPES = ("chat", "models")
+DEFAULT_ADMIN_SCOPES = ("admin", "chat", "metrics", "models", "users")
 
 
 class AuthService:
@@ -62,19 +67,149 @@ class AuthService:
     def _ensure_storage(cls) -> None:
         with cls._storage_lock:
             with closing(cls._connect()) as connection:
-                connection.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        username TEXT PRIMARY KEY,
-                        api_key TEXT NOT NULL,
-                        api_key_hash TEXT NOT NULL,
-                        is_admin INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL,
-                        last_login TEXT
-                    )
-                    """
-                )
+                cls._ensure_users_schema(connection)
                 connection.commit()
+
+    @classmethod
+    def _ensure_users_schema(cls, connection: sqlite3.Connection) -> None:
+        table_exists = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'users'
+            """
+        ).fetchone()
+        if not table_exists:
+            cls._create_users_table(connection)
+            return
+
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "api_key" in columns:
+            cls._migrate_plaintext_users_table(connection, columns)
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(users)").fetchall()
+            }
+
+        required_columns = {
+            "api_key_prefix": "TEXT NOT NULL DEFAULT 'mllm_unknown'",
+            "scopes": "TEXT NOT NULL DEFAULT 'chat,models'",
+            "last_used_at": "TEXT",
+            "last_used_ip": "TEXT",
+            "created_by": "TEXT",
+            "rotated_at": "TEXT",
+            "revoked_at": "TEXT",
+        }
+        for column_name, column_definition in required_columns.items():
+            if column_name not in columns:
+                connection.execute(
+                    f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"
+                )
+
+        cls._backfill_user_metadata(connection)
+
+    @classmethod
+    def _create_users_table(cls, connection: sqlite3.Connection, table_name: str = "users") -> None:
+        connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                username TEXT PRIMARY KEY,
+                api_key_hash TEXT NOT NULL,
+                api_key_prefix TEXT NOT NULL,
+                scopes TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_login TEXT,
+                last_used_at TEXT,
+                last_used_ip TEXT,
+                created_by TEXT,
+                rotated_at TEXT,
+                revoked_at TEXT
+            )
+            """
+        )
+
+    @classmethod
+    def _migrate_plaintext_users_table(
+        cls,
+        connection: sqlite3.Connection,
+        columns: set[str],
+    ) -> None:
+        logger.info("Migrating users table to hash-only API key storage")
+        cls._create_users_table(connection, "users_new")
+        select_columns = [
+            "username",
+            "api_key",
+            "api_key_hash",
+            "is_admin",
+            "created_at",
+            "last_login",
+        ]
+        optional_columns = [
+            "api_key_prefix",
+            "scopes",
+            "last_used_at",
+            "last_used_ip",
+            "created_by",
+            "rotated_at",
+            "revoked_at",
+        ]
+        select_sql = ", ".join(
+            column for column in select_columns + optional_columns if column in columns
+        )
+        rows = connection.execute(f"SELECT {select_sql} FROM users").fetchall()
+        for row in rows:
+            is_admin = bool(row["is_admin"])
+            api_key = row["api_key"]
+            scopes = row["scopes"] if "scopes" in row.keys() else None
+            connection.execute(
+                """
+                INSERT INTO users_new (
+                    username, api_key_hash, api_key_prefix, scopes, is_admin,
+                    created_at, last_login, last_used_at, last_used_ip,
+                    created_by, rotated_at, revoked_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["username"],
+                    row["api_key_hash"],
+                    cls._key_prefix(api_key),
+                    scopes or cls._serialize_scopes(cls._default_scopes(is_admin)),
+                    int(is_admin),
+                    row["created_at"],
+                    row["last_login"],
+                    row["last_used_at"] if "last_used_at" in row.keys() else None,
+                    row["last_used_ip"] if "last_used_ip" in row.keys() else None,
+                    row["created_by"] if "created_by" in row.keys() else None,
+                    row["rotated_at"] if "rotated_at" in row.keys() else None,
+                    row["revoked_at"] if "revoked_at" in row.keys() else None,
+                ),
+            )
+
+        connection.execute("DROP TABLE users")
+        connection.execute("ALTER TABLE users_new RENAME TO users")
+
+    @classmethod
+    def _backfill_user_metadata(cls, connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT username, is_admin, api_key_prefix, scopes FROM users"
+        ).fetchall()
+        for row in rows:
+            is_admin = bool(row["is_admin"])
+            scopes = row["scopes"] or cls._serialize_scopes(cls._default_scopes(is_admin))
+            prefix = row["api_key_prefix"] or "mllm_unknown"
+            connection.execute(
+                """
+                UPDATE users
+                SET api_key_prefix = ?, scopes = ?
+                WHERE username = ?
+                """,
+                (prefix, scopes, row["username"]),
+            )
 
     @staticmethod
     def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
@@ -90,15 +225,43 @@ class AuthService:
             return None
         return datetime.fromisoformat(value)
 
+    @staticmethod
+    def _default_scopes(is_admin: bool) -> tuple[str, ...]:
+        return DEFAULT_ADMIN_SCOPES if is_admin else DEFAULT_USER_SCOPES
+
+    @staticmethod
+    def _serialize_scopes(scopes: Optional[List[str] | tuple[str, ...]]) -> str:
+        if not scopes:
+            return ",".join(DEFAULT_USER_SCOPES)
+        return ",".join(sorted({scope.strip() for scope in scopes if scope and scope.strip()}))
+
+    @staticmethod
+    def _deserialize_scopes(value: Optional[str]) -> List[str]:
+        if not value:
+            return list(DEFAULT_USER_SCOPES)
+        return [scope.strip() for scope in value.split(",") if scope.strip()]
+
+    @staticmethod
+    def _key_prefix(api_key: Optional[str]) -> str:
+        if not api_key:
+            return "mllm_unknown"
+        return f"mllm_{api_key[:8]}"
+
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
         return {
             "username": row["username"],
-            "api_key": row["api_key"],
             "api_key_hash": row["api_key_hash"],
+            "api_key_prefix": row["api_key_prefix"],
+            "scopes": cls._deserialize_scopes(row["scopes"]),
             "is_admin": bool(row["is_admin"]),
             "created_at": cls._deserialize_datetime(row["created_at"]),
             "last_login": cls._deserialize_datetime(row["last_login"]),
+            "last_used_at": cls._deserialize_datetime(row["last_used_at"]),
+            "last_used_ip": row["last_used_ip"],
+            "created_by": row["created_by"],
+            "rotated_at": cls._deserialize_datetime(row["rotated_at"]),
+            "revoked_at": cls._deserialize_datetime(row["revoked_at"]),
         }
 
     @classmethod
@@ -107,7 +270,10 @@ class AuthService:
             with closing(cls._connect()) as connection:
                 rows = connection.execute(
                     """
-                    SELECT username, api_key, api_key_hash, is_admin, created_at, last_login
+                    SELECT
+                        username, api_key_hash, api_key_prefix, scopes, is_admin,
+                        created_at, last_login, last_used_at, last_used_ip,
+                        created_by, rotated_at, revoked_at
                     FROM users
                     ORDER BY username
                     """
@@ -121,35 +287,89 @@ class AuthService:
     def _persist_user(
         cls,
         username: str,
-        api_key: str,
+        api_key_hash: str,
+        api_key_prefix: str,
+        scopes: Optional[List[str] | tuple[str, ...]],
         is_admin: bool,
         created_at: datetime,
         last_login: Optional[datetime] = None,
+        last_used_at: Optional[datetime] = None,
+        last_used_ip: Optional[str] = None,
+        created_by: Optional[str] = None,
+        rotated_at: Optional[datetime] = None,
+        revoked_at: Optional[datetime] = None,
     ) -> None:
         with cls._storage_lock:
             with closing(cls._connect()) as connection:
+                cls._ensure_users_schema(connection)
                 connection.execute(
                     """
-                    INSERT INTO users (username, api_key, api_key_hash, is_admin, created_at, last_login)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (
+                        username, api_key_hash, api_key_prefix, scopes, is_admin,
+                        created_at, last_login, last_used_at, last_used_ip,
+                        created_by, rotated_at, revoked_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(username) DO UPDATE SET
-                        api_key = excluded.api_key,
                         api_key_hash = excluded.api_key_hash,
+                        api_key_prefix = excluded.api_key_prefix,
+                        scopes = excluded.scopes,
                         is_admin = excluded.is_admin,
                         created_at = excluded.created_at,
-                        last_login = excluded.last_login
+                        last_login = excluded.last_login,
+                        last_used_at = excluded.last_used_at,
+                        last_used_ip = excluded.last_used_ip,
+                        created_by = excluded.created_by,
+                        rotated_at = excluded.rotated_at,
+                        revoked_at = excluded.revoked_at
                     """,
                     (
                         username,
-                        api_key,
-                        generate_password_hash(api_key),
+                        api_key_hash,
+                        api_key_prefix,
+                        cls._serialize_scopes(scopes),
                         int(is_admin),
                         cls._serialize_datetime(created_at),
                         cls._serialize_datetime(last_login),
+                        cls._serialize_datetime(last_used_at),
+                        last_used_ip,
+                        created_by,
+                        cls._serialize_datetime(rotated_at),
+                        cls._serialize_datetime(revoked_at),
                     ),
                 )
                 connection.commit()
         cls._reload_user_cache()
+
+    @classmethod
+    def _persist_user_with_api_key(
+        cls,
+        username: str,
+        api_key: str,
+        is_admin: bool,
+        created_at: datetime,
+        last_login: Optional[datetime] = None,
+        scopes: Optional[List[str] | tuple[str, ...]] = None,
+        last_used_at: Optional[datetime] = None,
+        last_used_ip: Optional[str] = None,
+        created_by: Optional[str] = None,
+        rotated_at: Optional[datetime] = None,
+        revoked_at: Optional[datetime] = None,
+    ) -> None:
+        cls._persist_user(
+            username=username,
+            api_key_hash=generate_password_hash(api_key),
+            api_key_prefix=cls._key_prefix(api_key),
+            scopes=scopes or cls._default_scopes(is_admin),
+            is_admin=is_admin,
+            created_at=created_at,
+            last_login=last_login,
+            last_used_at=last_used_at,
+            last_used_ip=last_used_ip,
+            created_by=created_by,
+            rotated_at=rotated_at,
+            revoked_at=revoked_at,
+        )
 
     @classmethod
     def _delete_user_record(cls, username: str) -> None:
@@ -168,17 +388,27 @@ class AuthService:
             return
 
         existing_user = cls._users.get(default_username)
-        if existing_user and existing_user.get("api_key") == default_api_key and existing_user.get("is_admin"):
+        if (
+            existing_user
+            and check_password_hash(existing_user["api_key_hash"], default_api_key)
+            and existing_user.get("is_admin")
+        ):
             return
 
         created_at = existing_user.get("created_at") if existing_user else _utcnow()
         last_login = existing_user.get("last_login") if existing_user else None
-        cls._persist_user(
+        cls._persist_user_with_api_key(
             username=default_username,
             api_key=default_api_key,
             is_admin=True,
             created_at=created_at,
             last_login=last_login,
+            scopes=DEFAULT_ADMIN_SCOPES,
+            last_used_at=existing_user.get("last_used_at") if existing_user else None,
+            last_used_ip=existing_user.get("last_used_ip") if existing_user else None,
+            created_by=existing_user.get("created_by") if existing_user else "system",
+            rotated_at=existing_user.get("rotated_at") if existing_user else None,
+            revoked_at=existing_user.get("revoked_at") if existing_user else None,
         )
         logger.info("Initialized default admin user")
 
@@ -365,6 +595,98 @@ class AuthService:
         return session.get("user")
 
     @classmethod
+    def _public_user(cls, username: str, user: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": username,
+            "username": username,
+            "api_key_prefix": user["api_key_prefix"],
+            "scopes": list(user.get("scopes") or []),
+            "is_admin": user["is_admin"],
+            "created_at": cls._serialize_datetime(user["created_at"]),
+            "last_login": cls._serialize_datetime(user["last_login"]),
+            "last_used_at": cls._serialize_datetime(user["last_used_at"]),
+            "last_used_ip": user.get("last_used_ip"),
+            "created_by": user.get("created_by"),
+            "rotated_at": cls._serialize_datetime(user["rotated_at"]),
+            "revoked_at": cls._serialize_datetime(user["revoked_at"]),
+        }
+
+    @classmethod
+    def _update_login(cls, username: str, last_login: datetime) -> None:
+        user = cls._users[username]
+        cls._persist_user(
+            username=username,
+            api_key_hash=user["api_key_hash"],
+            api_key_prefix=user["api_key_prefix"],
+            scopes=user["scopes"],
+            is_admin=user.get("is_admin", False),
+            created_at=user["created_at"] or last_login,
+            last_login=last_login,
+            last_used_at=user.get("last_used_at"),
+            last_used_ip=user.get("last_used_ip"),
+            created_by=user.get("created_by"),
+            rotated_at=user.get("rotated_at"),
+            revoked_at=user.get("revoked_at"),
+        )
+
+    @classmethod
+    def _update_key_usage(cls, username: str, remote_addr: Optional[str] = None) -> None:
+        user = cls._users.get(username)
+        if not user:
+            return
+        cls._persist_user(
+            username=username,
+            api_key_hash=user["api_key_hash"],
+            api_key_prefix=user["api_key_prefix"],
+            scopes=user["scopes"],
+            is_admin=user.get("is_admin", False),
+            created_at=user["created_at"] or _utcnow(),
+            last_login=user.get("last_login"),
+            last_used_at=_utcnow(),
+            last_used_ip=remote_addr,
+            created_by=user.get("created_by"),
+            rotated_at=user.get("rotated_at"),
+            revoked_at=user.get("revoked_at"),
+        )
+
+    @classmethod
+    def verify_api_key(cls, api_key: Optional[str], remote_addr: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Verify a bearer API key without storing or comparing plaintext user keys."""
+        if not api_key:
+            return None
+
+        default_username = os.environ.get("ADMIN_USERNAME", "admin")
+        admin_api_key = os.environ.get("ADMIN_API_KEY")
+        if admin_api_key and hmac.compare_digest(api_key, admin_api_key):
+            user = cls._users.get(default_username)
+            if user:
+                cls._update_key_usage(default_username, remote_addr)
+                return cls._public_user(default_username, cls._users[default_username])
+            return {
+                "id": default_username,
+                "username": default_username,
+                "api_key_prefix": cls._key_prefix(admin_api_key),
+                "scopes": list(DEFAULT_ADMIN_SCOPES),
+                "is_admin": True,
+                "created_at": None,
+                "last_login": None,
+                "last_used_at": cls._serialize_datetime(_utcnow()),
+                "last_used_ip": remote_addr,
+                "created_by": "system",
+                "rotated_at": None,
+                "revoked_at": None,
+            }
+
+        for username, user in cls._users.items():
+            if user.get("revoked_at"):
+                continue
+            if check_password_hash(user["api_key_hash"], api_key):
+                cls._update_key_usage(username, remote_addr)
+                return cls._public_user(username, cls._users[username])
+
+        return None
+
+    @classmethod
     def authenticate_user(cls, username: str, api_key: str) -> bool:
         """Authenticate a user with username and API key."""
         user = cls._users.get(username)
@@ -375,18 +697,15 @@ class AuthService:
             return False
 
         last_login = _utcnow()
-        cls._persist_user(
-            username=username,
-            api_key=user["api_key"],
-            is_admin=user.get("is_admin", False),
-            created_at=user["created_at"] or last_login,
-            last_login=last_login,
-        )
+        cls._update_login(username, last_login)
+        user = cls._users[username]
 
         session["user"] = {
             "username": username,
             "is_admin": user.get("is_admin", False),
-            "api_key": api_key,
+            "api_key_prefix": user.get("api_key_prefix"),
+            "scopes": list(user.get("scopes") or []),
+            "session_id": secrets.token_urlsafe(16),
         }
         session["authenticated"] = True
         return True
@@ -401,17 +720,7 @@ class AuthService:
     def list_users(cls) -> List[Dict[str, Any]]:
         """List all users (admin only)."""
         cls._require_admin()
-        return [
-            {
-                "id": username,
-                "username": username,
-                "api_key": user["api_key"],
-                "is_admin": user["is_admin"],
-                "created_at": cls._serialize_datetime(user["created_at"]),
-                "last_login": cls._serialize_datetime(user["last_login"]),
-            }
-            for username, user in sorted(cls._users.items())
-        ]
+        return [cls._public_user(username, user) for username, user in sorted(cls._users.items())]
 
     @classmethod
     def count_users(cls) -> int:
@@ -429,18 +738,24 @@ class AuthService:
 
         api_key = cls._generate_api_key()
         created_at = _utcnow()
-        cls._persist_user(
+        scopes = cls._default_scopes(is_admin)
+        current_user = cls.get_current_user() or {}
+        cls._persist_user_with_api_key(
             username=username,
             api_key=api_key,
             is_admin=is_admin,
             created_at=created_at,
             last_login=None,
+            scopes=scopes,
+            created_by=current_user.get("username"),
         )
 
         return {
             "id": username,
             "username": username,
             "api_key": api_key,
+            "api_key_prefix": cls._key_prefix(api_key),
+            "scopes": list(scopes),
             "is_admin": is_admin,
             "created_at": cls._serialize_datetime(created_at),
             "last_login": None,
@@ -465,16 +780,25 @@ class AuthService:
             raise APIError("User not found", status_code=404)
 
         new_api_key = cls._generate_api_key()
-        cls._persist_user(
+        rotated_at = _utcnow()
+        cls._persist_user_with_api_key(
             username=username,
             api_key=new_api_key,
             is_admin=user["is_admin"],
             created_at=user["created_at"] or _utcnow(),
             last_login=user["last_login"],
+            scopes=user["scopes"],
+            last_used_at=user.get("last_used_at"),
+            last_used_ip=user.get("last_used_ip"),
+            created_by=user.get("created_by"),
+            rotated_at=rotated_at,
+            revoked_at=user.get("revoked_at"),
         )
 
         return {
             "id": username,
             "username": username,
             "api_key": new_api_key,
+            "api_key_prefix": cls._key_prefix(new_api_key),
+            "rotated_at": cls._serialize_datetime(rotated_at),
         }

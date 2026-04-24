@@ -91,7 +91,7 @@
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 rounded-tl-lg">Username</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Role</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">API Key</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Key Prefix</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Created At</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Last Login</th>
                             <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 rounded-tr-lg">Actions</th>
@@ -114,12 +114,7 @@
                                 </span>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="relative max-w-xs">
-                                    <input type="password" value="{{ user.api_key }}" class="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1 w-32" readonly id="api-key-{{ user.id }}">
-                                    <button class="absolute right-1 top-1 text-xs text-gray-500 hover:text-gray-700" onclick="toggleApiKeyVisibility('{{ user.id }}')">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
+                                <code class="text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1">{{ user.api_key_prefix }}</code>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {{ user.created_at }}
@@ -129,9 +124,6 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div class="flex justify-end space-x-2">
-                                    <button onclick="copyApiKey('{{ user.id }}', '{{ user.api_key }}')" class="text-indigo-600 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-md px-2 py-1 transition-colors">
-                                        <i class="fas fa-copy"></i>
-                                    </button>
                                     <button onclick="regenerateApiKey('{{ user.id }}')" class="text-yellow-600 hover:text-yellow-900 bg-yellow-50 hover:bg-yellow-100 rounded-md px-2 py-1 transition-colors">
                                         <i class="fas fa-sync-alt"></i>
                                     </button>
@@ -160,43 +152,6 @@
 </div>
 
 <script>
-    // Toggle API key visibility
-    function toggleApiKeyVisibility(userId) {
-        const inputElement = document.getElementById(`api-key-${userId}`);
-        const eyeIcon = inputElement.nextElementSibling.querySelector('i');
-        
-        if (inputElement.type === 'password') {
-            inputElement.type = 'text';
-            eyeIcon.classList.remove('fa-eye');
-            eyeIcon.classList.add('fa-eye-slash');
-        } else {
-            inputElement.type = 'password';
-            eyeIcon.classList.remove('fa-eye-slash');
-            eyeIcon.classList.add('fa-eye');
-        }
-    }
-    
-    // Copy API key to clipboard
-    function copyApiKey(userId, apiKey) {
-        const tempInput = document.createElement('input');
-        tempInput.value = apiKey;
-        document.body.appendChild(tempInput);
-        tempInput.select();
-        document.execCommand('copy');
-        document.body.removeChild(tempInput);
-        
-        // Show success message
-        const button = event.currentTarget;
-        const originalHTML = button.innerHTML;
-        button.innerHTML = '<i class="fas fa-check"></i>';
-        button.classList.add('bg-green-100', 'text-green-700');
-        
-        setTimeout(() => {
-            button.innerHTML = originalHTML;
-            button.classList.remove('bg-green-100', 'text-green-700');
-        }, 2000);
-    }
-    
     // Create user form submission
     document.getElementById('create-user-form').addEventListener('submit', function(event) {
         event.preventDefault();
@@ -206,7 +161,7 @@
             is_admin: formData.get('is_admin') === 'on'
         };
         
-        fetch('/api/users', {
+        fetch('/users', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -216,10 +171,11 @@
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
+            if (data.status === 'success') {
+                alert(`User created. Save this API key now; it will not be shown again:\n${data.user.api_key}`);
                 window.location.reload();
             } else {
-                alert(data.error || 'Failed to create user');
+                alert(data.message || 'Failed to create user');
             }
         })
         .catch(error => {
@@ -234,7 +190,7 @@
             return;
         }
         
-        fetch(`/api/users/${userId}/regenerate_key`, {
+        fetch(`/users/${userId}/rotate-key`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -243,7 +199,8 @@
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
+            if (data.api_key) {
+                alert(`API key rotated. Save this API key now; it will not be shown again:\n${data.api_key}`);
                 window.location.reload();
             } else {
                 alert(data.error || 'Failed to regenerate API key');
@@ -261,7 +218,7 @@
             return;
         }
         
-        fetch(`/api/users/${userId}`, {
+        fetch(`/users/${userId}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -270,7 +227,7 @@
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
+            if (data.message) {
                 window.location.reload();
             } else {
                 alert(data.error || 'Failed to delete user');
@@ -282,4 +239,4 @@
         });
     }
 </script>
-{% endblock %} 
+{% endblock %}

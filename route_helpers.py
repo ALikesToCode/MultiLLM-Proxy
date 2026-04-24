@@ -1,6 +1,4 @@
-import hmac
 import logging
-import os
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 
@@ -142,26 +140,14 @@ def api_auth_required(func: Callable) -> Callable:
 
         logger.debug("Extracted API key: %s", mask_secret(api_key))
 
-        admin_api_key = os.environ.get("ADMIN_API_KEY")
-        if not admin_api_key:
-            logger.error("ADMIN_API_KEY not configured in environment")
-            return jsonify(
-                {
-                    "error": "Server configuration error",
-                    "message": "ADMIN_API_KEY not configured on server",
-                }
-            ), 500
-
-        logger.debug("Admin API key: %s", mask_secret(admin_api_key))
-        if hmac.compare_digest(api_key, admin_api_key):
-            logger.info("Request authenticated with admin API key")
+        authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
+        if authenticated_user:
+            logger.info(
+                "Request authenticated with API key prefix %s for %s",
+                authenticated_user.get("api_key_prefix"),
+                authenticated_user.get("username"),
+            )
             return func(*args, **kwargs)
-
-        for username, user_data in AuthService._users.items():
-            user_api_key = user_data.get("api_key")
-            if user_api_key and hmac.compare_digest(user_api_key, api_key):
-                logger.info("Request authenticated with user API key for %s", username)
-                return func(*args, **kwargs)
 
         logger.error("Invalid API key provided: %s", mask_secret(api_key))
         return jsonify(

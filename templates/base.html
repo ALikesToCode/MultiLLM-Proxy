@@ -65,7 +65,7 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
     <!-- Navigation Bar -->
-    {% if session.get('user') and session.get('user').get('token') and session.get('authenticated') %}
+    {% if session.get('user') and session.get('authenticated') %}
     <nav class="bg-white shadow-md border-b border-gray-100">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">

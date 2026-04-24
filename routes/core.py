@@ -192,8 +192,13 @@ def register_core_routes(app) -> None:
                 if not current_user or not current_user.get("is_admin", False):
                     raise APIError("Only admin users can create new users", status_code=403)
 
-                username = request.form.get("username")
-                is_admin = request.form.get("is_admin") == "on"
+                payload = request.get_json(silent=True) or {}
+                username = payload.get("username") or request.form.get("username")
+                is_admin = (
+                    bool(payload.get("is_admin"))
+                    if payload
+                    else request.form.get("is_admin") == "on"
+                )
 
                 if not username:
                     raise APIError("Username is required", status_code=400)

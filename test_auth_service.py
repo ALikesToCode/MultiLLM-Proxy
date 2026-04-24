@@ -1,10 +1,12 @@
 import importlib
 import os
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from flask import Flask
+from werkzeug.security import generate_password_hash
 
 
 class AuthServicePersistenceTest(unittest.TestCase):
@@ -62,6 +64,7 @@ class AuthServicePersistenceTest(unittest.TestCase):
 
         self.assertIn("alice", self.AuthService._users)
         self.assertTrue(self._authenticate("alice", created_user["api_key"]))
+        self.assertNotIn("api_key", self.AuthService._users["alice"])
 
     def test_rotated_keys_replace_old_key_after_reinitialize(self):
         self.AuthService.initialize()
@@ -79,6 +82,126 @@ class AuthServicePersistenceTest(unittest.TestCase):
 
         self.assertFalse(self._authenticate("bob", created_user["api_key"]))
         self.assertTrue(self._authenticate("bob", rotated_user["api_key"]))
+
+    def test_users_table_does_not_store_plaintext_api_keys(self):
+        self.AuthService.initialize()
+
+        db_path = os.environ["AUTH_DB_PATH"]
+        with sqlite3.connect(db_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(users)").fetchall()
+            }
+
+        self.assertNotIn("api_key", columns)
+        self.assertIn("api_key_hash", columns)
+        self.assertIn("api_key_prefix", columns)
+
+    def test_legacy_plaintext_api_key_table_is_migrated(self):
+        db_path = os.environ["AUTH_DB_PATH"]
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE users (
+                    username TEXT PRIMARY KEY,
+                    api_key TEXT NOT NULL,
+                    api_key_hash TEXT NOT NULL,
+                    is_admin INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    last_login TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO users (
+                    username, api_key, api_key_hash, is_admin, created_at, last_login
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy",
+                    "legacy-secret-key",
+                    generate_password_hash("legacy-secret-key"),
+                    0,
+                    "2026-04-24T00:00:00+00:00",
+                    None,
+                ),
+            )
+            connection.commit()
+
+        self.AuthService.initialize()
+
+        with sqlite3.connect(db_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(users)").fetchall()
+            }
+            row = connection.execute(
+                "SELECT api_key_prefix FROM users WHERE username = ?",
+                ("legacy",),
+            ).fetchone()
+
+        self.assertNotIn("api_key", columns)
+        self.assertEqual(row[0], "mllm_legacy-s")
+        self.assertTrue(self._authenticate("legacy", "legacy-secret-key"))
+
+    def test_authentication_session_omits_api_key_material(self):
+        self.AuthService.initialize()
+
+        with patch.object(
+            self.AuthService,
+            "get_current_user",
+            return_value={"username": "admin", "is_admin": True},
+        ):
+            created_user = self.AuthService.create_user("carol", is_admin=False)
+
+        with self.flask_app.test_request_context("/login"):
+            self.assertTrue(
+                self.AuthService.authenticate_user("carol", created_user["api_key"])
+            )
+            session_user = self.auth_module.session["user"]
+
+        self.assertNotIn("api_key", session_user)
+        self.assertNotIn(created_user["api_key"], str(session_user))
+        self.assertEqual(session_user["api_key_prefix"], created_user["api_key_prefix"])
+
+    def test_list_users_returns_prefix_not_plaintext_key(self):
+        self.AuthService.initialize()
+
+        with patch.object(
+            self.AuthService,
+            "get_current_user",
+            return_value={"username": "admin", "is_admin": True},
+        ):
+            created_user = self.AuthService.create_user("dana", is_admin=False)
+            users = self.AuthService.list_users()
+
+        dana = next(user for user in users if user["username"] == "dana")
+        self.assertNotIn("api_key", dana)
+        self.assertEqual(dana["api_key_prefix"], created_user["api_key_prefix"])
+        self.assertNotIn(created_user["api_key"], str(users))
+
+    def test_verify_api_key_uses_hash_only_and_tracks_usage(self):
+        self.AuthService.initialize()
+
+        with patch.object(
+            self.AuthService,
+            "get_current_user",
+            return_value={"username": "admin", "is_admin": True},
+        ):
+            created_user = self.AuthService.create_user("erin", is_admin=False)
+
+        verified_user = self.AuthService.verify_api_key(
+            created_user["api_key"],
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertIsNotNone(verified_user)
+        self.assertEqual(verified_user["username"], "erin")
+        self.assertNotIn("api_key", verified_user)
+        self.assertEqual(self.AuthService._users["erin"]["last_used_ip"], "203.0.113.10")
+        self.assertIsNotNone(self.AuthService._users["erin"]["last_used_at"])
 
     def test_groq_provider_key_uses_first_numbered_key_when_direct_key_absent(self):
         with patch.dict(
