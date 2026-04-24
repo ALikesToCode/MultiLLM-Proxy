@@ -8,28 +8,11 @@ import time
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
+from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
 from route_helpers import api_auth_required, login_required
 
 logger = logging.getLogger(__name__)
-
-DASHBOARD_CHAT_COMPLETIONS_PATHS = {
-    "openai": "v1/chat/completions",
-    "cerebras": "v1/chat/completions",
-    "xai": "v1/chat/completions",
-    "groq": "openai/v1/chat/completions",
-    "azure": "v1/chat/completions",
-    "together": "v1/chat/completions",
-    "scaleway": "chat/completions",
-    "hyperbolic": "chat/completions",
-    "sambanova": "chat/completions",
-    "openrouter": "chat/completions",
-    "opencode": "chat/completions",
-    "chutes": "v1/chat/completions",
-    "gemini": "chat/completions",
-    "gemma": "chat/completions",
-    "googleai": "chat/completions",
-}
 
 HOP_BY_HOP_RESPONSE_HEADERS = {
     "connection",
@@ -54,10 +37,6 @@ def _safe_response_headers(headers):
 
 
 def _dashboard_chat_completions_url(app, provider):
-    path = DASHBOARD_CHAT_COMPLETIONS_PATHS.get(provider)
-    if not path:
-        raise APIError(f"Chat completions are not supported for provider: {provider}", status_code=400)
-
     if provider == "googleai":
         project_id = os.environ.get("PROJECT_ID")
         location = os.environ.get("LOCATION")
@@ -75,13 +54,13 @@ def _dashboard_chat_completions_url(app, provider):
             raise APIError(f"Missing Google AI configuration: {', '.join(missing)}", status_code=502)
         return (
             f"https://{endpoint}/v1beta1/projects/{project_id}/locations/"
-            f"{location}/endpoints/openapi/{path}"
+            f"{location}/endpoints/openapi/chat/completions"
         )
 
-    base_url = app.config["API_BASE_URLS"].get(provider)
-    if not base_url:
-        raise APIError(f"Unsupported API provider: {provider}", status_code=400)
-    return f"{base_url.rstrip('/')}/{path}"
+    adapter = get_adapter(provider, app.config["API_BASE_URLS"])
+    if not adapter or not adapter.capabilities().supports_chat:
+        raise APIError(f"Chat completions are not supported for provider: {provider}", status_code=400)
+    return adapter.chat_completions_url()
 
 
 def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
