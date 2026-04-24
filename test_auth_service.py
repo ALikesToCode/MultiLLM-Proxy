@@ -80,6 +80,20 @@ class AuthServicePersistenceTest(unittest.TestCase):
         self.assertFalse(self._authenticate("bob", created_user["api_key"]))
         self.assertTrue(self._authenticate("bob", rotated_user["api_key"]))
 
+    def test_groq_provider_key_uses_first_numbered_key_when_direct_key_absent(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GROQ_API_KEY": "",
+                "GROQ_API_KEY_2": "groq-second",
+                "GROQ_API_KEY_1": "groq-first",
+            },
+            clear=False,
+        ):
+            self.AuthService.initialize()
+
+        self.assertEqual(self.AuthService.get_api_key("groq"), "groq-first")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,8 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
             os.environ["GOOGLE_ENDPOINT"] = "google.example.test"
             os.environ["SERVER_HOST"] = "127.0.0.1"
             os.environ["SERVER_PORT"] = "1555"
+            os.environ["GROQ_API_KEY_2"] = "groq-second"
+            os.environ["GROQ_API_KEY_1"] = "groq-first"
 
         fake_env_loader.load_runtime_env = load_runtime_env
 
@@ -32,6 +34,7 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
             config_module.Config.API_BASE_URLS["googleai"],
             "https://google.example.test/v1/projects/test-project/locations/us-central1/endpoints/openapi",
         )
+        self.assertEqual(config_module.Config.GROQ_API_KEYS, ["groq-first", "groq-second"])
 
 
 if __name__ == "__main__":

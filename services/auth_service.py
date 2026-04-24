@@ -17,6 +17,7 @@ from google.oauth2 import service_account
 from flask import session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from config import load_numbered_env_values
 from error_handlers import APIError
 
 logger = logging.getLogger(__name__)
@@ -207,6 +208,11 @@ class AuthService:
             api_key = os.environ.get(env_key)
             if api_key:
                 cls._api_keys[provider] = api_key
+
+        if "groq" not in cls._api_keys:
+            groq_keys = load_numbered_env_values("GROQ_API_KEY")
+            if groq_keys:
+                cls._api_keys["groq"] = groq_keys[0]
 
         chutes_token = os.environ.get("CHUTES_API_TOKEN")
         if chutes_token:

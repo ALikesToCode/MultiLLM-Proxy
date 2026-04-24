@@ -1,10 +1,29 @@
 import os
+import re
 from datetime import timedelta
 
 from env_loader import load_runtime_env
 
 
 load_runtime_env()
+
+
+def load_numbered_env_values(base_name: str) -> list[str]:
+    """Load BASE_NAME plus BASE_NAME_1, BASE_NAME_2, ... in numeric order."""
+    values = []
+    direct_value = os.environ.get(base_name)
+    if direct_value:
+        values.append(direct_value)
+
+    numbered_values = []
+    pattern = re.compile(rf"^{re.escape(base_name)}_(\d+)$")
+    for key, value in os.environ.items():
+        match = pattern.match(key)
+        if match and value:
+            numbered_values.append((int(match.group(1)), value))
+
+    values.extend(value for _, value in sorted(numbered_values))
+    return values
 
 
 class Config:
@@ -107,7 +126,7 @@ class Config:
 
     # Groq specific settings
     GROQ_TOKEN_LIMIT = 6000  # Tokens per minute per API key
-    GROQ_API_KEYS = []  # Will be populated from environment variables
+    GROQ_API_KEYS = load_numbered_env_values('GROQ_API_KEY')
     
     # Available Groq models
     GROQ_MODELS = [
