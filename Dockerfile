@@ -10,19 +10,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./requirements.txt
+COPY requirements.lock ./requirements.lock
 
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r requirements.lock
 
 COPY . .
 COPY --chmod=755 scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
 
-# Cloudflare Containers run as a non-root user, so app sources must be
-# world-readable and the Flask instance directory must be writable.
-RUN mkdir -p /app/instance && \
+RUN addgroup --system multillm && \
+    adduser --system --ingroup multillm --home /tmp --no-create-home multillm && \
+    mkdir -p /app/instance /tmp/multillm && \
+    chown -R multillm:multillm /app/instance /tmp/multillm && \
     chmod -R a+rX /app && \
-    chmod 1777 /app/instance
+    chmod 0750 /app/instance /tmp/multillm
+
+USER multillm
 
 EXPOSE 8080
 
