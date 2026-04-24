@@ -2,6 +2,9 @@ import time
 from collections import deque
 from threading import Lock
 from datetime import datetime, timedelta
+from typing import Optional
+
+from flask import g, has_request_context, request
 
 class MetricsService:
     _instance = None
@@ -79,14 +82,62 @@ class MetricsService:
 
         return buckets
 
-    def track_request(self, provider, status_code, response_time, timestamp=None):
+    def _request_context_metadata(self, provider):
+        if not has_request_context():
+            return {}
+
+        user = getattr(g, "authenticated_user", None) or {}
+        rate_limit = getattr(g, "rate_limit", None) or {}
+        payload = request.get_json(silent=True) if request.is_json else None
+        model = payload.get("model") if isinstance(payload, dict) else None
+        if model and ":" not in str(model) and provider:
+            model = f"{provider}:{model}"
+
+        return {
+            "request_id": getattr(g, "request_id", None),
+            "user_id": user.get("username") or user.get("id"),
+            "api_key_prefix": user.get("api_key_prefix"),
+            "model": model,
+            "input_tokens": rate_limit.get("input_tokens"),
+            "output_tokens": rate_limit.get("output_tokens"),
+            "estimated_tokens": rate_limit.get("estimated_tokens"),
+        }
+
+    def track_request(
+        self,
+        provider,
+        status_code,
+        response_time,
+        timestamp=None,
+        request_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        api_key_prefix: Optional[str] = None,
+        model: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        estimated_tokens: Optional[int] = None,
+        estimated_cost: Optional[float] = None,
+        actual_cost: Optional[float] = None,
+        ttft_ms: Optional[float] = None,
+    ):
         """Track a new request"""
         now = timestamp if timestamp is not None else time.time()
+        context_metadata = self._request_context_metadata(provider)
         self.requests.append({
             'timestamp': now,
             'provider': provider,
             'status_code': status_code,
-            'response_time': response_time
+            'response_time': response_time,
+            'request_id': request_id or context_metadata.get("request_id"),
+            'user_id': user_id or context_metadata.get("user_id"),
+            'api_key_prefix': api_key_prefix or context_metadata.get("api_key_prefix"),
+            'model': model or context_metadata.get("model"),
+            'input_tokens': input_tokens if input_tokens is not None else context_metadata.get("input_tokens"),
+            'output_tokens': output_tokens if output_tokens is not None else context_metadata.get("output_tokens"),
+            'estimated_tokens': estimated_tokens if estimated_tokens is not None else context_metadata.get("estimated_tokens"),
+            'estimated_cost': estimated_cost,
+            'actual_cost': actual_cost,
+            'ttft_ms': ttft_ms,
         })
     
     def get_stats(self, hours=24, now=None):
@@ -248,12 +299,43 @@ class MetricsService:
         return [
             {
                 "time": datetime.fromtimestamp(request["timestamp"]).strftime('%Y-%m-%d %H:%M:%S'),
+                "request_id": request.get("request_id"),
                 "provider": request["provider"],
+                "model": request.get("model"),
                 "status_code": request["status_code"],
                 "response_time": round(request["response_time"], 2),
                 "status_bucket": self._status_code_bucket(request["status_code"]),
             }
             for request in failures
+        ]
+
+    def get_request_records(self, limit=100, now=None, hours=24):
+        """Return recent request-level records without prompt or response bodies."""
+        current_time = now if now is not None else time.time()
+        records = sorted(
+            self._get_recent_requests(hours=hours, now=current_time),
+            key=lambda item: item["timestamp"],
+            reverse=True,
+        )[:limit]
+
+        return [
+            {
+                "time": datetime.fromtimestamp(record["timestamp"]).strftime('%Y-%m-%d %H:%M:%S'),
+                "request_id": record.get("request_id"),
+                "user_id": record.get("user_id"),
+                "api_key_prefix": record.get("api_key_prefix"),
+                "provider": record["provider"],
+                "model": record.get("model"),
+                "status_code": record["status_code"],
+                "input_tokens": record.get("input_tokens"),
+                "output_tokens": record.get("output_tokens"),
+                "estimated_tokens": record.get("estimated_tokens"),
+                "estimated_cost": record.get("estimated_cost"),
+                "actual_cost": record.get("actual_cost"),
+                "response_time": round(record["response_time"], 2),
+                "ttft_ms": record.get("ttft_ms"),
+            }
+            for record in records
         ]
     
     def get_recent_activity(self, limit=10):

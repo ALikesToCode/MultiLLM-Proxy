@@ -1,5 +1,7 @@
 import unittest
 
+from flask import Flask, g
+
 from services.metrics_service import MetricsService
 
 
@@ -48,6 +50,39 @@ class MetricsServiceAnalyticsTest(unittest.TestCase):
         self.assertEqual(failures[0]["status_code"], 500)
         self.assertEqual(failures[1]["provider"], "openrouter")
         self.assertEqual(failures[1]["status_code"], 429)
+
+    def test_track_request_records_request_metadata_without_prompt_text(self):
+        app = Flask(__name__)
+        metrics = MetricsService()
+
+        with app.test_request_context(
+            "/v1/chat/completions",
+            method="POST",
+            json={
+                "model": "opencode:kimi-k2.5",
+                "messages": [{"role": "user", "content": "secret prompt"}],
+            },
+        ):
+            g.request_id = "req_test"
+            g.authenticated_user = {
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+            }
+            g.rate_limit = {
+                "input_tokens": 12,
+                "output_tokens": 6,
+                "estimated_tokens": 18,
+            }
+            metrics.track_request("opencode", 200, 42)
+
+        record = metrics.get_request_records(limit=1)[0]
+        self.assertEqual(record["request_id"], "req_test")
+        self.assertEqual(record["user_id"], "alice")
+        self.assertEqual(record["api_key_prefix"], "mllm_live_alice")
+        self.assertEqual(record["model"], "opencode:kimi-k2.5")
+        self.assertEqual(record["input_tokens"], 12)
+        self.assertNotIn("prompt", record)
+        self.assertNotIn("secret prompt", str(record))
 
 
 if __name__ == "__main__":

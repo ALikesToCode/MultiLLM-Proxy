@@ -1,6 +1,21 @@
 import unittest
+from unittest.mock import patch
 
-from route_helpers import extract_bearer_token, mask_authorization_header, mask_secret
+from flask import Flask, Response
+
+from route_helpers import (
+    api_auth_required,
+    apply_cors_headers,
+    build_cors_preflight_response,
+    copy_upstream_response_headers,
+    extract_bearer_token,
+    is_cors_origin_allowed,
+    mask_authorization_header,
+    mask_secret,
+    parse_allowed_origins,
+    provider_from_request_path,
+)
+from services.rate_limit_service import LimitDecision
 
 
 class RouteHelperSecretMaskingTest(unittest.TestCase):
@@ -23,6 +38,142 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
         self.assertIsNone(extract_bearer_token(None))
         self.assertIsNone(extract_bearer_token("Basic token-value"))
         self.assertIsNone(extract_bearer_token("Bearer "))
+
+    def test_copy_upstream_response_headers_drops_hop_by_hop_values(self):
+        headers = copy_upstream_response_headers(
+            {
+                "Content-Type": "application/json",
+                "Connection": "keep-alive",
+                "Transfer-Encoding": "chunked",
+                "X-Request-ID": "req_123",
+            }
+        )
+
+        self.assertEqual(
+            headers,
+            {
+                "Content-Type": "application/json",
+                "X-Request-ID": "req_123",
+            },
+        )
+
+
+class RouteHelperCorsTest(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+
+    def test_parse_allowed_origins_trims_values(self):
+        self.assertEqual(
+            parse_allowed_origins(" https://one.example,https://two.example/ "),
+            {"https://one.example", "https://two.example"},
+        )
+
+    def test_allowed_origin_gets_cors_headers(self):
+        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
+            with self.app.test_request_context(
+                "/openai/chat/completions",
+                headers={"Origin": "https://allowed.example"},
+            ):
+                response = apply_cors_headers(Response(status=200))
+
+        self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://allowed.example")
+        self.assertEqual(response.headers["Vary"], "Origin")
+
+    def test_denied_origin_gets_no_cors_headers(self):
+        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
+            with self.app.test_request_context(
+                "/openai/chat/completions",
+                headers={"Origin": "https://evil.example"},
+            ):
+                response = apply_cors_headers(Response(status=200))
+
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertEqual(response.headers["Vary"], "Origin")
+
+    def test_denied_preflight_returns_403(self):
+        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
+            with self.app.test_request_context(
+                "/openai/chat/completions",
+                method="OPTIONS",
+                headers={"Origin": "https://evil.example"},
+            ):
+                response = build_cors_preflight_response()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+    def test_development_allows_localhost_when_unconfigured(self):
+        with patch.dict("os.environ", {"FLASK_ENV": "development", "ALLOWED_ORIGINS": ""}, clear=False):
+            self.assertTrue(is_cors_origin_allowed("http://localhost:5173"))
+            self.assertTrue(is_cors_origin_allowed("http://127.0.0.1:3000"))
+            self.assertFalse(is_cors_origin_allowed("https://evil.example"))
+
+    def test_no_origin_server_to_server_requests_are_not_cors_responses(self):
+        with patch.dict("os.environ", {"ALLOWED_ORIGINS": "https://allowed.example"}, clear=False):
+            with self.app.test_request_context("/openai/chat/completions"):
+                response = apply_cors_headers(Response(status=200))
+
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+
+class RouteHelperRateLimitTest(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+
+        @self.app.route("/openai/chat/completions", methods=["POST"])
+        @api_auth_required
+        def protected_route():
+            return {"ok": True}
+
+    def test_api_auth_required_enforces_rate_limit_before_handler(self):
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
+            return_value={
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+                "scopes": ["chat"],
+            },
+        ), patch.object(
+            rate_limit_service,
+            "enforce_request",
+            return_value=LimitDecision(
+                allowed=False,
+                status_code=429,
+                error="rate_limit_exceeded",
+                message="Request-per-minute limit exceeded.",
+                retry_after=60,
+            ),
+        ) as enforce_request:
+            response = self.app.test_client().post(
+                "/openai/chat/completions",
+                headers={"Authorization": "Bearer user-key"},
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.get_json()["error"], "rate_limit_exceeded")
+        self.assertEqual(response.headers["Retry-After"], "60")
+        enforce_request.assert_called_once()
+        self.assertEqual(enforce_request.call_args.kwargs["provider"], "openai")
+
+    def test_provider_from_v1_plain_model_uses_unified_bucket(self):
+        provider = provider_from_request_path(
+            "/v1/chat/completions",
+            {"model": "gpt-4o"},
+        )
+
+        self.assertEqual(provider, "unified")
+
+    def test_provider_from_v1_prefixed_model_uses_real_provider(self):
+        provider = provider_from_request_path(
+            "/v1/chat/completions",
+            {"model": "openrouter:openai/gpt-4o"},
+        )
+
+        self.assertEqual(provider, "openrouter")
 
 
 if __name__ == "__main__":

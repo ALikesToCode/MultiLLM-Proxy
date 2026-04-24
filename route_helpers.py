@@ -1,19 +1,44 @@
-import hmac
 import logging
 import os
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
+from urllib.parse import urlparse
 
-from flask import Response, jsonify, redirect, request, url_for
+from flask import Response, g, jsonify, redirect, request, url_for
 
 from config import Config
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
+from services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
+LOCAL_DEVELOPMENT_HOSTS = {"localhost", "127.0.0.1", "::1"}
+HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
+    {
+        "connection",
+        "content-encoding",
+        "content-length",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
+
+
+def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy only response headers that are safe for Flask to emit downstream."""
+    return {
+        key: value
+        for key, value in upstream_headers.items()
+        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
+    }
 
 
 def mask_secret(value: Optional[str]) -> str:
@@ -57,15 +82,60 @@ def is_api_request_path(path: str) -> bool:
         return False
 
     first_segment = stripped.split("/", 1)[0]
-    return first_segment in Config.API_BASE_URLS or stripped == "health"
+    return first_segment in Config.API_BASE_URLS or first_segment == "v1" or stripped == "health"
+
+
+def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
+    first_segment = path.strip("/").split("/", 1)[0]
+    if first_segment == "v1" and isinstance(payload_json, dict):
+        model = payload_json.get("model")
+        if isinstance(model, str) and ":" in model:
+            provider = model.split(":", 1)[0].strip().lower()
+            if provider:
+                return provider
+        return "unified"
+    return first_segment
+
+
+def parse_allowed_origins(raw_value: Optional[str] = None) -> set[str]:
+    """Parse comma-separated browser origins from ALLOWED_ORIGINS."""
+    configured_value = os.environ.get("ALLOWED_ORIGINS", "") if raw_value is None else raw_value
+    return {
+        origin.strip().rstrip("/")
+        for origin in configured_value.split(",")
+        if origin.strip()
+    }
+
+
+def is_local_development_origin(origin: str) -> bool:
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.hostname in LOCAL_DEVELOPMENT_HOSTS
+
+
+def is_cors_origin_allowed(origin: Optional[str]) -> bool:
+    if not origin:
+        return False
+
+    normalized_origin = origin.strip().rstrip("/")
+    allowed_origins = parse_allowed_origins()
+    if allowed_origins:
+        return normalized_origin in allowed_origins
+
+    return os.environ.get("FLASK_ENV") == "development" and is_local_development_origin(normalized_origin)
 
 
 def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Response:
     """
-    Add permissive CORS headers for API routes when a browser origin is present.
+    Add CORS headers for configured browser origins on API routes.
     """
     request_origin = origin or request.headers.get("Origin")
     if not request_origin or not is_api_request_path(request.path):
+        return response
+
+    if not is_cors_origin_allowed(request_origin):
+        logger.warning("Denied CORS origin for %s: %s", request.path, request_origin)
+        vary = response.headers.get("Vary")
+        response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
         return response
 
     response.headers["Access-Control-Allow-Origin"] = request_origin
@@ -83,8 +153,14 @@ def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Resp
 
 def build_cors_preflight_response(origin: Optional[str] = None) -> Response:
     """
-    Return a 204 preflight response for browser API calls.
+    Return a preflight response for browser API calls.
     """
+    request_origin = origin or request.headers.get("Origin")
+    if request_origin and is_api_request_path(request.path) and not is_cors_origin_allowed(request_origin):
+        response = Response(status=403)
+        response.headers["Vary"] = "Origin"
+        return response
+
     response = Response(status=204)
     return apply_cors_headers(response, origin=origin)
 
@@ -142,26 +218,37 @@ def api_auth_required(func: Callable) -> Callable:
 
         logger.debug("Extracted API key: %s", mask_secret(api_key))
 
-        admin_api_key = os.environ.get("ADMIN_API_KEY")
-        if not admin_api_key:
-            logger.error("ADMIN_API_KEY not configured in environment")
-            return jsonify(
-                {
-                    "error": "Server configuration error",
-                    "message": "ADMIN_API_KEY not configured on server",
-                }
-            ), 500
+        authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
+        if authenticated_user:
+            logger.info(
+                "Request authenticated with API key prefix %s for %s",
+                authenticated_user.get("api_key_prefix"),
+                authenticated_user.get("username"),
+            )
+            g.authenticated_user = authenticated_user
 
-        logger.debug("Admin API key: %s", mask_secret(admin_api_key))
-        if hmac.compare_digest(api_key, admin_api_key):
-            logger.info("Request authenticated with admin API key")
+            payload_bytes = request.get_data(cache=True) or b""
+            payload_json = request.get_json(silent=True) if request.is_json else None
+            provider = provider_from_request_path(request.path, payload_json)
+            limit_decision = RateLimitService.enforce_request(
+                provider=provider,
+                user=authenticated_user,
+                payload_bytes=payload_bytes,
+                payload_json=payload_json,
+                remote_addr=request.remote_addr,
+            )
+            g.rate_limit = limit_decision.metadata
+            if not limit_decision.allowed:
+                response = jsonify(
+                    {
+                        "error": limit_decision.error,
+                        "message": limit_decision.message,
+                    }
+                )
+                if limit_decision.retry_after:
+                    response.headers["Retry-After"] = str(limit_decision.retry_after)
+                return response, limit_decision.status_code
             return func(*args, **kwargs)
-
-        for username, user_data in AuthService._users.items():
-            user_api_key = user_data.get("api_key")
-            if user_api_key and hmac.compare_digest(user_api_key, api_key):
-                logger.info("Request authenticated with user API key for %s", username)
-                return func(*args, **kwargs)
 
         logger.error("Invalid API key provided: %s", mask_secret(api_key))
         return jsonify(

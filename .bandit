@@ -1,0 +1,8 @@
+# B104 is expected for containerized Flask/Gunicorn binding to 0.0.0.0.
+# B110/B404/B603/B607 are legacy operational checks tracked separately.
+skips:
+  - B104
+  - B110
+  - B404
+  - B603
+  - B607

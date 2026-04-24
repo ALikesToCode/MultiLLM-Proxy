@@ -1,5 +1,6 @@
-import importlib
+import importlib.util
 import os
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -7,8 +8,10 @@ from unittest.mock import patch
 
 class OpenRouterScriptConfigTest(unittest.TestCase):
     def setUp(self):
-        self.script_module = importlib.import_module("test_openrouter")
-        self.script_module = importlib.reload(self.script_module)
+        script_path = Path(__file__).resolve().parent / "scripts" / "openrouter_integration.py"
+        spec = importlib.util.spec_from_file_location("openrouter_integration", script_path)
+        self.script_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.script_module)
 
     def test_resolve_api_key_prefers_explicit_flag(self):
         with patch.dict(os.environ, {"ADMIN_API_KEY": "env-admin-key"}, clear=False):

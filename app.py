@@ -17,6 +17,7 @@ from route_helpers import (
 )
 from routes.core import register_core_routes
 from routes.proxy import register_proxy_routes
+from routes.unified import register_unified_routes
 from security_config import validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
@@ -54,19 +55,21 @@ def create_app() -> Flask:
             os.makedirs(dir_path)
 
     flask_env = os.environ.get("FLASK_ENV", "production")
+    app.config.from_object(Config)
     if flask_env == "development":
         app.config.from_object(DevelopmentConfig)
     else:
         app.config.from_object(ProductionConfig)
 
-    for key in dir(Config):
-        if not key.startswith("_"):
-            app.config[key] = getattr(Config, key)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = flask_env != "development"
 
     init_error_handlers(app)
     AuthService.initialize()
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_core_routes(app)
 
     return app

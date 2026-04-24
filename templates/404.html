@@ -18,6 +18,9 @@
                     The requested URL <span class="font-mono bg-indigo-100 px-1 rounded">{{ request.path }}</span> was not found on this server.
                 </p>
             </div>
+            {% if request_id %}
+            <p class="text-xs text-gray-500 font-mono mb-4">Request ID: {{ request_id }}</p>
+            {% endif %}
             
             <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="p-4 bg-gray-50 rounded-lg">
@@ -44,4 +47,4 @@
         </div>
     </div>
 </div>
-{% endblock %} 
+{% endblock %}
