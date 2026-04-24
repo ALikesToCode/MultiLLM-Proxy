@@ -36,6 +36,7 @@ class AuthService:
     """Service for handling user authentication and API key management."""
 
     _users: Dict[str, Dict[str, Any]] = {}
+    _api_key_prefix_index: Dict[str, List[str]] = {}
     _api_keys: Dict[str, str] = {}
     _google_token: Optional[str] = None
     _google_token_expiry: Optional[datetime] = None
@@ -165,6 +166,16 @@ class AuthService:
             is_admin = bool(row["is_admin"])
             api_key = row["api_key"]
             scopes = row["scopes"] if "scopes" in row.keys() else None
+            api_key_hash = (
+                row["api_key_hash"]
+                if "api_key_hash" in row.keys() and row["api_key_hash"]
+                else cls._hash_api_key(api_key or secrets.token_urlsafe(32))
+            )
+            api_key_prefix = (
+                row["api_key_prefix"]
+                if "api_key_prefix" in row.keys() and row["api_key_prefix"]
+                else cls._key_prefix(api_key)
+            )
             connection.execute(
                 """
                 INSERT INTO users_new (
@@ -176,8 +187,8 @@ class AuthService:
                 """,
                 (
                     row["username"],
-                    row["api_key_hash"],
-                    cls._key_prefix(api_key),
+                    api_key_hash,
+                    api_key_prefix,
                     scopes or cls._serialize_scopes(cls._default_scopes(is_admin)),
                     int(is_admin),
                     row["created_at"],
@@ -247,6 +258,10 @@ class AuthService:
             return "mllm_unknown"
         return f"mllm_{api_key[:8]}"
 
+    @staticmethod
+    def _hash_api_key(api_key: str) -> str:
+        return generate_password_hash(api_key)
+
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
         return {
@@ -282,6 +297,16 @@ class AuthService:
             row["username"]: cls._row_to_user(row)
             for row in rows
         }
+        cls._rebuild_api_key_prefix_index()
+
+    @classmethod
+    def _rebuild_api_key_prefix_index(cls) -> None:
+        prefix_index: Dict[str, List[str]] = {}
+        for username, user in cls._users.items():
+            prefix = user.get("api_key_prefix")
+            if prefix:
+                prefix_index.setdefault(prefix, []).append(username)
+        cls._api_key_prefix_index = prefix_index
 
     @classmethod
     def _persist_user(
@@ -358,7 +383,7 @@ class AuthService:
     ) -> None:
         cls._persist_user(
             username=username,
-            api_key_hash=generate_password_hash(api_key),
+            api_key_hash=cls._hash_api_key(api_key),
             api_key_prefix=cls._key_prefix(api_key),
             scopes=scopes or cls._default_scopes(is_admin),
             is_admin=is_admin,
@@ -634,20 +659,28 @@ class AuthService:
         user = cls._users.get(username)
         if not user:
             return
-        cls._persist_user(
-            username=username,
-            api_key_hash=user["api_key_hash"],
-            api_key_prefix=user["api_key_prefix"],
-            scopes=user["scopes"],
-            is_admin=user.get("is_admin", False),
-            created_at=user["created_at"] or _utcnow(),
-            last_login=user.get("last_login"),
-            last_used_at=_utcnow(),
-            last_used_ip=remote_addr,
-            created_by=user.get("created_by"),
-            rotated_at=user.get("rotated_at"),
-            revoked_at=user.get("revoked_at"),
-        )
+        last_used_at = _utcnow()
+        with cls._storage_lock:
+            with closing(cls._connect()) as connection:
+                try:
+                    connection.execute(
+                        """
+                        UPDATE users
+                        SET last_used_at = ?, last_used_ip = ?
+                        WHERE username = ?
+                        """,
+                        (cls._serialize_datetime(last_used_at), remote_addr, username),
+                    )
+                    connection.commit()
+                except sqlite3.OperationalError as exc:
+                    if "no such table: users" not in str(exc):
+                        raise
+                    logger.warning(
+                        "Skipping API key usage persistence because auth storage is not initialized",
+                        extra={"username": username},
+                    )
+        user["last_used_at"] = last_used_at
+        user["last_used_ip"] = remote_addr
 
     @classmethod
     def verify_api_key(cls, api_key: Optional[str], remote_addr: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -677,7 +710,16 @@ class AuthService:
                 "revoked_at": None,
             }
 
-        for username, user in cls._users.items():
+        api_key_prefix = cls._key_prefix(api_key)
+        candidate_usernames = cls._api_key_prefix_index.get(api_key_prefix, [])
+        if not candidate_usernames and cls._users and not cls._api_key_prefix_index:
+            cls._rebuild_api_key_prefix_index()
+            candidate_usernames = cls._api_key_prefix_index.get(api_key_prefix, [])
+
+        for username in candidate_usernames:
+            user = cls._users.get(username)
+            if not user:
+                continue
             if user.get("revoked_at"):
                 continue
             if check_password_hash(user["api_key_hash"], api_key):
