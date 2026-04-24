@@ -91,6 +91,63 @@ test("worker answers API CORS preflight without forwarding to the container", as
   );
 });
 
+test("worker treats unified v1 routes as API paths for CORS preflight", async () => {
+  const origin = "https://janitorai.com";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/v1/chat/completions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Authorization, Content-Type",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+});
+
+test("worker returns CORS-safe v1 API errors when the container fetch fails", async () => {
+  const origin = "https://janitorai.com";
+  const stub = makeEnv(async () => {
+    throw new Error("container unavailable");
+  });
+
+  const originalConsoleError = console.error;
+  console.error = () => {};
+
+  let response;
+  try {
+    response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "opencode:kimi-k2.5" }),
+      }),
+      stub.env,
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.deepEqual(await response.json(), {
+    error: "Proxy unavailable",
+    message: "The proxy container could not handle the request.",
+  });
+});
+
 test("worker rejects disallowed API CORS preflight without forwarding", async () => {
   const stub = makeEnv(
     async () => {

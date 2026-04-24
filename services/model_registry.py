@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from config import Config
 from providers.base import ModelInfo
-from providers.registry import build_default_registry
+from providers.registry import get_registry
 
 
 STATIC_PROVIDER_MODELS = {
@@ -94,7 +94,7 @@ class ModelRegistry:
     @classmethod
     def list_models(cls, base_urls: Dict[str, str]) -> list[ModelInfo]:
         overrides = cls._status_overrides()
-        adapters = build_default_registry(base_urls)
+        adapters = get_registry(base_urls)
         models: list[ModelInfo] = []
 
         for provider, adapter in adapters.items():
@@ -123,7 +123,34 @@ class ModelRegistry:
 
     @classmethod
     def get_model(cls, model_id: str, base_urls: Dict[str, str]) -> Optional[ModelInfo]:
-        return next((model for model in cls.list_models(base_urls) if model.id == model_id), None)
+        try:
+            provider, provider_model_id = cls.parse_model_id(model_id)
+        except ValueError:
+            return None
+
+        adapter = get_registry(base_urls).get(provider)
+        if not adapter:
+            return None
+
+        if provider_model_id not in set(cls._provider_models(provider)):
+            return None
+
+        capabilities = adapter.capabilities()
+        return ModelInfo(
+            id=model_id,
+            provider=provider,
+            display_name=provider_model_id,
+            supports_streaming=capabilities.supports_streaming,
+            supports_tools=capabilities.supports_tools,
+            supports_vision=capabilities.supports_vision,
+            supports_audio=capabilities.supports_audio,
+            supports_json_schema=capabilities.supports_json_schema,
+            status=cls.get_model_status(model_id),
+        )
+
+    @classmethod
+    def get_model_status(cls, model_id: str) -> str:
+        return cls._status_overrides().get(model_id, "available")
 
     @classmethod
     def disable_model(cls, model_id: str) -> None:

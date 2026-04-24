@@ -102,6 +102,24 @@ class UnifiedApiRouteTest(unittest.TestCase):
             "Bearer opencode-provider-key",
         )
 
+    def test_v1_chat_model_resolution_does_not_list_entire_registry(self):
+        upstream_response = self._chat_response("hello")
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response), patch(
+            "routes.unified.ModelRegistry.list_models",
+            side_effect=AssertionError("list_models should not run on chat request"),
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:kimi-k2.5",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_v1_chat_requires_provider_prefixed_model(self):
         response = self.client.post(
             "/v1/chat/completions",
@@ -138,6 +156,21 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("disabled", response.get_json()["message"])
 
+    def test_admin_model_disable_requires_csrf_when_enabled(self):
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        with self.client.session_transaction() as session:
+            session["authenticated"] = True
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key_prefix": "mllm_live_admin",
+                "scopes": ["admin"],
+            }
+
+        response = self.client.post("/admin/models/opencode:kimi-k2.5/disable")
+
+        self.assertEqual(response.status_code, 400)
+
     def test_v1_responses_bridges_to_chat_completions(self):
         upstream_response = self._chat_response("response text")
 
@@ -168,6 +201,28 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 {"role": "user", "content": "Say hi"},
             ],
         )
+
+    def test_v1_responses_treats_non_json_upstream_as_provider_failure(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 502
+        upstream_response._content = b"<html>bad gateway</html>"
+        upstream_response.headers["Content-Type"] = "text/html"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response):
+            response = self.client.post(
+                "/v1/responses",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "Accept": "application/json",
+                },
+                json={
+                    "model": "opencode:kimi-k2.5",
+                    "input": "Say hi",
+                },
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.get_json()["error"], "internal_error")
 
 
 if __name__ == "__main__":

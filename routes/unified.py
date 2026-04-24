@@ -25,10 +25,20 @@ def _resolve_enabled_model(app, model_id: str):
     if not adapter:
         raise APIError(f"Unsupported provider: {provider}", status_code=400)
 
-    model_info = ModelRegistry.get_model(model_id, app.config["API_BASE_URLS"])
-    if model_info and model_info.status == "disabled":
+    if ModelRegistry.get_model_status(model_id) == "disabled":
         raise APIError(f"Model is disabled: {model_id}", status_code=400)
     return provider, provider_model, adapter
+
+
+def _decode_upstream_json(response: requests.Response) -> dict:
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise APIError("Upstream provider returned a non-JSON response", status_code=502) from error
+
+    if not isinstance(payload, dict):
+        raise APIError("Upstream provider returned an unsupported JSON response", status_code=502)
+    return payload
 
 
 def _copy_request_payload(payload: dict, provider_model: str) -> dict:
@@ -221,7 +231,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 response_time=(time.time() - start_time) * 1000,
             )
 
-            chat_response = response.json() if isinstance(response, requests.Response) else {}
+            chat_response = _decode_upstream_json(response) if isinstance(response, requests.Response) else {}
             responses_payload = _chat_response_to_responses_payload(chat_response, requested_model)
             return jsonify(responses_payload), response.status_code
         except ValueError as error:

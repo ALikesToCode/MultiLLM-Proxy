@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import lru_cache
 
 from providers.base import ProviderCapabilities
 from providers.openai_compatible import OpenAICompatibleAdapter
@@ -102,4 +103,17 @@ def build_default_registry(base_urls: Mapping[str, str]) -> dict[str, OpenAIComp
 
 
 def get_adapter(provider: str, base_urls: Mapping[str, str]) -> OpenAICompatibleAdapter | None:
-    return build_default_registry(base_urls).get(provider)
+    return get_registry(base_urls).get(provider)
+
+
+def _registry_cache_key(base_urls: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((provider, str(base_url)) for provider, base_url in base_urls.items()))
+
+
+@lru_cache(maxsize=8)
+def _cached_registry(base_url_items: tuple[tuple[str, str], ...]) -> dict[str, OpenAICompatibleAdapter]:
+    return build_default_registry(dict(base_url_items))
+
+
+def get_registry(base_urls: Mapping[str, str]) -> dict[str, OpenAICompatibleAdapter]:
+    return _cached_registry(_registry_cache_key(base_urls))

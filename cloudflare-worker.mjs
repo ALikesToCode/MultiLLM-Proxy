@@ -17,6 +17,7 @@ const API_ROUTE_PREFIXES = new Set([
   "sambanova",
   "scaleway",
   "together",
+  "v1",
   "xai",
 ]);
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
