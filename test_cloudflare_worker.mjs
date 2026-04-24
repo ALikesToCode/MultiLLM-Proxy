@@ -27,6 +27,7 @@ function makeEnv(fetchImpl, envOverrides = {}) {
       return calls;
     },
     env: {
+      ALLOWED_ORIGINS: "https://janitorai.com,https://example.com",
       MULTILLM_PROXY_CONTAINER: {
         getByName(name) {
           assert.equal(name, "primary");
@@ -90,6 +91,30 @@ test("worker answers API CORS preflight without forwarding to the container", as
   );
 });
 
+test("worker rejects disallowed API CORS preflight without forwarding", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("preflight should not reach the container");
+    },
+    { ALLOWED_ORIGINS: "https://allowed.example" },
+  );
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://evil.example",
+        "Access-Control-Request-Method": "POST",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 403);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+});
+
 test("worker adds CORS headers to proxied API responses", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -116,6 +141,37 @@ test("worker adds CORS headers to proxied API responses", async () => {
   assert.equal(response.status, 200);
   assert.equal(stub.getCalls(), 1);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.deepEqual(await response.json(), { ok: true });
+});
+
+test("worker omits CORS headers for disallowed proxied origins", async () => {
+  const stub = makeEnv(
+    async () => {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+    },
+    { ALLOWED_ORIGINS: "https://allowed.example" },
+  );
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/openai/chat/completions", {
+      method: "POST",
+      headers: {
+        Origin: "https://evil.example",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: "kimi-k2.5" }),
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(stub.getCalls(), 1);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
   assert.deepEqual(await response.json(), { ok: true });
 });
 

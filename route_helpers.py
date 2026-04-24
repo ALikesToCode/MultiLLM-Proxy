@@ -1,6 +1,8 @@
 import logging
+import os
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlparse
 
 from flask import Response, jsonify, redirect, request, url_for
 
@@ -12,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
+LOCAL_DEVELOPMENT_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def mask_secret(value: Optional[str]) -> str:
@@ -58,12 +61,45 @@ def is_api_request_path(path: str) -> bool:
     return first_segment in Config.API_BASE_URLS or stripped == "health"
 
 
+def parse_allowed_origins(raw_value: Optional[str] = None) -> set[str]:
+    """Parse comma-separated browser origins from ALLOWED_ORIGINS."""
+    configured_value = os.environ.get("ALLOWED_ORIGINS", "") if raw_value is None else raw_value
+    return {
+        origin.strip().rstrip("/")
+        for origin in configured_value.split(",")
+        if origin.strip()
+    }
+
+
+def is_local_development_origin(origin: str) -> bool:
+    parsed = urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.hostname in LOCAL_DEVELOPMENT_HOSTS
+
+
+def is_cors_origin_allowed(origin: Optional[str]) -> bool:
+    if not origin:
+        return False
+
+    normalized_origin = origin.strip().rstrip("/")
+    allowed_origins = parse_allowed_origins()
+    if allowed_origins:
+        return normalized_origin in allowed_origins
+
+    return os.environ.get("FLASK_ENV") == "development" and is_local_development_origin(normalized_origin)
+
+
 def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Response:
     """
-    Add permissive CORS headers for API routes when a browser origin is present.
+    Add CORS headers for configured browser origins on API routes.
     """
     request_origin = origin or request.headers.get("Origin")
     if not request_origin or not is_api_request_path(request.path):
+        return response
+
+    if not is_cors_origin_allowed(request_origin):
+        logger.warning("Denied CORS origin for %s: %s", request.path, request_origin)
+        vary = response.headers.get("Vary")
+        response.headers["Vary"] = f"{vary}, Origin" if vary else "Origin"
         return response
 
     response.headers["Access-Control-Allow-Origin"] = request_origin
@@ -81,8 +117,14 @@ def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Resp
 
 def build_cors_preflight_response(origin: Optional[str] = None) -> Response:
     """
-    Return a 204 preflight response for browser API calls.
+    Return a preflight response for browser API calls.
     """
+    request_origin = origin or request.headers.get("Origin")
+    if request_origin and is_api_request_path(request.path) and not is_cors_origin_allowed(request_origin):
+        response = Response(status=403)
+        response.headers["Vary"] = "Origin"
+        return response
+
     response = Response(status=204)
     return apply_cors_headers(response, origin=origin)
 

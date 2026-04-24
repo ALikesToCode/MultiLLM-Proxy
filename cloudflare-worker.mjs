@@ -61,6 +61,7 @@ const DIRECT_ENV_KEYS = [
   "NINETEEN_API_KEY",
   "CHUTES_API_TOKEN",
   "GEMINI_API_KEY",
+  "ALLOWED_ORIGINS",
   "APP_NAME",
   "GUNICORN_WORKERS",
   "GUNICORN_THREADS",
@@ -68,6 +69,7 @@ const DIRECT_ENV_KEYS = [
 ];
 
 const DYNAMIC_ENV_PATTERNS = [/^GROQ_API_KEY_\d+$/];
+const LOCAL_DEVELOPMENT_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 function shouldPassThroughKey(key) {
   return DIRECT_ENV_KEYS.includes(key) || DYNAMIC_ENV_PATTERNS.some((pattern) => pattern.test(key));
@@ -118,6 +120,38 @@ function isDirectHealthPath(pathname) {
 
 function isDirectOpencodePath(pathname) {
   return pathname === "/opencode" || pathname.startsWith("/opencode/");
+}
+
+function parseAllowedOrigins(value = "") {
+  return new Set(
+    String(value)
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/+$/g, ""))
+      .filter(Boolean),
+  );
+}
+
+function isLocalDevelopmentOrigin(origin) {
+  try {
+    const parsed = new URL(origin);
+    return ["http:", "https:"].includes(parsed.protocol) && LOCAL_DEVELOPMENT_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isCorsOriginAllowed(origin, env = {}) {
+  if (!origin) {
+    return false;
+  }
+
+  const normalizedOrigin = origin.trim().replace(/\/+$/g, "");
+  const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS);
+  if (allowedOrigins.size > 0) {
+    return allowedOrigins.has(normalizedOrigin);
+  }
+
+  return env.FLASK_ENV === "development" && isLocalDevelopmentOrigin(normalizedOrigin);
 }
 
 function extractBearerToken(request) {
@@ -777,12 +811,12 @@ function createOpencodeStreamResponse(upstreamResponse) {
 
 async function handleDirectOpencodeRequest(request, env, requestUrl) {
   if (!env.OPENCODE_API_KEY) {
-    return applyCorsHeaders(request, buildMissingUpstreamKeyResponse());
+    return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
   const providedToken = extractBearerToken(request);
   if (!providedToken || providedToken !== env.ADMIN_API_KEY) {
-    return applyCorsHeaders(request, buildUnauthorizedResponse());
+    return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
   }
 
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
@@ -804,6 +838,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
           "X-Accel-Buffering": "no",
         },
       }),
+      env,
     );
   }
 
@@ -815,6 +850,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
         status: upstreamResponse.status,
         headers: copyProxyResponseHeaders(upstreamResponse.headers),
       }),
+      env,
     );
   }
 
@@ -824,14 +860,19 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
       status: upstreamResponse.status,
       headers: copyProxyResponseHeaders(upstreamResponse.headers),
     }),
+    env,
   );
 }
 
-function buildCorsHeaders(request) {
+function buildCorsHeaders(request, env = {}) {
   const origin = request.headers.get("Origin");
   const { pathname } = new URL(request.url);
 
   if (!origin || !isApiRequestPath(pathname)) {
+    return null;
+  }
+
+  if (!isCorsOriginAllowed(origin, env)) {
     return null;
   }
 
@@ -861,8 +902,8 @@ function appendVaryHeader(headers, value) {
   }
 }
 
-function applyCorsHeaders(request, response) {
-  const corsHeaders = buildCorsHeaders(request);
+function applyCorsHeaders(request, response, env = {}) {
+  const corsHeaders = buildCorsHeaders(request, env);
   if (!corsHeaders) {
     return response;
   }
@@ -875,8 +916,16 @@ function applyCorsHeaders(request, response) {
   return responseWithCors;
 }
 
-function buildPreflightResponse(request) {
-  const headers = buildCorsHeaders(request) ?? {};
+function buildPreflightResponse(request, env = {}) {
+  const origin = request.headers.get("Origin");
+  const { pathname } = new URL(request.url);
+  if (origin && isApiRequestPath(pathname) && !isCorsOriginAllowed(origin, env)) {
+    const response = new Response(null, { status: 403 });
+    appendVaryHeader(response.headers, "Origin");
+    return response;
+  }
+
+  const headers = buildCorsHeaders(request, env) ?? {};
   const response = new Response(null, { status: 204 });
 
   for (const [header, value] of Object.entries(headers)) {
@@ -935,11 +984,11 @@ export default {
     });
 
     if (request.method === "OPTIONS" && apiPath) {
-      return buildPreflightResponse(request);
+      return buildPreflightResponse(request, env);
     }
 
     if (healthPath) {
-      return applyCorsHeaders(request, buildFallbackHealthResponse());
+      return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
     }
 
     if (opencodePath) {
@@ -956,6 +1005,7 @@ export default {
             },
             { status: 502 },
           ),
+          env,
         );
       }
     }
@@ -982,7 +1032,7 @@ export default {
       const response = await container.fetch(
         switchPort(forwardedRequest, 8080),
       );
-      return applyCorsHeaders(request, response);
+      return applyCorsHeaders(request, response, env);
     } catch (error) {
       if (rootPath) {
         console.error("Container fetch failed", error);
@@ -1014,6 +1064,7 @@ export default {
             },
           },
         ),
+        env,
       );
     }
   },

@@ -17,6 +17,7 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         os.environ["FLASK_SECRET_KEY"] = "flask-test-secret"
         os.environ["JWT_SECRET"] = "jwt-test-secret"
         os.environ["OPENCODE_API_KEY"] = "opencode-provider-key"
+        os.environ["ALLOWED_ORIGINS"] = "https://example.com"
 
         for module_name in ("app", "services.auth_service", "services.proxy_service"):
             sys.modules.pop(module_name, None)
