@@ -221,6 +221,10 @@ The proxy server supports extensive configuration through environment variables 
 - Model-specific parameter handling
 - Development and production environment settings
 
+## Documentation
+
+Additional setup and deployment notes are organized under [`docs/`](docs/README.md).
+
 ## Testing
 
 Python tests live in `tests/` and can be run with:
