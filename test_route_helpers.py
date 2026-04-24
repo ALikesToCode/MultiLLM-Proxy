@@ -13,6 +13,7 @@ from route_helpers import (
     mask_authorization_header,
     mask_secret,
     parse_allowed_origins,
+    provider_from_request_path,
 )
 from services.rate_limit_service import LimitDecision
 
@@ -125,15 +126,19 @@ class RouteHelperRateLimitTest(unittest.TestCase):
             return {"ok": True}
 
     def test_api_auth_required_enforces_rate_limit_before_handler(self):
-        with patch(
-            "route_helpers.AuthService.verify_api_key",
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
             return_value={
                 "username": "alice",
                 "api_key_prefix": "mllm_live_alice",
                 "scopes": ["chat"],
             },
-        ), patch(
-            "route_helpers.RateLimitService.enforce_request",
+        ), patch.object(
+            rate_limit_service,
+            "enforce_request",
             return_value=LimitDecision(
                 allowed=False,
                 status_code=429,
@@ -153,6 +158,22 @@ class RouteHelperRateLimitTest(unittest.TestCase):
         self.assertEqual(response.headers["Retry-After"], "60")
         enforce_request.assert_called_once()
         self.assertEqual(enforce_request.call_args.kwargs["provider"], "openai")
+
+    def test_provider_from_v1_plain_model_uses_unified_bucket(self):
+        provider = provider_from_request_path(
+            "/v1/chat/completions",
+            {"model": "gpt-4o"},
+        )
+
+        self.assertEqual(provider, "unified")
+
+    def test_provider_from_v1_prefixed_model_uses_real_provider(self):
+        provider = provider_from_request_path(
+            "/v1/chat/completions",
+            {"model": "openrouter:openai/gpt-4o"},
+        )
+
+        self.assertEqual(provider, "openrouter")
 
 
 if __name__ == "__main__":

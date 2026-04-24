@@ -15,6 +15,12 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
                 self.assertIn(provider, registry)
                 self.assertTrue(registry[provider].capabilities().supports_chat)
 
+    def test_default_registry_skips_missing_provider_base_urls(self):
+        registry = build_default_registry({"openai": "https://api.openai.com"})
+
+        self.assertEqual(set(registry), {"openai"})
+        self.assertIsNone(get_adapter("gemini", {"openai": "https://api.openai.com"}))
+
     def test_chat_completion_urls_match_legacy_routes(self):
         registry = build_default_registry(Config.API_BASE_URLS)
 

@@ -93,6 +93,7 @@ def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]]
             provider = model.split(":", 1)[0].strip().lower()
             if provider:
                 return provider
+        return "unified"
     return first_segment
 
 

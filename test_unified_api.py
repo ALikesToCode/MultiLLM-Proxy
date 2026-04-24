@@ -25,8 +25,12 @@ class UnifiedApiRouteTest(unittest.TestCase):
             }
         )
 
+        for module_name in list(sys.modules):
+            if module_name.startswith(("routes.", "providers.")):
+                sys.modules.pop(module_name, None)
         for module_name in (
             "app",
+            "route_helpers",
             "services.auth_service",
             "services.model_registry",
             "services.rate_limit_service",
@@ -34,11 +38,15 @@ class UnifiedApiRouteTest(unittest.TestCase):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
+        self.config_module = importlib.import_module("config")
+        self.original_gemini_models = list(self.config_module.Config.GEMINI_MODELS)
+        self.config_module.Config.GEMINI_MODELS = ["gemini-test-model"]
         self.app = self.app_module.create_app()
         self.app.config["WTF_CSRF_ENABLED"] = False
         self.client = self.app.test_client()
 
     def tearDown(self):
+        self.config_module.Config.GEMINI_MODELS = self.original_gemini_models
         self.temp_dir.cleanup()
         os.environ.clear()
         os.environ.update(self.original_env)
@@ -72,7 +80,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.get_json()["data"]}
         self.assertIn("opencode:kimi-k2.5", model_ids)
-        self.assertIn("gemini:gemini-2.0-flash", model_ids)
+        self.assertIn("gemini:gemini-test-model", model_ids)
 
     def test_v1_chat_completions_routes_provider_model(self):
         upstream_response = self._chat_response("hello")
@@ -155,6 +163,24 @@ class UnifiedApiRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("disabled", response.get_json()["message"])
+
+    def test_admin_disable_unknown_model_returns_404(self):
+        with self.client.session_transaction() as session:
+            session["authenticated"] = True
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key_prefix": "mllm_live_admin",
+                "scopes": ["admin"],
+            }
+
+        response = self.client.post(
+            "/admin/models/opencode:not-a-model/disable",
+            headers={"Accept": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Model not found", response.get_json()["message"])
 
     def test_admin_model_disable_requires_csrf_when_enabled(self):
         self.app.config["WTF_CSRF_ENABLED"] = True

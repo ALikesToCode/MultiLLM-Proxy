@@ -278,6 +278,11 @@ class AuthServicePersistenceTest(unittest.TestCase):
         self.assertEqual(verified_user["username"], "admin")
         self.assertEqual(self.AuthService._users["admin"]["last_used_ip"], "198.51.100.7")
 
+    def test_verify_default_admin_key_fails_closed_without_admin_row(self):
+        self.AuthService._users = {}
+
+        self.assertIsNone(self.AuthService.verify_api_key("seed-admin-key"))
+
     def test_verify_api_key_uses_prefix_lookup_before_hash_check(self):
         self.AuthService.initialize()
 

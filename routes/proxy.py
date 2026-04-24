@@ -29,7 +29,7 @@ def _dashboard_chat_completions_url(app, provider):
             if not value
         ]
         if missing:
-            raise APIError(f"Missing Google AI configuration: {', '.join(missing)}", status_code=502)
+            raise APIError(f"Missing Google AI configuration: {', '.join(missing)}", status_code=503)
         return (
             f"https://{endpoint}/v1beta1/projects/{project_id}/locations/"
             f"{location}/endpoints/openapi/chat/completions"
@@ -91,7 +91,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 auth_token = auth_service_cls.get_api_key(api_provider)
 
             if not auth_token:
-                raise APIError(f"API key not configured for {api_provider}", status_code=500)
+                raise APIError(f"API key not configured for {api_provider}", status_code=503)
 
             is_streaming = False
             if request.is_json:
@@ -223,11 +223,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             if provider == "googleai":
                 auth_token = auth_service_cls.get_google_token()
                 if not auth_token:
-                    raise APIError("Google AI authentication token not configured", status_code=502)
+                    raise APIError("Google AI authentication token not configured", status_code=503)
             else:
                 auth_token = auth_service_cls.get_api_key(provider)
                 if not auth_token:
-                    raise APIError(f"{provider.upper()} API key not configured", status_code=502)
+                    raise APIError(f"{provider.upper()} API key not configured", status_code=503)
 
             url = _dashboard_chat_completions_url(app, provider)
             upstream_payload = {
@@ -567,15 +567,15 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     )
 
             except APIError as error:
-                logger.error("API Error in Google chat completions: %s", error)
+                logger.error("API Error in Google chat completions: %s", error.message)
                 response_time = (time.time() - start_time) * 1000
                 metrics_service_cls.get_instance().track_request(
                     provider="googleai",
                     status_code=error.status_code,
                     response_time=response_time,
                 )
-                return jsonify({"status": "error", "message": str(error)}), (
-                    401 if "authentication" in str(error).lower() else 400
+                return jsonify({"status": "error", "message": error.client_message}), (
+                    401 if "authentication" in error.message.lower() else error.status_code
                 )
             except Exception as error:
                 logger.error("Unexpected error in Google chat completions: %s", error)
@@ -593,15 +593,15 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 ), 500
 
         except APIError as error:
-            logger.error("API Error in Google chat completions: %s", error)
+            logger.error("API Error in Google chat completions: %s", error.message)
             response_time = (time.time() - start_time) * 1000
             metrics_service_cls.get_instance().track_request(
                 provider="googleai",
                 status_code=error.status_code,
                 response_time=response_time,
             )
-            return jsonify({"status": "error", "message": str(error)}), (
-                401 if "authentication" in str(error).lower() else 400
+            return jsonify({"status": "error", "message": error.client_message}), (
+                401 if "authentication" in error.message.lower() else error.status_code
             )
         except Exception as error:
             logger.error("Unexpected error in Google chat completions: %s", error)

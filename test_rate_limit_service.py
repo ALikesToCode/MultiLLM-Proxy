@@ -94,6 +94,40 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 429)
         self.assertEqual(decision.error, "token_rate_limit_exceeded")
 
+    def test_estimate_input_tokens_counts_message_text_not_metadata(self):
+        payload = {
+            "messages": [
+                {
+                    "role": "system",
+                    "name": "large_tool_name_that_should_not_count",
+                    "content": "12345678",
+                },
+                {
+                    "role": "user",
+                    "tool_call_id": "tool_id_that_should_not_count",
+                    "content": [{"type": "text", "text": "abcd"}],
+                },
+            ],
+            "metadata": {"tenant": "metadata_should_not_count"},
+        }
+
+        self.assertEqual(RateLimitService.estimate_input_tokens(payload), 3)
+
+    def test_estimate_input_tokens_counts_gemini_parts_text(self):
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "12345678"},
+                        {"inline_data": {"mime_type": "image/png", "data": "base64_should_not_count"}},
+                    ],
+                }
+            ]
+        }
+
+        self.assertEqual(RateLimitService.estimate_input_tokens(payload), 2)
+
     def test_prunes_old_usage_when_sampled(self):
         with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
             connection.row_factory = sqlite3.Row

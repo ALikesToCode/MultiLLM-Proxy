@@ -15,7 +15,7 @@ from services.model_registry import ModelRegistry
 def _provider_token(auth_service_cls, provider: str) -> str:
     token = auth_service_cls.get_google_token() if provider == "googleai" else auth_service_cls.get_api_key(provider)
     if not token:
-        raise APIError(f"API key not configured for {provider}", status_code=502)
+        raise APIError(f"API key not configured for {provider}", status_code=503)
     return token
 
 
@@ -132,7 +132,12 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
         current_user = AuthService.get_current_user()
         if not current_user or not current_user.get("is_admin"):
             raise APIError("Only admin users can disable models", status_code=403)
-        ModelRegistry.parse_model_id(model_id)
+        try:
+            ModelRegistry.parse_model_id(model_id)
+        except ValueError as error:
+            raise APIError(str(error), status_code=400) from error
+        if not ModelRegistry.get_model(model_id, app.config["API_BASE_URLS"]):
+            raise APIError(f"Model not found: {model_id}", status_code=404)
         ModelRegistry.disable_model(model_id)
         return jsonify({"model": model_id, "status": "disabled"})
 

@@ -19,7 +19,15 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         os.environ["OPENCODE_API_KEY"] = "opencode-provider-key"
         os.environ["ALLOWED_ORIGINS"] = "https://example.com"
 
-        for module_name in ("app", "services.auth_service", "services.proxy_service"):
+        for module_name in list(sys.modules):
+            if module_name.startswith("routes."):
+                sys.modules.pop(module_name, None)
+        for module_name in (
+            "app",
+            "route_helpers",
+            "services.auth_service",
+            "services.proxy_service",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")

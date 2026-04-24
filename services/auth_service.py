@@ -106,6 +106,9 @@ class AuthService:
         }
         for column_name, column_definition in required_columns.items():
             if column_name not in columns:
+                if column_name not in required_columns:
+                    raise ValueError("Unsupported users column name")
+                # Identifiers and definitions come from the fixed required_columns map.
                 connection.execute(
                     f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"
                 )
@@ -114,7 +117,10 @@ class AuthService:
 
     @classmethod
     def _create_users_table(cls, connection: sqlite3.Connection, table_name: str = "users") -> None:
-        connection.execute(
+        if table_name not in {"users", "users_new"}:
+            raise ValueError("Unsupported users table name")
+        # table_name is validated against a fixed allowlist above.
+        connection.execute(  # nosec B608
             f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 username TEXT PRIMARY KEY,
@@ -141,27 +147,7 @@ class AuthService:
     ) -> None:
         logger.info("Migrating users table to hash-only API key storage")
         cls._create_users_table(connection, "users_new")
-        select_columns = [
-            "username",
-            "api_key",
-            "api_key_hash",
-            "is_admin",
-            "created_at",
-            "last_login",
-        ]
-        optional_columns = [
-            "api_key_prefix",
-            "scopes",
-            "last_used_at",
-            "last_used_ip",
-            "created_by",
-            "rotated_at",
-            "revoked_at",
-        ]
-        select_sql = ", ".join(
-            column for column in select_columns + optional_columns if column in columns
-        )
-        rows = connection.execute(f"SELECT {select_sql} FROM users").fetchall()
+        rows = connection.execute("SELECT * FROM users").fetchall()
         for row in rows:
             is_admin = bool(row["is_admin"])
             api_key = row["api_key"]
@@ -695,20 +681,11 @@ class AuthService:
             if user:
                 cls._update_key_usage(default_username, remote_addr)
                 return cls._public_user(default_username, cls._users[default_username])
-            return {
-                "id": default_username,
-                "username": default_username,
-                "api_key_prefix": cls._key_prefix(admin_api_key),
-                "scopes": list(DEFAULT_ADMIN_SCOPES),
-                "is_admin": True,
-                "created_at": None,
-                "last_login": None,
-                "last_used_at": cls._serialize_datetime(_utcnow()),
-                "last_used_ip": remote_addr,
-                "created_by": "system",
-                "rotated_at": None,
-                "revoked_at": None,
-            }
+            logger.error(
+                "Default admin API key matched but persistent admin user is missing",
+                extra={"username": default_username},
+            )
+            return None
 
         api_key_prefix = cls._key_prefix(api_key)
         candidate_usernames = cls._api_key_prefix_index.get(api_key_prefix, [])

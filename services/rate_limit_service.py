@@ -125,22 +125,60 @@ class RateLimitService:
         return cls._env_int(provider_env, cls._env_int(shared_env, default))
 
     @staticmethod
-    def _iter_text_values(value: Any):
+    def _iter_content_text(value: Any):
         if isinstance(value, str):
             yield value
         elif isinstance(value, dict):
-            for item in value.values():
-                yield from RateLimitService._iter_text_values(item)
+            if isinstance(value.get("text"), str):
+                yield value["text"]
+            if isinstance(value.get("content"), (str, list, dict)):
+                yield from RateLimitService._iter_content_text(value["content"])
+            if isinstance(value.get("parts"), list):
+                yield from RateLimitService._iter_content_text(value["parts"])
         elif isinstance(value, list):
             for item in value:
-                yield from RateLimitService._iter_text_values(item)
+                yield from RateLimitService._iter_content_text(item)
+
+    @classmethod
+    def _message_text_values(cls, messages: Any):
+        if not isinstance(messages, list):
+            return
+        for message in messages:
+            if isinstance(message, str):
+                yield message
+                continue
+            if not isinstance(message, dict):
+                continue
+            if "content" in message:
+                yield from cls._iter_content_text(message["content"])
+            elif "text" in message:
+                yield from cls._iter_content_text(message["text"])
+            if "parts" in message:
+                yield from cls._iter_content_text(message["parts"])
+            if "contents" in message:
+                yield from cls._message_text_values(message["contents"])
+
+    @classmethod
+    def _payload_text_values(cls, payload: Dict[str, Any]):
+        if isinstance(payload.get("messages"), list):
+            yield from cls._message_text_values(payload["messages"])
+            return
+        if isinstance(payload.get("contents"), list):
+            yield from cls._message_text_values(payload["contents"])
+            return
+        if "input" in payload:
+            yield from cls._iter_content_text(payload["input"])
+            return
+        if "prompt" in payload:
+            yield from cls._iter_content_text(payload["prompt"])
+            return
 
     @classmethod
     def estimate_input_tokens(cls, payload: Optional[Dict[str, Any]]) -> int:
         if not isinstance(payload, dict):
             return 0
 
-        text = " ".join(cls._iter_text_values(payload.get("messages", payload.get("contents", payload))))
+        text = " ".join(cls._payload_text_values(payload))
         if not text:
             return 0
         return max(1, len(text) // 4)
@@ -191,6 +229,13 @@ class RateLimitService:
         payload_json: Optional[Dict[str, Any]],
         remote_addr: Optional[str],
     ) -> LimitDecision:
+        """
+        Reserve a request budget slot before dispatch.
+
+        The proxy enforces limits before upstream calls so bursts and failed-cost
+        probes cannot bypass RPM/TPM gates. Failed upstream requests currently
+        remain counted until request usage reconciliation is added.
+        """
         if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {"0", "false", "no"}:
             return LimitDecision(True)
 
@@ -322,7 +367,8 @@ class RateLimitService:
                     int(bool(payload_json.get("stream"))) if isinstance(payload_json, dict) else 0,
                 ),
             )
-            if random.random() < 0.01:
+            # Non-security sampling for opportunistic cleanup.
+            if random.random() < 0.01:  # nosec B311
                 cls._prune_old_usage(connection)
             connection.commit()
             return LimitDecision(True, metadata=metadata)
