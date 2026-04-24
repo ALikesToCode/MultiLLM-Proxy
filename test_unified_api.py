@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import requests
+from flask import Response
 
 
 class UnifiedApiRouteTest(unittest.TestCase):
@@ -228,9 +229,9 @@ class UnifiedApiRouteTest(unittest.TestCase):
             ],
         )
 
-    def test_v1_responses_treats_non_json_upstream_as_provider_failure(self):
+    def test_v1_responses_treats_success_non_json_upstream_as_provider_failure(self):
         upstream_response = requests.Response()
-        upstream_response.status_code = 502
+        upstream_response.status_code = 200
         upstream_response._content = b"<html>bad gateway</html>"
         upstream_response.headers["Content-Type"] = "text/html"
 
@@ -249,6 +250,49 @@ class UnifiedApiRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.get_json()["error"], "internal_error")
+
+    def test_v1_responses_passes_through_upstream_json_errors(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 429
+        upstream_response._content = json.dumps(
+            {"error": {"message": "provider rate limit"}}
+        ).encode("utf-8")
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response):
+            response = self.client.post(
+                "/v1/responses",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:kimi-k2.5",
+                    "input": "Say hi",
+                },
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.get_json()["error"]["message"], "provider rate limit")
+        self.assertNotIn("object", response.get_json())
+
+    def test_v1_responses_returns_flask_error_response_without_bridge(self):
+        upstream_response = Response(
+            json.dumps({"error": "circuit_open"}),
+            status=503,
+            content_type="application/json",
+        )
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response):
+            response = self.client.post(
+                "/v1/responses",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:kimi-k2.5",
+                    "input": "Say hi",
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "circuit_open")
+        self.assertNotIn("object", response.get_json())
 
 
 if __name__ == "__main__":

@@ -47,6 +47,15 @@ def _copy_request_payload(payload: dict, provider_model: str) -> dict:
     return upstream_payload
 
 
+def _pass_through_response(response: requests.Response) -> Response:
+    return Response(
+        response.content,
+        status=response.status_code,
+        content_type=response.headers.get("content-type", "application/json"),
+        headers=copy_upstream_response_headers(response.headers),
+    )
+
+
 def _chat_response_to_responses_payload(chat_payload: dict, requested_model: str) -> dict:
     choices = chat_payload.get("choices") or []
     first_choice = choices[0] if choices else {}
@@ -236,7 +245,14 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 response_time=(time.time() - start_time) * 1000,
             )
 
-            chat_response = _decode_upstream_json(response) if isinstance(response, requests.Response) else {}
+            if isinstance(response, Response):
+                return response
+            if not isinstance(response, requests.Response):
+                raise APIError("Unsupported upstream response type", status_code=502)
+            if response.status_code >= 400:
+                return _pass_through_response(response)
+
+            chat_response = _decode_upstream_json(response)
             responses_payload = _chat_response_to_responses_payload(chat_response, requested_model)
             return jsonify(responses_payload), response.status_code
         except ValueError as error:

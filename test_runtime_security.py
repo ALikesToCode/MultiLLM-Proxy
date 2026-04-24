@@ -36,6 +36,29 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
                 sys.modules.pop("app", None)
                 importlib.import_module("app")
 
+    def test_create_app_keeps_environment_config_and_cookie_hardening_order(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "FLASK_ENV": "development",
+                    "ADMIN_API_KEY": "admin-live-key",
+                    "FLASK_SECRET_KEY": "flask-live-secret",
+                    "JWT_SECRET": "jwt-live-secret",
+                    "AUTH_DB_PATH": os.path.join(tempdir, "auth.sqlite3"),
+                },
+                clear=False,
+            ):
+                sys.modules.pop("app", None)
+                app_module = importlib.import_module("app")
+
+                flask_app = app_module.create_app()
+
+        self.assertTrue(flask_app.config["DEBUG"])
+        self.assertTrue(flask_app.config["SESSION_COOKIE_HTTPONLY"])
+        self.assertEqual(flask_app.config["SESSION_COOKIE_SAMESITE"], "Lax")
+        self.assertFalse(flask_app.config["SESSION_COOKIE_SECURE"])
+
     def test_vercel_init_does_not_invent_default_admin_key(self):
         with patch.dict(
             os.environ,
