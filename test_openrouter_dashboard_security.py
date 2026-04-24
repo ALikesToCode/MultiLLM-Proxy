@@ -85,6 +85,10 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         make_request.assert_called_once()
         self.assertEqual(make_request.call_args.kwargs["api_provider"], "openrouter")
         self.assertEqual(make_request.call_args.kwargs["method"], "GET")
+        self.assertEqual(
+            make_request.call_args.kwargs["url"],
+            "https://openrouter.ai/api/v1/key",
+        )
 
     def test_dashboard_chat_completions_requires_admin_session(self):
         with self.client.session_transaction() as session:
@@ -141,6 +145,13 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
 
         self.assertIn("meta[name=\"csrf-token\"]", script)
         self.assertIn("headers.set('X-CSRFToken', csrfToken)", script)
+
+    def test_openrouter_credits_parser_uses_limit_usage_schema(self):
+        script = Path("static/js/openrouter.js").read_text(encoding="utf-8")
+
+        self.assertIn("creditsPayload.usage ?? creditsPayload.used", script)
+        self.assertIn("creditsPayload.limit_remaining", script)
+        self.assertIn("Credits Available: Unlimited", script)
 
     def test_openrouter_template_does_not_render_provider_key(self):
         template = Path("templates/openrouter.html").read_text(encoding="utf-8")

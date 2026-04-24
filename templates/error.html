@@ -15,6 +15,9 @@
             <div class="p-4 bg-red-50 rounded-lg mb-4 border-l-4 border-red-500">
                 <p class="text-sm text-red-700">{{ error_detail }}</p>
             </div>
+            {% if request_id %}
+            <p class="text-xs text-gray-500 font-mono mb-4">Request ID: {{ request_id }}</p>
+            {% endif %}
             
             {% if error_code %}
             <div class="bg-gray-50 p-3 rounded-lg mb-4 text-left">
@@ -45,4 +48,4 @@
         </div>
     </div>
 </div>
-{% endblock %} 
+{% endblock %}

@@ -80,6 +80,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(response.headers["Location"], "/users")
 
     def test_session_cookie_is_hardened_in_production(self):
+        self.flask_app.config["SESSION_COOKIE_SECURE"] = True
         response = self.client.post(
             "/login",
             data={"username": "admin", "api_key": "admin-test-key"},
@@ -136,6 +137,26 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(payload["message"], "An unexpected error occurred.")
         self.assertIn("request_id", payload)
         self.assertNotIn("sk-live", response.get_data(as_text=True))
+
+    def test_json_errors_accept_wildcard_accept_header(self):
+        self._set_admin_session()
+        response = self.client.get(
+            "/test/client-api-error",
+            headers={"Accept": "*/*"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.content_type, "application/json")
+        self.assertEqual(response.get_json()["message"], "Model is required")
+
+    def test_not_found_html_includes_request_id(self):
+        response = self.client.get(
+            "/static/missing-page.txt",
+            headers={"X-Request-ID": "req-missing-page"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("req-missing-page", response.get_data(as_text=True))
 
     def test_json_user_create_parses_is_admin_strings_strictly(self):
         self._set_admin_session()

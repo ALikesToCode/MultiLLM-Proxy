@@ -25,7 +25,7 @@ class APIError(Exception):
         return self.message
 
     def __str__(self):
-        return self.client_message
+        return self.message
 
     def to_dict(self):
         rv = dict(self.payload or ())
@@ -55,7 +55,13 @@ def _select_request_id():
 
 
 def _wants_json_response():
-    return request.is_json or "application/json" in request.headers.get("Accept", "")
+    if request.is_json:
+        return True
+    best_match = request.accept_mimetypes.best_match(
+        ["application/json", "text/html"],
+        default="text/html",
+    )
+    return best_match == "application/json"
 
 
 def internal_error_payload():
@@ -127,7 +133,11 @@ def init_error_handlers(app):
             
         if _wants_json_response():
             return jsonify({"error": "Not found", "request_id": get_request_id()}), 404
-        return render_template('error.html', error="Page not found"), 404
+        return render_template(
+            'error.html',
+            error="Page not found",
+            request_id=get_request_id(),
+        ), 404
 
     @app.errorhandler(500)
     def internal_server_error(error):

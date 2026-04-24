@@ -286,12 +286,22 @@ function updateOpenRouterCredits() {
         const usageBar = document.getElementById('usage-bar');
         const usagePercentage = document.getElementById('usage-percentage');
         const usageDetails = document.getElementById('usage-details');
-        const creditsPayload = data && data.data ? data.data : data;
-        const credits = Number(creditsPayload.credit || creditsPayload.credits || 0);
-        const used = Number(creditsPayload.used || 0);
-        const limit = credits + used;
+        const creditsPayload = data?.data ?? data ?? {};
+        const used = Number(creditsPayload.usage ?? creditsPayload.used ?? 0);
+        const hasLimit = creditsPayload.limit !== undefined && creditsPayload.limit !== null;
+        const limit = hasLimit
+            ? Number(creditsPayload.limit)
+            : Number(creditsPayload.credit ?? creditsPayload.credits ?? 0) + used;
+        const available = creditsPayload.limit_remaining !== undefined && creditsPayload.limit_remaining !== null
+            ? Number(creditsPayload.limit_remaining)
+            : Math.max(limit - used, 0);
 
-        setCreditsDisplay(`Credits Available: $${credits.toFixed(2)}`, 'ok');
+        setCreditsDisplay(
+            hasLimit || limit > 0
+                ? `Credits Available: $${available.toFixed(2)}`
+                : 'Credits Available: Unlimited',
+            'ok'
+        );
 
         if (usageBar && usagePercentage && limit > 0) {
             const percentage = Math.min(Math.round((used / limit) * 100), 100);

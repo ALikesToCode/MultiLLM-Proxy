@@ -221,8 +221,8 @@ def register_core_routes(app) -> None:
         except APIError as error:
             status_code = error.status_code
             if "application/json" in request.headers.get("Accept", ""):
-                return jsonify({"status": "error", "message": str(error)}), status_code
-            return render_template("error.html", error=str(error)), status_code
+                return jsonify({"status": "error", "message": error.client_message}), status_code
+            return render_template("error.html", error=error.client_message), status_code
 
         except Exception as error:
             logger.error("Error in user management: %s", error)
@@ -537,7 +537,7 @@ def register_core_routes(app) -> None:
         try:
             upstream_response = ProxyService.make_request(
                 method="GET",
-                url="https://openrouter.ai/api/v1/auth/key",
+                url="https://openrouter.ai/api/v1/key",
                 headers=build_openrouter_dashboard_headers(),
                 params=request.args,
                 data=None,
@@ -571,7 +571,7 @@ def register_core_routes(app) -> None:
         """
         if request.path == "/favicon.ico":
             return send_from_directory("static", "favicon.ico")
-        return render_template("404.html"), 404
+        return render_template("404.html", request_id=get_request_id()), 404
 
     @app.errorhandler(500)
     def internal_error(error):
