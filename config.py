@@ -1,6 +1,12 @@
 import os
 from datetime import timedelta
 
+from env_loader import load_runtime_env
+
+
+load_runtime_env()
+
+
 class Config:
     PROJECT_ID = os.environ.get('PROJECT_ID')
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
