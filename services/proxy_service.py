@@ -12,6 +12,8 @@ import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
+from streaming.openai import sanitize_openai_stream_payload
+from streaming.sse import iter_sse_data
 import time
 import uuid
 import flask
@@ -2488,6 +2490,7 @@ class ProxyService:
                         parsed_payload.get("object") == "chat.completion.chunk" or
                         "choices" in parsed_payload
                     ):
+                        parsed_payload = sanitize_openai_stream_payload(parsed_payload)
                         normalized_payload = cls.normalize_json_text(parsed_payload)
                         return f"data: {json.dumps(normalized_payload)}\n\n"
                 except json.JSONDecodeError:
@@ -2575,6 +2578,20 @@ class ProxyService:
             # Return a safe fallback
             return f"data: {json.dumps({'choices': [{'delta': {'content': chunk}}]})}\n\n"
 
+    @staticmethod
+    def _iter_stream_lines(response: requests.Response) -> Generator[str, None, None]:
+        content_type = response.headers.get("content-type", "").lower()
+        if content_type.startswith("text/event-stream") and hasattr(response, "iter_content"):
+            try:
+                for data_payload in iter_sse_data(response.iter_content(chunk_size=1024)):
+                    yield f"data: {data_payload}"
+                return
+            except Exception as error:
+                logger.warning("SSE parser failed, falling back to line iteration: %s", error)
+
+        for line in response.iter_lines(decode_unicode=True):
+            yield line
+
     @classmethod
     def _create_streaming_response(cls, response: requests.Response, provider: str) -> Generator:
         """
@@ -2606,7 +2623,12 @@ class ProxyService:
                 buffer.seek(0)
                 with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
                     decompressed = gz.read().decode('utf-8')
-                    for line in decompressed.split('\n'):
+                    parsed_lines = [
+                        f"data: {payload}"
+                        for payload in iter_sse_data([decompressed])
+                    ]
+                    lines = parsed_lines or decompressed.split('\n')
+                    for line in lines:
                         if provider == "opencode":
                             line, inside_reasoning_block = cls._strip_reasoning_block_markup(
                                 line,
@@ -2629,7 +2651,7 @@ class ProxyService:
                     yield 'data: [DONE]\n\n'
             else:
                 # For non-gzipped responses
-                for line in response.iter_lines(decode_unicode=True):
+                for line in cls._iter_stream_lines(response):
                     if provider == "opencode":
                         line, inside_reasoning_block = cls._strip_reasoning_block_markup(
                             line,

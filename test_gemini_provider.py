@@ -15,6 +15,7 @@ class GeminiProviderRequestTest(unittest.TestCase):
         os.environ["GEMINI_API_KEY"] = "AIza-provider-key"
 
         sys.modules.pop("services.proxy_service", None)
+        sys.modules.pop("services.auth_service", None)
         self.proxy_module = importlib.import_module("services.proxy_service")
 
     def tearDown(self):

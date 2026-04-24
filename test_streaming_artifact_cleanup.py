@@ -10,6 +10,18 @@ class _FakeTokenizer:
         return list(text)
 
 
+_STUBBED_MODULES = (
+    "tiktoken",
+    "flask",
+    "error_handlers",
+    "config",
+    "services.cache_service",
+    "services.rate_limit_service",
+    "services.auth_service",
+    "services.proxy_service",
+)
+
+
 def _install_proxy_service_stubs():
     tiktoken_module = types.ModuleType("tiktoken")
     tiktoken_module.get_encoding = lambda _name: _FakeTokenizer()
@@ -60,6 +72,10 @@ def _install_proxy_service_stubs():
 
 class StreamingArtifactCleanupTest(unittest.TestCase):
     def setUp(self):
+        self.original_modules = {
+            module_name: sys.modules.get(module_name)
+            for module_name in _STUBBED_MODULES
+        }
         _install_proxy_service_stubs()
         sys.modules.pop("services.proxy_service", None)
         self.proxy_module = importlib.import_module("services.proxy_service")
@@ -68,6 +84,11 @@ class StreamingArtifactCleanupTest(unittest.TestCase):
 
     def tearDown(self):
         self.proxy_module.ProxyService._tokenizer = self.original_tokenizer
+        for module_name, module in self.original_modules.items():
+            if module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = module
 
     def test_streaming_response_skips_think_blocks_and_concatenated_chunk_json_artifacts(self):
         leaked_payload = (
