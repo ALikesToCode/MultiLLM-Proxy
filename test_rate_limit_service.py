@@ -1,6 +1,8 @@
 import os
+import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from services.rate_limit_service import RateLimitService
 
@@ -91,6 +93,50 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 429)
         self.assertEqual(decision.error, "token_rate_limit_exceeded")
+
+    def test_prunes_old_usage_when_sampled(self):
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            connection.row_factory = sqlite3.Row
+            RateLimitService._ensure_storage(connection)
+            connection.execute(
+                """
+                INSERT INTO request_usage (
+                    created_at, identity, key_prefix, provider, remote_addr,
+                    input_tokens, output_tokens, estimated_tokens, stream
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "alice",
+                    "mllm_live_alice",
+                    "openai",
+                    "203.0.113.10",
+                    1,
+                    0,
+                    1,
+                    0,
+                ),
+            )
+            connection.commit()
+
+        with patch("services.rate_limit_service.random.random", return_value=0.0):
+            decision = RateLimitService.enforce_request(
+                provider="openai",
+                user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+                payload_bytes=b"{}",
+                payload_json={"messages": [{"role": "user", "content": "hello"}]},
+                remote_addr="203.0.113.10",
+            )
+
+        self.assertTrue(decision.allowed)
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            old_count = connection.execute(
+                "SELECT COUNT(*) FROM request_usage WHERE created_at = ?",
+                ("2026-01-01T00:00:00+00:00",),
+            ).fetchone()[0]
+
+        self.assertEqual(old_count, 0)
 
 
 if __name__ == "__main__":

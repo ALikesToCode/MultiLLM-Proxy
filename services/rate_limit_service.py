@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import sqlite3
 import threading
 from contextlib import closing
@@ -79,12 +80,13 @@ class RateLimitService:
     def _connect(cls) -> sqlite3.Connection:
         storage_path = cls._get_storage_path()
         storage_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(storage_path)
+        connection = sqlite3.connect(storage_path, timeout=10)
         connection.row_factory = sqlite3.Row
         return connection
 
     @classmethod
     def _ensure_storage(cls, connection: sqlite3.Connection) -> None:
+        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS request_usage (
@@ -173,6 +175,14 @@ class RateLimitService:
         return (_utcnow() - timedelta(seconds=seconds)).isoformat()
 
     @classmethod
+    def _prune_old_usage(cls, connection: sqlite3.Connection) -> None:
+        retention_seconds = cls._env_int("RATE_LIMIT_USAGE_RETENTION_SECONDS", 48 * 60 * 60)
+        connection.execute(
+            "DELETE FROM request_usage WHERE created_at < ?",
+            (cls._iso_cutoff(retention_seconds),),
+        )
+
+    @classmethod
     def enforce_request(
         cls,
         provider: str,
@@ -221,95 +231,101 @@ class RateLimitService:
         tpm_limit = cls._provider_limit(provider, "RATE_LIMIT_TPM", 200000)
         daily_limit = cls._provider_limit(provider, "DAILY_REQUEST_LIMIT", 10000)
 
-        with cls._storage_lock:
-            with closing(cls._connect()) as connection:
-                cls._ensure_storage(connection)
-                minute_cutoff = cls._iso_cutoff(60)
-                day_cutoff = cls._iso_cutoff(24 * 60 * 60)
-                minute_stats = connection.execute(
-                    """
-                    SELECT COUNT(*) AS request_count,
-                           COALESCE(SUM(estimated_tokens), 0) AS token_count
-                    FROM request_usage
-                    WHERE identity = ? AND provider = ? AND created_at >= ?
-                    """,
-                    (identity, provider, minute_cutoff),
-                ).fetchone()
-                daily_stats = connection.execute(
-                    """
-                    SELECT COUNT(*) AS request_count
-                    FROM request_usage
-                    WHERE identity = ? AND provider = ? AND created_at >= ?
-                    """,
-                    (identity, provider, day_cutoff),
-                ).fetchone()
+        with closing(cls._connect()) as connection:
+            cls._ensure_storage(connection)
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            minute_cutoff = cls._iso_cutoff(60)
+            day_cutoff = cls._iso_cutoff(24 * 60 * 60)
+            minute_stats = connection.execute(
+                """
+                SELECT COUNT(*) AS request_count,
+                       COALESCE(SUM(estimated_tokens), 0) AS token_count
+                FROM request_usage
+                WHERE identity = ? AND provider = ? AND created_at >= ?
+                """,
+                (identity, provider, minute_cutoff),
+            ).fetchone()
+            daily_stats = connection.execute(
+                """
+                SELECT COUNT(*) AS request_count
+                FROM request_usage
+                WHERE identity = ? AND provider = ? AND created_at >= ?
+                """,
+                (identity, provider, day_cutoff),
+            ).fetchone()
 
-                minute_count = int(minute_stats["request_count"])
-                minute_tokens = int(minute_stats["token_count"])
-                daily_count = int(daily_stats["request_count"])
+            minute_count = int(minute_stats["request_count"])
+            minute_tokens = int(minute_stats["token_count"])
+            daily_count = int(daily_stats["request_count"])
 
-                metadata = {
-                    "identity": identity,
-                    "provider": provider,
-                    "key_prefix": key_prefix,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "estimated_tokens": estimated_tokens,
-                    "rpm_limit": rpm_limit,
-                    "tpm_limit": tpm_limit,
-                    "daily_request_limit": daily_limit,
-                }
+            metadata = {
+                "identity": identity,
+                "provider": provider,
+                "key_prefix": key_prefix,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "estimated_tokens": estimated_tokens,
+                "rpm_limit": rpm_limit,
+                "tpm_limit": tpm_limit,
+                "daily_request_limit": daily_limit,
+            }
 
-                if minute_count >= rpm_limit:
-                    return LimitDecision(
-                        False,
-                        status_code=429,
-                        error="rate_limit_exceeded",
-                        message="Request-per-minute limit exceeded.",
-                        retry_after=60,
-                        metadata=metadata,
-                    )
-                if estimated_tokens and minute_tokens + estimated_tokens > tpm_limit:
-                    return LimitDecision(
-                        False,
-                        status_code=429,
-                        error="token_rate_limit_exceeded",
-                        message="Token-per-minute limit exceeded.",
-                        retry_after=60,
-                        metadata=metadata,
-                    )
-                if daily_count >= daily_limit:
-                    return LimitDecision(
-                        False,
-                        status_code=429,
-                        error="daily_budget_exceeded",
-                        message="Daily request budget exceeded.",
-                        retry_after=60 * 60,
-                        metadata=metadata,
-                    )
-
-                connection.execute(
-                    """
-                    INSERT INTO request_usage (
-                        created_at, identity, key_prefix, provider, remote_addr,
-                        input_tokens, output_tokens, estimated_tokens, stream
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        _utcnow().isoformat(),
-                        identity,
-                        key_prefix,
-                        provider,
-                        remote_addr,
-                        input_tokens,
-                        output_tokens,
-                        estimated_tokens,
-                        int(bool(payload_json.get("stream"))) if isinstance(payload_json, dict) else 0,
-                    ),
+            if minute_count >= rpm_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="rate_limit_exceeded",
+                    message="Request-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
                 )
-                connection.commit()
-                return LimitDecision(True, metadata=metadata)
+            if estimated_tokens and minute_tokens + estimated_tokens > tpm_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="token_rate_limit_exceeded",
+                    message="Token-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
+                )
+            if daily_count >= daily_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="daily_budget_exceeded",
+                    message="Daily request budget exceeded.",
+                    retry_after=60 * 60,
+                    metadata=metadata,
+                )
+
+            connection.execute(
+                """
+                INSERT INTO request_usage (
+                    created_at, identity, key_prefix, provider, remote_addr,
+                    input_tokens, output_tokens, estimated_tokens, stream
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _utcnow().isoformat(),
+                    identity,
+                    key_prefix,
+                    provider,
+                    remote_addr,
+                    input_tokens,
+                    output_tokens,
+                    estimated_tokens,
+                    int(bool(payload_json.get("stream"))) if isinstance(payload_json, dict) else 0,
+                ),
+            )
+            if random.random() < 0.01:
+                cls._prune_old_usage(connection)
+            connection.commit()
+            return LimitDecision(True, metadata=metadata)
 
     @classmethod
     def get_next_groq_key(cls) -> Optional[str]:
