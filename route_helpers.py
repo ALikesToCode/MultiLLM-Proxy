@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 from functools import wraps
@@ -32,6 +33,19 @@ def mask_authorization_header(value: Optional[str]) -> str:
     if not separator:
         return mask_secret(value)
     return f"{scheme} {mask_secret(token.strip())}"
+
+
+def extract_bearer_token(value: Optional[str]) -> Optional[str]:
+    """Extract a Bearer token using the HTTP auth scheme rules."""
+    if not value:
+        return None
+
+    scheme, separator, token = value.partition(" ")
+    if not separator or scheme.lower() != "bearer":
+        return None
+
+    token = token.strip()
+    return token or None
 
 
 def is_api_request_path(path: str) -> bool:
@@ -116,7 +130,16 @@ def api_auth_required(func: Callable) -> Callable:
                 }
             ), 401
 
-        api_key = auth_header.replace("Bearer ", "").strip()
+        api_key = extract_bearer_token(auth_header)
+        if not api_key:
+            logger.error("Invalid Authorization header: %s", mask_authorization_header(auth_header))
+            return jsonify(
+                {
+                    "error": "Invalid Authorization header",
+                    "message": "Please use the Bearer authentication scheme.",
+                }
+            ), 401
+
         logger.debug("Extracted API key: %s", mask_secret(api_key))
 
         admin_api_key = os.environ.get("ADMIN_API_KEY")
@@ -130,13 +153,13 @@ def api_auth_required(func: Callable) -> Callable:
             ), 500
 
         logger.debug("Admin API key: %s", mask_secret(admin_api_key))
-        if api_key == admin_api_key:
+        if hmac.compare_digest(api_key, admin_api_key):
             logger.info("Request authenticated with admin API key")
             return func(*args, **kwargs)
 
         for username, user_data in AuthService._users.items():
             user_api_key = user_data.get("api_key")
-            if user_api_key and user_api_key == api_key:
+            if user_api_key and hmac.compare_digest(user_api_key, api_key):
                 logger.info("Request authenticated with user API key for %s", username)
                 return func(*args, **kwargs)
 
