@@ -19,6 +19,7 @@ import gzip
 import io
 import re
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -1440,7 +1441,7 @@ class ProxyService:
         url: str,
         headers: Dict[str, str],
         params: Dict[str, Any],
-        data: bytes,
+        data: Optional[bytes],
         request_data: Dict[str, Any],
         use_cache: bool,
         api_provider: str,
@@ -1452,31 +1453,50 @@ class ProxyService:
         logger.info(f"Handling {api_provider} request to {url}")
         
         try:
+            params = dict(params or {})
+            headers = dict(headers or {})
+            request_data = dict(request_data or {})
+            original_url = url
+            should_convert_to_openai_response = "/chat/completions" in original_url
+            is_streaming_request = bool(request_data.pop("stream", False)) or ":streamGenerateContent" in url
+            enable_google_search = bool(
+                request_data.pop("webSearch", False)
+                or request_data.pop("enable_google_search", False)
+            )
+            request_data.pop("webSearchSpec", None)
+
             # Extract API key from URL parameters and rebuild the URL without it
             api_key = None
             
             # Check if key is in params
             if params and 'key' in params:
                 api_key = params.pop('key')
+                if isinstance(api_key, (list, tuple)):
+                    api_key = api_key[0] if api_key else None
                 logger.info(f"Found API key in URL parameters for {api_provider}")
             
             # If no key in params, check if it's in the URL
-            elif '?key=' in url:
-                base_url, query = url.split('?', 1)
-                query_params = {}
-                for param in query.split('&'):
-                    if '=' in param:
-                        k, v = param.split('=', 1)
-                        if k == 'key':
-                            api_key = v
-                            logger.info(f"Found API key in URL for {api_provider}")
-                        else:
-                            query_params[k] = v
-                
-                # Rebuild URL without the key
-                url = base_url
-                if query_params:
-                    url += '?' + '&'.join([f"{k}={v}" for k, v in query_params.items()])
+            else:
+                parsed_url = urlsplit(url)
+                query_pairs = parse_qsl(parsed_url.query, keep_blank_values=True)
+                filtered_query_pairs = []
+                for key, value in query_pairs:
+                    if key == 'key' and api_key is None:
+                        api_key = value
+                        logger.info(f"Found API key in URL for {api_provider}")
+                    else:
+                        filtered_query_pairs.append((key, value))
+
+                if api_key is not None:
+                    url = urlunsplit(
+                        (
+                            parsed_url.scheme,
+                            parsed_url.netloc,
+                            parsed_url.path,
+                            urlencode(filtered_query_pairs),
+                            parsed_url.fragment,
+                        )
+                    )
             
             # If still no API key, use the auth token passed from make_request
             # But first check if it's the admin API key - if so, use the Gemini key from env instead
@@ -1531,10 +1551,7 @@ class ProxyService:
                 masked_key = f"{api_key[:4]}...{api_key[-4:]}"
                 logger.info(f"Using API key: {masked_key}")
             
-            # Add API key to params - THIS IS CRUCIAL FOR GEMINI API
-            if not params:
-                params = {}
-            params['key'] = api_key
+            headers["x-goog-api-key"] = api_key
             
             # Remove the Authorization header as Gemini doesn't use it
             if 'Authorization' in headers:
@@ -1612,12 +1629,14 @@ class ProxyService:
                         new_request_data['generationConfig'] = new_request_data.get('generationConfig', {})
                         new_request_data['generationConfig']['topP'] = request_data['top_p']
                     
-                    # Use streaming if requested
-                    if 'stream' in request_data and request_data['stream']:
-                        new_request_data['stream'] = True
-                    
                     # Update request data
                     request_data = new_request_data
+
+            if is_streaming_request:
+                if ":generateContent" in url:
+                    url = url.replace(":generateContent", ":streamGenerateContent", 1)
+                params["alt"] = "sse"
+                logger.info(f"Using Gemini streaming endpoint: {url}")
                 
             # Process the request data to disable safety settings
             if request_data:
@@ -1632,13 +1651,15 @@ class ProxyService:
                 # Overwrite any existing safety settings
                 request_data["safetySettings"] = safety_settings
                 
-                # Add web search capability if needed for Gemini models
-                if 'webSearch' not in request_data and api_provider == 'gemini':
-                    # Only add web search for models that support it
-                    if model and 'gemini' in model and not 'gemma' in model:
-                        request_data["webSearch"] = True
-                        request_data["webSearchSpec"] = {"disableSearch": False}
-                        logger.info(f"Enabling web search for Gemini model: {model}")
+                if enable_google_search and api_provider == 'gemini':
+                    tools = request_data.get("tools")
+                    if not isinstance(tools, list):
+                        tools = []
+                        request_data["tools"] = tools
+
+                    if not any(isinstance(tool, dict) and "google_search" in tool for tool in tools):
+                        tools.append({"google_search": {}})
+                    logger.info(f"Enabled Google Search grounding for Gemini model: {model}")
                 
                 # Re-encode the modified data
                 data = json.dumps(request_data).encode('utf-8')
@@ -1648,7 +1669,7 @@ class ProxyService:
             # Log the final URL with params
             full_url = url
             if params:
-                param_str = '&'.join([f"{k}={'REDACTED' if k=='key' else v}" for k, v in params.items()])
+                param_str = '&'.join([f"{k}={v}" for k, v in params.items()])
                 full_url = f"{url}?{param_str}" if '?' not in url else f"{url}&{param_str}"
             logger.info(f"Making {api_provider} request to: {full_url}")
             
@@ -1710,12 +1731,10 @@ class ProxyService:
             
             # Process response to convert from Google's format to OpenAI compatible format
             if response.status_code == 200:
-                # Check if this is a streaming response
-                is_streaming = request_data.get('stream', False)
-                
-                if is_streaming:
+                if is_streaming_request:
                     # Handle streaming response
                     def generate_stream():
+                        done_sent = False
                         try:
                             for line in response.iter_lines():
                                 if line:
@@ -1728,14 +1747,17 @@ class ProxyService:
                                             
                                         # Check for stream end marker
                                         if line_str.strip() == '[DONE]':
+                                            done_sent = True
                                             yield "data: [DONE]\n\n"
-                                            continue
+                                            if hasattr(response, "close"):
+                                                response.close()
+                                            return
                                         
                                         # Parse Google's SSE format
                                         google_chunk = json.loads(line_str)
                                         
                                         # For chat/completions endpoints, convert to OpenAI format
-                                        if '/chat/completions' in url:
+                                        if should_convert_to_openai_response:
                                             # Extract content if available in this chunk
                                             content = ""
                                             finish_reason = None
@@ -1785,11 +1807,15 @@ class ProxyService:
                                         continue
                             
                             # Make sure to send the final [DONE] marker
-                            yield "data: [DONE]\n\n"
+                            if not done_sent:
+                                yield "data: [DONE]\n\n"
                         except Exception as e:
                             logger.error(f"Error in Gemini streaming response: {str(e)}")
                             yield f"data: {json.dumps({'error': str(e)})}\n\n"
                             yield "data: [DONE]\n\n"
+                        finally:
+                            if hasattr(response, "close"):
+                                response.close()
                     
                     # Return a streaming response
                     streaming_response = Response(
@@ -1802,7 +1828,7 @@ class ProxyService:
                         }
                     )
                     return streaming_response
-                elif '/chat/completions' in url:
+                elif should_convert_to_openai_response:
                     # Handle normal chat/completions response
                     try:
                         google_response = response.json()
