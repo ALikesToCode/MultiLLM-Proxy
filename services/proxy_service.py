@@ -737,27 +737,11 @@ class ProxyService:
                     try:
                         # Let requests handle decompression automatically
                         content = response.content
-                        
-                        # Try to decode as UTF-8 string
-                        if isinstance(content, bytes):
-                            try:
-                                decoded = content.decode('utf-8', errors='ignore')
-                            except UnicodeDecodeError:
-                                logger.error("Failed to decode response as UTF-8")
-                                error_json = {
-                                    "error": {
-                                        "message": "Failed to decode response as UTF-8",
-                                        "type": "decode_error",
-                                        "code": 500
-                                    }
-                                }
-                                response._content = json.dumps(error_json).encode('utf-8')
-                                response.headers['Content-Type'] = 'application/json'
-                                return response
-                        else:
-                            decoded = str(content)
-                        
-                        # Remove any ANSI escape sequences
+                        content_type = response.headers.get('content-type', '').lower()
+                        if not content or "json" not in content_type:
+                            return response
+
+                        decoded = content.decode('utf-8') if isinstance(content, bytes) else str(content)
                         ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]')
                         cleaned = ansi_escape.sub('', decoded)
 
@@ -774,56 +758,41 @@ class ProxyService:
                             except json.JSONDecodeError:
                                 normalized_payload = None
 
-                        if normalized_payload is not None:
-                            if (
-                                cls._is_retryable_timeout_payload(
-                                    api_provider,
-                                    response.status_code,
-                                    normalized_payload,
-                                )
-                                and retry_count < MAX_RETRIES
-                            ):
-                                logger.warning(
-                                    "Retrying %s request after timeout payload (attempt %s/%s)",
-                                    api_provider,
-                                    retry_count + 1,
-                                    MAX_RETRIES,
-                                )
-                                time.sleep(RETRY_DELAY * (retry_count + 1))
-                                return cls._make_base_request(
-                                    method=method,
-                                    url=url,
-                                    headers=headers,
-                                    params=params,
-                                    data=data,
-                                    api_provider=api_provider,
-                                    use_cache=use_cache,
-                                    retry_count=retry_count + 1,
-                                )
+                        if normalized_payload is None:
+                            return response
 
-                            response._content = json.dumps(normalized_payload).encode('utf-8')
-                        else:
-                            wrapped_json = {
-                                "data": cls._repair_mojibake_text(cleaned),
-                                "status": response.status_code,
-                                "headers": dict(response.headers)
-                            }
-                            response._content = json.dumps(wrapped_json).encode('utf-8')
-                                
-                        # Ensure Content-Type is application/json
+                        if (
+                            cls._is_retryable_timeout_payload(
+                                api_provider,
+                                response.status_code,
+                                normalized_payload,
+                            )
+                            and retry_count < MAX_RETRIES
+                        ):
+                            logger.warning(
+                                "Retrying %s request after timeout payload (attempt %s/%s)",
+                                api_provider,
+                                retry_count + 1,
+                                MAX_RETRIES,
+                            )
+                            time.sleep(RETRY_DELAY * (retry_count + 1))
+                            return cls._make_base_request(
+                                method=method,
+                                url=url,
+                                headers=headers,
+                                params=params,
+                                data=data,
+                                api_provider=api_provider,
+                                use_cache=use_cache,
+                                retry_count=retry_count + 1,
+                            )
+
+                        response._content = json.dumps(normalized_payload).encode('utf-8')
                         response.headers['Content-Type'] = 'application/json'
                         
                     except Exception as e:
                         logger.error(f"Error processing response: {str(e)}")
-                        error_json = {
-                            "error": {
-                                "message": f"Error processing response: {str(e)}",
-                                "type": "processing_error",
-                                "code": 500
-                            }
-                        }
-                        response._content = json.dumps(error_json).encode('utf-8')
-                        response.headers['Content-Type'] = 'application/json'
+                        return response
 
                 return response
 
