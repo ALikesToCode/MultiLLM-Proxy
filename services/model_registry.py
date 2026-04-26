@@ -21,7 +21,7 @@ STATIC_PROVIDER_MODELS = {
 DEFAULT_MODEL_IDS = {
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
-    "opencode": ["kimi-k2.5"],
+    "opencode": ["kimi-k2.6"],
     "xai": ["grok-4"],
     "cerebras": ["llama3.1-8b"],
     "azure": ["gpt-4o-mini"],

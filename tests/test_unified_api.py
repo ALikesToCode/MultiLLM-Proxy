@@ -80,7 +80,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.get_json()["data"]}
-        self.assertIn("opencode:kimi-k2.5", model_ids)
+        self.assertIn("opencode:kimi-k2.6", model_ids)
         self.assertIn("gemini:gemini-test-model", model_ids)
 
     def test_v1_chat_completions_routes_provider_model(self):
@@ -91,7 +91,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/chat/completions",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "messages": [{"role": "user", "content": "hi"}],
                 },
             )
@@ -105,7 +105,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
             "https://opencode.ai/zen/go/v1/chat/completions",
         )
         upstream_payload = json.loads(request_kwargs["data"])
-        self.assertEqual(upstream_payload["model"], "kimi-k2.5")
+        self.assertEqual(upstream_payload["model"], "kimi-k2.6")
         self.assertEqual(
             request_kwargs["headers"]["Authorization"],
             "Bearer opencode-provider-key",
@@ -122,7 +122,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/chat/completions",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "messages": [{"role": "user", "content": "hi"}],
                 },
             )
@@ -149,7 +149,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "scopes": ["admin"],
             }
 
-        disable_response = self.client.post("/admin/models/opencode:kimi-k2.5/disable")
+        disable_response = self.client.post("/admin/models/opencode:kimi-k2.6/disable")
         self.assertEqual(disable_response.status_code, 200)
         self.assertEqual(disable_response.get_json()["status"], "disabled")
 
@@ -157,7 +157,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
             "/v1/chat/completions",
             headers={"Authorization": "Bearer admin-test-key"},
             json={
-                "model": "opencode:kimi-k2.5",
+                "model": "opencode:kimi-k2.6",
                 "messages": [{"role": "user", "content": "hi"}],
             },
         )
@@ -194,7 +194,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "scopes": ["admin"],
             }
 
-        response = self.client.post("/admin/models/opencode:kimi-k2.5/disable")
+        response = self.client.post("/admin/models/opencode:kimi-k2.6/disable")
 
         self.assertEqual(response.status_code, 400)
 
@@ -206,7 +206,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/responses",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "instructions": "Be brief",
                     "input": "Say hi",
                     "max_output_tokens": 12,
@@ -219,7 +219,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(payload["output_text"], "response text")
 
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
-        self.assertEqual(upstream_payload["model"], "kimi-k2.5")
+        self.assertEqual(upstream_payload["model"], "kimi-k2.6")
         self.assertEqual(upstream_payload["max_tokens"], 12)
         self.assertEqual(
             upstream_payload["messages"],
@@ -243,7 +243,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                     "Accept": "application/json",
                 },
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "input": "Say hi",
                 },
             )
@@ -264,7 +264,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/responses",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "input": "Say hi",
                 },
             )
@@ -285,7 +285,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/responses",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "opencode:kimi-k2.5",
+                    "model": "opencode:kimi-k2.6",
                     "input": "Say hi",
                 },
             )

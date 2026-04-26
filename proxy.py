@@ -114,18 +114,18 @@ PROVIDER_DETAILS = {
         }
     },
     'opencode': {
-        'description': 'OpenCode Zen Go plan - OpenAI-compatible access to curated models like Kimi K2.5',
+        'description': 'OpenCode Zen Go plan - OpenAI-compatible access to curated models like Kimi K2.6',
         'endpoints': [
             {
                 'url': '/chat/completions',
-                'curl': 'curl -X POST "http://localhost:1400/opencode/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"kimi-k2.5\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"max_tokens\\": 128}"'
+                'curl': 'curl -X POST "http://localhost:1400/opencode/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"kimi-k2.6\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"max_tokens\\": 128}"'
             }
         ],
         'supported_features': {
             'streaming': True,
             'json_mode': True
         },
-        'default_model': 'kimi-k2.5'
+        'default_model': 'kimi-k2.6'
     },
     'nineteen': {
         'description': 'Nineteen AI - High-performance inference for open-source models',
