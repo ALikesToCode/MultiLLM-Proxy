@@ -180,11 +180,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 response.content,
                 status=response.status_code,
                 content_type=response.headers.get("content-type", "application/json"),
-                headers={
-                    key: value
-                    for key, value in response.headers.items()
-                    if key.lower() not in ["content-encoding", "content-length", "transfer-encoding"]
-                },
+                headers=copy_upstream_response_headers(response.headers),
             )
 
         except Exception as error:

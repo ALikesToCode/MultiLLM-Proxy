@@ -59,6 +59,8 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
             }
         ).encode("utf-8")
         upstream_response.headers["Content-Type"] = "application/json"
+        upstream_response.headers["Connection"] = "keep-alive"
+        upstream_response.headers["Transfer-Encoding"] = "chunked"
 
         with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
             response = self.client.post(
@@ -78,6 +80,8 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["choices"][0]["message"]["content"], "Hello from OpenCode")
         self.assertEqual(response.headers["Access-Control-Allow-Origin"], "https://example.com")
+        self.assertNotIn("Connection", response.headers)
+        self.assertNotIn("Transfer-Encoding", response.headers)
 
         make_request.assert_called_once()
         self.assertEqual(

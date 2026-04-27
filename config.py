@@ -169,14 +169,13 @@ class Config:
     
     # Gemini models
     GEMINI_MODELS = [
-        'gemini-2.0-flash',
-        'gemini-2.0-pro',
-        'gemini-2.0-ultra',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro',
-        'gemini-1.5-ultra',
-        'gemini-1.0-pro',
-        'gemini-1.0-ultra'
+        'gemini-3.1-pro-preview',
+        'gemini-3.1-pro-preview-customtools',
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite'
     ]
     
     # Gemma models

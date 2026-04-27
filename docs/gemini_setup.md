@@ -33,10 +33,10 @@ Or use curl directly:
 curl -X POST "http://localhost:1400/gemini/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
-  -d '{"model": "gemini-2.0-flash", "messages": [{"role": "user", "content": "Hello"}], "stream": true}'
+  -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "Hello"}], "stream": true}'
 
 # Direct Gemini API endpoint
-curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.0-flash:generateContent" \
+curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.5-flash:generateContent" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
   -d '{"contents": [{"parts": [{"text": "Hello"}]}], "stream": true}'
@@ -44,13 +44,19 @@ curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.0-flash:genera
 
 ## 4. Available Gemini Models
 
-The MultiLLM-Proxy supports all Gemini models, including:
+The MultiLLM-Proxy model registry includes current Gemini text models, including:
 
-- `gemini-2.0-flash` - Fast, efficient model for quick responses
-- `gemini-2.0-pro` - More capable model for complex tasks
-- `gemini-pro-vision` - Supports image understanding
+- `gemini-3.1-pro-preview` - Advanced preview reasoning and coding model
+- `gemini-3-flash-preview` - Frontier preview model optimized for speed and scale
+- `gemini-3.1-flash-lite-preview` - Cost-efficient preview model for high-volume tasks
+- `gemini-2.5-pro` - Stable advanced reasoning model
+- `gemini-2.5-flash` - Stable price-performance model
+- `gemini-2.5-flash-lite` - Stable low-latency, cost-efficient model
 - `gemma-2-9b` - Open model from Google
-- `gemma-3-27b` - Latest open model from Google
+- `gemma-3-27b` - Open model from Google
+
+Check the official Gemini model documentation for newly released, preview, or deprecated model IDs:
+https://ai.google.dev/gemini-api/docs/models
 
 ## 5. Troubleshooting
 

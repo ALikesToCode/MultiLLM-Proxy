@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import psutil
@@ -270,22 +271,16 @@ def register_core_routes(app) -> None:
         """
         Serve the PWA web manifest from the app root.
         """
-        return send_from_directory(
-            os.path.join(app.root_path, "static"),
-            "manifest.webmanifest",
-            mimetype="application/manifest+json",
-        )
+        manifest_path = Path(app.root_path) / "static" / "manifest.webmanifest"
+        return Response(manifest_path.read_bytes(), mimetype="application/manifest+json")
 
     @app.route("/service-worker.js")
     def service_worker():
         """
         Serve the PWA service worker from the app root so it can control the whole app.
         """
-        response = send_from_directory(
-            os.path.join(app.root_path, "static"),
-            "service-worker.js",
-            mimetype="application/javascript",
-        )
+        service_worker_path = Path(app.root_path) / "static" / "service-worker.js"
+        response = Response(service_worker_path.read_bytes(), mimetype="application/javascript")
         response.headers["Service-Worker-Allowed"] = "/"
         response.headers["Cache-Control"] = "no-cache"
         return response

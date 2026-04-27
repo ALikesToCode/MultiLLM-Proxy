@@ -55,4 +55,4 @@ jobs:
       - name: Node audit
         run: npm audit --audit-level=high
       - name: Worker tests
-        run: node --test test_cloudflare_worker.mjs
+        run: node --test tests/test_cloudflare_worker.mjs

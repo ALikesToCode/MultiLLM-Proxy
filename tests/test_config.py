@@ -36,6 +36,16 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
         )
         self.assertEqual(config_module.Config.GROQ_API_KEYS, ["groq-first", "groq-second"])
 
+    def test_gemini_static_model_list_prefers_current_public_models(self):
+        from config import Config
+
+        self.assertIn("gemini-3.1-pro-preview", Config.GEMINI_MODELS)
+        self.assertIn("gemini-3-flash-preview", Config.GEMINI_MODELS)
+        self.assertIn("gemini-2.5-pro", Config.GEMINI_MODELS)
+        self.assertIn("gemini-2.5-flash", Config.GEMINI_MODELS)
+        self.assertNotIn("gemini-2.0-pro", Config.GEMINI_MODELS)
+        self.assertNotIn("gemini-1.0-ultra", Config.GEMINI_MODELS)
+
 
 if __name__ == "__main__":
     unittest.main()

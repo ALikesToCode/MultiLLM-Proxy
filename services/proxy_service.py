@@ -62,6 +62,22 @@ class ProxyService:
 
     RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
     SAFE_RETRY_METHODS = {"GET", "HEAD", "OPTIONS"}
+    UPSTREAM_HEADER_WHITELIST = {
+        "accept": "Accept",
+        "accept-language": "Accept-Language",
+        "anthropic-version": "Anthropic-Version",
+        "content-type": "Content-Type",
+        "http-referer": "HTTP-Referer",
+        "openai-organization": "OpenAI-Organization",
+        "user-agent": "User-Agent",
+        "x-request-id": "X-Request-ID",
+        "x-title": "X-Title",
+    }
+
+    @staticmethod
+    def _has_header(headers: Dict[str, str], header_name: str) -> bool:
+        normalized_name = header_name.lower()
+        return any(existing_header.lower() == normalized_name for existing_header in headers)
 
     @classmethod
     def _get_provider_session(cls, api_provider: str) -> requests.Session:
@@ -276,34 +292,22 @@ class ProxyService:
         """
         Prepare headers for API requests, filtering out unnecessary ones.
         """
-        # Create a copy of headers that will be sent
         headers = {}
+        header_whitelist = dict(cls.UPSTREAM_HEADER_WHITELIST)
+        if api_provider in ["googleai", "gemini", "gemma"]:
+            header_whitelist["x-goog-user-project"] = "X-Goog-User-Project"
 
-        # Copy specific headers that should be preserved
-        header_whitelist = {
-            'Content-Type', 'Accept', 'User-Agent',
-            'HTTP-Referer', 'X-Title', 'Anthropic-Version', 'OpenAI-Organization',
-            'X-Request-ID', 'Accept-Language'
-        }
-
-        # Special case for Google API
-        if api_provider in ['googleai', 'gemini', 'gemma']:
-            header_whitelist.add('X-Goog-User-Project')
-
-        # Copy allowed headers
         for header, value in request_headers.items():
-            if header.lower() in [h.lower() for h in header_whitelist]:
-                headers[header] = value
+            canonical_header = header_whitelist.get(header.lower())
+            if canonical_header:
+                headers[canonical_header] = value
 
-        # Set content type if not provided
-        if 'Content-Type' not in headers:
-            headers['Content-Type'] = 'application/json'
+        if not cls._has_header(headers, "Content-Type"):
+            headers["Content-Type"] = "application/json"
 
-        # Set accept header if not provided
-        if 'Accept' not in headers:
+        if not cls._has_header(headers, "Accept"):
             if 'stream=true' in request_headers.get('Cookie', '').lower() or \
                request_headers.get('X-Stream', '').lower() == 'true':
-                # Request is for streaming
                 headers['Accept'] = 'text/event-stream'
             else:
                 headers['Accept'] = 'application/json'
@@ -315,13 +319,13 @@ class ProxyService:
         # Add provider-specific headers
         if api_provider == 'openrouter':
             # OpenRouter requires HTTP-Referer and X-Title
-            if 'HTTP-Referer' not in headers:
+            if not cls._has_header(headers, "HTTP-Referer"):
                 headers['HTTP-Referer'] = os.environ.get('OPENROUTER_REFERER', 'https://multiproxy.example.com')
-            if 'X-Title' not in headers:
+            if not cls._has_header(headers, "X-Title"):
                 headers['X-Title'] = os.environ.get('APP_NAME', 'MultiLLM Proxy')
         elif api_provider == 'anthropic':
             # Anthropic specific headers
-            if 'Anthropic-Version' not in headers:
+            if not cls._has_header(headers, "Anthropic-Version"):
                 headers['Anthropic-Version'] = '2023-06-01'
 
         return headers

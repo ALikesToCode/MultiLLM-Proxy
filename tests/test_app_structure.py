@@ -13,6 +13,13 @@ class AppStructureTest(unittest.TestCase):
             f"app.py is still too large at {line_count} lines; expected <= 500 lines after route extraction",
         )
 
+    def test_ci_uses_current_worker_test_path(self):
+        workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+        workflow_text = workflow.read_text(encoding="utf-8")
+
+        self.assertIn("node --test tests/test_cloudflare_worker.mjs", workflow_text)
+        self.assertNotIn("node --test test_cloudflare_worker.mjs", workflow_text)
+
 
 if __name__ == "__main__":
     unittest.main()

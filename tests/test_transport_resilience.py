@@ -70,6 +70,38 @@ class TransportResilienceTest(unittest.TestCase):
         self.assertEqual(fake_session.request_calls, 2)
         self.assertEqual(len(fake_session.mounts), 2)
 
+    def test_prepare_headers_canonicalizes_allowed_request_headers(self):
+        headers = self.proxy_module.ProxyService.prepare_headers(
+            {
+                "content-type": "application/json",
+                "accept": "text/event-stream",
+                "http-referer": "https://client.example",
+                "x-title": "Client App",
+                "x-goog-user-project": "billing-project",
+                "authorization": "Bearer user-key",
+            },
+            "openrouter",
+            "provider-key",
+        )
+
+        self.assertEqual(headers["Content-Type"], "application/json")
+        self.assertEqual(headers["Accept"], "text/event-stream")
+        self.assertEqual(headers["HTTP-Referer"], "https://client.example")
+        self.assertEqual(headers["X-Title"], "Client App")
+        self.assertEqual(headers["Authorization"], "Bearer provider-key")
+        self.assertNotIn("content-type", headers)
+        self.assertNotIn("authorization", headers)
+        self.assertNotIn("X-Goog-User-Project", headers)
+
+    def test_prepare_headers_allows_google_user_project_header(self):
+        headers = self.proxy_module.ProxyService.prepare_headers(
+            {"x-goog-user-project": "billing-project"},
+            "gemini",
+            "provider-key",
+        )
+
+        self.assertEqual(headers["X-Goog-User-Project"], "billing-project")
+
     def test_post_retryable_status_without_idempotency_key_is_not_retried(self):
         fake_session = FakeSession([
             _json_response(503, {"error": "temporary"}),
