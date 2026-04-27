@@ -10,7 +10,6 @@ Chunk = Union[bytes, str]
 
 HIDDEN_REASONING_KEYS = {
     "reasoning",
-    "reasoning_content",
     "reasoning_details",
     "thinking",
     "thought",

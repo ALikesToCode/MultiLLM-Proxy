@@ -59,6 +59,7 @@ class SSEParserTest(unittest.TestCase):
                     "delta": {
                         "content": "visible",
                         "tool_calls": [{"id": "call_1"}],
+                        "reasoning_content": "deepseek state",
                         "reasoning": "hidden",
                         "reasoning_details": [{"text": "hidden"}],
                     },
@@ -73,6 +74,7 @@ class SSEParserTest(unittest.TestCase):
         delta = sanitized["choices"][0]["delta"]
         self.assertEqual(delta["content"], "visible")
         self.assertEqual(delta["tool_calls"], [{"id": "call_1"}])
+        self.assertEqual(delta["reasoning_content"], "deepseek state")
         self.assertNotIn("reasoning", delta)
         self.assertNotIn("reasoning_details", delta)
         self.assertEqual(sanitized["choices"][0]["finish_reason"], "stop")

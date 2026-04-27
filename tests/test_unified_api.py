@@ -81,6 +81,9 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         model_ids = {model["id"] for model in response.get_json()["data"]}
         self.assertIn("opencode:kimi-k2.6", model_ids)
+        self.assertIn("opencode:mimo-v2-pro", model_ids)
+        self.assertIn("opencode:glm-5.1", model_ids)
+        self.assertIn("opencode:qwen3.6-plus", model_ids)
         self.assertIn("gemini:gemini-test-model", model_ids)
 
     def test_v1_chat_completions_routes_provider_model(self):
@@ -110,6 +113,23 @@ class UnifiedApiRouteTest(unittest.TestCase):
             request_kwargs["headers"]["Authorization"],
             "Bearer opencode-provider-key",
         )
+
+    def test_v1_chat_completions_routes_other_opencode_go_model(self):
+        upstream_response = self._chat_response("hello")
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:mimo-v2-pro",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual(upstream_payload["model"], "mimo-v2-pro")
 
     def test_v1_chat_model_resolution_does_not_list_entire_registry(self):
         upstream_response = self._chat_response("hello")

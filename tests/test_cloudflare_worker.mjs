@@ -511,6 +511,70 @@ test("worker drops non-streaming opencode reasoning metadata", async () => {
   }
 });
 
+test("worker preserves non-streaming opencode reasoning_content for DeepSeek thinking mode", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("opencode fallback should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        id: "chatcmpl-deepseek",
+        object: "chat.completion",
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Pong!",
+              reasoning_content: "state that must be sent back on the next turn",
+              reasoning: "private",
+              reasoning_details: [{ text: "private" }],
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: "https://janitorai.com",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ model: "kimi-k2.5", messages: [{ role: "user", content: "ping" }] }),
+      }),
+      stub.env,
+    );
+
+    const payload = await response.json();
+    const message = payload.choices[0].message;
+    assert.equal(response.status, 200);
+    assert.equal(message.content, "Pong!");
+    assert.equal(message.reasoning_content, "state that must be sent back on the next turn");
+    assert.equal("reasoning" in message, false);
+    assert.equal("reasoning_details" in message, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("worker strips raw non-stream think blocks from opencode content", async () => {
   const stub = makeEnv(
     async () => {

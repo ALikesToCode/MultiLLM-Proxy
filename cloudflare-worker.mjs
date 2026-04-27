@@ -510,7 +510,6 @@ function sanitizeOpenAiCompletionPayload(payload) {
         const sanitizedMessage = { ...sanitizedChoice.message };
         delete sanitizedMessage.reasoning;
         delete sanitizedMessage.reasoning_details;
-        delete sanitizedMessage.reasoning_content;
         sanitizedMessage.content = stripThinkBlocks(sanitizedMessage.content);
         sanitizedChoice.message = sanitizedMessage;
       }
