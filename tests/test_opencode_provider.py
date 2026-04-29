@@ -356,6 +356,83 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
         self.assertTrue(fake_response.closed)
 
+    def test_streaming_normalizer_renders_opencode_reasoning_before_content(self):
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield 'data: {"choices":[{"delta":{"content":"","role":"assistant","reasoning":"first pass"}}]}'
+                yield 'data: {"choices":[{"delta":{"content":"Visible answer"}}]}'
+                yield "data: [DONE]"
+
+            def close(self):
+                return None
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
+        )
+
+        frames = [
+            frame
+            for chunk in chunks
+            for frame in chunk.split("\n\n")
+            if frame.startswith("data: {")
+        ]
+        contents = [
+            json.loads(frame[6:].strip())["choices"][0]["delta"]["content"]
+            for frame in frames
+        ]
+        self.assertEqual(
+            contents,
+            ["<think>", "first pass", "</think>\n\n", "Visible answer"],
+        )
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+
+    def test_streaming_normalizer_preserves_opencode_reasoning_content_state(self):
+        class FakeStreamingResponse:
+            headers = {"content-type": "text/event-stream"}
+
+            def iter_lines(self, decode_unicode=True):
+                yield (
+                    'data: {"choices":[{"delta":{"content":"","role":"assistant",'
+                    '"reasoning_content":"state to preserve"}}]}'
+                )
+                yield 'data: {"choices":[{"delta":{"content":"Visible answer"}}]}'
+                yield "data: [DONE]"
+
+            def close(self):
+                return None
+
+        chunks = list(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FakeStreamingResponse(),
+                "opencode",
+            )
+        )
+
+        frames = [
+            frame
+            for chunk in chunks
+            for frame in chunk.split("\n\n")
+            if frame.startswith("data: {")
+        ]
+        preserved_state_payload = json.loads(frames[0][6:].strip())
+        self.assertEqual(
+            preserved_state_payload["choices"][0]["delta"]["reasoning_content"],
+            "state to preserve",
+        )
+        contents = [
+            json.loads(frame[6:].strip())["choices"][0]["delta"].get("content")
+            for frame in frames
+        ]
+        self.assertIn("<think>", contents)
+        self.assertIn("state to preserve", contents)
+        self.assertIn("</think>\n\n", contents)
+        self.assertIn("Visible answer", contents)
+
     def test_openrouter_streaming_handler_stops_after_done_marker(self):
         class FakeStreamingResponse:
             status_code = 200

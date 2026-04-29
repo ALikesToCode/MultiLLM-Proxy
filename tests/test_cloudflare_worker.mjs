@@ -449,7 +449,7 @@ test("worker proxies opencode requests directly when the container is unavailabl
   }
 });
 
-test("worker drops non-streaming opencode reasoning metadata", async () => {
+test("worker renders non-streaming opencode reasoning as a visible think block", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("opencode fallback should bypass the container");
@@ -503,7 +503,7 @@ test("worker drops non-streaming opencode reasoning metadata", async () => {
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.equal(payload.choices[0].message.content, "Pong!");
+    assert.equal(payload.choices[0].message.content, "<think>private</think>\n\nPong!");
     assert.equal("reasoning" in payload.choices[0].message, false);
     assert.equal("reasoning_details" in payload.choices[0].message, false);
   } finally {
@@ -566,7 +566,7 @@ test("worker preserves non-streaming opencode reasoning_content for DeepSeek thi
     const payload = await response.json();
     const message = payload.choices[0].message;
     assert.equal(response.status, 200);
-    assert.equal(message.content, "Pong!");
+    assert.equal(message.content, "<think>state that must be sent back on the next turnprivate</think>\n\nPong!");
     assert.equal(message.reasoning_content, "state that must be sent back on the next turn");
     assert.equal("reasoning" in message, false);
     assert.equal("reasoning_details" in message, false);
@@ -630,15 +630,17 @@ test("worker strips raw non-stream think blocks from opencode content", async ()
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.equal(payload.choices[0].message.content, "*The warmth vanishes.*");
-    assert.doesNotMatch(payload.choices[0].message.content, /<think>|<\/think>/);
-    assert.doesNotMatch(payload.choices[0].message.content, /Mysterious gets up|duplicate private draft|exactly "pong"/);
+    assert.equal(
+      payload.choices[0].message.content,
+      '<think>The user wants me to reply with exactly "pong".So I should output just the word "pong "without any punctuation. No,"exactly pong "implies just the word.</think>\n\n*The warmth vanishes.*',
+    );
+    assert.doesNotMatch(payload.choices[0].message.content, /Mysterious gets up|duplicate private draft/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("worker does not expose long non-stream reasoning text", async () => {
+test("worker does not truncate long non-stream reasoning text", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("opencode fallback should bypass the container");
@@ -692,14 +694,14 @@ test("worker does not expose long non-stream reasoning text", async () => {
     const payload = await response.json();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.equal(payload.choices[0].message.content, "pong");
-    assert.doesNotMatch(payload.choices[0].message.content, new RegExp(longReasoning));
+    assert.equal(payload.choices[0].message.content, `<think>${longReasoning}</think>\n\npong`);
+    assert.doesNotMatch(payload.choices[0].message.content, /…<\/think>/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("worker drops streaming opencode reasoning and raw think blocks", async () => {
+test("worker renders streaming opencode reasoning and strips duplicate raw think blocks", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -758,8 +760,10 @@ test("worker drops streaming opencode reasoning and raw think blocks", async () 
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.doesNotMatch(text, /<think>|<\/think>/);
-    assert.doesNotMatch(text, /private reasoning/);
+    assert.match(text, /<think>/);
+    assert.match(text, /private reasoning/);
+    assert.match(text, /The/);
+    assert.match(text, /<\/think>\\n\\n/);
     assert.match(text, /\*The ascent was a brutal ballet of desperation and calculated intent\.\*/);
     assert.doesNotMatch(text, /"reasoning":/);
     assert.doesNotMatch(text, /reasoning_details/);
@@ -830,16 +834,21 @@ test("worker ignores streaming reasoning deltas before and after visible content
     const text = await response.text();
     assert.equal(response.status, 200);
     const contentChunks = [...text.matchAll(/"content":"((?:\\.|[^"])*)"/g)].map(([, content]) => content);
-    assert.deepEqual(contentChunks, ["Visible answer"]);
+    assert.deepEqual(contentChunks, [
+      "<think>",
+      "first pass",
+      "</think>\\n\\n",
+      "Visible answer",
+    ]);
     assert.match(text, /Visible answer/);
-    assert.doesNotMatch(text, /first pass/);
+    assert.match(text, /first pass/);
     assert.doesNotMatch(text, /late hidden thought/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("worker drops streamed thinking fragments", async () => {
+test("worker preserves streamed thinking fragments", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -909,15 +918,15 @@ test("worker drops streamed thinking fragments", async () => {
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.doesNotMatch(text, /The user wants pong\./);
-    assert.doesNotMatch(text, /<think>|<\/think>/);
+    assert.match(text, /The user wants pong\./);
+    assert.match(text, /"content":"<\/think>\\n\\n"/);
     assert.match(text, /"content":"pong"/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("worker does not expose long streamed reasoning text", async () => {
+test("worker does not truncate long streamed reasoning text", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -977,15 +986,16 @@ test("worker does not expose long streamed reasoning text", async () => {
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.doesNotMatch(text, /<think>|<\/think>/);
-    assert.doesNotMatch(text, new RegExp(longReasoning));
+    assert.match(text, /"content":"<think>"/);
+    assert.match(text, new RegExp(longReasoning));
+    assert.doesNotMatch(text, /…<\/think>/);
     assert.match(text, /"content":"pong"/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test("worker drops quoted and colon-prefixed streamed thinking text", async () => {
+test("worker preserves quoted and colon-prefixed streamed thinking text", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("streaming fallback should bypass the container");
@@ -1060,8 +1070,7 @@ test("worker drops quoted and colon-prefixed streamed thinking text", async () =
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(stub.getCalls(), 0);
-    assert.doesNotMatch(text, /The user wants/);
-    assert.doesNotMatch(text, /The answer is simply/);
+    assert.match(text, /\\"pong\\"\. The answer is simply: pong/);
     assert.match(text, /"content":"pong"/);
   } finally {
     globalThis.fetch = originalFetch;

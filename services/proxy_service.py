@@ -608,6 +608,141 @@ class ProxyService:
         return cleaned_chunk.strip(), inside_reasoning_block
 
     @classmethod
+    def _sanitize_reasoning_candidate(cls, value: Any, trim_edges: bool = False) -> str:
+        if not isinstance(value, str):
+            return ""
+
+        sanitized = re.sub(r"</?think>", "", value, flags=re.IGNORECASE)
+        stripped_embedded_payload = cls._strip_embedded_stream_chunk_payload(sanitized)
+        if stripped_embedded_payload is not None:
+            sanitized = stripped_embedded_payload
+        sanitized = cls._repair_mojibake_text(sanitized)
+        return sanitized.strip() if trim_edges else sanitized
+
+    @classmethod
+    def _extract_reasoning_preview(cls, source: Any, trim_edges: bool = True) -> str:
+        if not isinstance(source, dict):
+            return ""
+
+        parts: List[str] = []
+        seen: set[str] = set()
+
+        def maybe_push(value: Any) -> None:
+            sanitized = cls._sanitize_reasoning_candidate(value, trim_edges)
+            if not sanitized or sanitized in seen:
+                return
+            seen.add(sanitized)
+            parts.append(sanitized)
+
+        maybe_push(source.get("reasoning_content"))
+        maybe_push(source.get("reasoning"))
+
+        reasoning_details = source.get("reasoning_details")
+        if isinstance(reasoning_details, list):
+            for detail in reasoning_details:
+                if isinstance(detail, str):
+                    maybe_push(detail)
+                elif isinstance(detail, dict):
+                    maybe_push(detail.get("text"))
+                    maybe_push(detail.get("reasoning"))
+                    maybe_push(detail.get("reasoning_content"))
+
+        return "".join(parts)
+
+    @staticmethod
+    def _new_visible_thinking_state() -> Dict[str, Any]:
+        return {
+            "thinking_open": False,
+            "thinking_closed": False,
+            "thinking_buffer": [],
+            "thinking_buffered_chars": 0,
+        }
+
+    @classmethod
+    def _build_streaming_chunk(cls, content: str) -> str:
+        formatted_chunk = {
+            "id": str(uuid.uuid4()),
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": "provider-stream",
+            "choices": [{"delta": {"content": content}}],
+        }
+        return f"data: {json.dumps(formatted_chunk)}\n\n"
+
+    @classmethod
+    def _flush_visible_thinking_buffer(cls, state: Optional[Dict[str, Any]]) -> str:
+        if not state or not state.get("thinking_buffer"):
+            return ""
+
+        combined_preview = "".join(state["thinking_buffer"])
+        state["thinking_buffer"] = []
+        state["thinking_buffered_chars"] = 0
+        if not combined_preview:
+            return ""
+
+        output = ""
+        if not state.get("thinking_open"):
+            output += cls._build_streaming_chunk("<think>")
+            state["thinking_open"] = True
+        output += cls._build_streaming_chunk(combined_preview)
+        return output
+
+    @classmethod
+    def _append_visible_thinking_chunk(
+        cls,
+        reasoning_preview: str,
+        state: Optional[Dict[str, Any]],
+    ) -> str:
+        normalized_preview = cls._sanitize_reasoning_candidate(reasoning_preview)
+        if not normalized_preview or not state or state.get("thinking_closed"):
+            return ""
+
+        state["thinking_buffer"].append(normalized_preview)
+        state["thinking_buffered_chars"] += len(normalized_preview)
+        if re.search(r"[.!?…]$", normalized_preview) or state["thinking_buffered_chars"] >= 160:
+            return cls._flush_visible_thinking_buffer(state)
+        return ""
+
+    @classmethod
+    def _close_visible_thinking_chunk(cls, state: Optional[Dict[str, Any]]) -> str:
+        if not state or state.get("thinking_closed"):
+            return ""
+
+        output = cls._flush_visible_thinking_buffer(state)
+        if not state.get("thinking_open"):
+            if not output:
+                return ""
+            state["thinking_open"] = True
+
+        state["thinking_open"] = False
+        state["thinking_closed"] = True
+        output += cls._build_streaming_chunk("</think>\n\n")
+        return output
+
+    @staticmethod
+    def _payload_has_visible_content(payload: Dict[str, Any]) -> bool:
+        return any(
+            isinstance(choice, dict)
+            and isinstance(choice.get("delta"), dict)
+            and isinstance(choice["delta"].get("content"), str)
+            and len(choice["delta"]["content"]) > 0
+            for choice in payload.get("choices", [])
+        )
+
+    @staticmethod
+    def _payload_has_meaningful_delta(payload: Dict[str, Any]) -> bool:
+        for choice in payload.get("choices", []):
+            if not isinstance(choice, dict) or not isinstance(choice.get("delta"), dict):
+                continue
+            for key, value in choice["delta"].items():
+                if key == "role":
+                    continue
+                if key == "content" and value == "":
+                    continue
+                return True
+        return False
+
+    @classmethod
     def _looks_like_meaningful_stream_text(cls, text: str) -> bool:
         """
         Distinguish real leaked-prose lines from noise left behind after chunk stripping.
@@ -2583,7 +2718,12 @@ class ProxyService:
             raise APIError(error_msg, status_code=500)
 
     @classmethod
-    def _standardize_streaming_chunk(cls, chunk: str, provider: str) -> str:
+    def _standardize_streaming_chunk(
+        cls,
+        chunk: str,
+        provider: str,
+        visible_thinking_state: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Standardize streaming response chunks from different providers to match OpenAI format.
         
@@ -2612,7 +2752,7 @@ class ProxyService:
                 
             # If the chunk is the completion signal
             if data_payload == '[DONE]':
-                return 'data: [DONE]\n\n'
+                return f"{cls._close_visible_thinking_chunk(visible_thinking_state)}data: [DONE]\n\n"
 
             # If the chunk is already an OpenAI-compatible SSE payload, preserve it
             if chunk.startswith("data: "):
@@ -2622,9 +2762,26 @@ class ProxyService:
                         parsed_payload.get("object") == "chat.completion.chunk" or
                         "choices" in parsed_payload
                     ):
+                        output = ""
+                        if provider == "opencode" and isinstance(parsed_payload.get("choices"), list):
+                            reasoning_preview = "".join(
+                                cls._extract_reasoning_preview(
+                                    choice.get("delta") if isinstance(choice, dict) else None,
+                                    trim_edges=False,
+                                )
+                                for choice in parsed_payload["choices"]
+                            )
+                            output += cls._append_visible_thinking_chunk(
+                                reasoning_preview,
+                                visible_thinking_state,
+                            )
                         parsed_payload = sanitize_openai_stream_payload(parsed_payload)
                         normalized_payload = cls.normalize_json_text(parsed_payload)
-                        return f"data: {json.dumps(normalized_payload)}\n\n"
+                        if provider == "opencode" and not cls._payload_has_meaningful_delta(normalized_payload):
+                            return output
+                        if provider == "opencode" and cls._payload_has_visible_content(normalized_payload):
+                            output += cls._close_visible_thinking_chunk(visible_thinking_state)
+                        return f"{output}data: {json.dumps(normalized_payload)}\n\n"
                 except json.JSONDecodeError:
                     pass
 
@@ -2680,7 +2837,18 @@ class ProxyService:
                         data = json.loads(chunk)
                         # Look for content in common places
                         if 'choices' in data and len(data['choices']) > 0:
+                            visible_thinking_chunk = ""
+                            if provider == "opencode":
+                                visible_thinking_chunk = cls._append_visible_thinking_chunk(
+                                    cls._extract_reasoning_preview(
+                                        data['choices'][0].get('delta', {}),
+                                        trim_edges=False,
+                                    ),
+                                    visible_thinking_state,
+                                )
                             content = data['choices'][0].get('text', '') or data['choices'][0].get('delta', {}).get('content', '')
+                            if not content:
+                                return visible_thinking_chunk
                         elif 'text' in data:
                             content = data['text']
                     else:
@@ -2695,16 +2863,7 @@ class ProxyService:
             elif isinstance(content, str):
                 content = cls._repair_mojibake_text(content)
                 
-            # Create OpenAI-compatible format
-            formatted_chunk = {
-                "id": str(uuid.uuid4()),
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": "provider-stream",
-                "choices": [{"delta": {"content": content}}]
-            }
-            
-            return f"data: {json.dumps(formatted_chunk)}\n\n"
+            return f"{cls._close_visible_thinking_chunk(visible_thinking_state)}{cls._build_streaming_chunk(content)}"
         except Exception as e:
             logger.error(f"Error standardizing streaming chunk: {str(e)}")
             # Return a safe fallback
@@ -2740,6 +2899,7 @@ class ProxyService:
             is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
             done_sent = False
             inside_reasoning_block = False
+            visible_thinking_state = cls._new_visible_thinking_state() if provider == "opencode" else None
             
             # For gzipped responses, we need to accumulate and decompress
             if is_gzipped:
@@ -2768,9 +2928,13 @@ class ProxyService:
                             )
                             if not line:
                                 continue
-                        standardized_chunk = cls._standardize_streaming_chunk(line, provider)
+                        standardized_chunk = cls._standardize_streaming_chunk(
+                            line,
+                            provider,
+                            visible_thinking_state,
+                        )
                         if standardized_chunk:
-                            if standardized_chunk.strip() == "data: [DONE]":
+                            if "data: [DONE]" in standardized_chunk:
                                 done_sent = True
                                 yield standardized_chunk
                                 if hasattr(response, "close"):
@@ -2780,6 +2944,9 @@ class ProxyService:
                 
                 # Signal completion
                 if not done_sent:
+                    closing_think_chunk = cls._close_visible_thinking_chunk(visible_thinking_state)
+                    if closing_think_chunk:
+                        yield closing_think_chunk
                     yield 'data: [DONE]\n\n'
             else:
                 # For non-gzipped responses
@@ -2791,9 +2958,13 @@ class ProxyService:
                         )
                         if not line:
                             continue
-                    standardized_chunk = cls._standardize_streaming_chunk(line, provider)
+                    standardized_chunk = cls._standardize_streaming_chunk(
+                        line,
+                        provider,
+                        visible_thinking_state,
+                    )
                     if standardized_chunk:
-                        if standardized_chunk.strip() == "data: [DONE]":
+                        if "data: [DONE]" in standardized_chunk:
                             done_sent = True
                             yield standardized_chunk
                             if hasattr(response, "close"):
@@ -2803,6 +2974,9 @@ class ProxyService:
                 
                 # Signal completion
                 if not done_sent:
+                    closing_think_chunk = cls._close_visible_thinking_chunk(visible_thinking_state)
+                    if closing_think_chunk:
+                        yield closing_think_chunk
                     yield 'data: [DONE]\n\n'
         except Exception as e:
             logger.error(f"Error in streaming response processing: {str(e)}")
