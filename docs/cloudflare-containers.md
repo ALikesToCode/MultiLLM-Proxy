@@ -9,7 +9,7 @@ Cloudflare's Python Workers runtime runs on Pyodide. Cloudflare's docs note that
 - Flask and WSGI-style request handling
 - `requests` for upstream provider calls
 - threaded execution and SSE streaming
-- optional `gcloud` CLI access for the `googleai` provider
+- service-account JSON support for the `googleai` provider
 
 That makes Cloudflare Containers the safer target.
 
@@ -67,7 +67,7 @@ wrangler secret put LOCATION
 wrangler secret put GOOGLE_ENDPOINT
 ```
 
-`GOOGLE_APPLICATION_CREDENTIALS_JSON` should contain the full service account JSON as a single secret value. The container entrypoint writes it to `/tmp/google-credentials.json`, sets `GOOGLE_APPLICATION_CREDENTIALS`, activates the service account with `gcloud`, and sets the project before starting Gunicorn.
+`GOOGLE_APPLICATION_CREDENTIALS_JSON` should contain the full service account JSON as a single secret value. The container entrypoint writes it to `/tmp/google-credentials.json` and sets `GOOGLE_APPLICATION_CREDENTIALS`. The app uses that JSON directly through `google-auth`; `gcloud` is only a local fallback when no service-account JSON/path is configured.
 
 ## Deploy
 
@@ -86,9 +86,11 @@ Wrangler will:
 - Worker entry: `cloudflare-worker.mjs`
 - Durable Object / Container class: `MultiLLMProxyContainer`
 - Container port: `8080`
-- Gunicorn entrypoint: `wsgi:app`
+- Gunicorn entrypoint: `app:create_app()`
+- Gunicorn default: `GUNICORN_WORKERS=1`, `GUNICORN_THREADS=8`
 
 ## Notes
 
 - The deployment is pinned to a single named container instance (`primary`) to avoid auth/session drift from the app's in-memory state.
-- Containers are currently manual-scale on Cloudflare beta. This setup intentionally favors correctness over horizontal scaling.
+- `wrangler.jsonc` sets `max_instances=1` for the same reason.
+- Container disk is ephemeral. The default SQLite paths use `/tmp`, so created users, model-disable overrides, and rate-limit rows are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential and move state to D1/Durable Object storage or another external database before relying on dashboard-created users in production.

@@ -7,7 +7,7 @@
     {
       "class_name": "MultiLLMProxyContainer",
       "image": "./Dockerfile",
-      "max_instances": 2,
+      "max_instances": 1,
       "instance_type": "basic"
     }
   ],
@@ -27,6 +27,9 @@
       ]
     }
   ],
+  "observability": {
+    "enabled": true
+  },
   "vars": {
     "FLASK_ENV": "production",
     "SERVER_HOST": "0.0.0.0",

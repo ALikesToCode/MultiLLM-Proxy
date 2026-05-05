@@ -308,6 +308,9 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.JWT_SECRET, "jwt-live-secret");
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
   assert.equal(container.envVars.AUTH_DB_PATH, "/tmp/auth.sqlite3");
+  assert.equal(container.envVars.RATE_LIMIT_DB_PATH, "/tmp/rate_limits.sqlite3");
+  assert.equal(container.envVars.MODEL_REGISTRY_DB_PATH, "/tmp/model_registry.sqlite3");
+  assert.equal(container.envVars.GUNICORN_WORKERS, "1");
   assert.equal(container.envVars.HOME, "/tmp");
   assert.equal(container.envVars.SERVER_PORT, "8080");
 });

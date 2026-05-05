@@ -13,7 +13,7 @@ bind_port="${PORT:-${SERVER_PORT:-8080}}"
 
 exec gunicorn "app:create_app()" \
   --bind "0.0.0.0:${bind_port}" \
-  --workers "${GUNICORN_WORKERS:-2}" \
+  --workers "${GUNICORN_WORKERS:-1}" \
   --threads "${GUNICORN_THREADS:-8}" \
   --timeout "${GUNICORN_TIMEOUT:-120}" \
   --graceful-timeout "${GUNICORN_GRACEFUL_TIMEOUT:-30}" \

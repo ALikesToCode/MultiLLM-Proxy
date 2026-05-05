@@ -1,12 +1,12 @@
 {
+    "$schema": "https://openapi.vercel.sh/vercel.json",
     "version": 2,
     "builds": [
         {
             "src": "index.py",
             "use": "@vercel/python",
             "config": {
-                "maxLambdaSize": "15mb",
-                "runtime": "python3.9"
+                "maxLambdaSize": "50mb"
             }
         },
         {
@@ -28,5 +28,11 @@
         "PYTHONPATH": ".",
         "FLASK_ENV": "production",
         "FLASK_APP": "app.py"
+    },
+    "functions": {
+        "index.py": {
+            "maxDuration": 300,
+            "excludeFiles": "{tests/**,__pycache__/**,.pytest_cache/**,.mypy_cache/**,.ruff_cache/**,.git/**,.venv/**,venv/**,node_modules/**,.wrangler/**,docs/**,instance/**,*.sqlite,*.sqlite3,*.db}"
+        }
     }
-} 
+}

@@ -77,7 +77,10 @@ function shouldPassThroughKey(key) {
 function collectContainerEnv(source = {}) {
   const envVars = {
     AUTH_DB_PATH: source.AUTH_DB_PATH ?? "/tmp/auth.sqlite3",
+    RATE_LIMIT_DB_PATH: source.RATE_LIMIT_DB_PATH ?? "/tmp/rate_limits.sqlite3",
+    MODEL_REGISTRY_DB_PATH: source.MODEL_REGISTRY_DB_PATH ?? "/tmp/model_registry.sqlite3",
     FLASK_ENV: source.FLASK_ENV ?? "production",
+    GUNICORN_WORKERS: source.GUNICORN_WORKERS ?? "1",
     HOME: "/tmp",
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
