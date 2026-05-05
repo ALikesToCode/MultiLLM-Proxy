@@ -80,7 +80,7 @@ def is_api_request_path(path: str) -> bool:
         return False
 
     first_segment = stripped.split("/", 1)[0]
-    return first_segment in Config.API_BASE_URLS or first_segment == "v1" or stripped == "health"
+    return first_segment in Config.API_BASE_URLS or first_segment == "v1" or stripped in {"health", "healthz"}
 
 
 def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:

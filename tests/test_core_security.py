@@ -92,6 +92,22 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertIn("Secure", cookie_header)
         self.assertIn("SameSite=Lax", cookie_header)
 
+    def test_health_endpoints_are_public_and_not_cached(self):
+        for path in ("/health", "/healthz"):
+            response = self.client.get(path, follow_redirects=False)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["status"], "healthy")
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_private_dashboard_responses_are_not_cached(self):
+        self._set_admin_session()
+        response = self.client.get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["Pragma"], "no-cache")
+
     def test_unexpected_errors_are_opaque_and_include_request_id(self):
         self._set_admin_session()
         response = self.client.get(

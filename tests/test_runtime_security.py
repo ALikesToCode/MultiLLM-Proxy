@@ -74,6 +74,38 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
             vercel_module.init_vercel()
             self.assertNotEqual(os.environ.get("ADMIN_API_KEY"), "default-key")
 
+    def test_vercel_init_defaults_sqlite_paths_to_tmp_on_vercel(self):
+        with patch.dict(
+            os.environ,
+            {
+                "VERCEL": "1",
+                "AUTH_DB_PATH": "",
+                "RATE_LIMIT_DB_PATH": "",
+                "MODEL_REGISTRY_DB_PATH": "",
+            },
+            clear=False,
+        ):
+            vercel_module = importlib.import_module("vercel")
+            vercel_module = importlib.reload(vercel_module)
+
+            vercel_module.init_vercel()
+
+            self.assertEqual(os.environ["AUTH_DB_PATH"], "/tmp/multillm-auth.sqlite3")
+            self.assertEqual(os.environ["RATE_LIMIT_DB_PATH"], "/tmp/multillm-rate-limits.sqlite3")
+            self.assertEqual(os.environ["MODEL_REGISTRY_DB_PATH"], "/tmp/multillm-model-registry.sqlite3")
+
+    def test_service_worker_does_not_cache_login_or_authenticated_navigation(self):
+        service_worker = Path(__file__).resolve().parents[1] / "static" / "service-worker.js"
+        source = service_worker.read_text(encoding="utf-8")
+        navigate_block = source.split("if (event.request.mode === 'navigate')", 1)[1].split(
+            "if (",
+            1,
+        )[0]
+
+        self.assertNotIn("'/login'", source)
+        self.assertNotIn('"/login"', source)
+        self.assertNotIn("cache.put", navigate_block)
+
     def test_env_loader_prefers_env_local_over_env_without_overriding_shell(self):
         env_loader = importlib.import_module("env_loader")
         env_loader = importlib.reload(env_loader)

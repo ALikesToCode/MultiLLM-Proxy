@@ -21,6 +21,21 @@ logger = logging.getLogger(__name__)
 
 TRUE_JSON_VALUES = {"1", "true", "yes", "on"}
 FALSE_JSON_VALUES = {"", "0", "false", "no", "off"}
+PRIVATE_CACHE_ENDPOINTS = {
+    "login",
+    "logout",
+    "manage_users",
+    "delete_user",
+    "rotate_api_key",
+    "status_page",
+    "openrouter_dashboard",
+    "admin_request_metrics",
+    "dashboard_openrouter_chat_completions",
+    "dashboard_openrouter_credits",
+    "list_admin_models",
+    "disable_admin_model",
+    "status_updates",
+}
 
 
 def parse_json_bool(value, field_name: str) -> bool:
@@ -119,6 +134,13 @@ def build_openrouter_dashboard_headers() -> dict:
         headers["X-OpenRouter-Title"] = app_name
 
     return headers
+
+
+def apply_private_cache_headers(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def register_core_routes(app) -> None:
@@ -272,7 +294,9 @@ def register_core_routes(app) -> None:
         Serve the PWA web manifest from the app root.
         """
         manifest_path = Path(app.root_path) / "static" / "manifest.webmanifest"
-        return Response(manifest_path.read_bytes(), mimetype="application/manifest+json")
+        response = Response(manifest_path.read_bytes(), mimetype="application/manifest+json")
+        response.headers["Cache-Control"] = "public, max-age=300"
+        return response
 
     @app.route("/service-worker.js")
     def service_worker():
@@ -301,7 +325,9 @@ def register_core_routes(app) -> None:
         """
         Serve static files
         """
-        return send_from_directory("static", filename)
+        response = send_from_directory("static", filename)
+        response.headers.setdefault("Cache-Control", "public, max-age=3600")
+        return response
 
     @app.before_request
     def handle_redirects():
@@ -319,6 +345,7 @@ def register_core_routes(app) -> None:
             "login",
             "static_files",
             "favicon",
+            "health_check",
             "web_manifest",
             "service_worker",
             "apple_touch_icon",
@@ -339,19 +366,37 @@ def register_core_routes(app) -> None:
         return None
 
     @app.after_request
-    def add_cors_headers(response):
+    def add_response_headers(response):
         """
-        Attach CORS headers to API responses so browser clients can consume them.
+        Attach CORS and conservative cache headers.
         """
-        return apply_cors_headers(response)
+        response = apply_cors_headers(response)
+
+        if request.endpoint in {"static_files", "favicon", "apple_touch_icon"}:
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            return response
+        if request.endpoint == "web_manifest":
+            response.headers.setdefault("Cache-Control", "public, max-age=300")
+            return response
+
+        if (
+            request.endpoint in PRIVATE_CACHE_ENDPOINTS
+            or request.endpoint in {"health_check"}
+            or request.headers.get("Authorization")
+            or AuthService.is_authenticated()
+        ):
+            apply_private_cache_headers(response)
+
+        return response
 
     @app.route("/health")
+    @app.route("/healthz")
     def health_check():
         """
         Health check endpoint.
         """
         try:
-            return jsonify(
+            response = jsonify(
                 {
                     "status": "healthy",
                     "config": {
@@ -359,7 +404,9 @@ def register_core_routes(app) -> None:
                         "port": int(os.environ.get("SERVER_PORT", Config.DEFAULT_PORT)),
                     },
                 }
-            ), 200
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response, 200
         except Exception as error:
             logger.error("Health check failed: %s", error)
             return jsonify({"status": "error", "message": str(error)}), 500
