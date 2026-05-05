@@ -6,7 +6,14 @@
   "scripts": {
     "build": "tailwindcss -i ./static/css/main.css -o ./static/css/style.css",
     "watch": "tailwindcss -i ./static/css/main.css -o ./static/css/style.css --watch",
+    "lint": "ruff check . --select E9,F63,F7,F82",
+    "typecheck": "mypy --ignore-missing-imports --follow-imports=skip --disable-error-code import-untyped --disable-error-code var-annotated --disable-error-code arg-type --disable-error-code assignment --disable-error-code operator app.py routes services providers streaming",
+    "test": "python -m pytest -q",
+    "db:migrate": "python scripts/validate_sqlite_schema.py --apply",
+    "db:validate": "python scripts/validate_sqlite_schema.py",
+    "security:secrets": "python scripts/check_static_secrets.py",
     "cf:deploy": "wrangler deploy",
+    "cf:dry-run": "wrangler deploy --dry-run",
     "cf:tail": "wrangler tail"
   },
   "keywords": [],
@@ -15,7 +22,7 @@
   "devDependencies": {
     "@cloudflare/containers": "^0.3.2",
     "autoprefixer": "^10.4.14",
-    "postcss": "^8.4.24",
+    "postcss": "^8.5.14",
     "tailwindcss": "^3.3.2",
     "wrangler": "^4.11.1"
   }
