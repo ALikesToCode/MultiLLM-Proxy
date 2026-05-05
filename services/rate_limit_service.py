@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 from flask import request
 from config import Config
+from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class RateLimitService:
 
     @classmethod
     def _default_storage_path(cls) -> Path:
-        return Path(__file__).resolve().parent.parent / "instance" / "rate_limits.sqlite3"
+        return storage_path("RATE_LIMIT_DB_PATH", "rate_limits.sqlite3")
 
     @classmethod
     def _get_storage_path(cls) -> Path:
@@ -78,11 +79,7 @@ class RateLimitService:
 
     @classmethod
     def _connect(cls) -> sqlite3.Connection:
-        storage_path = cls._get_storage_path()
-        storage_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(storage_path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return connect(cls._get_storage_path())
 
     @classmethod
     def _ensure_storage(cls, connection: sqlite3.Connection) -> None:
@@ -107,6 +104,12 @@ class RateLimitService:
             """
             CREATE INDEX IF NOT EXISTS idx_request_usage_window
             ON request_usage(identity, provider, created_at)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_request_usage_created_at
+            ON request_usage(created_at)
             """
         )
 

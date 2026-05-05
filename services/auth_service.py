@@ -20,6 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import load_numbered_env_values
 from error_handlers import APIError
+from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class AuthService:
 
     @classmethod
     def _default_storage_path(cls) -> Path:
-        return Path(__file__).resolve().parent.parent / "instance" / "auth.sqlite3"
+        return storage_path("AUTH_DB_PATH", "auth.sqlite3")
 
     @classmethod
     def _get_storage_path(cls) -> Path:
@@ -58,11 +59,7 @@ class AuthService:
 
     @classmethod
     def _connect(cls) -> sqlite3.Connection:
-        storage_path = cls._get_storage_path()
-        storage_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(storage_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return connect(cls._get_storage_path())
 
     @classmethod
     def _ensure_storage(cls) -> None:
@@ -82,6 +79,7 @@ class AuthService:
         ).fetchone()
         if not table_exists:
             cls._create_users_table(connection)
+            cls._ensure_users_indexes(connection)
             return
 
         columns = {
@@ -114,6 +112,7 @@ class AuthService:
                 )
 
         cls._backfill_user_metadata(connection)
+        cls._ensure_users_indexes(connection)
 
     @classmethod
     def _create_users_table(cls, connection: sqlite3.Connection, table_name: str = "users") -> None:
@@ -136,6 +135,15 @@ class AuthService:
                 rotated_at TEXT,
                 revoked_at TEXT
             )
+            """
+        )
+
+    @classmethod
+    def _ensure_users_indexes(cls, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_users_api_key_prefix
+            ON users(api_key_prefix)
             """
         )
 
@@ -189,6 +197,7 @@ class AuthService:
 
         connection.execute("DROP TABLE users")
         connection.execute("ALTER TABLE users_new RENAME TO users")
+        cls._ensure_users_indexes(connection)
 
     @classmethod
     def _backfill_user_metadata(cls, connection: sqlite3.Connection) -> None:
@@ -284,6 +293,57 @@ class AuthService:
             for row in rows
         }
         cls._rebuild_api_key_prefix_index()
+
+    @classmethod
+    def _load_user_by_username(cls, username: str) -> Optional[Dict[str, Any]]:
+        with cls._storage_lock:
+            with closing(cls._connect()) as connection:
+                cls._ensure_users_schema(connection)
+                row = connection.execute(
+                    """
+                    SELECT
+                        username, api_key_hash, api_key_prefix, scopes, is_admin,
+                        created_at, last_login, last_used_at, last_used_ip,
+                        created_by, rotated_at, revoked_at
+                    FROM users
+                    WHERE username = ?
+                    """,
+                    (username,),
+                ).fetchone()
+        if not row:
+            cls._users.pop(username, None)
+            cls._rebuild_api_key_prefix_index()
+            return None
+
+        user = cls._row_to_user(row)
+        cls._users[username] = user
+        cls._rebuild_api_key_prefix_index()
+        return user
+
+    @classmethod
+    def _load_users_by_api_key_prefix(cls, api_key_prefix: str) -> List[tuple[str, Dict[str, Any]]]:
+        with cls._storage_lock:
+            with closing(cls._connect()) as connection:
+                cls._ensure_users_schema(connection)
+                rows = connection.execute(
+                    """
+                    SELECT
+                        username, api_key_hash, api_key_prefix, scopes, is_admin,
+                        created_at, last_login, last_used_at, last_used_ip,
+                        created_by, rotated_at, revoked_at
+                    FROM users
+                    WHERE api_key_prefix = ? AND revoked_at IS NULL
+                    ORDER BY username
+                    """,
+                    (api_key_prefix,),
+                ).fetchall()
+
+        users = [(row["username"], cls._row_to_user(row)) for row in rows]
+        for username, user in users:
+            cls._users[username] = user
+        if users:
+            cls._rebuild_api_key_prefix_index()
+        return users
 
     @classmethod
     def _rebuild_api_key_prefix_index(cls) -> None:
@@ -687,18 +747,7 @@ class AuthService:
             )
             return None
 
-        api_key_prefix = cls._key_prefix(api_key)
-        candidate_usernames = cls._api_key_prefix_index.get(api_key_prefix, [])
-        if not candidate_usernames and cls._users and not cls._api_key_prefix_index:
-            cls._rebuild_api_key_prefix_index()
-            candidate_usernames = cls._api_key_prefix_index.get(api_key_prefix, [])
-
-        for username in candidate_usernames:
-            user = cls._users.get(username)
-            if not user:
-                continue
-            if user.get("revoked_at"):
-                continue
+        for username, user in cls._load_users_by_api_key_prefix(cls._key_prefix(api_key)):
             if check_password_hash(user["api_key_hash"], api_key):
                 cls._update_key_usage(username, remote_addr)
                 return cls._public_user(username, cls._users[username])
@@ -708,7 +757,7 @@ class AuthService:
     @classmethod
     def authenticate_user(cls, username: str, api_key: str) -> bool:
         """Authenticate a user with username and API key."""
-        user = cls._users.get(username)
+        user = cls._load_user_by_username(username)
         if not user:
             return False
 
@@ -739,11 +788,13 @@ class AuthService:
     def list_users(cls) -> List[Dict[str, Any]]:
         """List all users (admin only)."""
         cls._require_admin()
+        cls._reload_user_cache()
         return [cls._public_user(username, user) for username, user in sorted(cls._users.items())]
 
     @classmethod
     def count_users(cls) -> int:
         """Return the total number of persisted users."""
+        cls._reload_user_cache()
         return len(cls._users)
 
     @classmethod
@@ -784,6 +835,7 @@ class AuthService:
     def delete_user(cls, username: str) -> None:
         """Delete an existing user."""
         current_user = cls._require_admin()
+        cls._load_user_by_username(username)
         if username not in cls._users:
             raise APIError("User not found", status_code=404)
         if username == current_user.get("username"):
@@ -794,6 +846,7 @@ class AuthService:
     def rotate_api_key(cls, username: str) -> Dict[str, Any]:
         """Rotate a user's API key."""
         cls._require_admin()
+        cls._load_user_by_username(username)
         user = cls._users.get(username)
         if not user:
             raise APIError("User not found", status_code=404)

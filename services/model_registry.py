@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional
 from config import Config
 from providers.base import ModelInfo
 from providers.registry import get_registry
+from services.sqlite_store import connect, storage_path
 
 
 STATIC_PROVIDER_MODELS = {
@@ -47,7 +48,7 @@ class ModelRegistry:
 
     @classmethod
     def _default_storage_path(cls) -> Path:
-        return Path(__file__).resolve().parent.parent / "instance" / "model_registry.sqlite3"
+        return storage_path("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3")
 
     @classmethod
     def _get_storage_path(cls) -> Path:
@@ -60,11 +61,7 @@ class ModelRegistry:
 
     @classmethod
     def _connect(cls) -> sqlite3.Connection:
-        storage_path = cls._get_storage_path()
-        storage_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(storage_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return connect(cls._get_storage_path())
 
     @classmethod
     def _ensure_storage(cls, connection: sqlite3.Connection) -> None:
@@ -161,7 +158,13 @@ class ModelRegistry:
 
     @classmethod
     def get_model_status(cls, model_id: str) -> str:
-        return cls._status_overrides().get(model_id, "available")
+        with closing(cls._connect()) as connection:
+            cls._ensure_storage(connection)
+            row = connection.execute(
+                "SELECT status FROM model_overrides WHERE model_id = ?",
+                (model_id,),
+            ).fetchone()
+        return row["status"] if row else "available"
 
     @classmethod
     def disable_model(cls, model_id: str) -> None:
