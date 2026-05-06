@@ -46,6 +46,15 @@ PROVIDER_SPECS = (
     ),
     ("groq", "openai/v1/chat/completions", ProviderCapabilities()),
     ("opencode", "chat/completions", ProviderCapabilities()),
+    (
+        "mimo",
+        "chat/completions",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_vision=True,
+            supports_json_schema=True,
+        ),
+    ),
     ("together", "v1/chat/completions", ProviderCapabilities()),
     ("chutes", "v1/chat/completions", ProviderCapabilities()),
     ("xai", "v1/chat/completions", ProviderCapabilities()),

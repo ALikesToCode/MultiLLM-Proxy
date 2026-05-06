@@ -127,6 +127,21 @@ PROVIDER_DETAILS = {
         },
         'default_model': 'kimi-k2.6'
     },
+    'mimo': {
+        'description': 'Xiaomi MiMo Token Plan - OpenAI-compatible access to MiMo-V2.5-Pro',
+        'endpoints': [
+            {
+                'url': '/chat/completions',
+                'curl': 'curl -X POST "http://localhost:1400/mimo/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"mimo-v2.5-pro\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"max_tokens\\": 128}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True
+        },
+        'default_model': 'mimo-v2.5-pro'
+    },
     'nineteen': {
         'description': 'Nineteen AI - High-performance inference for open-source models',
         'endpoints': [

@@ -10,7 +10,7 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
     def test_default_registry_resolves_initial_adapter_slice(self):
         registry = build_default_registry(Config.API_BASE_URLS)
 
-        for provider in ("openai", "openrouter", "gemini", "groq", "opencode"):
+        for provider in ("openai", "openrouter", "gemini", "groq", "opencode", "mimo"):
             with self.subTest(provider=provider):
                 self.assertIn(provider, registry)
                 self.assertTrue(registry[provider].capabilities().supports_chat)
@@ -35,6 +35,10 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
         self.assertEqual(
             registry["opencode"].chat_completions_url(),
             "https://opencode.ai/zen/go/v1/chat/completions",
+        )
+        self.assertEqual(
+            registry["mimo"].chat_completions_url(),
+            "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
         )
         self.assertEqual(
             registry["gemini"].chat_completions_url(),

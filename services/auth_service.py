@@ -501,6 +501,7 @@ class AuthService:
             "sambanova",
             "openrouter",
             "opencode",
+            "mimo",
             "palm",
             "together",
             "nineteen",

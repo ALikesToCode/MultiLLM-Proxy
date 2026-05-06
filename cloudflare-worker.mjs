@@ -9,6 +9,7 @@ const API_ROUTE_PREFIXES = new Set([
   "googleai",
   "groq",
   "hyperbolic",
+  "mimo",
   "nineteen",
   "openai",
   "opencode",
@@ -55,6 +56,7 @@ const DIRECT_ENV_KEYS = [
   "SAMBANOVA_API_KEY",
   "OPENROUTER_API_KEY",
   "OPENCODE_API_KEY",
+  "MIMO_API_KEY",
   "OPENROUTER_SITE_URL",
   "OPENROUTER_APP_NAME",
   "OPENROUTER_REFERER",
@@ -955,6 +957,7 @@ export class MultiLLMProxyContainer extends Container {
       hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
       hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
       hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
+      hasMimoApiKey: Boolean(this.envVars.MIMO_API_KEY),
     });
   }
 
@@ -966,6 +969,7 @@ export class MultiLLMProxyContainer extends Container {
       hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
       hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
       hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
+      hasMimoApiKey: Boolean(this.envVars.MIMO_API_KEY),
     });
   }
 }
@@ -983,6 +987,7 @@ export default {
       hasFlaskSecretKey: Boolean(env.FLASK_SECRET_KEY),
       hasJwtSecret: Boolean(env.JWT_SECRET),
       hasOpenCodeApiKey: Boolean(env.OPENCODE_API_KEY),
+      hasMimoApiKey: Boolean(env.MIMO_API_KEY),
     });
 
     if (request.method === "OPTIONS" && apiPath) {

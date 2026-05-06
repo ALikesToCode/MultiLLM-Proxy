@@ -11,6 +11,7 @@ const endpoints = [
     ['Hyperbolic', '/hyperbolic/chat/completions'],
     ['SambaNova', ['/sambanova/chat/completions', '/sambanova/completions']],
     ['OpenRouter', ['/openrouter/chat/completions', '/openrouter/models']],
+    ['Xiaomi MiMo', '/mimo/chat/completions'],
     ['PaLM', '/palm/models/chat-bison-001:generateText'],
     ['Nineteen AI', '/nineteen/v1/completions']
 ];

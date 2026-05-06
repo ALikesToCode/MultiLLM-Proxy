@@ -19,6 +19,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Hyperbolic
   - SambaNova
   - OpenRouter
+  - Xiaomi MiMo Token Plan
   - PaLM API
   - Nineteen AI
 - 🎨 Beautiful web dashboard with dark mode support
@@ -98,6 +99,9 @@ SAMBANOVA_API_KEY=your-sambanova-api-key
 
 # OpenRouter
 OPENROUTER_API_KEY=your-openrouter-api-key
+
+# Xiaomi MiMo Token Plan
+MIMO_API_KEY=your-mimo-token-plan-api-key
 
 # PaLM API
 PALM_API_KEY=your-palm-api-key
@@ -188,6 +192,9 @@ http://localhost:1400/sambanova/completions
 http://localhost:1400/openrouter/chat/completions
 http://localhost:1400/openrouter/models
 
+# Xiaomi MiMo Token Plan
+http://localhost:1400/mimo/chat/completions
+
 # PaLM
 http://localhost:1400/palm/models/chat-bison-001:generateText
 
@@ -208,6 +215,7 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **Azure AI**: Support for Azure-hosted models
 - **SambaNova**: Text generation with streaming support
 - **OpenRouter**: Gateway to multiple AI providers
+- **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
 

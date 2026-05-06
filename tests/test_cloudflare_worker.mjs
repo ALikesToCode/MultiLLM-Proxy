@@ -139,6 +139,29 @@ test("worker treats unified v1 routes as API paths for CORS preflight", async ()
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
 });
 
+test("worker treats mimo provider routes as API paths for CORS preflight", async () => {
+  const origin = "https://janitorai.com";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/mimo/chat/completions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Authorization, Content-Type",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+});
+
 test("worker returns CORS-safe v1 API errors when the container fetch fails", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -300,6 +323,7 @@ test("container envVars are derived from the live Durable Object env", () => {
       FLASK_SECRET_KEY: "flask-live-secret",
       JWT_SECRET: "jwt-live-secret",
       OPENCODE_API_KEY: "opencode-live-key",
+      MIMO_API_KEY: "mimo-live-key",
     },
   );
 
@@ -307,6 +331,7 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.FLASK_SECRET_KEY, "flask-live-secret");
   assert.equal(container.envVars.JWT_SECRET, "jwt-live-secret");
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
+  assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
   assert.equal(container.envVars.AUTH_DB_PATH, "/tmp/auth.sqlite3");
   assert.equal(container.envVars.RATE_LIMIT_DB_PATH, "/tmp/rate_limits.sqlite3");
   assert.equal(container.envVars.MODEL_REGISTRY_DB_PATH, "/tmp/model_registry.sqlite3");

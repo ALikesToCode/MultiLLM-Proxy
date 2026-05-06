@@ -58,6 +58,7 @@ class Config:
         'sambanova': 'https://api.sambanova.ai/v1',
         'openrouter': 'https://openrouter.ai/api/v1',
         'opencode': 'https://opencode.ai/zen/go/v1',
+        'mimo': 'https://token-plan-sgp.xiaomimimo.com/v1',
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
         'nineteen': 'https://api.nineteen.ai',
         'chutes': 'https://llm.chutes.ai',
@@ -79,6 +80,7 @@ class Config:
         'sambanova': (5, 120),  # SambaNova can take longer for larger models
         'openrouter': (5, 120),  # OpenRouter can take longer as it routes to various providers
         'opencode': (5, 120),  # OpenCode routes to hosted models over an OpenAI-compatible endpoint
+        'mimo': (5, 300),  # MiMo Token Plan supports long-context agent requests
         'palm': (10, 120),  # PaLM API can be slow to respond
         'nineteen': (5, 120),
         'chutes': (5, 120),  # Chutes API can take longer for larger models
@@ -101,6 +103,7 @@ class Config:
         'sambanova': {'max_retries': 3, 'backoff_factor': 1},
         'openrouter': {'max_retries': 3, 'backoff_factor': 1},
         'opencode': {'max_retries': 3, 'backoff_factor': 1},
+        'mimo': {'max_retries': 3, 'backoff_factor': 1},
         'palm': {'max_retries': 5, 'backoff_factor': 2},  # More retries for PaLM API
         'nineteen': {'max_retries': 3, 'backoff_factor': 1},
         'chutes': {'max_retries': 3, 'backoff_factor': 1},
