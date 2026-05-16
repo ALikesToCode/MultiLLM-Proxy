@@ -19,6 +19,8 @@ STATIC_PROVIDER_MODELS = {
     "gemma": "GEMMA_MODELS",
 }
 
+DYNAMIC_PROVIDER_MODELS = {"nanogpt"}
+
 DEFAULT_MODEL_IDS = {
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
@@ -141,7 +143,7 @@ class ModelRegistry:
         if not adapter:
             return None
 
-        if provider_model_id not in set(cls._provider_models(provider)):
+        if provider not in DYNAMIC_PROVIDER_MODELS and provider_model_id not in set(cls._provider_models(provider)):
             return None
 
         capabilities = adapter.capabilities()

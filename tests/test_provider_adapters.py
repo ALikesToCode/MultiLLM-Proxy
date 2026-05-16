@@ -10,7 +10,7 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
     def test_default_registry_resolves_initial_adapter_slice(self):
         registry = build_default_registry(Config.API_BASE_URLS)
 
-        for provider in ("openai", "openrouter", "gemini", "groq", "opencode", "mimo"):
+        for provider in ("openai", "openrouter", "gemini", "groq", "opencode", "mimo", "nanogpt"):
             with self.subTest(provider=provider):
                 self.assertIn(provider, registry)
                 self.assertTrue(registry[provider].capabilities().supports_chat)
@@ -44,6 +44,22 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
             registry["gemini"].chat_completions_url(),
             "https://generativelanguage.googleapis.com/v1beta/chat/completions",
         )
+        self.assertEqual(
+            registry["nanogpt"].chat_completions_url(),
+            "https://nano-gpt.com/api/v1/chat/completions",
+        )
+
+    def test_nanogpt_adapter_advertises_openai_compatible_capabilities(self):
+        adapter = get_adapter("nanogpt", Config.API_BASE_URLS)
+
+        capabilities = adapter.capabilities()
+
+        self.assertTrue(capabilities.supports_tools)
+        self.assertTrue(capabilities.supports_vision)
+        self.assertTrue(capabilities.supports_embeddings)
+        self.assertTrue(capabilities.supports_audio)
+        self.assertTrue(capabilities.supports_images)
+        self.assertTrue(capabilities.supports_json_schema)
 
     def test_adapter_prepares_openai_compatible_request(self):
         adapter = get_adapter("openrouter", Config.API_BASE_URLS)

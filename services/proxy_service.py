@@ -296,6 +296,16 @@ class ProxyService:
         header_whitelist = dict(cls.UPSTREAM_HEADER_WHITELIST)
         if api_provider in ["googleai", "gemini", "gemma"]:
             header_whitelist["x-goog-user-project"] = "X-Goog-User-Project"
+        elif api_provider == "nanogpt":
+            header_whitelist.update(
+                {
+                    "anthropic-beta": "anthropic-beta",
+                    "memory": "memory",
+                    "memory-expiration-days": "memory_expiration_days",
+                    "memory_expiration_days": "memory_expiration_days",
+                    "x-use-byok": "x-use-byok",
+                }
+            )
 
         for header, value in request_headers.items():
             canonical_header = header_whitelist.get(header.lower())
@@ -2758,6 +2768,14 @@ class ProxyService:
             if chunk.startswith("data: "):
                 try:
                     parsed_payload = json.loads(data_payload)
+                    if provider == "nanogpt" and isinstance(parsed_payload, dict):
+                        if (
+                            "x_nanogpt_pricing" in parsed_payload
+                            or parsed_payload.get("object") == "chat.completion.chunk"
+                            or "choices" in parsed_payload
+                        ):
+                            normalized_payload = cls.normalize_json_text(parsed_payload)
+                            return f"data: {json.dumps(normalized_payload)}\n\n"
                     if isinstance(parsed_payload, dict) and (
                         parsed_payload.get("object") == "chat.completion.chunk" or
                         "choices" in parsed_payload
@@ -3007,6 +3025,8 @@ class ProxyService:
             # Check if this is a streaming request
             request_data = cls._decode_json_request_data(data)
             is_streaming = bool(request_data.get('stream', False))
+            if api_provider == "nanogpt" and is_streaming:
+                headers["Accept"] = "text/event-stream"
             
             # Extract authentication tokens/keys if needed
             auth_token = None

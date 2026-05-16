@@ -14,6 +14,15 @@ from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
 
+PROVIDER_LIMIT_DEFAULTS = {
+    "mimo": {
+        "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
+        "MAX_PROMPT_TOKENS": 1_048_576,
+        "MAX_OUTPUT_TOKENS": 131_072,
+        "RATE_LIMIT_TPM": 1_200_000,
+    },
+}
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -58,6 +67,7 @@ class RateLimitService:
         'xai': {'requests': 500, 'window': timedelta(minutes=1)},
         'googleai': {'requests': 500, 'window': timedelta(minutes=1)},
         'groq': {'requests': 500, 'window': timedelta(minutes=1)},  # Increased since we handle token limits separately
+        'nanogpt': {'requests': 60, 'window': timedelta(minutes=1)},
         'together': {'requests': 500, 'window': timedelta(minutes=1)}  # Together AI has a generous rate limit
     }
 
@@ -125,7 +135,8 @@ class RateLimitService:
     def _provider_limit(cls, provider: str, name: str, default: int) -> int:
         provider_env = f"{provider.upper()}_{name}"
         shared_env = name
-        return cls._env_int(provider_env, cls._env_int(shared_env, default))
+        provider_default = PROVIDER_LIMIT_DEFAULTS.get(provider, {}).get(name, default)
+        return cls._env_int(provider_env, cls._env_int(shared_env, provider_default))
 
     @staticmethod
     def _iter_content_text(value: Any):

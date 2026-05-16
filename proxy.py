@@ -142,6 +142,38 @@ PROVIDER_DETAILS = {
         },
         'default_model': 'mimo-v2.5-pro'
     },
+    'nanogpt': {
+        'description': 'NanoGPT - OpenAI-compatible access to chat, models, embeddings, images, audio, memory, and search',
+        'endpoints': [
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/models?detailed=true',
+                'curl': 'curl -X GET "http://localhost:1400/nanogpt/v1/models?detailed=true" -H "Authorization: Bearer $API_KEY"'
+            },
+            {
+                'url': '/v1/embeddings',
+                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/embeddings" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_EMBEDDING_MODEL\\", \\"input\\": \\"NanoGPT embeddings\\"}"'
+            },
+            {
+                'url': '/v1/audio/speech',
+                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/audio/speech" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_TTS_MODEL\\", \\"voice\\": \\"alloy\\", \\"input\\": \\"Welcome to NanoGPT.\\"}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True,
+            'vision': True,
+            'embeddings': True,
+            'audio': True,
+            'images': True,
+            'web_search': True,
+            'memory': True
+        }
+    },
     'nineteen': {
         'description': 'Nineteen AI - High-performance inference for open-source models',
         'endpoints': [

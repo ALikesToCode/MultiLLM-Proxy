@@ -49,6 +49,36 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 400)
         self.assertEqual(decision.error, "max_output_too_large")
 
+    def test_mimo_defaults_allow_model_sized_prompt_and_output(self):
+        os.environ["RATE_LIMIT_TPM"] = "2000000"
+        payload = {
+            "messages": [{"role": "user", "content": "a" * ((128000 + 1) * 4)}],
+            "max_tokens": 131072,
+        }
+
+        decision = RateLimitService.enforce_request(
+            provider="mimo",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json=payload,
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed, decision)
+
+    def test_mimo_defaults_allow_long_context_request_bodies(self):
+        os.environ["RATE_LIMIT_TPM"] = "2000000"
+
+        decision = RateLimitService.enforce_request(
+            provider="mimo",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"0" * (1024 * 1024 + 1),
+            payload_json={"messages": [{"role": "user", "content": "hello"}]},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed, decision)
+
     def test_enforces_request_per_minute_limit_by_user_provider(self):
         os.environ["RATE_LIMIT_RPM"] = "1"
         user = {"username": "alice", "api_key_prefix": "mllm_live_alice"}

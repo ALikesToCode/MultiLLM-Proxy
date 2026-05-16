@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ['SambaNova', ['/sambanova/chat/completions', '/sambanova/completions']],
         ['OpenRouter', ['/openrouter/chat/completions', '/openrouter/models']],
         ['Xiaomi MiMo', '/mimo/chat/completions'],
+        ['NanoGPT', ['/nanogpt/v1/chat/completions', '/nanogpt/v1/models?detailed=true']],
         ['PaLM', '/palm/models/chat-bison-001:generateText'],
         ['Nineteen AI', '/nineteen/v1/completions']
     ];

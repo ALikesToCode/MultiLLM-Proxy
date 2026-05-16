@@ -20,6 +20,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - SambaNova
   - OpenRouter
   - Xiaomi MiMo Token Plan
+  - NanoGPT
   - PaLM API
   - Nineteen AI
 - 🎨 Beautiful web dashboard with dark mode support
@@ -102,6 +103,9 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 
 # Xiaomi MiMo Token Plan
 MIMO_API_KEY=your-mimo-token-plan-api-key
+
+# NanoGPT
+NANOGPT_API_KEY=your-nanogpt-api-key
 
 # PaLM API
 PALM_API_KEY=your-palm-api-key
@@ -195,6 +199,10 @@ http://localhost:1400/openrouter/models
 # Xiaomi MiMo Token Plan
 http://localhost:1400/mimo/chat/completions
 
+# NanoGPT
+http://localhost:1400/nanogpt/v1/chat/completions
+http://localhost:1400/nanogpt/v1/models?detailed=true
+
 # PaLM
 http://localhost:1400/palm/models/chat-bison-001:generateText
 
@@ -216,6 +224,7 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **SambaNova**: Text generation with streaming support
 - **OpenRouter**: Gateway to multiple AI providers
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
+- **NanoGPT**: OpenAI-compatible chat, streaming, model catalog, embeddings, images, audio, memory, and search via `/nanogpt/v1/*`; use `/nanogpt/v1/models?detailed=true` before selecting model IDs
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
 

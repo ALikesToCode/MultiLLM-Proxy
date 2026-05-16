@@ -162,6 +162,29 @@ test("worker treats mimo provider routes as API paths for CORS preflight", async
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
 });
 
+test("worker treats nanogpt provider routes as API paths for CORS preflight", async () => {
+  const origin = "https://janitorai.com";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/nanogpt/v1/chat/completions", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Authorization, Content-Type",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+});
+
 test("worker returns CORS-safe v1 API errors when the container fetch fails", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -324,6 +347,13 @@ test("container envVars are derived from the live Durable Object env", () => {
       JWT_SECRET: "jwt-live-secret",
       OPENCODE_API_KEY: "opencode-live-key",
       MIMO_API_KEY: "mimo-live-key",
+      NANOGPT_API_KEY: "nanogpt-live-key",
+      MIMO_MAX_PROMPT_TOKENS: "1048576",
+      MIMO_MAX_OUTPUT_TOKENS: "131072",
+      MIMO_MAX_REQUEST_BYTES: "16777216",
+      MIMO_RATE_LIMIT_TPM: "1200000",
+      NANOGPT_RATE_LIMIT_RPM: "60",
+      RATE_LIMIT_ENABLED: "true",
     },
   );
 
@@ -332,6 +362,13 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.JWT_SECRET, "jwt-live-secret");
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
   assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
+  assert.equal(container.envVars.NANOGPT_API_KEY, "nanogpt-live-key");
+  assert.equal(container.envVars.MIMO_MAX_PROMPT_TOKENS, "1048576");
+  assert.equal(container.envVars.MIMO_MAX_OUTPUT_TOKENS, "131072");
+  assert.equal(container.envVars.MIMO_MAX_REQUEST_BYTES, "16777216");
+  assert.equal(container.envVars.MIMO_RATE_LIMIT_TPM, "1200000");
+  assert.equal(container.envVars.NANOGPT_RATE_LIMIT_RPM, "60");
+  assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.AUTH_DB_PATH, "/tmp/auth.sqlite3");
   assert.equal(container.envVars.RATE_LIMIT_DB_PATH, "/tmp/rate_limits.sqlite3");
   assert.equal(container.envVars.MODEL_REGISTRY_DB_PATH, "/tmp/model_registry.sqlite3");

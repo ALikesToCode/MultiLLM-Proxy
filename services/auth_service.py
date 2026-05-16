@@ -502,6 +502,7 @@ class AuthService:
             "openrouter",
             "opencode",
             "mimo",
+            "nanogpt",
             "palm",
             "together",
             "nineteen",

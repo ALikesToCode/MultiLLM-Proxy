@@ -55,6 +55,18 @@ PROVIDER_SPECS = (
             supports_json_schema=True,
         ),
     ),
+    (
+        "nanogpt",
+        "v1/chat/completions",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_vision=True,
+            supports_embeddings=True,
+            supports_audio=True,
+            supports_images=True,
+            supports_json_schema=True,
+        ),
+    ),
     ("together", "v1/chat/completions", ProviderCapabilities()),
     ("chutes", "v1/chat/completions", ProviderCapabilities()),
     ("xai", "v1/chat/completions", ProviderCapabilities()),
