@@ -3,6 +3,10 @@
   "name": "multillm-proxy",
   "main": "./cloudflare-worker.mjs",
   "compatibility_date": "2026-04-07",
+  "compatibility_flags": [
+    "enable_request_signal",
+    "request_signal_passthrough"
+  ],
   "containers": [
     {
       "class_name": "MultiLLMProxyContainer",
@@ -28,12 +32,16 @@
     }
   ],
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": {
+      "invocation_logs": false
+    }
   },
   "vars": {
     "FLASK_ENV": "production",
     "SERVER_HOST": "0.0.0.0",
     "SERVER_PORT": "8080",
-    "APP_NAME": "MultiLLM Proxy"
+    "APP_NAME": "MultiLLM Proxy",
+    "LINKAPI_BASE_URL": "https://api.linkapi.ai"
   }
 }

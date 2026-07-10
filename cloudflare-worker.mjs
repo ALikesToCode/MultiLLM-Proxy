@@ -9,6 +9,7 @@ const API_ROUTE_PREFIXES = new Set([
   "googleai",
   "groq",
   "hyperbolic",
+  "linkapi",
   "mimo",
   "nanogpt",
   "nineteen",
@@ -23,8 +24,65 @@ const API_ROUTE_PREFIXES = new Set([
   "xai",
 ]);
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
-const CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With";
+const CORS_DEFAULT_HEADERS =
+  "Authorization, X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta, Content-Type, Accept, Origin, X-Requested-With";
+const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
+const LINKAPI_ALLOWED_HOSTNAMES = new Set([
+  "linkapi.ai",
+  "api.linkapi.ai",
+  "hk.linkapi.ai",
+  "jp.linkapi.ai",
+  "linkapi.cc",
+  "linkapi.pro",
+]);
 const OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1";
+const LINKAPI_REQUEST_HEADER_WHITELIST = new Set([
+  "accept",
+  "accept-language",
+  "anthropic-beta",
+  "anthropic-dangerous-direct-browser-access",
+  "anthropic-version",
+  "content-type",
+  "idempotency-key",
+  "openai-beta",
+  "openai-organization",
+  "openai-project",
+  "user-agent",
+  "x-client-request-id",
+  "x-goog-api-client",
+  "x-goog-user-project",
+  "x-request-id",
+  "x-stainless-arch",
+  "x-stainless-async",
+  "x-stainless-lang",
+  "x-stainless-os",
+  "x-stainless-package-version",
+  "x-stainless-retry-count",
+  "x-stainless-runtime",
+  "x-stainless-runtime-version",
+  "x-stainless-timeout",
+]);
+const LINKAPI_RESPONSE_HEADER_WHITELIST = new Set([
+  "cache-control",
+  "content-disposition",
+  "content-type",
+  "date",
+  "etag",
+  "expires",
+  "last-modified",
+  "openai-processing-ms",
+  "openai-version",
+  "request-id",
+  "retry-after",
+  "vary",
+  "x-request-id",
+  "x-should-retry",
+]);
+const LINKAPI_RESPONSE_HEADER_PREFIXES = [
+  "anthropic-ratelimit-",
+  "ratelimit-",
+  "x-ratelimit-",
+];
 const UPSTREAM_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -67,6 +125,9 @@ const DIRECT_ENV_KEYS = [
   "OPENCODE_API_KEY",
   "MIMO_API_KEY",
   "NANOGPT_API_KEY",
+  "LINKAPI_KEY",
+  "LINKAPI_API_KEY",
+  "LINKAPI_BASE_URL",
   "OPENROUTER_SITE_URL",
   "OPENROUTER_APP_NAME",
   "OPENROUTER_REFERER",
@@ -82,7 +143,7 @@ const DIRECT_ENV_KEYS = [
 
 const DYNAMIC_ENV_PATTERNS = [
   /^GROQ_API_KEY_\d+$/,
-  /^(?:AZURE|CEREBRAS|CHUTES|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|MIMO|NANOGPT|NINETEEN|OPENAI|OPENCODE|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
+  /^(?:AZURE|CEREBRAS|CHUTES|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|LINKAPI|MIMO|NANOGPT|NINETEEN|OPENAI|OPENCODE|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
 ];
 
 function shouldPassThroughKey(key) {
@@ -137,6 +198,10 @@ function isDirectHealthPath(pathname) {
 
 function isDirectOpencodePath(pathname) {
   return pathname === "/opencode" || pathname.startsWith("/opencode/");
+}
+
+function isDirectLinkApiPath(pathname) {
+  return pathname === "/linkapi" || pathname.startsWith("/linkapi/");
 }
 
 function extractBearerToken(request) {
@@ -217,6 +282,165 @@ function buildMissingUpstreamKeyResponse() {
     },
     { status: 500 },
   );
+}
+
+function buildLinkApiUnauthorizedResponse() {
+  return jsonResponse(
+    {
+      error: "Authentication required",
+      message: "Please provide a valid admin API key.",
+    },
+    { status: 401 },
+  );
+}
+
+function buildMissingLinkApiKeyResponse() {
+  return jsonResponse(
+    {
+      error: "Server configuration error",
+      message: "The requested provider is not configured on the worker.",
+    },
+    { status: 500 },
+  );
+}
+
+function extractLinkApiCallerToken(request, requestUrl) {
+  const authorization = request.headers.get("Authorization") ?? "";
+  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+  const candidates = [
+    bearerMatch?.[1],
+    request.headers.get("x-api-key"),
+    request.headers.get("x-goog-api-key"),
+    ...requestUrl.searchParams.getAll("key"),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+async function timingSafeTokenMatch(providedToken, expectedToken) {
+  const encoder = new TextEncoder();
+  const [providedDigest, expectedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(String(providedToken ?? ""))),
+    crypto.subtle.digest("SHA-256", encoder.encode(String(expectedToken ?? ""))),
+  ]);
+  const providedBytes = new Uint8Array(providedDigest);
+  const expectedBytes = new Uint8Array(expectedDigest);
+  if (typeof crypto.subtle.timingSafeEqual === "function") {
+    return (
+      Boolean(providedToken) &&
+      Boolean(expectedToken) &&
+      crypto.subtle.timingSafeEqual(providedBytes, expectedBytes)
+    );
+  }
+
+  // Node's Web Crypto test harness lacks Workers' timingSafeEqual extension.
+  let mismatch = providedBytes.byteLength ^ expectedBytes.byteLength;
+
+  for (let index = 0; index < providedBytes.byteLength; index += 1) {
+    mismatch |= providedBytes[index] ^ expectedBytes[index];
+  }
+
+  return Boolean(providedToken) && Boolean(expectedToken) && mismatch === 0;
+}
+
+function getTrustedLinkApiBaseUrl(configuredBaseUrl) {
+  if (typeof configuredBaseUrl !== "string" || !configuredBaseUrl.trim()) {
+    return new URL(LINKAPI_DEFAULT_BASE_URL);
+  }
+
+  try {
+    const candidate = new URL(configuredBaseUrl.trim());
+    const hasUnsupportedParts =
+      candidate.protocol !== "https:" ||
+      Boolean(candidate.username) ||
+      Boolean(candidate.password) ||
+      Boolean(candidate.search) ||
+      Boolean(candidate.hash) ||
+      Boolean(candidate.port) ||
+      !LINKAPI_ALLOWED_HOSTNAMES.has(candidate.hostname) ||
+      (candidate.pathname !== "/" && candidate.pathname !== "");
+    if (hasUnsupportedParts) {
+      return new URL(LINKAPI_DEFAULT_BASE_URL);
+    }
+    return new URL(candidate.origin);
+  } catch {
+    return new URL(LINKAPI_DEFAULT_BASE_URL);
+  }
+}
+
+function getLinkApiProtocol(pathname) {
+  if (pathname === "/v1/messages" || pathname.startsWith("/v1/messages/")) {
+    return "claude";
+  }
+  if (pathname === "/v1beta" || pathname.startsWith("/v1beta/")) {
+    return "gemini";
+  }
+  return "openai";
+}
+
+function buildLinkApiUpstreamUrl(requestUrl, env, upstreamToken) {
+  const upstreamUrl = getTrustedLinkApiBaseUrl(env.LINKAPI_BASE_URL);
+  const suffix = requestUrl.pathname.slice("/linkapi".length) || "/";
+  upstreamUrl.pathname = suffix;
+
+  for (const [name, value] of requestUrl.searchParams.entries()) {
+    if (name.toLowerCase() !== "key") {
+      upstreamUrl.searchParams.append(name, value);
+    }
+  }
+
+  if (getLinkApiProtocol(suffix) === "gemini") {
+    upstreamUrl.searchParams.append("key", upstreamToken);
+  }
+  return upstreamUrl;
+}
+
+function buildLinkApiUpstreamHeaders(request, protocol, upstreamToken) {
+  const headers = new Headers();
+
+  for (const [header, value] of request.headers.entries()) {
+    if (LINKAPI_REQUEST_HEADER_WHITELIST.has(header.toLowerCase())) {
+      headers.set(header, value);
+    }
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  if (protocol === "claude") {
+    headers.set("x-api-key", upstreamToken);
+    if (!headers.has("anthropic-version")) {
+      headers.set("anthropic-version", "2023-06-01");
+    }
+  } else if (protocol === "openai") {
+    headers.set("Authorization", `Bearer ${upstreamToken}`);
+  }
+
+  return headers;
+}
+
+function copyLinkApiResponseHeaders(headers) {
+  const responseHeaders = new Headers();
+
+  for (const [header, value] of headers.entries()) {
+    const normalized = header.toLowerCase();
+    if (
+      LINKAPI_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      LINKAPI_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+    ) {
+      responseHeaders.set(header, value);
+    }
+  }
+  return responseHeaders;
 }
 
 function buildOpencodeUpstreamUrl(requestUrl) {
@@ -893,6 +1117,41 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
   );
 }
 
+async function handleDirectLinkApiRequest(request, env, requestUrl) {
+  const providedToken = extractLinkApiCallerToken(request, requestUrl);
+  if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
+    return applyCorsHeaders(request, buildLinkApiUnauthorizedResponse(), env);
+  }
+
+  const upstreamToken = env.LINKAPI_KEY || env.LINKAPI_API_KEY;
+  if (!upstreamToken) {
+    return applyCorsHeaders(request, buildMissingLinkApiKeyResponse(), env);
+  }
+
+  const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env, upstreamToken);
+  const protocol = getLinkApiProtocol(upstreamUrl.pathname);
+  const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
+  const upstreamRequest = new Request(upstreamUrl, {
+    method: request.method,
+    headers: buildLinkApiUpstreamHeaders(request, protocol, upstreamToken),
+    body: bodyAllowed ? request.body : undefined,
+    redirect: "manual",
+    signal: request.signal,
+    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
+  });
+  const upstreamResponse = await fetch(upstreamRequest);
+
+  return applyCorsHeaders(
+    request,
+    new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+    }),
+    env,
+  );
+}
+
 function buildCorsHeaders(request) {
   const origin = request.headers.get("Origin");
   const { pathname } = new URL(request.url);
@@ -993,6 +1252,7 @@ export default {
     const apiPath = isApiRequestPath(requestUrl.pathname);
     const rootPath = requestUrl.pathname === "/";
     const healthPath = isDirectHealthPath(requestUrl.pathname);
+    const linkapiPath = isDirectLinkApiPath(requestUrl.pathname);
     const opencodePath = isDirectOpencodePath(requestUrl.pathname);
 
     console.log("Worker env check", {
@@ -1009,6 +1269,27 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (linkapiPath) {
+      try {
+        return await handleDirectLinkApiRequest(request, env, requestUrl);
+      } catch (error) {
+        console.error("Direct LinkAPI fetch failed", {
+          name: error instanceof Error ? error.name : "UnknownError",
+        });
+        return applyCorsHeaders(
+          request,
+          jsonResponse(
+            {
+              error: "Proxy unavailable",
+              message: "The direct provider route could not handle the request.",
+            },
+            { status: 502 },
+          ),
+          env,
+        );
+      }
     }
 
     if (opencodePath) {

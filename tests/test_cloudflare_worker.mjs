@@ -62,6 +62,28 @@ function makeEnv(fetchImpl, envOverrides = {}) {
   };
 }
 
+function makeChunkedBody(chunks) {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+async function withGlobalFetch(fetchImpl, operation) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    return await operation();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 test("worker answers API CORS preflight without forwarding to the container", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -348,11 +370,16 @@ test("container envVars are derived from the live Durable Object env", () => {
       OPENCODE_API_KEY: "opencode-live-key",
       MIMO_API_KEY: "mimo-live-key",
       NANOGPT_API_KEY: "nanogpt-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+      LINKAPI_API_KEY: "linkapi-alias-key",
+      LINKAPI_BASE_URL: "https://hk.linkapi.ai",
       MIMO_MAX_PROMPT_TOKENS: "1048576",
       MIMO_MAX_OUTPUT_TOKENS: "131072",
       MIMO_MAX_REQUEST_BYTES: "16777216",
       MIMO_RATE_LIMIT_TPM: "1200000",
       NANOGPT_RATE_LIMIT_RPM: "60",
+      LINKAPI_MAX_REQUEST_BYTES: "33554432",
+      LINKAPI_RATE_LIMIT_RPM: "120",
       RATE_LIMIT_ENABLED: "true",
     },
   );
@@ -363,11 +390,16 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
   assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
   assert.equal(container.envVars.NANOGPT_API_KEY, "nanogpt-live-key");
+  assert.equal(container.envVars.LINKAPI_KEY, "linkapi-live-key");
+  assert.equal(container.envVars.LINKAPI_API_KEY, "linkapi-alias-key");
+  assert.equal(container.envVars.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
   assert.equal(container.envVars.MIMO_MAX_PROMPT_TOKENS, "1048576");
   assert.equal(container.envVars.MIMO_MAX_OUTPUT_TOKENS, "131072");
   assert.equal(container.envVars.MIMO_MAX_REQUEST_BYTES, "16777216");
   assert.equal(container.envVars.MIMO_RATE_LIMIT_TPM, "1200000");
   assert.equal(container.envVars.NANOGPT_RATE_LIMIT_RPM, "60");
+  assert.equal(container.envVars.LINKAPI_MAX_REQUEST_BYTES, "33554432");
+  assert.equal(container.envVars.LINKAPI_RATE_LIMIT_RPM, "120");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.AUTH_DB_PATH, "/tmp/auth.sqlite3");
   assert.equal(container.envVars.RATE_LIMIT_DB_PATH, "/tmp/rate_limits.sqlite3");
@@ -375,6 +407,616 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.GUNICORN_WORKERS, "1");
   assert.equal(container.envVars.HOME, "/tmp");
   assert.equal(container.envVars.SERVER_PORT, "8080");
+});
+
+test("worker accepts every native LinkAPI caller auth style without reaching the container", async () => {
+  const cases = [
+    {
+      name: "bearer",
+      headers: { Authorization: "Bearer admin-live-key" },
+      query: "cursor=one&cursor=two",
+    },
+    {
+      name: "Claude x-api-key",
+      headers: { "x-api-key": "admin-live-key" },
+      query: "cursor=one&cursor=two",
+    },
+    {
+      name: "Gemini x-goog-api-key",
+      headers: { "x-goog-api-key": "admin-live-key" },
+      query: "cursor=one&cursor=two",
+    },
+    {
+      name: "Gemini query key",
+      headers: {},
+      query: "key=admin-live-key&cursor=one&cursor=two",
+    },
+  ];
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      const upstreamUrl = new URL(upstreamRequest.url);
+      assert.equal(upstreamUrl.origin, "https://api.linkapi.ai");
+      assert.equal(upstreamUrl.pathname, "/v1/models");
+      assert.deepEqual(upstreamUrl.searchParams.getAll("cursor"), ["one", "two"]);
+      assert.equal(upstreamUrl.searchParams.has("key"), false);
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer linkapi-live-key");
+      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async () => {
+      for (const authCase of cases) {
+        const response = await worker.fetch(
+          new Request(
+            `https://multillm-proxy.cserules.workers.dev/linkapi/v1/models?${authCase.query}`,
+            { headers: authCase.headers },
+          ),
+          stub.env,
+        );
+        assert.equal(response.status, 200, authCase.name);
+        assert.deepEqual(await response.json(), { data: [] }, authCase.name);
+      }
+    },
+  );
+
+  assert.equal(fetchCalls, cases.length);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker uses the Workers timing-safe primitive for fixed-length token digests", async () => {
+  const originalTimingSafeEqual = crypto.subtle.timingSafeEqual;
+  let timingSafeCalls = 0;
+  let fetchCalls = 0;
+  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+    configurable: true,
+    value(left, right) {
+      timingSafeCalls += 1;
+      const leftBytes = new Uint8Array(left.buffer ?? left, left.byteOffset ?? 0, left.byteLength);
+      const rightBytes = new Uint8Array(right.buffer ?? right, right.byteOffset ?? 0, right.byteLength);
+      assert.equal(leftBytes.byteLength, 32);
+      assert.equal(rightBytes.byteLength, 32);
+      return leftBytes.every((value, index) => value === rightBytes[index]);
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+
+  try {
+    await withGlobalFetch(
+      async () => {
+        fetchCalls += 1;
+        return new Response(null, { status: 204 });
+      },
+      async () => {
+        const accepted = await worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+            headers: { Authorization: "Bearer admin-live-key" },
+          }),
+          stub.env,
+        );
+        const rejected = await worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+            headers: { Authorization: "Bearer wrong-key" },
+          }),
+          stub.env,
+        );
+
+        assert.equal(accepted.status, 204);
+        assert.equal(rejected.status, 401);
+      },
+    );
+  } finally {
+    if (originalTimingSafeEqual === undefined) {
+      delete crypto.subtle.timingSafeEqual;
+    } else {
+      Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+        configurable: true,
+        value: originalTimingSafeEqual,
+      });
+    }
+  }
+
+  assert.equal(timingSafeCalls, 2);
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, and Gemini", async () => {
+  const scenarios = [
+    {
+      name: "OpenAI Responses",
+      path: "/linkapi/v1/responses?include=usage&include=metadata",
+      headers: {
+        Authorization: "Bearer admin-live-key",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "request-123",
+        "OpenAI-Beta": "responses=v1",
+        Cookie: "must-not-leak=yes",
+      },
+      expectedUrl: "https://api.linkapi.ai/v1/responses?include=usage&include=metadata",
+      assertAuth(request) {
+        assert.equal(request.headers.get("Authorization"), "Bearer linkapi-live-key");
+        assert.equal(request.headers.has("x-api-key"), false);
+        assert.equal(request.headers.has("x-goog-api-key"), false);
+        assert.equal(request.headers.get("Idempotency-Key"), "request-123");
+        assert.equal(request.headers.get("OpenAI-Beta"), "responses=v1");
+      },
+      bodyChunks: ['{"model":"gpt-5.5",', '"input":"café"}'],
+      responseChunks: ["event: response.created\n", 'data: {"type":"response.created"}\n\n'],
+    },
+    {
+      name: "Claude Messages",
+      path: "/linkapi/v1/messages?beta=true",
+      headers: {
+        "x-api-key": "admin-live-key",
+        "Content-Type": "application/json",
+        "Anthropic-Beta": "tools-2025-04-04",
+        Cookie: "must-not-leak=yes",
+      },
+      expectedUrl: "https://api.linkapi.ai/v1/messages?beta=true",
+      assertAuth(request) {
+        assert.equal(request.headers.has("Authorization"), false);
+        assert.equal(request.headers.get("x-api-key"), "linkapi-live-key");
+        assert.equal(request.headers.has("x-goog-api-key"), false);
+        assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+        assert.equal(request.headers.get("Anthropic-Beta"), "tools-2025-04-04");
+      },
+      bodyChunks: ['{"model":"claude-opus-4-7",', '"stream":true}'],
+      responseChunks: ["event: message_start\n", 'data: {"type":"message_start"}\n\n'],
+    },
+    {
+      name: "Gemini generateContent",
+      path: "/linkapi/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&alt=json&key=admin-live-key",
+      headers: {
+        "x-goog-api-key": "admin-live-key",
+        "Content-Type": "application/json",
+        "x-goog-api-client": "gl-node/22.0.0",
+        Cookie: "must-not-leak=yes",
+      },
+      expectedUrl:
+        "https://api.linkapi.ai/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&alt=json&key=linkapi-live-key",
+      assertAuth(request) {
+        assert.equal(request.headers.has("Authorization"), false);
+        assert.equal(request.headers.has("x-api-key"), false);
+        assert.equal(request.headers.has("x-goog-api-key"), false);
+        assert.equal(request.headers.get("x-goog-api-client"), "gl-node/22.0.0");
+      },
+      bodyChunks: ['{"contents":[{"parts":[', '{"text":"hello"}]}]}'],
+      responseChunks: ["data: {\"candidates\":[", '{"index":0}]}\n\n'],
+    },
+  ];
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let scenarioIndex = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      const scenario = scenarios[scenarioIndex];
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, scenario.expectedUrl, scenario.name);
+      assert.equal(upstreamRequest.method, "POST", scenario.name);
+      assert.equal(await upstreamRequest.text(), scenario.bodyChunks.join(""), scenario.name);
+      assert.equal(upstreamRequest.headers.has("Cookie"), false, scenario.name);
+      scenario.assertAuth(upstreamRequest);
+
+      return new Response(makeChunkedBody(scenario.responseChunks), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Request-Id": `request-${scenarioIndex}`,
+          "Set-Cookie": "must-not-leak=yes",
+        },
+      });
+    },
+    async () => {
+      for (scenarioIndex = 0; scenarioIndex < scenarios.length; scenarioIndex += 1) {
+        const scenario = scenarios[scenarioIndex];
+        const response = await worker.fetch(
+          new Request(`https://multillm-proxy.cserules.workers.dev${scenario.path}`, {
+            method: "POST",
+            headers: {
+              ...scenario.headers,
+              Origin: "https://client.example",
+            },
+            body: makeChunkedBody(scenario.bodyChunks),
+            duplex: "half",
+          }),
+          stub.env,
+        );
+        const actualBytes = new Uint8Array(await response.arrayBuffer());
+        const expectedBytes = new TextEncoder().encode(scenario.responseChunks.join(""));
+        assert.deepEqual(actualBytes, expectedBytes, scenario.name);
+        assert.equal(response.headers.get("Content-Type"), "text/event-stream", scenario.name);
+        assert.equal(response.headers.get("X-Request-Id"), `request-${scenarioIndex}`, scenario.name);
+        assert.equal(response.headers.has("Set-Cookie"), false, scenario.name);
+        assert.equal(
+          response.headers.get("Access-Control-Allow-Origin"),
+          "https://client.example",
+          scenario.name,
+        );
+      }
+    },
+  );
+
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker never exposes the Gemini upstream key through redirect headers", async () => {
+  const upstreamKey = "linkapi-upstream-secret";
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: upstreamKey,
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.method, "POST");
+      assert.equal(new URL(upstreamRequest.url).searchParams.get("key"), upstreamKey);
+      return new Response("redirect refused", {
+        status: 302,
+        headers: {
+          Location: `https://api.linkapi.ai/redirect?key=${upstreamKey}`,
+          "X-Request-Id": "request-redirect",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/linkapi/v1beta/models/gemini-3.5-flash:generateContent?key=admin-live-key",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: '{"contents":[{"parts":[{"text":"hello"}]}]}',
+          },
+        ),
+        stub.env,
+      );
+      const body = await response.text();
+      const downstreamSurface = `${JSON.stringify([...response.headers.entries()])}\n${body}`;
+
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get("Location"), null);
+      assert.equal(response.headers.get("X-Request-Id"), "request-redirect");
+      assert.doesNotMatch(downstreamSurface, new RegExp(upstreamKey, "i"));
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker streams gated LinkAPI request and response bodies without retrying the generation POST", async () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseRequest;
+  let releaseResponse;
+  let resolveUpstreamFirstChunk;
+  const requestGate = new Promise((resolve) => {
+    releaseRequest = resolve;
+  });
+  const responseGate = new Promise((resolve) => {
+    releaseResponse = resolve;
+  });
+  const upstreamFirstChunk = new Promise((resolve) => {
+    resolveUpstreamFirstChunk = resolve;
+  });
+  const requestBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"model":"gpt-5.5",'));
+      requestGate.then(() => {
+        controller.enqueue(encoder.encode('"input":"hello"}'));
+        controller.close();
+      });
+    },
+  });
+  const responseBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode("event: response.created\n\n"));
+      responseGate.then(() => {
+        controller.enqueue(encoder.encode("event: response.completed\n\n"));
+        controller.close();
+      });
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  const withDeadline = async (promise, label) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} was buffered`)), 500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    await withGlobalFetch(
+      async (input) => {
+        fetchCalls += 1;
+        const upstreamRequest = input instanceof Request ? input : new Request(input);
+        const reader = upstreamRequest.body.getReader();
+        const first = await reader.read();
+        assert.equal(decoder.decode(first.value), '{"model":"gpt-5.5",');
+        assert.equal(first.done, false);
+        resolveUpstreamFirstChunk();
+
+        await requestGate;
+        const second = await reader.read();
+        assert.equal(decoder.decode(second.value), '"input":"hello"}');
+        assert.equal(second.done, false);
+        assert.equal((await reader.read()).done, true);
+        return new Response(responseBody, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+      async () => {
+        const pendingResponse = worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            duplex: "half",
+          }),
+          stub.env,
+        );
+
+        await withDeadline(upstreamFirstChunk, "LinkAPI request body");
+        assert.equal(fetchCalls, 1);
+        releaseRequest();
+
+        const response = await withDeadline(pendingResponse, "LinkAPI response headers");
+        const responseReader = response.body.getReader();
+        const first = await withDeadline(responseReader.read(), "LinkAPI first response chunk");
+        assert.equal(decoder.decode(first.value), "event: response.created\n\n");
+        assert.equal(first.done, false);
+        assert.equal(fetchCalls, 1);
+
+        releaseResponse();
+        const second = await responseReader.read();
+        assert.equal(decoder.decode(second.value), "event: response.completed\n\n");
+        assert.equal(second.done, false);
+        assert.equal((await responseReader.read()).done, true);
+      },
+    );
+  } finally {
+    releaseRequest();
+    releaseResponse();
+  }
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker propagates caller aborts to the direct LinkAPI fetch", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  const controller = new AbortController();
+  let upstreamSawAbort = false;
+
+  await withGlobalFetch(
+    async (input) => {
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      await new Promise((resolve) => {
+        if (upstreamRequest.signal.aborted) {
+          upstreamSawAbort = true;
+          resolve();
+          return;
+        }
+        upstreamRequest.signal.addEventListener(
+          "abort",
+          () => {
+            upstreamSawAbort = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return new Response(null, { status: 204 });
+    },
+    async () => {
+      const pendingResponse = worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+          headers: { Authorization: "Bearer admin-live-key" },
+          signal: controller.signal,
+        }),
+        stub.env,
+      );
+      await Promise.resolve();
+      controller.abort();
+      assert.equal((await pendingResponse).status, 204);
+    },
+  );
+
+  assert.equal(upstreamSawAbort, true);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker constrains LinkAPI base URL overrides to HTTPS origins", async () => {
+  const cases = [
+    ["https://linkapi.ai", "https://linkapi.ai/v1/models"],
+    ["https://api.linkapi.ai", "https://api.linkapi.ai/v1/models"],
+    ["https://hk.linkapi.ai/", "https://hk.linkapi.ai/v1/models"],
+    ["https://jp.linkapi.ai", "https://jp.linkapi.ai/v1/models"],
+    ["https://linkapi.cc", "https://linkapi.cc/v1/models"],
+    ["https://linkapi.pro", "https://linkapi.pro/v1/models"],
+    ["https://proxy.example", "https://api.linkapi.ai/v1/models"],
+    ["http://internal.example", "https://api.linkapi.ai/v1/models"],
+    ["https://user:password@api.linkapi.ai", "https://api.linkapi.ai/v1/models"],
+    ["https://api.linkapi.ai:8443", "https://api.linkapi.ai/v1/models"],
+    ["https://api.linkapi.ai/proxy", "https://api.linkapi.ai/v1/models"],
+    ["https://api.linkapi.ai?region=hk", "https://api.linkapi.ai/v1/models"],
+    ["https://api.linkapi.ai#fragment", "https://api.linkapi.ai/v1/models"],
+    ["not a URL", "https://api.linkapi.ai/v1/models"],
+  ];
+  let caseIndex = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, cases[caseIndex][1]);
+      return new Response(null, { status: 204 });
+    },
+    async () => {
+      for (caseIndex = 0; caseIndex < cases.length; caseIndex += 1) {
+        const [baseUrl] = cases[caseIndex];
+        const stub = makeEnv(
+          async () => {
+            throw new Error("LinkAPI fast path should bypass the container");
+          },
+          {
+            ADMIN_API_KEY: "admin-live-key",
+            LINKAPI_KEY: "linkapi-live-key",
+            LINKAPI_BASE_URL: baseUrl,
+          },
+        );
+        const response = await worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+            headers: { Authorization: "Bearer admin-live-key" },
+          }),
+          stub.env,
+        );
+        assert.equal(response.status, 204);
+        assert.equal(stub.getCalls(), 0);
+      }
+    },
+  );
+});
+
+test("worker returns sanitized CORS-safe LinkAPI auth and configuration errors", async () => {
+  const origin = "https://client.example";
+  const invalidAuthStub = makeEnv(
+    async () => {
+      throw new Error("invalid auth must not call the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  const invalidAuthResponse = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+      headers: { Authorization: "Bearer wrong-key", Origin: origin },
+    }),
+    invalidAuthStub.env,
+  );
+  assert.equal(invalidAuthResponse.status, 401);
+  assert.equal(invalidAuthResponse.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.equal(invalidAuthStub.getCalls(), 0);
+
+  const missingKeyStub = makeEnv(
+    async () => {
+      throw new Error("missing key must not call the container");
+    },
+    { ADMIN_API_KEY: "admin-live-key" },
+  );
+  const missingKeyResponse = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/models", {
+      headers: { "x-api-key": "admin-live-key", Origin: origin },
+    }),
+    missingKeyStub.env,
+  );
+  const missingKeyBody = await missingKeyResponse.text();
+  assert.equal(missingKeyResponse.status, 500);
+  assert.equal(missingKeyResponse.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.doesNotMatch(missingKeyBody, /LINKAPI|API_KEY|linkapi-live-key/i);
+  assert.equal(missingKeyStub.getCalls(), 0);
+});
+
+test("worker answers LinkAPI CORS preflight with native SDK headers", async () => {
+  const origin = "https://client.example";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/linkapi/v1/messages", {
+      method: "OPTIONS",
+      headers: { Origin: origin },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") ?? "", /X-Api-Key/i);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") ?? "", /X-Goog-Api-Key/i);
+  assert.match(response.headers.get("Access-Control-Allow-Headers") ?? "", /Anthropic-Version/i);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker deploy config exposes only the safe LinkAPI base URL default", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  assert.equal(config.vars?.LINKAPI_BASE_URL, "https://api.linkapi.ai");
+  assert.equal(config.vars?.LINKAPI_KEY, undefined);
+  assert.equal(config.vars?.LINKAPI_API_KEY, undefined);
+  assert.equal(config.compatibility_flags?.includes("enable_request_signal"), true);
+  assert.equal(config.compatibility_flags?.includes("request_signal_passthrough"), true);
+  assert.equal(config.observability?.enabled, true);
+  assert.equal(config.observability?.logs?.invocation_logs, false);
 });
 
 test("worker answers /health directly without touching the container", async () => {
