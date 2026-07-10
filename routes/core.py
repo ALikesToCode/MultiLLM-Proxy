@@ -12,7 +12,13 @@ from flask_wtf.csrf import CSRFError
 from config import Config
 from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
-from route_helpers import apply_cors_headers, check_provider, copy_upstream_response_headers, login_required
+from route_helpers import (
+    apply_cors_headers,
+    check_provider,
+    copy_upstream_response_headers,
+    login_required,
+    request_api_key,
+)
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
@@ -338,7 +344,7 @@ def register_core_routes(app) -> None:
         if request.method == "OPTIONS":
             return None
 
-        if request.headers.get("Authorization"):
+        if request.headers.get("Authorization") or request_api_key():
             return None
 
         if request.endpoint in [
@@ -383,6 +389,7 @@ def register_core_routes(app) -> None:
             request.endpoint in PRIVATE_CACHE_ENDPOINTS
             or request.endpoint in {"health_check"}
             or request.headers.get("Authorization")
+            or request_api_key()
             or AuthService.is_authenticated()
         ):
             apply_private_cache_headers(response)

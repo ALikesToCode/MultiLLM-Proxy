@@ -7,7 +7,12 @@ from flask import Response, jsonify, request
 
 from error_handlers import APIError
 from providers.registry import get_adapter
-from route_helpers import api_auth_required, copy_upstream_response_headers, login_required
+from route_helpers import (
+    api_auth_required,
+    copy_upstream_response_headers,
+    login_required,
+    stream_upstream_response,
+)
 from services.auth_service import AuthService
 from services.model_registry import ModelRegistry
 
@@ -162,13 +167,29 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             token = _provider_token(auth_service_cls, provider)
             upstream_payload = _copy_request_payload(payload, provider_model)
             raw_body = json.dumps(upstream_payload).encode("utf-8")
-            headers = proxy_service_cls.prepare_headers(request.headers, provider, token)
+            upstream_path = "v1/chat/completions"
+            headers = proxy_service_cls.prepare_headers(
+                request.headers,
+                provider,
+                token,
+                upstream_path=upstream_path,
+            )
+            params = (
+                proxy_service_cls.prepare_params(
+                    request.args,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                )
+                if provider == "linkapi"
+                else request.args
+            )
 
             response = proxy_service_cls.make_request(
                 method="POST",
                 url=adapter.chat_completions_url(),
                 headers=headers,
-                params=request.args,
+                params=params,
                 data=proxy_service_cls.filter_request_data(provider, raw_body),
                 api_provider=provider,
                 use_cache=False,
@@ -182,6 +203,8 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
             if isinstance(response, Response):
                 return response
+            if provider == "linkapi":
+                return stream_upstream_response(response)
             return Response(
                 response.content,
                 status=response.status_code,
@@ -207,12 +230,47 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
         provider = "unknown"
         try:
             payload = request.get_json(silent=True) or {}
-            if payload.get("stream"):
-                raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
-
             requested_model = payload.get("model")
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
             token = _provider_token(auth_service_cls, provider)
+
+            if provider == "linkapi":
+                upstream_path = "v1/responses"
+                upstream_payload = _copy_request_payload(payload, provider_model)
+                headers = proxy_service_cls.prepare_headers(
+                    request.headers,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                )
+                response = proxy_service_cls.make_request(
+                    method="POST",
+                    url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+                    headers=headers,
+                    params=proxy_service_cls.prepare_params(
+                        request.args,
+                        provider,
+                        token,
+                        upstream_path=upstream_path,
+                    ),
+                    data=json.dumps(upstream_payload).encode("utf-8"),
+                    api_provider=provider,
+                    use_cache=False,
+                )
+
+                metrics_service_cls.get_instance().track_request(
+                    provider=provider,
+                    status_code=response.status_code,
+                    response_time=(time.time() - start_time) * 1000,
+                )
+
+                if isinstance(response, Response):
+                    return response
+                return stream_upstream_response(response)
+
+            if payload.get("stream"):
+                raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
+
             chat_payload = {
                 "model": provider_model,
                 "messages": _responses_input_to_messages(payload),

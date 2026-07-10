@@ -3,10 +3,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from werkzeug.datastructures import MultiDict
+
 from config import Config
 from providers.registry import get_adapter
 from services.auth_service import AuthService
 from services.model_registry import ModelRegistry
+from services.proxy_service import ProxyService
 
 
 class LinkAPIProviderRegistrationTest(unittest.TestCase):
@@ -100,6 +103,123 @@ class LinkAPIProviderRegistrationTest(unittest.TestCase):
             "linkapi:provider/model-not-yet-known-locally",
             listed_model_ids,
         )
+
+
+class LinkAPINativeTransportPreparationTest(unittest.TestCase):
+    def test_claude_messages_uses_native_key_and_version_headers(self):
+        headers = ProxyService.prepare_headers(
+            {
+                "Authorization": "Bearer downstream-proxy-key",
+                "X-Api-Key": "downstream-proxy-key",
+                "Anthropic-Beta": "prompt-caching-2024-07-31",
+            },
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="v1/messages",
+        )
+
+        self.assertEqual(headers["X-Api-Key"], "upstream-linkapi-key")
+        self.assertEqual(headers["Anthropic-Version"], "2023-06-01")
+        self.assertEqual(headers["Anthropic-Beta"], "prompt-caching-2024-07-31")
+        self.assertNotIn("Authorization", headers)
+
+    def test_openai_routes_use_bearer_auth_and_forward_idempotency(self):
+        headers = ProxyService.prepare_headers(
+            {
+                "X-Api-Key": "downstream-proxy-key",
+                "Idempotency-Key": "request-123",
+                "OpenAI-Beta": "responses=v1",
+            },
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="/v1/responses",
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer upstream-linkapi-key")
+        self.assertEqual(headers["Idempotency-Key"], "request-123")
+        self.assertEqual(headers["OpenAI-Beta"], "responses=v1")
+        self.assertNotIn("X-Api-Key", headers)
+
+    def test_gemini_query_key_is_stripped_and_upstream_header_is_replaced(self):
+        params = ProxyService.prepare_params(
+            MultiDict(
+                [
+                    ("alt", "sse"),
+                    ("alt", "json"),
+                    ("key", "downstream-proxy-key"),
+                ]
+            ),
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="v1beta/models/gemini-test:streamGenerateContent",
+        )
+        headers = ProxyService.prepare_headers(
+            {
+                "X-Goog-Api-Key": "downstream-proxy-key",
+                "X-Goog-Api-Client": "gl-python/3.12",
+            },
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="v1beta/models/gemini-test:streamGenerateContent",
+        )
+
+        self.assertEqual(
+            params,
+            [
+                ("alt", "sse"),
+                ("alt", "json"),
+            ],
+        )
+        self.assertEqual(headers["X-Goog-Api-Client"], "gl-python/3.12")
+        self.assertEqual(headers["X-Goog-Api-Key"], "upstream-linkapi-key")
+        self.assertNotIn("Authorization", headers)
+
+    def test_gemini_model_listing_uses_header_auth_too(self):
+        params = ProxyService.prepare_params(
+            MultiDict([("key", "downstream-proxy-key")]),
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="v1beta/models",
+        )
+        headers = ProxyService.prepare_headers(
+            {},
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="v1beta/models",
+        )
+
+        self.assertEqual(params, [])
+        self.assertEqual(headers["X-Goog-Api-Key"], "upstream-linkapi-key")
+        self.assertNotIn("Authorization", headers)
+
+    def test_all_v1beta_resources_use_gemini_header_auth(self):
+        for upstream_path in (
+            "v1beta",
+            "/v1beta/cachedContents",
+            "v1beta/fileSearchStores",
+        ):
+            with self.subTest(upstream_path=upstream_path):
+                params = ProxyService.prepare_params(
+                    MultiDict(
+                        [
+                            ("pageSize", "10"),
+                            ("key", "downstream-proxy-key"),
+                        ]
+                    ),
+                    "linkapi",
+                    "upstream-linkapi-key",
+                    upstream_path=upstream_path,
+                )
+                headers = ProxyService.prepare_headers(
+                    {"X-Goog-Api-Key": "downstream-proxy-key"},
+                    "linkapi",
+                    "upstream-linkapi-key",
+                    upstream_path=upstream_path,
+                )
+
+                self.assertEqual(params, [("pageSize", "10")])
+                self.assertEqual(headers["X-Goog-Api-Key"], "upstream-linkapi-key")
+                self.assertNotIn("Authorization", headers)
 
 
 if __name__ == "__main__":

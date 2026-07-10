@@ -1,3 +1,4 @@
+import inspect
 import logging
 import os
 from functools import wraps
@@ -13,7 +14,10 @@ from services.rate_limit_service import RateLimitService
 logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-CORS_DEFAULT_HEADERS = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
+CORS_DEFAULT_HEADERS = (
+    "Authorization, Content-Type, Accept, Origin, X-Requested-With, "
+    "X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta"
+)
 HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
     {
         "connection",
@@ -28,6 +32,30 @@ HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
         "upgrade",
     }
 )
+LINKAPI_RESPONSE_HEADER_ALLOWLIST = frozenset(
+    {
+        "accept-ranges",
+        "age",
+        "cache-control",
+        "content-disposition",
+        "content-language",
+        "content-range",
+        "content-type",
+        "etag",
+        "expires",
+        "last-modified",
+        "request-id",
+        "retry-after",
+        "vary",
+        "x-request-id",
+        "x-should-retry",
+    }
+)
+LINKAPI_RESPONSE_HEADER_PREFIXES = (
+    "anthropic-ratelimit-",
+    "ratelimit-",
+    "x-ratelimit-",
+)
 
 
 def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
@@ -36,6 +64,16 @@ def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[
         key: value
         for key, value in upstream_headers.items()
         if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
+    }
+
+
+def copy_linkapi_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
+    """Copy the small, explicit response-header surface safe for native LinkAPI."""
+    return {
+        key: value
+        for key, value in upstream_headers.items()
+        if key.lower() in LINKAPI_RESPONSE_HEADER_ALLOWLIST
+        or key.lower().startswith(LINKAPI_RESPONSE_HEADER_PREFIXES)
     }
 
 
@@ -69,6 +107,89 @@ def extract_bearer_token(value: Optional[str]) -> Optional[str]:
 
     token = token.strip()
     return token or None
+
+
+def _is_linkapi_request_path(path: str) -> bool:
+    return path.strip("/").split("/", 1)[0].lower() == "linkapi"
+
+
+def request_api_key() -> Optional[str]:
+    """Read the proxy credential without leaking native provider credentials upstream."""
+    bearer_token = extract_bearer_token(request.headers.get("Authorization"))
+    if bearer_token:
+        return bearer_token
+
+    if not _is_linkapi_request_path(request.path):
+        return None
+
+    for value in (
+        request.headers.get("X-Api-Key"),
+        request.headers.get("X-Goog-Api-Key"),
+        request.args.get("key"),
+    ):
+        if value and value.strip():
+            return value.strip()
+    return None
+
+
+def stream_upstream_response(upstream_response: Any) -> Response:
+    """Stream an upstream entity body unchanged and release its connection."""
+
+    raw_response = getattr(upstream_response, "raw", None)
+    raw_read1 = getattr(raw_response, "read1", None)
+    try:
+        raw_read1_parameters = (
+            inspect.signature(raw_read1).parameters if callable(raw_read1) else {}
+        )
+    except (TypeError, ValueError):
+        raw_read1_parameters = {}
+    closed = False
+
+    def close_once() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        close = getattr(upstream_response, "close", None)
+        if close is not None:
+            if raw_response is None and hasattr(upstream_response, "_content_consumed"):
+                upstream_response._content_consumed = True
+            close()
+
+    def generate():
+        try:
+            if raw_response is None:
+                content = upstream_response.content
+                if content:
+                    yield content
+            elif (
+                upstream_response.headers.get("Content-Type", "")
+                .partition(";")[0]
+                .strip()
+                .lower()
+                == "text/event-stream"
+                and callable(raw_read1)
+                and "decode_content" in raw_read1_parameters
+            ):
+                while True:
+                    chunk = raw_read1(64 * 1024, decode_content=True)
+                    if not chunk:
+                        break
+                    yield chunk
+            else:
+                for chunk in upstream_response.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+        finally:
+            close_once()
+
+    response = Response(
+        generate(),
+        status=upstream_response.status_code,
+        headers=copy_linkapi_response_headers(upstream_response.headers),
+    )
+    response.call_on_close(close_once)
+    return response
 
 
 def is_api_request_path(path: str) -> bool:
@@ -141,8 +262,7 @@ def login_required(func: Callable) -> Callable:
 
 def api_auth_required(func: Callable) -> Callable:
     """
-    Decorator that checks if the request has a valid API key in
-    the Authorization header (Bearer scheme).
+    Validate proxy authentication, including native LinkAPI credential fields.
     """
 
     @wraps(func)
@@ -153,25 +273,34 @@ def api_auth_required(func: Callable) -> Callable:
         auth_header = request.headers.get("Authorization")
         logger.debug("Authorization header: %s", mask_authorization_header(auth_header))
 
-        if not auth_header:
-            logger.error("No Authorization header found")
+        api_key = request_api_key()
+        if not api_key:
+            if auth_header:
+                logger.error(
+                    "Invalid Authorization header: %s",
+                    mask_authorization_header(auth_header),
+                )
+                return jsonify(
+                    {
+                        "error": "Invalid Authorization header",
+                        "message": "Please use the Bearer authentication scheme.",
+                    }
+                ), 401
+
+            logger.error("No proxy API credential found")
+            native_hint = (
+                " Native LinkAPI clients may also use X-Api-Key, X-Goog-Api-Key, "
+                "or the Gemini key query parameter."
+                if _is_linkapi_request_path(request.path)
+                else ""
+            )
             return jsonify(
                 {
                     "error": "Authentication required",
                     "message": (
                         "Please provide your API key in the Authorization header. "
-                        "Example: Authorization: Bearer YOUR_API_KEY"
+                        f"Example: Authorization: Bearer YOUR_API_KEY{native_hint}"
                     ),
-                }
-            ), 401
-
-        api_key = extract_bearer_token(auth_header)
-        if not api_key:
-            logger.error("Invalid Authorization header: %s", mask_authorization_header(auth_header))
-            return jsonify(
-                {
-                    "error": "Invalid Authorization header",
-                    "message": "Please use the Bearer authentication scheme.",
                 }
             ), 401
 

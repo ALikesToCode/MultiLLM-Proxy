@@ -10,7 +10,12 @@ from flask import Response, jsonify, request
 from error_handlers import APIError
 from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
-from route_helpers import api_auth_required, copy_upstream_response_headers, login_required
+from route_helpers import (
+    api_auth_required,
+    copy_upstream_response_headers,
+    login_required,
+    stream_upstream_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,8 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         try:
             if api_provider not in app.config["API_BASE_URLS"]:
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
+            if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):
+                raise APIError("Invalid LinkAPI path", status_code=400)
 
             base_url = app.config["API_BASE_URLS"][api_provider]
             if api_provider == "groq":
@@ -101,14 +108,34 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 except Exception:
                     pass
 
-            headers = proxy_service_cls.prepare_headers(request.headers, api_provider, auth_token)
-            request_data = proxy_service_cls.filter_request_data(api_provider, request.get_data())
+            headers = proxy_service_cls.prepare_headers(
+                request.headers,
+                api_provider,
+                auth_token,
+                upstream_path=path,
+            )
+            params = (
+                proxy_service_cls.prepare_params(
+                    request.args,
+                    api_provider,
+                    auth_token,
+                    upstream_path=path,
+                )
+                if api_provider == "linkapi"
+                else request.args
+            )
+            raw_request_data = request.get_data()
+            request_data = (
+                raw_request_data
+                if api_provider == "linkapi"
+                else proxy_service_cls.filter_request_data(api_provider, raw_request_data)
+            )
 
             response = proxy_service_cls.make_request(
                 method=request.method,
                 url=url,
                 headers=headers,
-                params=request.args,
+                params=params,
                 data=request_data,
                 api_provider=api_provider,
                 use_cache=(request.method.upper() == "GET" and not is_streaming),
@@ -120,6 +147,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 status_code=response.status_code,
                 response_time=response_time,
             )
+
+            if api_provider == "linkapi":
+                if isinstance(response, Response):
+                    return response
+                return stream_upstream_response(response)
 
             if is_streaming and response.headers.get("content-type", "").startswith("text/event-stream"):
                 if isinstance(response, Response):

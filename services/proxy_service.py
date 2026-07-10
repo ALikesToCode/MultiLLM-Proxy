@@ -79,6 +79,11 @@ class ProxyService:
         normalized_name = header_name.lower()
         return any(existing_header.lower() == normalized_name for existing_header in headers)
 
+    @staticmethod
+    def _is_linkapi_gemini_path(path: str) -> bool:
+        normalized_path = path.strip("/").lower()
+        return normalized_path == "v1beta" or normalized_path.startswith("v1beta/")
+
     @classmethod
     def _get_provider_session(cls, api_provider: str) -> requests.Session:
         with cls._session_lock:
@@ -287,7 +292,8 @@ class ProxyService:
         cls,
         request_headers: Dict[str, str],
         api_provider: str,
-        auth_token: Optional[str] = None
+        auth_token: Optional[str] = None,
+        upstream_path: str = "",
     ) -> Dict[str, str]:
         """
         Prepare headers for API requests, filtering out unnecessary ones.
@@ -306,6 +312,18 @@ class ProxyService:
                     "x-use-byok": "x-use-byok",
                 }
             )
+        elif api_provider == "linkapi":
+            header_whitelist.update(
+                {
+                    "anthropic-beta": "Anthropic-Beta",
+                    "idempotency-key": "Idempotency-Key",
+                    "openai-beta": "OpenAI-Beta",
+                    "openai-project": "OpenAI-Project",
+                    "x-client-request-id": "X-Client-Request-ID",
+                    "x-goog-api-client": "X-Goog-Api-Client",
+                    "x-goog-user-project": "X-Goog-User-Project",
+                }
+            )
 
         for header, value in request_headers.items():
             canonical_header = header_whitelist.get(header.lower())
@@ -322,9 +340,22 @@ class ProxyService:
             else:
                 headers['Accept'] = 'application/json'
 
+        normalized_path = upstream_path.strip("/").lower()
+        is_linkapi_claude = api_provider == "linkapi" and (
+            normalized_path == "v1/messages" or normalized_path.startswith("v1/messages/")
+        )
+        is_linkapi_gemini = api_provider == "linkapi" and cls._is_linkapi_gemini_path(
+            normalized_path
+        )
+
         # Handle API key authentication
         if auth_token:
-            headers['Authorization'] = f"Bearer {auth_token}"
+            if is_linkapi_claude:
+                headers["X-Api-Key"] = auth_token
+            elif is_linkapi_gemini:
+                headers["X-Goog-Api-Key"] = auth_token
+            else:
+                headers['Authorization'] = f"Bearer {auth_token}"
 
         # Add provider-specific headers
         if api_provider == 'openrouter':
@@ -337,8 +368,36 @@ class ProxyService:
             # Anthropic specific headers
             if not cls._has_header(headers, "Anthropic-Version"):
                 headers['Anthropic-Version'] = '2023-06-01'
+        elif is_linkapi_claude and not cls._has_header(headers, "Anthropic-Version"):
+            headers["Anthropic-Version"] = "2023-06-01"
 
         return headers
+
+    @classmethod
+    def prepare_params(
+        cls,
+        request_args: Any,
+        api_provider: str,
+        auth_token: Optional[str] = None,
+        upstream_path: str = "",
+    ) -> List[Tuple[str, Any]]:
+        """Preserve repeated query parameters while removing proxy credentials."""
+        params: List[Tuple[str, Any]] = []
+        if hasattr(request_args, "lists"):
+            for key, values in request_args.lists():
+                params.extend((key, value) for value in values)
+        elif hasattr(request_args, "items"):
+            for key, value in request_args.items():
+                if isinstance(value, (list, tuple)):
+                    params.extend((key, item) for item in value)
+                else:
+                    params.append((key, value))
+
+        if api_provider != "linkapi":
+            return params
+
+        params = [(key, value) for key, value in params if key.lower() != "key"]
+        return params
 
     @staticmethod
     def filter_request_data(api_provider: str, request_data: Optional[bytes]) -> Optional[bytes]:
@@ -941,10 +1000,12 @@ class ProxyService:
         """
         Make a base request with retries and error handling
         """
+        raw_linkapi = api_provider == "linkapi"
         try:
-            circuit_response = cls._circuit_open_response(api_provider)
-            if circuit_response is not None:
-                return circuit_response
+            if not raw_linkapi:
+                circuit_response = cls._circuit_open_response(api_provider)
+                if circuit_response is not None:
+                    return circuit_response
 
             session = cls._get_provider_session(api_provider)
 
@@ -968,7 +1029,14 @@ class ProxyService:
                 data=data,
                 stream=True,  # always enable streaming
                 timeout=timeout,
+                allow_redirects=not raw_linkapi,
             )
+
+            # LinkAPI exposes multiple native protocols. Reading, normalizing, or
+            # retrying here would alter event streams and could double-bill a
+            # generation request, so return the untouched streaming response.
+            if raw_linkapi:
+                return response
 
             # Handle response content
             try:
@@ -1072,10 +1140,30 @@ class ProxyService:
             return response
 
         except requests.exceptions.RequestException as e:
+            if raw_linkapi:
+                logger.error(
+                    "LinkAPI upstream transport request failed (%s)",
+                    type(e).__name__,
+                )
+                error_response = requests.Response()
+                error_response.status_code = 502
+                error_response._content = json.dumps(
+                    {
+                        "error": {
+                            "message": "LinkAPI upstream transport request failed",
+                            "type": "upstream_transport_error",
+                            "code": 502,
+                        }
+                    }
+                ).encode("utf-8")
+                error_response.headers = {"Content-Type": "application/json"}
+                return error_response
+
             error_msg = f"Request failed: {str(e)}"
             logger.error(error_msg)
             if (
-                cls._should_retry_exception(method, data, e)
+                not raw_linkapi
+                and cls._should_retry_exception(method, data, e)
                 and retry_count < MAX_RETRIES
             ):
                 logger.info(f"Retrying request (attempt {retry_count + 1}/{MAX_RETRIES})")
@@ -1090,7 +1178,8 @@ class ProxyService:
                     use_cache=use_cache,
                     retry_count=retry_count + 1
                 )
-            cls._record_circuit_result(api_provider, 503)
+            if not raw_linkapi:
+                cls._record_circuit_result(api_provider, 503)
             
             # If all retries fail, return a JSON error response
             error_response = requests.Response()
@@ -3022,6 +3111,17 @@ class ProxyService:
         logger.info(f"Making request to {url} with method {method}")
         
         try:
+            if api_provider == "linkapi":
+                return cls._make_base_request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    params=params,
+                    data=data,
+                    api_provider=api_provider,
+                    use_cache=use_cache,
+                )
+
             # Check if this is a streaming request
             request_data = cls._decode_json_request_data(data)
             is_streaming = bool(request_data.get('stream', False))

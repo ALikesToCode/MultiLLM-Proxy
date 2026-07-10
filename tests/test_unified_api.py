@@ -1,4 +1,5 @@
 import importlib
+import io
 import json
 import os
 import sys
@@ -21,6 +22,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "JWT_SECRET": "jwt-test-secret",
                 "OPENCODE_API_KEY": "opencode-provider-key",
                 "MIMO_API_KEY": "mimo-provider-key",
+                "LINKAPI_KEY": "linkapi-provider-key",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(self.temp_dir.name, "limits.sqlite3"),
                 "MODEL_REGISTRY_DB_PATH": os.path.join(self.temp_dir.name, "models.sqlite3"),
@@ -342,6 +344,179 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.get_json()["error"], "circuit_open")
         self.assertNotIn("object", response.get_json())
+
+    def test_linkapi_responses_forwards_native_schema_and_model(self):
+        native_body = (
+            b'{  "id": "resp_test", "object": "response", '
+            b'"status": "completed", "output": [] }\n'
+        )
+        upstream_response = requests.Response()
+        upstream_response.status_code = 201
+        upstream_response.raw = io.BytesIO(native_body)
+        upstream_response.headers["Content-Type"] = "application/json"
+        upstream_response.headers["Request-ID"] = "req_linkapi"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/responses?include=usage&include=output_text",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "linkapi:gpt-live-model",
+                    "input": "Say hi",
+                    "max_output_tokens": 12,
+                    "metadata": {"tenant": "test"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data, native_body)
+        self.assertEqual(response.headers["Request-ID"], "req_linkapi")
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["api_provider"], "linkapi")
+        self.assertEqual(request_kwargs["url"], "https://api.linkapi.ai/v1/responses")
+        self.assertEqual(
+            request_kwargs["params"],
+            [("include", "usage"), ("include", "output_text")],
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer linkapi-provider-key",
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "gpt-live-model",
+                "input": "Say hi",
+                "max_output_tokens": 12,
+                "metadata": {"tenant": "test"},
+            },
+        )
+
+    def test_linkapi_responses_stream_is_byte_for_byte_and_closes_upstream(self):
+        native_sse = (
+            b"event: response.output_text.delta\n"
+            b'data: {"type":"response.output_text.delta","delta":"hello"}\n\n'
+            b"event: response.completed\n"
+            b'data: {"type":"response.completed","response":{"id":"resp_test"}}\n\n'
+        )
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_sse)
+        upstream_response.headers["Content-Type"] = "text/event-stream"
+
+        with patch.object(upstream_response, "close") as close, patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ):
+            response = self.client.post(
+                "/v1/responses",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "linkapi:gpt-live-model",
+                    "input": "Say hi",
+                    "stream": True,
+                },
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, native_sse)
+
+        close.assert_called_once()
+        self.assertNotIn(b"[DONE]", response.data)
+
+    def test_linkapi_native_catchall_replaces_gemini_query_key(self):
+        native_sse = b'data: {"candidates":[{"content":{"parts":[{"text":"hi"}]}}]}\n\n'
+        native_request = b'{  "contents": [{"parts": [{"text": "hello"}]}] }\n'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_sse)
+        upstream_response.headers["Content-Type"] = "text/event-stream"
+
+        with patch.object(upstream_response, "close") as close, patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/linkapi/v1beta/models/gemini-live:streamGenerateContent"
+                "?alt=sse&alt=json&key=admin-test-key",
+                data=native_request,
+                content_type="application/json",
+            )
+            response_data = response.data
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response_data, native_sse)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        close.assert_called_once()
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["data"], native_request)
+        self.assertEqual(
+            request_kwargs["params"],
+            [
+                ("alt", "sse"),
+                ("alt", "json"),
+            ],
+        )
+        self.assertNotIn("Authorization", request_kwargs["headers"])
+        self.assertEqual(
+            request_kwargs["headers"]["X-Goog-Api-Key"],
+            "linkapi-provider-key",
+        )
+
+    def test_linkapi_native_catchall_replaces_claude_header_key(self):
+        native_request = b'{  "model": "claude-live", "messages": [] }\n'
+        native_response = b'{  "id": "msg_test", "type": "message" }\n'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 202
+        upstream_response.raw = io.BytesIO(native_response)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/linkapi/v1/messages?beta=one&beta=two",
+                headers={
+                    "X-Api-Key": "admin-test-key",
+                    "Anthropic-Beta": "prompt-caching-2024-07-31",
+                },
+                data=native_request,
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data, native_response)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["data"], native_request)
+        self.assertEqual(request_kwargs["params"], [("beta", "one"), ("beta", "two")])
+        self.assertEqual(request_kwargs["headers"]["X-Api-Key"], "linkapi-provider-key")
+        self.assertEqual(request_kwargs["headers"]["Anthropic-Version"], "2023-06-01")
+        self.assertEqual(
+            request_kwargs["headers"]["Anthropic-Beta"],
+            "prompt-caching-2024-07-31",
+        )
+        self.assertNotIn("Authorization", request_kwargs["headers"])
+
+    def test_linkapi_native_catchall_rejects_decoded_query_and_fragment_delimiters(self):
+        encoded_paths = (
+            "/linkapi/v1/responses%3Fkey%3Dencoded-path-secret",
+            "/linkapi/v1/responses%23encoded-path-fragment",
+        )
+
+        for encoded_path in encoded_paths:
+            with self.subTest(encoded_path=encoded_path), patch(
+                "app.ProxyService.make_request"
+            ) as make_request, self.assertLogs("routes.proxy", level="ERROR") as logs:
+                response = self.client.post(
+                    encoded_path,
+                    headers={"Authorization": "Bearer admin-test-key"},
+                    json={"model": "gpt-live-model", "input": "hello"},
+                )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.get_json()["message"], "Invalid LinkAPI path")
+            make_request.assert_not_called()
+            log_output = "\n".join(logs.output)
+            self.assertNotIn("encoded-path-secret", log_output)
+            self.assertNotIn("encoded-path-fragment", log_output)
 
 
 if __name__ == "__main__":

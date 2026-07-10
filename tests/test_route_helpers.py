@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+import requests
 from flask import Flask, Response
 
 from route_helpers import (
@@ -12,6 +13,7 @@ from route_helpers import (
     mask_authorization_header,
     mask_secret,
     provider_from_request_path,
+    stream_upstream_response,
 )
 from services.rate_limit_service import LimitDecision
 
@@ -54,6 +56,134 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
                 "X-Request-ID": "req_123",
             },
         )
+
+    def test_stream_upstream_response_handles_local_transport_error_body(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 500
+        upstream_response._content = b'{"error":{"type":"request_error"}}'
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        response = stream_upstream_response(upstream_response)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_data(), upstream_response.content)
+
+    def test_linkapi_response_headers_use_explicit_safe_allowlist(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 429
+        upstream_response._content = b'{"error":"rate limited"}'
+        upstream_response.headers.update(
+            {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+                "ETag": '"response-tag"',
+                "Retry-After": "30",
+                "X-Should-Retry": "false",
+                "Request-ID": "req_native",
+                "X-Request-ID": "req_proxy",
+                "X-RateLimit-Remaining-Requests": "0",
+                "Anthropic-RateLimit-Requests-Reset": "2026-07-10T10:00:00Z",
+                "Set-Cookie": "session=upstream-secret; Secure",
+                "Location": "https://attacker.example/redirect",
+                "Connection": "keep-alive",
+                "Content-Encoding": "gzip",
+                "Content-Length": "999",
+                "X-Unrelated-Upstream": "drop-me",
+            }
+        )
+
+        response = stream_upstream_response(upstream_response)
+
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["ETag"], '"response-tag"')
+        self.assertEqual(response.headers["Retry-After"], "30")
+        self.assertEqual(response.headers["X-Should-Retry"], "false")
+        self.assertEqual(response.headers["Request-ID"], "req_native")
+        self.assertEqual(response.headers["X-Request-ID"], "req_proxy")
+        self.assertEqual(response.headers["X-RateLimit-Remaining-Requests"], "0")
+        self.assertEqual(
+            response.headers["Anthropic-RateLimit-Requests-Reset"],
+            "2026-07-10T10:00:00Z",
+        )
+        for header_name in (
+            "Set-Cookie",
+            "Location",
+            "Connection",
+            "Content-Encoding",
+            "Content-Length",
+            "X-Unrelated-Upstream",
+        ):
+            self.assertNotIn(header_name, response.headers)
+
+    def test_stream_upstream_response_closes_once_when_closed_before_iteration(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response._content = b"native response"
+        upstream_response.headers["Content-Type"] = "application/octet-stream"
+
+        with patch.object(upstream_response, "close") as close:
+            response = stream_upstream_response(upstream_response)
+            response.close()
+            response.close()
+
+        close.assert_called_once()
+
+    def test_stream_upstream_response_closes_once_after_iteration_and_response_close(self):
+        import io
+
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(b"native response")
+        upstream_response.headers["Content-Type"] = "application/octet-stream"
+
+        with patch.object(upstream_response, "close") as close:
+            response = stream_upstream_response(upstream_response)
+            self.assertEqual(response.get_data(), b"native response")
+            response.close()
+
+        close.assert_called_once()
+
+    def test_stream_upstream_response_yields_available_sse_bytes_before_completion(self):
+        class IncrementalSseRaw:
+            def __init__(self):
+                self.chunks = [b"event: first\ndata: one\n\n", b"event: second\ndata: two\n\n"]
+                self.read1_calls = []
+                self.completed = False
+
+            def read1(self, amount, decode_content=False):
+                self.read1_calls.append((amount, decode_content))
+                if self.chunks:
+                    return self.chunks.pop(0)
+                self.completed = True
+                return b""
+
+            def read(self, amount):
+                raise AssertionError("SSE must not wait for a filled buffered read")
+
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = IncrementalSseRaw()
+        upstream_response.headers["Content-Type"] = "text/event-stream"
+
+        with patch.object(upstream_response, "close") as close:
+            response = stream_upstream_response(upstream_response)
+            iterator = iter(response.response)
+
+            self.assertEqual(next(iterator), b"event: first\ndata: one\n\n")
+            self.assertFalse(upstream_response.raw.completed)
+            self.assertEqual(
+                b"".join(iterator),
+                b"event: second\ndata: two\n\n",
+            )
+            response.close()
+
+        self.assertTrue(upstream_response.raw.completed)
+        self.assertEqual(
+            upstream_response.raw.read1_calls,
+            [(64 * 1024, True), (64 * 1024, True), (64 * 1024, True)],
+        )
+        close.assert_called_once()
 
 
 class RouteHelperCorsTest(unittest.TestCase):
@@ -101,6 +231,19 @@ class RouteHelperCorsTest(unittest.TestCase):
                 response = apply_cors_headers(Response(status=200))
 
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+    def test_linkapi_preflight_default_headers_support_native_sdks(self):
+        with self.app.test_request_context(
+            "/linkapi/v1/messages",
+            method="OPTIONS",
+            headers={"Origin": "https://client.example"},
+        ):
+            response = build_cors_preflight_response()
+
+        allowed_headers = response.headers["Access-Control-Allow-Headers"].lower()
+        self.assertIn("x-api-key", allowed_headers)
+        self.assertIn("x-goog-api-key", allowed_headers)
+        self.assertIn("anthropic-version", allowed_headers)
 
 
 class RouteHelperRateLimitTest(unittest.TestCase):
@@ -161,6 +304,55 @@ class RouteHelperRateLimitTest(unittest.TestCase):
         )
 
         self.assertEqual(provider, "openrouter")
+
+
+class LinkAPINativeProxyAuthenticationTest(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+
+        @self.app.route("/linkapi/v1/messages", methods=["POST"])
+        @api_auth_required
+        def protected_route():
+            return {"ok": True}
+
+    def test_native_caller_auth_styles_authenticate_the_proxy(self):
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        allowed = LimitDecision(
+            allowed=True,
+            status_code=200,
+            error=None,
+            message=None,
+        )
+
+        auth_styles = (
+            ({"Authorization": "Bearer proxy-admin-key"}, ""),
+            ({"X-Api-Key": "proxy-admin-key"}, ""),
+            ({"X-Goog-Api-Key": "proxy-admin-key"}, ""),
+            ({}, "?key=proxy-admin-key"),
+        )
+        for headers, query in auth_styles:
+            with self.subTest(headers=headers, query=query), patch.object(
+                auth_service,
+                "verify_api_key",
+                return_value={
+                    "username": "alice",
+                    "api_key_prefix": "mllm_live_alice",
+                    "scopes": ["chat"],
+                },
+            ) as verify_api_key, patch.object(
+                rate_limit_service,
+                "enforce_request",
+                return_value=allowed,
+            ):
+                response = self.app.test_client().post(
+                    f"/linkapi/v1/messages{query}",
+                    headers=headers,
+                    json={"messages": []},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            verify_api_key.assert_called_once_with("proxy-admin-key", "127.0.0.1")
 
 
 if __name__ == "__main__":
