@@ -30,6 +30,11 @@ PROVIDER_SPECS = (
         ),
     ),
     (
+        "linkapi",
+        "v1/chat/completions",
+        ProviderCapabilities(),
+    ),
+    (
         "gemini",
         "chat/completions",
         ProviderCapabilities(

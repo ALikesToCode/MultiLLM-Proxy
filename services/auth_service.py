@@ -31,6 +31,16 @@ def _utcnow() -> datetime:
 
 DEFAULT_USER_SCOPES = ("chat", "models")
 DEFAULT_ADMIN_SCOPES = ("admin", "chat", "metrics", "models", "users")
+PROVIDER_API_KEY_ENV_NAMES = {
+    "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
+}
+
+
+def _provider_api_key_env_names(provider: str) -> tuple[str, ...]:
+    return PROVIDER_API_KEY_ENV_NAMES.get(
+        provider,
+        (f"{provider.upper()}_API_KEY",),
+    )
 
 
 class AuthService:
@@ -503,12 +513,19 @@ class AuthService:
             "opencode",
             "mimo",
             "nanogpt",
+            "linkapi",
             "palm",
             "together",
             "nineteen",
         ]:
-            env_key = f"{provider.upper()}_API_KEY"
-            api_key = os.environ.get(env_key)
+            api_key = next(
+                (
+                    os.environ[env_key]
+                    for env_key in _provider_api_key_env_names(provider)
+                    if os.environ.get(env_key)
+                ),
+                None,
+            )
             if api_key:
                 cls._api_keys[provider] = api_key
 
@@ -550,10 +567,10 @@ class AuthService:
     @classmethod
     def get_api_key(cls, provider: str) -> Optional[str]:
         """Get API key for a provider."""
-        env_key = f"{provider.upper()}_API_KEY"
-        api_key = os.environ.get(env_key)
-        if api_key:
-            return api_key
+        for env_key in _provider_api_key_env_names(provider):
+            api_key = os.environ.get(env_key)
+            if api_key:
+                return api_key
         return cls._api_keys.get(provider)
 
     @staticmethod
