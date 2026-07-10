@@ -265,9 +265,6 @@ class RawPassthroughTest(unittest.TestCase):
         self.assertEqual(received["api_key"], upstream_secret)
         self.assertNotIn(upstream_secret, prepared_url)
         self.assertNotIn(upstream_secret, log_output)
-        self.assertTrue(
-            any("urllib3.connectionpool" in entry for entry in captured_logs.output)
-        )
 
     def test_linkapi_redirect_is_returned_without_automatic_replay(self):
         redirect_response = requests.Response()

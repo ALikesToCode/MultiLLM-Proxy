@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Optional
 
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
@@ -24,10 +25,32 @@ from services.cache_service import CacheService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(name)s] %(message)s"
+_LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _configure_logging(level_name: Optional[str] = None) -> int:
+    """Configure application logging without replacing server-owned handlers."""
+    normalized_level = (level_name or "").strip().upper()
+    level = _LOG_LEVELS.get(normalized_level, logging.INFO)
+    root_logger = logging.getLogger()
+
+    if not root_logger.handlers:
+        logging.basicConfig(level=level, format=_LOG_FORMAT)
+    root_logger.setLevel(level)
+
+    # urllib3 DEBUG logs can contain complete upstream request targets.
+    logging.getLogger("urllib3").setLevel(max(level, logging.WARNING))
+    return level
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +59,7 @@ def create_app() -> Flask:
     Create and configure the Flask application.
     """
     load_runtime_env()
+    _configure_logging(os.environ.get("LOG_LEVEL"))
     runtime_secrets = validate_runtime_secrets()
 
     app = Flask(
