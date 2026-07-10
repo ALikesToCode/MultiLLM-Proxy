@@ -35,6 +35,11 @@ PROVIDER_SPECS = (
         ProviderCapabilities(),
     ),
     (
+        "codex-easy",
+        "v1/chat/completions",
+        ProviderCapabilities(),
+    ),
+    (
         "gemini",
         "chat/completions",
         ProviderCapabilities(

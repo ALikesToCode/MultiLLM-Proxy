@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import re
 import sqlite3
 import threading
 from contextlib import closing
@@ -133,7 +134,8 @@ class RateLimitService:
 
     @classmethod
     def _provider_limit(cls, provider: str, name: str, default: int) -> int:
-        provider_env = f"{provider.upper()}_{name}"
+        provider_prefix = re.sub(r"[^A-Z0-9]+", "_", provider.upper()).strip("_")
+        provider_env = f"{provider_prefix}_{name}"
         shared_env = name
         provider_default = PROVIDER_LIMIT_DEFAULTS.get(provider, {}).get(name, default)
         return cls._env_int(provider_env, cls._env_int(shared_env, provider_default))

@@ -19,7 +19,7 @@ STATIC_PROVIDER_MODELS = {
     "gemma": "GEMMA_MODELS",
 }
 
-DYNAMIC_PROVIDER_MODELS = {"linkapi", "nanogpt"}
+DYNAMIC_PROVIDER_MODELS = {"codex-easy", "linkapi", "nanogpt"}
 
 DEFAULT_MODEL_IDS = {
     "openai": ["gpt-4.1", "gpt-4.1-mini"],

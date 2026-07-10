@@ -33,6 +33,7 @@ DEFAULT_USER_SCOPES = ("chat", "models")
 DEFAULT_ADMIN_SCOPES = ("admin", "chat", "metrics", "models", "users")
 PROVIDER_API_KEY_ENV_NAMES = {
     "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
+    "codex-easy": ("CODEX_EASY_API_KEY", "CODEX_API_KEY"),
 }
 
 
@@ -514,6 +515,7 @@ class AuthService:
             "mimo",
             "nanogpt",
             "linkapi",
+            "codex-easy",
             "palm",
             "together",
             "nineteen",

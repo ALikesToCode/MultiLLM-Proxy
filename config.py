@@ -61,6 +61,7 @@ class Config:
         'mimo': 'https://token-plan-sgp.xiaomimimo.com/v1',
         'nanogpt': 'https://nano-gpt.com/api',
         'linkapi': 'https://api.linkapi.ai',
+        'codex-easy': 'https://codex-easy.ai',
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
         'nineteen': 'https://api.nineteen.ai',
         'chutes': 'https://llm.chutes.ai',
@@ -85,6 +86,7 @@ class Config:
         'mimo': (5, 300),  # MiMo Token Plan supports long-context agent requests
         'nanogpt': (5, 120),  # NanoGPT routes to many providers and supports web/memory augmentation
         'linkapi': (5, 600),  # LinkAPI supports long-running native agent requests
+        'codex-easy': (5, 600),  # Codex Easy supports long-running Responses API agent requests
         'palm': (10, 120),  # PaLM API can be slow to respond
         'nineteen': (5, 120),
         'chutes': (5, 120),  # Chutes API can take longer for larger models
