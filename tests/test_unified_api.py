@@ -395,6 +395,63 @@ class UnifiedApiRouteTest(unittest.TestCase):
             },
         )
 
+    def test_linkapi_chat_preserves_grok_high_reasoning_and_conversation_affinity(self):
+        native_body = b'{"id":"chatcmpl_linkapi_grok","object":"chat.completion","choices":[]}'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_body)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/chat/completions?trace=one&trace=two",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "X-Api-Key": "caller-key-must-not-leak",
+                    "X-Grok-Conv-Id": "conversation-123",
+                },
+                json={
+                    "model": "linkapi:grok-4.5",
+                    "messages": [{"role": "user", "content": "Solve this"}],
+                    "reasoning_effort": "high",
+                    "metadata": {"tenant": "test"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_body)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["api_provider"], "linkapi")
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://api.linkapi.ai/v1/chat/completions",
+        )
+        self.assertEqual(
+            request_kwargs["params"],
+            [("trace", "one"), ("trace", "two")],
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "grok-4.5",
+                "messages": [{"role": "user", "content": "Solve this"}],
+                "reasoning_effort": "high",
+                "metadata": {"tenant": "test"},
+            },
+        )
+        upstream_headers = {
+            name.lower(): value for name, value in request_kwargs["headers"].items()
+        }
+        self.assertEqual(
+            upstream_headers["authorization"],
+            "Bearer linkapi-provider-key",
+        )
+        self.assertEqual(
+            upstream_headers["x-grok-conv-id"],
+            "conversation-123",
+        )
+        self.assertNotIn("x-api-key", upstream_headers)
+
     def test_codex_easy_responses_preserves_grok_high_reasoning_and_all_fields(self):
         native_body = b'{"id":"resp_grok","object":"response","status":"completed"}'
         upstream_response = requests.Response()

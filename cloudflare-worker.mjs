@@ -69,6 +69,7 @@ const LINKAPI_REQUEST_HEADER_WHITELIST = new Set([
   "x-stainless-runtime-version",
   "x-stainless-timeout",
 ]);
+const LINKAPI_OPENAI_REQUEST_HEADER_WHITELIST = new Set(["x-grok-conv-id"]);
 const LINKAPI_RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
   "content-disposition",
@@ -520,11 +521,17 @@ function buildLinkApiUpstreamUrl(requestUrl, env) {
   return upstreamUrl;
 }
 
-function buildLinkApiUpstreamHeaders(request, protocol, upstreamToken) {
+function buildLinkApiUpstreamHeaders(request, protocol, upstreamPathname, upstreamToken) {
   const headers = new Headers();
 
   for (const [header, value] of request.headers.entries()) {
-    if (LINKAPI_REQUEST_HEADER_WHITELIST.has(header.toLowerCase())) {
+    const normalized = header.toLowerCase();
+    if (
+      LINKAPI_REQUEST_HEADER_WHITELIST.has(normalized) ||
+      (protocol === "openai" &&
+        upstreamPathname === "/v1/chat/completions" &&
+        LINKAPI_OPENAI_REQUEST_HEADER_WHITELIST.has(normalized))
+    ) {
       headers.set(header, value);
     }
   }
@@ -1405,7 +1412,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(upstreamUrl, {
     method: request.method,
-    headers: buildLinkApiUpstreamHeaders(request, protocol, upstreamToken),
+    headers: buildLinkApiUpstreamHeaders(request, protocol, upstreamUrl.pathname, upstreamToken),
     body: bodyAllowed ? request.body : undefined,
     redirect: "manual",
     signal: request.signal,

@@ -570,6 +570,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         "Content-Type": "application/json",
         "Idempotency-Key": "request-123",
         "OpenAI-Beta": "responses=v1",
+        "X-Grok-Conv-Id": "must-not-cross-endpoints",
         Cookie: "must-not-leak=yes",
       },
       expectedUrl: "https://api.linkapi.ai/v1/responses?include=usage&include=metadata",
@@ -579,6 +580,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         assert.equal(request.headers.has("x-goog-api-key"), false);
         assert.equal(request.headers.get("Idempotency-Key"), "request-123");
         assert.equal(request.headers.get("OpenAI-Beta"), "responses=v1");
+        assert.equal(request.headers.has("X-Grok-Conv-Id"), false);
       },
       bodyChunks: ['{"model":"gpt-5.5",', '"input":"café"}'],
       responseChunks: ["event: response.created\n", 'data: {"type":"response.created"}\n\n'],
@@ -590,6 +592,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         "x-api-key": "admin-live-key",
         "Content-Type": "application/json",
         "Anthropic-Beta": "tools-2025-04-04",
+        "X-Grok-Conv-Id": "must-not-cross-protocols",
         Cookie: "must-not-leak=yes",
       },
       expectedUrl: "https://api.linkapi.ai/v1/messages?beta=true",
@@ -599,6 +602,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         assert.equal(request.headers.has("x-goog-api-key"), false);
         assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
         assert.equal(request.headers.get("Anthropic-Beta"), "tools-2025-04-04");
+        assert.equal(request.headers.has("X-Grok-Conv-Id"), false);
       },
       bodyChunks: ['{"model":"claude-opus-4-7",', '"stream":true}'],
       responseChunks: ["event: message_start\n", 'data: {"type":"message_start"}\n\n'],
@@ -610,6 +614,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         "x-goog-api-key": "admin-live-key",
         "Content-Type": "application/json",
         "x-goog-api-client": "gl-node/22.0.0",
+        "X-Grok-Conv-Id": "must-not-cross-protocols",
         Cookie: "must-not-leak=yes",
       },
       expectedUrl:
@@ -619,6 +624,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         assert.equal(request.headers.has("x-api-key"), false);
         assert.equal(request.headers.get("x-goog-api-key"), "linkapi-live-key");
         assert.equal(request.headers.get("x-goog-api-client"), "gl-node/22.0.0");
+        assert.equal(request.headers.has("X-Grok-Conv-Id"), false);
       },
       bodyChunks: ['{"contents":[{"parts":[', '{"text":"hello"}]}]}'],
       responseChunks: ["data: {\"candidates\":[", '{"index":0}]}\n\n'],
@@ -685,6 +691,63 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
     },
   );
 
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker preserves LinkAPI Grok Chat cache affinity on the OpenAI protocol only", async () => {
+  const requestBytes =
+    '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"ping"}],"stream":true}';
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI Grok fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, "https://api.linkapi.ai/v1/chat/completions");
+      assert.equal(upstreamRequest.redirect, "manual");
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer linkapi-live-key");
+      assert.equal(upstreamRequest.headers.get("X-Grok-Conv-Id"), "conversation-123");
+      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
+      assert.equal(await upstreamRequest.text(), requestBytes);
+      return new Response("data: [DONE]\n\n", {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/linkapi/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+              "X-Grok-Conv-Id": "conversation-123",
+              "x-api-key": "caller-key-must-not-leak",
+              "x-goog-api-key": "caller-key-must-not-leak",
+            },
+            body: requestBytes,
+          },
+        ),
+        stub.env,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), "data: [DONE]\n\n");
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
   assert.equal(stub.getCalls(), 0);
 });
 

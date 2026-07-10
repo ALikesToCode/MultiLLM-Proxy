@@ -412,18 +412,43 @@ class CodexEasyRawRequestServiceTest(unittest.TestCase):
         self.assertIs(response, upstream_response)
         self.assertEqual(make_base_request.call_args.kwargs["data"], multipart_body)
 
-    def test_linkapi_does_not_forward_codex_cache_affinity_header(self):
+    def test_linkapi_chat_forwards_canonical_grok_cache_affinity_header(self):
         headers = self.proxy_module.ProxyService.prepare_headers(
-            {"X-Grok-Conv-Id": "conversation-123"},
+            {
+                "Authorization": "Bearer caller-key-must-not-leak",
+                "X-Api-Key": "caller-key-must-not-leak",
+                "x-grok-conv-id": "conversation-123",
+            },
             "linkapi",
             "linkapi-provider-key",
-            upstream_path="v1/responses",
+            upstream_path="/v1/chat/completions",
         )
 
-        self.assertNotIn(
-            "x-grok-conv-id",
-            {name.lower() for name in headers},
+        self.assertEqual(headers["X-Grok-Conv-Id"], "conversation-123")
+        self.assertEqual(
+            headers["Authorization"],
+            "Bearer linkapi-provider-key",
         )
+        self.assertNotIn("X-Api-Key", headers)
+
+    def test_linkapi_non_chat_protocols_drop_grok_cache_affinity_header(self):
+        for upstream_path in (
+            "v1/responses",
+            "v1/messages",
+            "v1beta/models/gemini-test:generateContent",
+        ):
+            with self.subTest(upstream_path=upstream_path):
+                headers = self.proxy_module.ProxyService.prepare_headers(
+                    {"X-Grok-Conv-Id": "conversation-123"},
+                    "linkapi",
+                    "linkapi-provider-key",
+                    upstream_path=upstream_path,
+                )
+
+                self.assertNotIn(
+                    "x-grok-conv-id",
+                    {name.lower() for name in headers},
+                )
 
     def test_pooled_raw_session_never_stores_or_replays_upstream_cookies(self):
         received_cookies: dict[str, list[str | None]] = {

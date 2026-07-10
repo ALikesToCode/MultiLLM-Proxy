@@ -344,6 +344,8 @@ class ProxyService:
                     "x-goog-user-project": "X-Goog-User-Project",
                 }
             )
+            if upstream_path.strip("/").lower() == "v1/chat/completions":
+                header_whitelist["x-grok-conv-id"] = "X-Grok-Conv-Id"
         elif api_provider == "codex-easy":
             header_whitelist.update(
                 {
