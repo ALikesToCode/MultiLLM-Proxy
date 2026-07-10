@@ -174,6 +174,31 @@ PROVIDER_DETAILS = {
             'memory': True
         }
     },
+    'linkapi': {
+        'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, and OpenAI-compatible passthrough',
+        'endpoints': [
+            {
+                'url': '/v1/messages',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/messages" -H "x-api-key: $ADMIN_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"$LINKAPI_MODEL\\", \\"max_tokens\\": 1024, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/responses',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$LINKAPI_MODEL\\", \\"input\\": \\"Hello!\\"}"'
+            },
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$LINKAPI_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1beta/models/{model}:generateContent',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1beta/models/$LINKAPI_MODEL:generateContent" -H "x-goog-api-key: $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\": [{\\"text\\": \\"Hello!\\"}]}]}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True
+        }
+    },
     'nineteen': {
         'description': 'Nineteen AI - High-performance inference for open-source models',
         'endpoints': [

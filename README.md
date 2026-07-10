@@ -21,6 +21,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - OpenRouter
   - Xiaomi MiMo Token Plan
   - NanoGPT
+  - LinkAPI
   - PaLM API
   - Nineteen AI
 - 🎨 Beautiful web dashboard with dark mode support
@@ -106,6 +107,12 @@ MIMO_API_KEY=your-mimo-token-plan-api-key
 
 # NanoGPT
 NANOGPT_API_KEY=your-nanogpt-api-key
+
+# LinkAPI (preferred key name)
+LINKAPI_KEY=your-linkapi-key
+
+# Optional Cloudflare Worker fast-path override; Flask uses the global endpoint
+LINKAPI_BASE_URL=https://api.linkapi.ai
 
 # PaLM API
 PALM_API_KEY=your-palm-api-key
@@ -203,6 +210,12 @@ http://localhost:1400/mimo/chat/completions
 http://localhost:1400/nanogpt/v1/chat/completions
 http://localhost:1400/nanogpt/v1/models?detailed=true
 
+# LinkAPI native and OpenAI-compatible routes
+http://localhost:1400/linkapi/v1/messages
+http://localhost:1400/linkapi/v1/responses
+http://localhost:1400/linkapi/v1/chat/completions
+http://localhost:1400/linkapi/v1beta/models/{model}:generateContent
+
 # PaLM
 http://localhost:1400/palm/models/chat-bison-001:generateText
 
@@ -225,8 +238,28 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **OpenRouter**: Gateway to multiple AI providers
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
 - **NanoGPT**: OpenAI-compatible chat, streaming, model catalog, embeddings, images, audio, memory, and search via `/nanogpt/v1/*`; use `/nanogpt/v1/models?detailed=true` before selecting model IDs
+- **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, and OpenAI-compatible routes under `/linkapi/*`; consult LinkAPI's live pricing/model page instead of relying on a hard-coded model list
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
+
+### LinkAPI native fast path
+
+On Cloudflare, requests under `/linkapi/*` run directly in the Worker and do not wake the Flask Container. Use your deployed Worker origin as `PROXY_BASE_URL`:
+
+| Client protocol | Proxy URL | Caller authentication |
+| --- | --- | --- |
+| Claude Messages | `$PROXY_BASE_URL/linkapi/v1/messages` | `x-api-key: $ADMIN_API_KEY` plus `anthropic-version` |
+| OpenAI Responses | `$PROXY_BASE_URL/linkapi/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI compatible | `$PROXY_BASE_URL/linkapi/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Gemini native | `$PROXY_BASE_URL/linkapi/v1beta/models/{model}:generateContent` | Prefer `x-goog-api-key: $ADMIN_API_KEY`; `?key=$ADMIN_API_KEY` is compatibility-only |
+
+The Worker validates the caller against `ADMIN_API_KEY`, removes that credential, and authenticates upstream with `LINKAPI_KEY`. `LINKAPI_BASE_URL` is restricted to the allowlisted official LinkAPI hosts; arbitrary HTTPS origins are rejected.
+
+This fast path is `ADMIN_API_KEY`-only and intentionally bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. When those controls are required, use the Container-backed `/v1/chat/completions` endpoint with a `linkapi:<model>` model ID.
+
+Gemini clients should prefer the `x-goog-api-key` header. Query-string `?key=` authentication is supported for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
+
+Native request and response bodies, including SSE event types and bytes, are streamed without compatibility translation. The proxy never retries generation POSTs and does not provide idempotency, because repeating a request can duplicate work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
 
 ## Configuration Options
 
