@@ -174,6 +174,31 @@ PROVIDER_DETAILS = {
             'memory': True
         }
     },
+    'codex-easy': {
+        'description': 'Codex Everywhere raw OpenAI-compatible gateway; model catalogs are specific to each API-key group',
+        'endpoints': [
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/codex-easy/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/responses',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/codex-easy/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"grok-4.5\\", \\"reasoning\\": {\\"effort\\": \\"high\\"}, \\"prompt_cache_key\\": \\"conversation-123\\", \\"input\\": \\"Hello!\\", \\"stream\\": true}"'
+            },
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/codex-easy/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "X-Grok-Conv-Id: conversation-123" -H "Content-Type: application/json" -d "{\\"model\\": \\"grok-4.5\\", \\"reasoning_effort\\": \\"high\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"stream\\": true}"'
+            },
+            {
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/codex-easy/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$CODEX_EASY_IMAGE_MODEL\\", \\"prompt\\": \\"A small red fox in a forest\\"}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True
+        }
+    },
     'linkapi': {
         'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, and OpenAI-compatible passthrough',
         'endpoints': [

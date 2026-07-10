@@ -21,6 +21,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - OpenRouter
   - Xiaomi MiMo Token Plan
   - NanoGPT
+  - Codex Everywhere
   - LinkAPI
   - PaLM API
   - Nineteen AI
@@ -107,6 +108,10 @@ MIMO_API_KEY=your-mimo-token-plan-api-key
 
 # NanoGPT
 NANOGPT_API_KEY=your-nanogpt-api-key
+
+# Codex Everywhere (preferred key name)
+CODEX_EASY_API_KEY=your-codex-everywhere-key
+# Optional compatibility alias: CODEX_API_KEY=your-codex-everywhere-key
 
 # LinkAPI (preferred key name)
 LINKAPI_KEY=your-linkapi-key
@@ -210,6 +215,12 @@ http://localhost:1400/mimo/chat/completions
 http://localhost:1400/nanogpt/v1/chat/completions
 http://localhost:1400/nanogpt/v1/models?detailed=true
 
+# Codex Everywhere OpenAI-compatible routes
+http://localhost:1400/codex-easy/v1/models
+http://localhost:1400/codex-easy/v1/responses
+http://localhost:1400/codex-easy/v1/chat/completions
+http://localhost:1400/codex-easy/v1/images/*
+
 # LinkAPI native and OpenAI-compatible routes
 http://localhost:1400/linkapi/v1/messages
 http://localhost:1400/linkapi/v1/responses
@@ -238,9 +249,51 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **OpenRouter**: Gateway to multiple AI providers
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
 - **NanoGPT**: OpenAI-compatible chat, streaming, model catalog, embeddings, images, audio, memory, and search via `/nanogpt/v1/*`; use `/nanogpt/v1/models?detailed=true` before selecting model IDs
+- **Codex Everywhere**: Raw OpenAI Responses, Chat Completions, key-group-specific model discovery, and conditional image routes under `/codex-easy/v1/*`
 - **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, and OpenAI-compatible routes under `/linkapi/*`; consult LinkAPI's live pricing/model page instead of relying on a hard-coded model list
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
+
+### Codex Everywhere OpenAI fast path
+
+Cloudflare serves `/codex-easy/*` directly from the Worker without waking the Flask Container. The upstream is fixed to `https://codex-easy.ai`. Configure the preferred `CODEX_EASY_API_KEY` Worker secret; the existing `CODEX_API_KEY` name remains a fallback alias.
+
+Choose the deployed base URL according to what the client appends:
+
+| Client behavior | Proxy base URL |
+| --- | --- |
+| Client appends `/v1` itself, including Codex Responses clients | `$PROXY_BASE_URL/codex-easy` |
+| Client expects a base URL that already ends in `/v1`, including many Hermes and OpenAI-compatible setups | `$PROXY_BASE_URL/codex-easy/v1` |
+
+Direct routes are:
+
+| Operation | Proxy route | Caller authentication |
+| --- | --- | --- |
+| Key-group model catalog | `$PROXY_BASE_URL/codex-easy/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI Responses | `$PROXY_BASE_URL/codex-easy/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `$PROXY_BASE_URL/codex-easy/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Images | `$PROXY_BASE_URL/codex-easy/v1/images/*` | `Authorization: Bearer $ADMIN_API_KEY` |
+
+The Worker verifies the caller against `ADMIN_API_KEY`, removes that credential, and authenticates upstream with `CODEX_EASY_API_KEY` or its `CODEX_API_KEY` alias. The direct path is admin-only and bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. Use the Container-backed `/v1/responses` or `/v1/chat/completions` route with a `codex-easy:<model>` model ID when those controls are required.
+
+Model catalogs are specific to the purchased API-key group. Query `/codex-easy/v1/models` before selecting a model. The `grok-4.5` requests below demonstrate current Responses and Chat request shapes only; use the exact model ID returned for your key group:
+
+```bash
+curl "$PROXY_BASE_URL/codex-easy/v1/responses" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"grok-4.5","reasoning":{"effort":"high"},"prompt_cache_key":"conversation-123","input":"Explain this repository","stream":true}'
+
+curl "$PROXY_BASE_URL/codex-easy/v1/chat/completions" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "X-Grok-Conv-Id: conversation-123" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"Explain this repository"}],"stream":true}'
+```
+
+Request and response bytes are passed through unchanged, including native SSE and multipart/image bodies. Both raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, preserve a Responses `prompt_cache_key` in the request body and forward the Chat `X-Grok-Conv-Id` header. For Grok requests, [xAI's prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) recommends a stable `prompt_cache_key` for Responses or `x-grok-conv-id` for Chat to improve cache routing. These fields do not guarantee a cache hit; caching remains an upstream behavior and stable request prefixes still matter.
+
+`/v1/images/*` works only for image-generation key groups. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency. Retry only when the selected upstream endpoint explicitly documents an idempotency guarantee.
 
 ### LinkAPI native fast path
 
@@ -259,7 +312,7 @@ This fast path is `ADMIN_API_KEY`-only and intentionally bypasses Flask dashboar
 
 Gemini clients should prefer the `x-goog-api-key` header. Query-string `?key=` authentication is supported for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
 
-Native request and response bodies, including SSE event types and bytes, are streamed without compatibility translation. The proxy never retries generation POSTs and does not provide idempotency, because repeating a request can duplicate work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
+Native request and response bodies, including SSE event types and bytes, are streamed without compatibility translation. On the raw OpenAI routes, the Worker leaves `prompt_cache_key` in Responses bodies and forwards the Chat `X-Grok-Conv-Id` header; for Grok, these are the request shapes recommended by xAI for cache routing, not a proxy or provider-level cache guarantee. The proxy never retries generation POSTs and does not provide idempotency, because repeating a request can duplicate work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
 
 ## Configuration Options
 

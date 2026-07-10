@@ -1,6 +1,6 @@
 # Deploying MultiLLM-Proxy to Cloudflare Containers
 
-This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks and native LinkAPI traffic directly; the Flask proxy handles the remaining routes in a Container.
+This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native LinkAPI traffic, and Codex Everywhere OpenAI traffic directly; the Flask proxy handles the remaining routes in a Container.
 
 ## Why Containers, not Python Workers
 
@@ -11,7 +11,7 @@ Cloudflare's Python Workers runtime runs on Pyodide. Cloudflare's docs note that
 - threaded execution and SSE streaming
 - service-account JSON support for the `googleai` provider
 
-That makes Cloudflare Containers the safer target for the Python application. LinkAPI is the exception: `/linkapi/*` is a raw Worker fast path, so native Claude, Gemini, and OpenAI traffic does not wake the Container.
+That makes Cloudflare Containers the safer target for the Python application. `/linkapi/*` and `/codex-easy/*` are raw Worker fast paths, so their provider-native traffic does not wake the Container.
 
 ## Prerequisites
 
@@ -43,6 +43,7 @@ Set secrets for anything sensitive:
 wrangler secret put ADMIN_API_KEY
 wrangler secret put FLASK_SECRET_KEY
 wrangler secret put JWT_SECRET
+wrangler secret put CODEX_EASY_API_KEY
 wrangler secret put LINKAPI_KEY
 wrangler secret put GEMINI_API_KEY
 wrangler secret put OPENAI_API_KEY
@@ -50,6 +51,25 @@ wrangler secret put OPENROUTER_API_KEY
 ```
 
 Set only the providers you actually use. The Worker forwards these directly into the container. It also forwards numbered `GROQ_API_KEY_N` secrets automatically.
+
+`CODEX_EASY_API_KEY` is the preferred Codex Everywhere secret; `CODEX_API_KEY` remains a fallback alias. Both the Worker and Flask always use the fixed upstream origin `https://codex-easy.ai`.
+
+### Codex Everywhere OpenAI routes
+
+Use `$PROXY_BASE_URL/codex-easy` when the client appends `/v1` itself. Use `$PROXY_BASE_URL/codex-easy/v1` when the client expects its configured base URL to include `/v1` already.
+
+| Operation | Direct Worker route | Caller authentication |
+| --- | --- | --- |
+| Key-group model catalog | `/codex-easy/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI Responses | `/codex-easy/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `/codex-easy/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Images | `/codex-easy/v1/images/*` | `Authorization: Bearer $ADMIN_API_KEY` |
+
+The Worker authenticates direct callers only against `ADMIN_API_KEY`, removes that caller credential, and sends `CODEX_EASY_API_KEY` or its alias upstream. These routes bypass Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. Use the Container-backed `/v1/responses` or `/v1/chat/completions` route with a `codex-easy:<model>` model ID when those controls are required.
+
+The model catalog is API-key-group-specific; query `/codex-easy/v1/models` instead of relying on a hard-coded catalog. `/v1/images/*` works only for image-generation key groups. Raw request and response bytes are preserved for JSON, SSE, binary images, and multipart bodies.
+
+On both raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, a Responses `prompt_cache_key` remains in the untouched body and the Chat `X-Grok-Conv-Id` header is forwarded. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) those fields with a stable conversation ID to improve cache routing. They do not guarantee a cache hit; caching remains upstream behavior and stable request prefixes still matter. Generation POSTs are single-attempt, and this proxy does not provide idempotency.
 
 `LINKAPI_KEY` is used both by the direct Worker fast path and the Container fallback. `LINKAPI_API_KEY` is supported as an alias, but `LINKAPI_KEY` is preferred. The optional, non-secret `LINKAPI_BASE_URL` variable defaults to `https://api.linkapi.ai` and is restricted to the Worker's allowlist of official LinkAPI hosts; arbitrary HTTPS origins are rejected.
 
@@ -68,7 +88,7 @@ These direct routes authenticate only with `ADMIN_API_KEY`. They intentionally b
 
 Gemini clients should prefer `x-goog-api-key`. Query-string `?key=` remains available for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
 
-Request and response bodies are streamed without parsing or changing native SSE event frames. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency, because a retry can duplicate upstream work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee.
+Request and response bodies are streamed without parsing or changing native SSE event frames. The raw OpenAI routes preserve Responses `prompt_cache_key` and Chat `X-Grok-Conv-Id`; for Grok, xAI recommends those shapes for cache routing, but neither this proxy nor LinkAPI guarantees a cache hit. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency, because a retry can duplicate upstream work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee.
 
 ### Gemini vs Vertex-style Google auth
 
@@ -104,6 +124,7 @@ Wrangler will:
 ## Runtime shape
 
 - Worker entry: `cloudflare-worker.mjs`
+- Direct Worker route: `/codex-easy/*`
 - Direct Worker route: `/linkapi/*`
 - Durable Object / Container class: `MultiLLMProxyContainer`
 - Container port: `8080`

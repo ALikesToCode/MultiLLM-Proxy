@@ -2,7 +2,7 @@
 
 ## Supported Runtime
 
-The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*` takes a direct Worker fast path to avoid a Container wakeup and preserve provider-native streaming.
+The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*` and Codex Everywhere OpenAI traffic under `/codex-easy/*` take direct Worker fast paths to avoid a Container wakeup and preserve provider-native streaming.
 
 `wrangler.jsonc` deploys:
 
@@ -14,6 +14,27 @@ The supported Cloudflare target is a hybrid Worker plus Container deployment. Mo
 - Observability: enabled
 
 The Worker routes Container-backed app traffic to the named `primary` container. Keeping one container instance avoids stale auth/model state from multiple Python worker processes until durable storage is introduced.
+
+## Codex Everywhere Worker Fast Path
+
+Configure the preferred upstream credential as a Worker secret. The existing `CODEX_API_KEY` secret name is supported as a fallback alias.
+
+```bash
+npx wrangler secret put CODEX_EASY_API_KEY
+```
+
+The upstream origin is fixed to `https://codex-easy.ai`. If a client appends `/v1`, configure `$PROXY_BASE_URL/codex-easy`; if it expects `/v1` in the configured base, use `$PROXY_BASE_URL/codex-easy/v1`.
+
+| Operation | Direct Worker route | Caller credential |
+| --- | --- | --- |
+| Key-group model catalog | `/codex-easy/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI Responses | `/codex-easy/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `/codex-easy/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Images | `/codex-easy/v1/images/*` | `Authorization: Bearer $ADMIN_API_KEY` |
+
+The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces it with `CODEX_EASY_API_KEY` or its alias before contacting Codex Everywhere. It bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. Use the Container-backed `/v1/responses` or `/v1/chat/completions` route with a `codex-easy:<model>` model ID when those controls are required.
+
+Catalog results are specific to the API-key group, so discover current model IDs through `/codex-easy/v1/models`. Image routes work only for image-generation key groups. The Worker preserves raw JSON, SSE, binary, and multipart bodies. On both raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, it retains a Responses `prompt_cache_key` and forwards Chat's `X-Grok-Conv-Id`. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) these fields for cache routing, but neither the proxy nor either provider guarantees a cache hit. Generation POSTs are single-attempt; the proxy does not provide idempotency.
 
 ## LinkAPI Worker Fast Path
 
@@ -38,7 +59,7 @@ The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces the caller
 
 Gemini clients should prefer `x-goog-api-key`. Query-string `?key=` remains available for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
 
-The Worker streams request and response bodies without parsing or translating native SSE frames. The proxy never retries generation POSTs and does not provide idempotency, avoiding accidental duplicate generations and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
+The Worker streams request and response bodies without parsing or translating native SSE frames. Its raw OpenAI routes preserve Responses `prompt_cache_key` and Chat `X-Grok-Conv-Id`; for Grok, xAI recommends those shapes for cache routing, but neither this proxy nor LinkAPI guarantees a cache hit. The proxy never retries generation POSTs and does not provide idempotency, avoiding accidental duplicate generations and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
 
 ## Important State Limitation
 
@@ -48,7 +69,7 @@ Cloudflare Containers have ephemeral disk when an instance sleeps or restarts. T
 - `RATE_LIMIT_DB_PATH=/tmp/rate_limits.sqlite3`
 - `MODEL_REGISTRY_DB_PATH=/tmp/model_registry.sqlite3`
 
-This is fast and cheap for bootstrap state, but it is not durable. Created users, rotated keys, disabled model overrides, and rate-limit history can disappear after container restart. Keep `ADMIN_API_KEY` configured as the bootstrap admin key. The direct LinkAPI fast path intentionally authenticates against this bootstrap key because it does not wake or query the Container's SQLite database.
+This is fast and cheap for bootstrap state, but it is not durable. Created users, rotated keys, disabled model overrides, and rate-limit history can disappear after container restart. Keep `ADMIN_API_KEY` configured as the bootstrap admin key. The direct LinkAPI and Codex Everywhere fast paths intentionally authenticate against this bootstrap key because they do not wake or query the Container's SQLite database.
 
 Use one of these architectures before relying on durable app state:
 
@@ -70,6 +91,7 @@ Provider secrets are optional and should be set only when used:
 wrangler secret put OPENAI_API_KEY
 wrangler secret put OPENROUTER_API_KEY
 wrangler secret put OPENCODE_API_KEY
+wrangler secret put CODEX_EASY_API_KEY
 wrangler secret put LINKAPI_KEY
 wrangler secret put GEMINI_API_KEY
 wrangler secret put GROQ_API_KEY_1
