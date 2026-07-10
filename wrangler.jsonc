@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "multillm-proxy",
   "main": "./cloudflare-worker.mjs",
-  "compatibility_date": "2026-04-07",
+  "compatibility_date": "2026-07-10",
   "compatibility_flags": [
     "enable_request_signal",
     "request_signal_passthrough"
@@ -34,7 +34,12 @@
   "observability": {
     "enabled": true,
     "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.05,
       "invocation_logs": false
+    },
+    "traces": {
+      "enabled": false
     }
   },
   "vars": {

@@ -1,4 +1,4 @@
-import { Container, getContainer, switchPort } from "@cloudflare/containers";
+import { Container, getContainer } from "@cloudflare/containers";
 
 const API_ROUTE_PREFIXES = new Set([
   "azure",
@@ -27,6 +27,10 @@ const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta, Content-Type, Accept, Origin, X-Requested-With";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
+const CONTAINER_PACKAGE_STARTUP_ERROR_PREFIXES = new Map([
+  [500, "Failed to start container:"],
+  [503, "There is no Container instance available at this time."],
+]);
 const LINKAPI_ALLOWED_HOSTNAMES = new Set([
   "linkapi.ai",
   "api.linkapi.ai",
@@ -139,6 +143,8 @@ const DIRECT_ENV_KEYS = [
   "GUNICORN_WORKERS",
   "GUNICORN_THREADS",
   "GUNICORN_TIMEOUT",
+  "GUNICORN_GRACEFUL_TIMEOUT",
+  "GUNICORN_ACCESS_LOG",
 ];
 
 const DYNAMIC_ENV_PATTERNS = [
@@ -184,7 +190,7 @@ function isApiRequestPath(pathname) {
     return false;
   }
 
-  if (stripped === "health") {
+  if (stripped === "health" || stripped === "ready") {
     return true;
   }
 
@@ -250,18 +256,42 @@ function buildRootFallbackResponse() {
   <body>
     <main>
       <h1>MultiLLM Proxy</h1>
-      <p>The dashboard container is currently unavailable, but the worker fallback is live.</p>
-      <p>Use <code>/health</code> for status checks and <code>/opencode/chat/completions</code> for the Janitor AI-compatible proxy path.</p>
+      <p>The dashboard container is currently unavailable.</p>
+      <p>Use <code>/health</code> for Worker liveness and <code>/ready</code> for application readiness.</p>
     </main>
   </body>
 </html>`,
     {
-      status: 200,
+      status: 503,
       headers: {
         "Content-Type": "text/html; charset=UTF-8",
+        "Retry-After": "5",
       },
     },
   );
+}
+
+function buildContainerNotReadyApiResponse() {
+  return jsonResponse(
+    {
+      error: "Proxy unavailable",
+      message: "The proxy container is not ready to handle requests.",
+    },
+    {
+      status: 503,
+      headers: { "Retry-After": "5" },
+    },
+  );
+}
+
+function buildContainerNotReadyTextResponse() {
+  return new Response("Proxy unavailable", {
+    status: 503,
+    headers: {
+      "Content-Type": "text/plain; charset=UTF-8",
+      "Retry-After": "5",
+    },
+  });
 }
 
 function buildUnauthorizedResponse() {
@@ -302,6 +332,14 @@ function buildMissingLinkApiKeyResponse() {
     },
     { status: 500 },
   );
+}
+
+function logStructuredError(event, error) {
+  const candidateName = error instanceof Error ? error.name : "UnknownError";
+  const errorName = /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(candidateName)
+    ? candidateName
+    : "Error";
+  console.error({ event, errorName });
 }
 
 function extractLinkApiCallerToken(request, requestUrl) {
@@ -383,7 +421,7 @@ function getLinkApiProtocol(pathname) {
   return "openai";
 }
 
-function buildLinkApiUpstreamUrl(requestUrl, env, upstreamToken) {
+function buildLinkApiUpstreamUrl(requestUrl, env) {
   const upstreamUrl = getTrustedLinkApiBaseUrl(env.LINKAPI_BASE_URL);
   const suffix = requestUrl.pathname.slice("/linkapi".length) || "/";
   upstreamUrl.pathname = suffix;
@@ -392,10 +430,6 @@ function buildLinkApiUpstreamUrl(requestUrl, env, upstreamToken) {
     if (name.toLowerCase() !== "key") {
       upstreamUrl.searchParams.append(name, value);
     }
-  }
-
-  if (getLinkApiProtocol(suffix) === "gemini") {
-    upstreamUrl.searchParams.append("key", upstreamToken);
   }
   return upstreamUrl;
 }
@@ -421,6 +455,8 @@ function buildLinkApiUpstreamHeaders(request, protocol, upstreamToken) {
     if (!headers.has("anthropic-version")) {
       headers.set("anthropic-version", "2023-06-01");
     }
+  } else if (protocol === "gemini") {
+    headers.set("x-goog-api-key", upstreamToken);
   } else if (protocol === "openai") {
     headers.set("Authorization", `Bearer ${upstreamToken}`);
   }
@@ -484,6 +520,64 @@ function copyProxyResponseHeaders(headers) {
   }
 
   return responseHeaders;
+}
+
+async function responseStartsWithAsciiPrefix(response, prefix) {
+  let reader;
+
+  try {
+    const probeBody = response.clone().body;
+    if (!probeBody) {
+      return false;
+    }
+
+    reader = probeBody.getReader();
+    const expectedBytes = new TextEncoder().encode(prefix);
+    let matchedBytes = 0;
+
+    while (matchedBytes < expectedBytes.byteLength) {
+      const { value, done } = await reader.read();
+      if (done || !value) {
+        return false;
+      }
+
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      for (const byte of chunk) {
+        if (byte !== expectedBytes[matchedBytes]) {
+          return false;
+        }
+        matchedBytes += 1;
+        if (matchedBytes === expectedBytes.byteLength) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  } finally {
+    if (reader) {
+      void reader.cancel().catch(() => {});
+    }
+  }
+
+  return false;
+}
+
+async function isContainerPackageStartupFailure(response) {
+  const expectedPrefix = CONTAINER_PACKAGE_STARTUP_ERROR_PREFIXES.get(response.status);
+  if (!expectedPrefix) {
+    return false;
+  }
+
+  const mediaType = (response.headers.get("content-type") ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  if (mediaType !== "text/plain") {
+    return false;
+  }
+
+  return responseStartsWithAsciiPrefix(response, expectedPrefix);
 }
 
 function looksLikeMeaningfulStreamText(text) {
@@ -1063,21 +1157,25 @@ function createOpencodeStreamResponse(upstreamResponse) {
 }
 
 async function handleDirectOpencodeRequest(request, env, requestUrl) {
+  const providedToken = extractBearerToken(request);
+  if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
+    return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
+  }
+
   if (!env.OPENCODE_API_KEY) {
     return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
-  const providedToken = extractBearerToken(request);
-  if (!providedToken || providedToken !== env.ADMIN_API_KEY) {
-    return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
-  }
-
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
-  const upstreamResponse = await fetch(buildOpencodeUpstreamUrl(requestUrl), {
+  const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl), {
     method: request.method,
     headers: buildUpstreamHeaders(request, env.OPENCODE_API_KEY),
-    body: bodyAllowed ? await request.clone().arrayBuffer() : undefined,
+    body: bodyAllowed ? request.body : undefined,
+    redirect: "manual",
+    signal: request.signal,
+    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
+  const upstreamResponse = await fetch(upstreamRequest);
 
   const contentType = upstreamResponse.headers.get("content-type") ?? "";
   if (contentType.startsWith("text/event-stream")) {
@@ -1128,7 +1226,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
     return applyCorsHeaders(request, buildMissingLinkApiKeyResponse(), env);
   }
 
-  const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env, upstreamToken);
+  const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env);
   const protocol = getLinkApiProtocol(upstreamUrl.pathname);
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(upstreamUrl, {
@@ -1222,27 +1320,8 @@ export class MultiLLMProxyContainer extends Container {
     this.envVars = collectContainerEnv(env);
   }
 
-  onStart() {
-    console.log("Container starting", {
-      envKeys: Object.keys(this.envVars).sort(),
-      hasAdminApiKey: Boolean(this.envVars.ADMIN_API_KEY),
-      hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
-      hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
-      hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
-      hasMimoApiKey: Boolean(this.envVars.MIMO_API_KEY),
-    });
-  }
-
   onError(error) {
-    console.error("Container startup error", {
-      message: error instanceof Error ? error.message : String(error),
-      envKeys: Object.keys(this.envVars).sort(),
-      hasAdminApiKey: Boolean(this.envVars.ADMIN_API_KEY),
-      hasFlaskSecretKey: Boolean(this.envVars.FLASK_SECRET_KEY),
-      hasJwtSecret: Boolean(this.envVars.JWT_SECRET),
-      hasOpenCodeApiKey: Boolean(this.envVars.OPENCODE_API_KEY),
-      hasMimoApiKey: Boolean(this.envVars.MIMO_API_KEY),
-    });
+    logStructuredError("container_start_failed", error);
   }
 }
 
@@ -1252,16 +1331,9 @@ export default {
     const apiPath = isApiRequestPath(requestUrl.pathname);
     const rootPath = requestUrl.pathname === "/";
     const healthPath = isDirectHealthPath(requestUrl.pathname);
+    const readyPath = requestUrl.pathname === "/ready";
     const linkapiPath = isDirectLinkApiPath(requestUrl.pathname);
     const opencodePath = isDirectOpencodePath(requestUrl.pathname);
-
-    console.log("Worker env check", {
-      hasAdminApiKey: Boolean(env.ADMIN_API_KEY),
-      hasFlaskSecretKey: Boolean(env.FLASK_SECRET_KEY),
-      hasJwtSecret: Boolean(env.JWT_SECRET),
-      hasOpenCodeApiKey: Boolean(env.OPENCODE_API_KEY),
-      hasMimoApiKey: Boolean(env.MIMO_API_KEY),
-    });
 
     if (request.method === "OPTIONS" && apiPath) {
       return buildPreflightResponse(request, env);
@@ -1275,9 +1347,7 @@ export default {
       try {
         return await handleDirectLinkApiRequest(request, env, requestUrl);
       } catch (error) {
-        console.error("Direct LinkAPI fetch failed", {
-          name: error instanceof Error ? error.name : "UnknownError",
-        });
+        logStructuredError("direct_linkapi_fetch_failed", error);
         return applyCorsHeaders(
           request,
           jsonResponse(
@@ -1296,7 +1366,7 @@ export default {
       try {
         return await handleDirectOpencodeRequest(request, env, requestUrl);
       } catch (error) {
-        console.error("Direct opencode fetch failed", error);
+        logStructuredError("direct_opencode_fetch_failed", error);
         return applyCorsHeaders(
           request,
           jsonResponse(
@@ -1313,36 +1383,42 @@ export default {
 
     try {
       const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
-      await container.startAndWaitForPorts({
-        ports: [8080],
-        cancellationOptions: {
-          instanceGetTimeoutMS: 30000,
-          portReadyTimeoutMS: 30000,
-          waitInterval: 500,
-        },
-      });
       const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
       const headers = new Headers(request.headers);
       headers.delete("content-length");
       headers.delete("host");
-      const forwardedRequest = new Request(requestUrl.toString(), {
+      const containerUrl = new URL(requestUrl);
+      if (readyPath) {
+        containerUrl.pathname = "/healthz";
+      }
+      const forwardedRequest = new Request(containerUrl, {
         method: request.method,
         headers,
-        body: bodyAllowed ? await request.clone().arrayBuffer() : undefined,
+        body: bodyAllowed ? request.body : undefined,
         redirect: "manual",
+        signal: request.signal,
+        ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
       });
-      const response = await container.fetch(
-        switchPort(forwardedRequest, 8080),
-      );
+      const response = await container.fetch(forwardedRequest);
+      if (await isContainerPackageStartupFailure(response)) {
+        logStructuredError("container_start_failed_response", new Error("Container unavailable"));
+        if (rootPath) {
+          return buildRootFallbackResponse();
+        }
+        if (apiPath) {
+          return applyCorsHeaders(request, buildContainerNotReadyApiResponse(), env);
+        }
+        return buildContainerNotReadyTextResponse();
+      }
       return applyCorsHeaders(request, response, env);
     } catch (error) {
       if (rootPath) {
-        console.error("Container fetch failed", error);
+        logStructuredError("container_fetch_failed", error);
         return buildRootFallbackResponse();
       }
 
       if (!apiPath) {
-        console.error("Container fetch failed", error);
+        logStructuredError("container_fetch_failed", error);
         return new Response("Proxy unavailable", {
           status: 502,
           headers: {
@@ -1351,7 +1427,7 @@ export default {
         });
       }
 
-      console.error("Container fetch failed", error);
+      logStructuredError("container_fetch_failed", error);
       return applyCorsHeaders(
         request,
         new Response(

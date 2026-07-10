@@ -21,10 +21,14 @@ const { MultiLLMProxyContainer } = workerModule;
 
 function makeEnv(fetchImpl, envOverrides = {}) {
   let calls = 0;
+  let startCalls = 0;
 
   return {
     getCalls() {
       return calls;
+    },
+    getStartCalls() {
+      return startCalls;
     },
     env: {
       MULTILLM_PROXY_CONTAINER: {
@@ -33,6 +37,7 @@ function makeEnv(fetchImpl, envOverrides = {}) {
 
           return {
             async startAndWaitForPorts() {
+              startCalls += 1;
               return undefined;
             },
             async containerFetch(input, init) {
@@ -381,6 +386,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       LINKAPI_MAX_REQUEST_BYTES: "33554432",
       LINKAPI_RATE_LIMIT_RPM: "120",
       RATE_LIMIT_ENABLED: "true",
+      GUNICORN_GRACEFUL_TIMEOUT: "45",
+      GUNICORN_ACCESS_LOG: "-",
     },
   );
 
@@ -401,6 +408,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.LINKAPI_MAX_REQUEST_BYTES, "33554432");
   assert.equal(container.envVars.LINKAPI_RATE_LIMIT_RPM, "120");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
+  assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
+  assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");
   assert.equal(container.envVars.AUTH_DB_PATH, "/tmp/auth.sqlite3");
   assert.equal(container.envVars.RATE_LIMIT_DB_PATH, "/tmp/rate_limits.sqlite3");
   assert.equal(container.envVars.MODEL_REGISTRY_DB_PATH, "/tmp/model_registry.sqlite3");
@@ -596,11 +605,11 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
         Cookie: "must-not-leak=yes",
       },
       expectedUrl:
-        "https://api.linkapi.ai/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&alt=json&key=linkapi-live-key",
+        "https://api.linkapi.ai/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse&alt=json",
       assertAuth(request) {
         assert.equal(request.headers.has("Authorization"), false);
         assert.equal(request.headers.has("x-api-key"), false);
-        assert.equal(request.headers.has("x-goog-api-key"), false);
+        assert.equal(request.headers.get("x-goog-api-key"), "linkapi-live-key");
         assert.equal(request.headers.get("x-goog-api-client"), "gl-node/22.0.0");
       },
       bodyChunks: ['{"contents":[{"parts":[', '{"text":"hello"}]}]}'],
@@ -688,8 +697,11 @@ test("worker never exposes the Gemini upstream key through redirect headers", as
     async (input) => {
       fetchCalls += 1;
       const upstreamRequest = input instanceof Request ? input : new Request(input);
+      const upstreamUrl = new URL(upstreamRequest.url);
       assert.equal(upstreamRequest.method, "POST");
-      assert.equal(new URL(upstreamRequest.url).searchParams.get("key"), upstreamKey);
+      assert.equal(upstreamUrl.searchParams.has("key"), false);
+      assert.equal(upstreamRequest.headers.get("x-goog-api-key"), upstreamKey);
+      assert.doesNotMatch(upstreamRequest.url, new RegExp(upstreamKey, "i"));
       return new Response("redirect refused", {
         status: 302,
         headers: {
@@ -721,6 +733,60 @@ test("worker never exposes the Gemini upstream key through redirect headers", as
   );
 
   assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker keeps Gemini provider secrets out of upstream URLs and failure logs", async () => {
+  const upstreamKey = "linkapi-upstream-secret";
+  const errorCalls = [];
+  const originalConsoleError = console.error;
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: upstreamKey,
+    },
+  );
+
+  console.error = (...args) => errorCalls.push(args);
+  try {
+    await withGlobalFetch(
+      async (input) => {
+        const upstreamRequest = input instanceof Request ? input : new Request(input);
+        const upstreamUrl = new URL(upstreamRequest.url);
+        assert.deepEqual(upstreamUrl.searchParams.getAll("alt"), ["sse", "json"]);
+        assert.equal(upstreamUrl.searchParams.has("key"), false);
+        assert.equal(upstreamRequest.headers.get("x-goog-api-key"), upstreamKey);
+        assert.doesNotMatch(upstreamRequest.url, new RegExp(upstreamKey, "i"));
+        throw new Error(`Gemini transport failed while using ${upstreamKey}`);
+      },
+      async () => {
+        const response = await worker.fetch(
+          new Request(
+            "https://multillm-proxy.cserules.workers.dev/linkapi/v1beta/models/gemini-3.5-flash:generateContent?alt=sse&key=admin-live-key&alt=json",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: '{"contents":[{"parts":[{"text":"hello"}]}]}',
+            },
+          ),
+          stub.env,
+        );
+
+        assert.equal(response.status, 502);
+      },
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(errorCalls, [[{
+    event: "direct_linkapi_fetch_failed",
+    errorName: "Error",
+  }]]);
+  assert.doesNotMatch(JSON.stringify(errorCalls), new RegExp(upstreamKey, "i"));
   assert.equal(stub.getCalls(), 0);
 });
 
@@ -1006,7 +1072,7 @@ test("worker answers LinkAPI CORS preflight with native SDK headers", async () =
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker deploy config exposes only the safe LinkAPI base URL default", async () => {
+test("worker deploy config keeps LinkAPI secrets private and samples observability", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
@@ -1015,8 +1081,12 @@ test("worker deploy config exposes only the safe LinkAPI base URL default", asyn
   assert.equal(config.vars?.LINKAPI_API_KEY, undefined);
   assert.equal(config.compatibility_flags?.includes("enable_request_signal"), true);
   assert.equal(config.compatibility_flags?.includes("request_signal_passthrough"), true);
+  assert.equal(config.compatibility_date, "2026-07-10");
   assert.equal(config.observability?.enabled, true);
+  assert.equal(config.observability?.logs?.enabled, true);
+  assert.equal(config.observability?.logs?.head_sampling_rate, 0.05);
   assert.equal(config.observability?.logs?.invocation_logs, false);
+  assert.equal(config.observability?.traces?.enabled, false);
 });
 
 test("worker answers /health directly without touching the container", async () => {
@@ -1035,6 +1105,221 @@ test("worker answers /health directly without touching the container", async () 
     status: "healthy",
     mode: "worker-fallback",
   });
+});
+
+test("worker checks application readiness through the container health endpoint", async () => {
+  const origin = "https://client.example";
+  const stub = makeEnv(async (request) => {
+    const forwardedUrl = new URL(request.url);
+    assert.equal(forwardedUrl.pathname, "/healthz");
+    assert.equal(request.method, "GET");
+    assert.equal(request.redirect, "manual");
+    return new Response(JSON.stringify({ status: "ready", database: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/ready", {
+      headers: { Origin: origin },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(stub.getCalls(), 1);
+  assert.equal(stub.getStartCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.deepEqual(await response.json(), { status: "ready", database: "ok" });
+});
+
+test("worker relies on container.fetch for startup and readiness", async () => {
+  const stub = makeEnv(async () => new Response("container ready", { status: 200 }));
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/dashboard"),
+    stub.env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "container ready");
+  assert.equal(stub.getCalls(), 1);
+  assert.equal(stub.getStartCalls(), 0);
+});
+
+test("worker streams ordinary request bodies into the container without buffering", async () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseTail;
+  let resolveFirstChunk;
+  const tailGate = new Promise((resolve) => {
+    releaseTail = resolve;
+  });
+  const firstChunkSeen = new Promise((resolve) => {
+    resolveFirstChunk = resolve;
+  });
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"model":"streamed",'));
+      tailGate.then(() => {
+        controller.enqueue(encoder.encode('"input":"hello"}'));
+        controller.close();
+      });
+    },
+  });
+  const stub = makeEnv(async (request) => {
+    assert.equal(request.redirect, "manual");
+    const reader = request.body.getReader();
+    const first = await reader.read();
+    assert.equal(decoder.decode(first.value), '{"model":"streamed",');
+    assert.equal(first.done, false);
+    resolveFirstChunk();
+
+    await tailGate;
+    const second = await reader.read();
+    assert.equal(decoder.decode(second.value), '"input":"hello"}');
+    assert.equal(second.done, false);
+    assert.equal((await reader.read()).done, true);
+    return new Response("accepted", { status: 202 });
+  });
+
+  const withDeadline = async (promise, label) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} was buffered`)), 500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    const pendingResponse = worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/openai/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        duplex: "half",
+      }),
+      stub.env,
+    );
+
+    await withDeadline(firstChunkSeen, "container request body");
+    assert.equal(stub.getStartCalls(), 0);
+    releaseTail();
+    const response = await withDeadline(pendingResponse, "container response");
+    assert.equal(response.status, 202);
+    assert.equal(await response.text(), "accepted");
+  } finally {
+    releaseTail();
+  }
+
+  assert.equal(stub.getCalls(), 1);
+});
+
+test("worker preserves caller cancellation when reconstructing container requests", async () => {
+  const controller = new AbortController();
+  let resolveContainerReceived;
+  const containerReceived = new Promise((resolve) => {
+    resolveContainerReceived = resolve;
+  });
+  let forwardedAbortObserved = false;
+  const stub = makeEnv(async (request) => {
+    resolveContainerReceived();
+    await new Promise((resolve) => {
+      if (request.signal.aborted) {
+        forwardedAbortObserved = true;
+        resolve();
+        return;
+      }
+      const timeout = setTimeout(resolve, 150);
+      request.signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timeout);
+          forwardedAbortObserved = true;
+          resolve();
+        },
+        { once: true },
+      );
+    });
+    return new Response(null, { status: 204 });
+  });
+
+  const pendingResponse = worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/dashboard", {
+      signal: controller.signal,
+    }),
+    stub.env,
+  );
+  await containerReceived;
+  controller.abort();
+
+  assert.equal((await pendingResponse).status, 204);
+  assert.equal(forwardedAbortObserved, true);
+  assert.equal(stub.getStartCalls(), 0);
+});
+
+test("worker omits routine environment inventory logs and sanitizes startup errors", async () => {
+  const workerUrl = new URL("../cloudflare-worker.mjs", import.meta.url);
+  const source = await readFile(workerUrl, "utf8");
+  assert.doesNotMatch(source, /Worker env check|Container starting|envKeys|hasAdminApiKey/);
+  assert.doesNotMatch(source, /\bstartAndWaitForPorts\b|\bswitchPort\b/);
+  assert.equal(Object.hasOwn(MultiLLMProxyContainer.prototype, "onStart"), false);
+
+  const logCalls = [];
+  const originalConsoleLog = console.log;
+  console.log = (...args) => logCalls.push(args);
+  try {
+    const stub = makeEnv(async () => {
+      throw new Error("health must remain Worker-only");
+    });
+    const response = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/health"),
+      stub.env,
+    );
+    assert.equal(response.status, 200);
+  } finally {
+    console.log = originalConsoleLog;
+  }
+  assert.deepEqual(logCalls, []);
+
+  const errorCalls = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => errorCalls.push(args);
+  try {
+    const container = new MultiLLMProxyContainer({}, {
+      ADMIN_API_KEY: "must-not-be-logged",
+      LINKAPI_KEY: "must-not-be-logged-either",
+    });
+    container.onError(new Error("startup failed"));
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.deepEqual(errorCalls, [[{
+    event: "container_start_failed",
+    errorName: "Error",
+  }]]);
+  assert.doesNotMatch(JSON.stringify(errorCalls), /must-not-be-logged|ADMIN_API_KEY|LINKAPI_KEY/);
+});
+
+test("container entrypoint uses a query-safe format when access logs are explicitly enabled", async () => {
+  const scriptUrl = new URL("../scripts/cloudflare-entrypoint.sh", import.meta.url);
+  const source = await readFile(scriptUrl, "utf8");
+
+  assert.match(source, /GUNICORN_ACCESS_LOG/);
+  assert.doesNotMatch(source, /--access-logfile\s+-\s*\\?$/m);
+  const enabledBlock = source.match(
+    /if \[ -n "\$\{GUNICORN_ACCESS_LOG:-\}" \]; then([\s\S]*?)\nfi/,
+  )?.[1] ?? "";
+  assert.match(enabledBlock, /--access-logfile\s+"\$GUNICORN_ACCESS_LOG"/);
+  assert.match(enabledBlock, /--access-logformat\s+'%\(m\)s %\(U\)s %\(H\)s'/);
+  assert.doesNotMatch(source, /%\(r\)s|%\(q\)s|RAW_URI|request[ _-]?line|referer/i);
 });
 
 test("worker serves / from the container when it is available", async () => {
@@ -1091,7 +1376,7 @@ test("worker preserves container redirects for dashboard form posts", async () =
   assert.equal(stub.getCalls(), 1);
 });
 
-test("worker falls back on / when the container is unavailable", async () => {
+test("worker reports / as unavailable when the container is unavailable", async () => {
   const stub = makeEnv(async () => {
     throw new Error("root container unavailable");
   });
@@ -1101,9 +1386,301 @@ test("worker falls back on / when the container is unavailable", async () => {
     stub.env,
   );
 
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 503);
   assert.equal(stub.getCalls(), 1);
   assert.match(await response.text(), /MultiLLM Proxy/);
+});
+
+test("worker sanitizes the container package's resolved startup 500 response", async () => {
+  const packageError =
+    "Failed to start container: Container did not start after 8000ms; token=must-not-leak";
+  const stub = makeEnv(async () => {
+    return new Response(packageError, { status: 500 });
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/"),
+    stub.env,
+  );
+  const body = await response.text();
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Retry-After"), "5");
+  assert.match(body, /MultiLLM Proxy/);
+  assert.doesNotMatch(body, /must-not-leak|Failed to start container/);
+  assert.equal(stub.getCalls(), 1);
+});
+
+test("worker sanitizes the container package's resolved capacity 503 response", async () => {
+  const packageError = [
+    "There is no Container instance available at this time.",
+    "This is likely because you have reached your max concurrent instance count (set in wrangler config) or are you currently provisioning the Container.",
+    "If you are deploying your Container for the first time, check your dashboard to see provisioning status, this may take a few minutes.",
+  ].join("\n");
+  const origin = "https://client.example";
+  const stub = makeEnv(async () => {
+    return new Response(packageError, { status: 503 });
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/ready", {
+      headers: { Origin: origin },
+    }),
+    stub.env,
+  );
+  const body = await response.text();
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Retry-After"), "5");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(response.headers.get("Content-Type") ?? "", /application\/json/);
+  assert.deepEqual(JSON.parse(body), {
+    error: "Proxy unavailable",
+    message: "The proxy container is not ready to handle requests.",
+  });
+  assert.doesNotMatch(body, /max concurrent instance|provisioning/);
+  assert.equal(stub.getCalls(), 1);
+});
+
+test("worker preserves genuine application text and JSON 5xx responses", async () => {
+  const cases = [
+    {
+      path: "/dashboard",
+      response: new Response("Application maintenance window", {
+        status: 500,
+        headers: { "Content-Type": "text/plain; charset=UTF-8" },
+      }),
+      expectedBody: "Application maintenance window",
+      expectedContentType: "text/plain; charset=UTF-8",
+    },
+    {
+      path: "/openai/chat/completions",
+      response: new Response(JSON.stringify({ error: "upstream unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+      expectedBody: JSON.stringify({ error: "upstream unavailable" }),
+      expectedContentType: "application/json",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const stub = makeEnv(async () => testCase.response);
+    const response = await worker.fetch(
+      new Request(`https://multillm-proxy.cserules.workers.dev${testCase.path}`),
+      stub.env,
+    );
+
+    assert.equal(response.status, testCase.response.status);
+    assert.equal(response.headers.get("Content-Type"), testCase.expectedContentType);
+    assert.equal(response.headers.get("Retry-After"), null);
+    assert.equal(await response.text(), testCase.expectedBody);
+    assert.equal(stub.getCalls(), 1);
+  }
+});
+
+test("worker authenticates OpenCode callers before revealing provider configuration", async () => {
+  const originalTimingSafeEqual = crypto.subtle.timingSafeEqual;
+  let timingSafeCalls = 0;
+  Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+    configurable: true,
+    value(left, right) {
+      timingSafeCalls += 1;
+      const leftBytes = new Uint8Array(left.buffer ?? left, left.byteOffset ?? 0, left.byteLength);
+      const rightBytes = new Uint8Array(right.buffer ?? right, right.byteOffset ?? 0, right.byteLength);
+      return leftBytes.every((value, index) => value === rightBytes[index]);
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode auth checks must bypass the container");
+    },
+    { ADMIN_API_KEY: "admin-live-key" },
+  );
+
+  try {
+    const unauthorized = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/models", {
+        headers: { Authorization: "Bearer wrong-key" },
+      }),
+      stub.env,
+    );
+    assert.equal(unauthorized.status, 401);
+    assert.doesNotMatch(await unauthorized.text(), /OPENCODE_API_KEY/);
+
+    const authenticated = await worker.fetch(
+      new Request("https://multillm-proxy.cserules.workers.dev/opencode/models", {
+        headers: { Authorization: "Bearer admin-live-key" },
+      }),
+      stub.env,
+    );
+    assert.equal(authenticated.status, 500);
+    assert.match(await authenticated.text(), /OPENCODE_API_KEY/);
+  } finally {
+    if (originalTimingSafeEqual === undefined) {
+      delete crypto.subtle.timingSafeEqual;
+    } else {
+      Object.defineProperty(crypto.subtle, "timingSafeEqual", {
+        configurable: true,
+        value: originalTimingSafeEqual,
+      });
+    }
+  }
+
+  assert.equal(timingSafeCalls, 2);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker streams OpenCode request bodies without buffering", async () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseTail;
+  let resolveFirstChunk;
+  const tailGate = new Promise((resolve) => {
+    releaseTail = resolve;
+  });
+  const firstChunkSeen = new Promise((resolve) => {
+    resolveFirstChunk = resolve;
+  });
+  const requestBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"model":"kimi-k2.5",'));
+      tailGate.then(() => {
+        controller.enqueue(encoder.encode('"messages":[]}'));
+        controller.close();
+      });
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+  const withDeadline = async (promise, label) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} was buffered`)), 500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    await withGlobalFetch(
+      async (input, init) => {
+        const upstreamRequest = input instanceof Request ? input : new Request(input, init);
+        assert.equal(upstreamRequest.url, "https://opencode.ai/zen/go/v1/chat/completions");
+        assert.equal(upstreamRequest.redirect, "manual");
+        const reader = upstreamRequest.body.getReader();
+        const first = await reader.read();
+        assert.equal(decoder.decode(first.value), '{"model":"kimi-k2.5",');
+        assert.equal(first.done, false);
+        resolveFirstChunk();
+
+        await tailGate;
+        const second = await reader.read();
+        assert.equal(decoder.decode(second.value), '"messages":[]}');
+        assert.equal(second.done, false);
+        assert.equal((await reader.read()).done, true);
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+      async () => {
+        const pendingResponse = worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/opencode/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            duplex: "half",
+          }),
+          stub.env,
+        );
+
+        await withDeadline(firstChunkSeen, "OpenCode request body");
+        releaseTail();
+        const response = await withDeadline(pendingResponse, "OpenCode response");
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { ok: true });
+      },
+    );
+  } finally {
+    releaseTail();
+  }
+
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker propagates caller aborts to the direct OpenCode fetch", async () => {
+  const controller = new AbortController();
+  let resolveFetchReceived;
+  const fetchReceived = new Promise((resolve) => {
+    resolveFetchReceived = resolve;
+  });
+  let upstreamSawAbort = false;
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_API_KEY: "opencode-live-key",
+    },
+  );
+
+  await withGlobalFetch(
+    async (input, init) => {
+      const upstreamRequest = input instanceof Request ? input : new Request(input, init);
+      resolveFetchReceived();
+      await new Promise((resolve) => {
+        if (upstreamRequest.signal.aborted) {
+          upstreamSawAbort = true;
+          resolve();
+          return;
+        }
+        const timeout = setTimeout(resolve, 150);
+        upstreamRequest.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timeout);
+            upstreamSawAbort = true;
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async () => {
+      const pendingResponse = worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/opencode/models", {
+          headers: { Authorization: "Bearer admin-live-key" },
+          signal: controller.signal,
+        }),
+        stub.env,
+      );
+      await fetchReceived;
+      controller.abort();
+      assert.equal((await pendingResponse).status, 200);
+    },
+  );
+
+  assert.equal(upstreamSawAbort, true);
+  assert.equal(stub.getCalls(), 0);
 });
 
 test("worker proxies opencode requests directly when the container is unavailable", async () => {
