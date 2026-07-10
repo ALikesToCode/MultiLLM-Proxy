@@ -378,6 +378,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       LINKAPI_KEY: "linkapi-live-key",
       LINKAPI_API_KEY: "linkapi-alias-key",
       LINKAPI_BASE_URL: "https://hk.linkapi.ai",
+      CODEX_EASY_API_KEY: "codex-easy-live-key",
+      CODEX_API_KEY: "codex-easy-alias-key",
       MIMO_MAX_PROMPT_TOKENS: "1048576",
       MIMO_MAX_OUTPUT_TOKENS: "131072",
       MIMO_MAX_REQUEST_BYTES: "16777216",
@@ -385,6 +387,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       NANOGPT_RATE_LIMIT_RPM: "60",
       LINKAPI_MAX_REQUEST_BYTES: "33554432",
       LINKAPI_RATE_LIMIT_RPM: "120",
+      CODEX_EASY_MAX_REQUEST_BYTES: "67108864",
+      CODEX_EASY_RATE_LIMIT_RPM: "180",
       RATE_LIMIT_ENABLED: "true",
       GUNICORN_GRACEFUL_TIMEOUT: "45",
       GUNICORN_ACCESS_LOG: "-",
@@ -400,6 +404,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.LINKAPI_KEY, "linkapi-live-key");
   assert.equal(container.envVars.LINKAPI_API_KEY, "linkapi-alias-key");
   assert.equal(container.envVars.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
+  assert.equal(container.envVars.CODEX_EASY_API_KEY, "codex-easy-live-key");
+  assert.equal(container.envVars.CODEX_API_KEY, "codex-easy-alias-key");
   assert.equal(container.envVars.MIMO_MAX_PROMPT_TOKENS, "1048576");
   assert.equal(container.envVars.MIMO_MAX_OUTPUT_TOKENS, "131072");
   assert.equal(container.envVars.MIMO_MAX_REQUEST_BYTES, "16777216");
@@ -407,6 +413,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.NANOGPT_RATE_LIMIT_RPM, "60");
   assert.equal(container.envVars.LINKAPI_MAX_REQUEST_BYTES, "33554432");
   assert.equal(container.envVars.LINKAPI_RATE_LIMIT_RPM, "120");
+  assert.equal(container.envVars.CODEX_EASY_MAX_REQUEST_BYTES, "67108864");
+  assert.equal(container.envVars.CODEX_EASY_RATE_LIMIT_RPM, "180");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
   assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");
@@ -1087,6 +1095,592 @@ test("worker deploy config keeps LinkAPI secrets private and samples observabili
   assert.equal(config.observability?.logs?.head_sampling_rate, 0.05);
   assert.equal(config.observability?.logs?.invocation_logs, false);
   assert.equal(config.observability?.traces?.enabled, false);
+});
+
+test("worker proxies Codex Everywhere Responses and Chat SSE bytes without rewriting Grok reasoning", async () => {
+  const scenarios = [
+    {
+      path: "/codex-easy/v1/responses?include=usage&KEY=caller-secret&include=metadata&key=second-secret",
+      expectedUrl: "https://codex-easy.ai/v1/responses?include=usage&include=metadata",
+      requestBytes:
+        '{"model":"grok-4.5","reasoning":{"effort":"high"},"prompt_cache_key":"conversation-123","input":"café","stream":true}',
+      conversationHeader: null,
+      responseChunks: [
+        "event: response.created\n",
+        'data: {"type":"response.created","response":{"id":"resp_1"}}\n\n',
+      ],
+    },
+    {
+      path: "/codex-easy/v1/chat/completions?trace=one&trace=two",
+      expectedUrl: "https://codex-easy.ai/v1/chat/completions?trace=one&trace=two",
+      requestBytes:
+        '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"ping"}],"stream":true}',
+      conversationHeader: "conversation-123",
+      responseChunks: [
+        'data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"pong"}}]}\n\n',
+        "data: [DONE]\n\n",
+      ],
+    },
+  ];
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_EASY_API_KEY: "codex-easy-primary-key",
+      CODEX_API_KEY: "codex-easy-alias-key",
+    },
+  );
+  let scenarioIndex = 0;
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const scenario = scenarios[scenarioIndex];
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, scenario.expectedUrl);
+      assert.equal(upstreamRequest.method, "POST");
+      assert.equal(upstreamRequest.redirect, "manual");
+      assert.equal(await upstreamRequest.text(), scenario.requestBytes);
+      assert.equal(
+        upstreamRequest.headers.get("Authorization"),
+        "Bearer codex-easy-primary-key",
+      );
+      assert.equal(upstreamRequest.headers.get("OpenAI-Beta"), "responses=v1");
+      assert.equal(upstreamRequest.headers.get("OpenAI-Organization"), "org_123");
+      assert.equal(upstreamRequest.headers.get("OpenAI-Project"), "proj_123");
+      assert.equal(upstreamRequest.headers.get("Idempotency-Key"), "idempotent-123");
+      assert.equal(upstreamRequest.headers.get("X-Client-Request-ID"), "client-request-123");
+      assert.equal(upstreamRequest.headers.get("x-stainless-lang"), "js");
+      assert.equal(upstreamRequest.headers.get("x-grok-conv-id"), scenario.conversationHeader);
+      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("Cookie"), false);
+
+      return new Response(makeChunkedBody(scenario.responseChunks), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-store",
+          "OpenAI-Processing-Ms": "42",
+          "X-Request-Id": `request-${scenarioIndex}`,
+          "X-RateLimit-Remaining-Requests": "9",
+          "Set-Cookie": "must-not-leak=yes",
+          Location: "https://untrusted.example/redirect",
+          "Content-Encoding": "gzip",
+          "Content-Length": "999",
+        },
+      });
+    },
+    async () => {
+      for (scenarioIndex = 0; scenarioIndex < scenarios.length; scenarioIndex += 1) {
+        const scenario = scenarios[scenarioIndex];
+        const response = await worker.fetch(
+          new Request(`https://multillm-proxy.cserules.workers.dev${scenario.path}`, {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+              "OpenAI-Beta": "responses=v1",
+              "OpenAI-Organization": "org_123",
+              "OpenAI-Project": "proj_123",
+              "Idempotency-Key": "idempotent-123",
+              "X-Client-Request-ID": "client-request-123",
+              "x-stainless-lang": "js",
+              ...(scenario.conversationHeader
+                ? { "x-grok-conv-id": scenario.conversationHeader }
+                : {}),
+              "x-api-key": "must-not-leak",
+              "x-goog-api-key": "must-not-leak",
+              Cookie: "must-not-leak=yes",
+              Origin: "https://client.example",
+            },
+            body: makeChunkedBody([scenario.requestBytes]),
+            duplex: "half",
+          }),
+          stub.env,
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), scenario.responseChunks.join(""));
+        assert.equal(response.headers.get("Content-Type"), "text/event-stream");
+        assert.equal(response.headers.get("Cache-Control"), "no-store");
+        assert.equal(response.headers.get("OpenAI-Processing-Ms"), "42");
+        assert.equal(response.headers.get("X-Request-Id"), `request-${scenarioIndex}`);
+        assert.equal(response.headers.get("X-RateLimit-Remaining-Requests"), "9");
+        assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://client.example");
+        assert.equal(response.headers.has("Set-Cookie"), false);
+        assert.equal(response.headers.has("Location"), false);
+        assert.equal(response.headers.has("Content-Encoding"), false);
+        assert.equal(response.headers.has("Content-Length"), false);
+      }
+    },
+  );
+
+  assert.equal(fetchCalls, scenarios.length);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker uses the Codex Everywhere key alias for the model catalog", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_API_KEY: "codex-easy-alias-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, "https://codex-easy.ai/v1/models?after=one&after=two");
+      assert.equal(upstreamRequest.method, "GET");
+      assert.equal(upstreamRequest.body, null);
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer codex-easy-alias-key");
+      return new Response('{"object":"list","data":[]}', {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/codex-easy/v1/models?after=one&key=caller&after=two&KeY=caller-two",
+          { headers: { Authorization: "Bearer admin-live-key" } },
+        ),
+        stub.env,
+      );
+      assert.deepEqual(await response.json(), { object: "list", data: [] });
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker authenticates Codex Everywhere callers before reporting configuration", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere auth failures must bypass the container");
+    },
+    { ADMIN_API_KEY: "admin-live-key" },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 204 });
+    },
+    async () => {
+      for (const headers of [
+        {},
+        { Authorization: "Basic admin-live-key" },
+        { Authorization: "Bearer wrong-key" },
+        { "x-api-key": "admin-live-key" },
+        { "x-goog-api-key": "admin-live-key" },
+      ]) {
+        const response = await worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/models", {
+            headers,
+          }),
+          stub.env,
+        );
+        assert.equal(response.status, 401);
+      }
+
+      const missingKey = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/models", {
+          headers: { Authorization: "Bearer admin-live-key" },
+        }),
+        stub.env,
+      );
+      const missingKeyBody = await missingKey.text();
+      assert.equal(missingKey.status, 500);
+      assert.doesNotMatch(missingKeyBody, /CODEX|API_KEY|codex-easy/i);
+    },
+  );
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker restricts Codex Everywhere to canonical documented paths", async () => {
+  const allowedPaths = [
+    ["GET", "/codex-easy/v1/models"],
+    ["POST", "/codex-easy/v1/responses"],
+    ["POST", "/codex-easy/v1/chat/completions"],
+    ["POST", "/codex-easy/v1/images"],
+    ["POST", "/codex-easy/v1/images/generations"],
+    ["POST", "/codex-easy/v1/images/edits/async"],
+  ];
+  const rejectedPaths = [
+    "/codex-easy",
+    "/codex-easy/",
+    "/codex-easy/v1/models/",
+    "/codex-easy/v1/files",
+    "/codex-easy/v1/chat/completions/extra",
+    "/codex-easy/v1%2Fmodels",
+    "/codex-easy/v1%5Cmodels",
+    "/codex-easy%2Fv1/models",
+    "/codex-easy%252Fv1/models",
+    "/cod%65x-easy%252Fv1/models",
+    "/codex-easy/v1/images/%2Fadmin",
+    "/codex-easy/v1/images//generations",
+  ];
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere route validation must bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_EASY_API_KEY: "codex-easy-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 204 });
+    },
+    async () => {
+      for (const [method, path] of allowedPaths) {
+        const bodyAllowed = method !== "GET";
+        const response = await worker.fetch(
+          new Request(`https://multillm-proxy.cserules.workers.dev${path}`, {
+            method,
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              ...(bodyAllowed ? { "Content-Type": "application/json" } : {}),
+            },
+            ...(bodyAllowed ? { body: "{}" } : {}),
+          }),
+          stub.env,
+        );
+        assert.equal(response.status, 204, path);
+      }
+
+      for (const path of rejectedPaths) {
+        const response = await worker.fetch(
+          new Request(`https://multillm-proxy.cserules.workers.dev${path}`, {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: "{}",
+          }),
+          stub.env,
+        );
+        assert.equal(response.status, 404, path);
+      }
+    },
+  );
+
+  assert.equal(fetchCalls, allowedPaths.length);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker preserves Codex Everywhere multipart uploads and binary image responses", async () => {
+  const boundary = "----multillm-boundary";
+  const requestBytes = new TextEncoder().encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngrok-image\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="input.png"\r\n` +
+      "Content-Type: image/png\r\n\r\nPNG-BYTES\r\n" +
+      `--${boundary}--\r\n`,
+  );
+  const responseBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere image fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_EASY_API_KEY: "codex-easy-live-key",
+    },
+  );
+
+  await withGlobalFetch(
+    async (input) => {
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, "https://codex-easy.ai/v1/images/edits");
+      assert.equal(
+        upstreamRequest.headers.get("Content-Type"),
+        `multipart/form-data; boundary=${boundary}`,
+      );
+      assert.deepEqual(new Uint8Array(await upstreamRequest.arrayBuffer()), requestBytes);
+      return new Response(responseBytes, {
+        headers: {
+          "Content-Type": "image/png",
+          "Content-Disposition": 'attachment; filename="result.png"',
+          "Request-Id": "image-request-1",
+          "Content-Length": String(responseBytes.byteLength),
+          "Set-Cookie": "must-not-leak=yes",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/images/edits", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer admin-live-key",
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          },
+          body: requestBytes,
+        }),
+        stub.env,
+      );
+
+      assert.deepEqual(new Uint8Array(await response.arrayBuffer()), responseBytes);
+      assert.equal(response.headers.get("Content-Type"), "image/png");
+      assert.equal(response.headers.get("Content-Disposition"), 'attachment; filename="result.png"');
+      assert.equal(response.headers.get("Request-Id"), "image-request-1");
+      assert.equal(response.headers.has("Content-Length"), false);
+      assert.equal(response.headers.has("Set-Cookie"), false);
+    },
+  );
+
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetches once", async () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseRequest;
+  let releaseResponse;
+  let resolveFirstRequestChunk;
+  const requestGate = new Promise((resolve) => {
+    releaseRequest = resolve;
+  });
+  const responseGate = new Promise((resolve) => {
+    releaseResponse = resolve;
+  });
+  const firstRequestChunk = new Promise((resolve) => {
+    resolveFirstRequestChunk = resolve;
+  });
+  const requestBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"model":"grok-4.5",'));
+      requestGate.then(() => {
+        controller.enqueue(encoder.encode('"reasoning":{"effort":"high"}}'));
+        controller.close();
+      });
+    },
+  });
+  const responseBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode("event: response.created\n\n"));
+      responseGate.then(() => {
+        controller.enqueue(encoder.encode("event: response.completed\n\n"));
+        controller.close();
+      });
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere streaming must bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_EASY_API_KEY: "codex-easy-live-key",
+    },
+  );
+  const controller = new AbortController();
+  let fetchCalls = 0;
+  let upstreamSawAbort = false;
+
+  const withDeadline = async (promise, label) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} was buffered`)), 500);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    await withGlobalFetch(
+      async (input) => {
+        fetchCalls += 1;
+        const upstreamRequest = input instanceof Request ? input : new Request(input);
+        upstreamRequest.signal.addEventListener(
+          "abort",
+          () => {
+            upstreamSawAbort = true;
+          },
+          { once: true },
+        );
+        const reader = upstreamRequest.body.getReader();
+        const first = await reader.read();
+        assert.equal(decoder.decode(first.value), '{"model":"grok-4.5",');
+        resolveFirstRequestChunk();
+        await requestGate;
+        const second = await reader.read();
+        assert.equal(decoder.decode(second.value), '"reasoning":{"effort":"high"}}');
+        assert.equal((await reader.read()).done, true);
+        return new Response(responseBody, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+      async () => {
+        const pendingResponse = worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/responses", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+            duplex: "half",
+            signal: controller.signal,
+          }),
+          stub.env,
+        );
+
+        await withDeadline(firstRequestChunk, "Codex Everywhere request body");
+        assert.equal(fetchCalls, 1);
+        releaseRequest();
+        const response = await withDeadline(pendingResponse, "Codex Everywhere response headers");
+        const reader = response.body.getReader();
+        const first = await withDeadline(reader.read(), "Codex Everywhere response body");
+        assert.equal(decoder.decode(first.value), "event: response.created\n\n");
+        controller.abort();
+        await Promise.resolve();
+        assert.equal(upstreamSawAbort, true);
+        releaseResponse();
+        const second = await reader.read();
+        assert.equal(decoder.decode(second.value), "event: response.completed\n\n");
+        assert.equal((await reader.read()).done, true);
+      },
+    );
+  } finally {
+    releaseRequest();
+    releaseResponse();
+  }
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker never retries, follows redirects, or accesses Cache for Codex Everywhere", async () => {
+  const originalCaches = globalThis.caches;
+  let cacheReads = 0;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    get() {
+      cacheReads += 1;
+      throw new Error("Cache API must not be accessed");
+    },
+  });
+  const cases = [429, 503, 307];
+  let caseIndex = 0;
+  let fetchCalls = 0;
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Codex Everywhere fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      CODEX_EASY_API_KEY: "codex-easy-live-key",
+    },
+  );
+
+  try {
+    await withGlobalFetch(
+      async (input) => {
+        fetchCalls += 1;
+        const upstreamRequest = input instanceof Request ? input : new Request(input);
+        assert.equal(upstreamRequest.redirect, "manual");
+        const status = cases[caseIndex];
+        return new Response(status === 307 ? "redirect refused" : "upstream unavailable", {
+          status,
+          headers: {
+            "Content-Type": "text/plain",
+            "Retry-After": "5",
+            Location: "https://untrusted.example/redirect",
+          },
+        });
+      },
+      async () => {
+        for (caseIndex = 0; caseIndex < cases.length; caseIndex += 1) {
+          const callsBefore = fetchCalls;
+          const response = await worker.fetch(
+            new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/responses", {
+              method: "POST",
+              headers: {
+                Authorization: "Bearer admin-live-key",
+                "Content-Type": "application/json",
+              },
+              body: '{"model":"grok-4.5","reasoning":{"effort":"high"}}',
+            }),
+            stub.env,
+          );
+          assert.equal(response.status, cases[caseIndex]);
+          assert.equal(fetchCalls - callsBefore, 1);
+          assert.equal(response.headers.get("Retry-After"), "5");
+          assert.equal(response.headers.has("Location"), false);
+        }
+      },
+    );
+  } finally {
+    if (originalCaches === undefined) {
+      delete globalThis.caches;
+    } else {
+      Object.defineProperty(globalThis, "caches", {
+        configurable: true,
+        value: originalCaches,
+        writable: true,
+      });
+    }
+  }
+
+  assert.equal(fetchCalls, cases.length);
+  assert.equal(cacheReads, 0);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker answers Codex Everywhere CORS preflight with OpenAI SDK headers", async () => {
+  const origin = "https://client.example";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/codex-easy/v1/responses", {
+      method: "OPTIONS",
+      headers: { Origin: origin },
+    }),
+    stub.env,
+  );
+
+  const allowedHeaders = response.headers.get("Access-Control-Allow-Headers") ?? "";
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(allowedHeaders, /OpenAI-Beta/i);
+  assert.match(allowedHeaders, /OpenAI-Organization/i);
+  assert.match(allowedHeaders, /OpenAI-Project/i);
+  assert.match(allowedHeaders, /Idempotency-Key/i);
+  assert.match(allowedHeaders, /X-Client-Request-ID/i);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker deploy config never stores Codex Everywhere secrets in plaintext", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  assert.equal(config.vars?.CODEX_EASY_API_KEY, undefined);
+  assert.equal(config.vars?.CODEX_API_KEY, undefined);
 });
 
 test("worker answers /health directly without touching the container", async () => {
