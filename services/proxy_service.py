@@ -22,12 +22,30 @@ import gzip
 import io
 import re
 import os
+from http.cookiejar import DefaultCookiePolicy
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
+RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+
+
+class _RejectAllCookiesPolicy(DefaultCookiePolicy):
+    """Prevent pooled raw-provider sessions from sharing upstream cookies."""
+
+    def set_ok(self, cookie, request):
+        return False
+
+    def return_ok(self, cookie, request):
+        return False
+
+    def domain_return_ok(self, domain, request):
+        return False
+
+    def path_return_ok(self, path, request):
+        return False
 
 
 class ProxyService:
@@ -92,6 +110,8 @@ class ProxyService:
                 return session
 
             session = requests.Session()
+            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+                session.cookies.set_policy(_RejectAllCookiesPolicy())
             adapter = requests.adapters.HTTPAdapter(
                 pool_connections=100,
                 pool_maxsize=100,
@@ -324,11 +344,25 @@ class ProxyService:
                     "x-goog-user-project": "X-Goog-User-Project",
                 }
             )
+        elif api_provider == "codex-easy":
+            header_whitelist.update(
+                {
+                    "idempotency-key": "Idempotency-Key",
+                    "openai-beta": "OpenAI-Beta",
+                    "openai-project": "OpenAI-Project",
+                    "x-client-request-id": "X-Client-Request-ID",
+                    "x-grok-conv-id": "X-Grok-Conv-Id",
+                }
+            )
 
         for header, value in request_headers.items():
             canonical_header = header_whitelist.get(header.lower())
             if canonical_header:
                 headers[canonical_header] = value
+            elif api_provider == "codex-easy" and header.lower().startswith(
+                "x-stainless-"
+            ):
+                headers[header] = value
 
         if not cls._has_header(headers, "Content-Type"):
             headers["Content-Type"] = "application/json"
@@ -393,7 +427,7 @@ class ProxyService:
                 else:
                     params.append((key, value))
 
-        if api_provider != "linkapi":
+        if api_provider not in RAW_PASSTHROUGH_PROVIDERS:
             return params
 
         params = [(key, value) for key, value in params if key.lower() != "key"]
@@ -1000,9 +1034,9 @@ class ProxyService:
         """
         Make a base request with retries and error handling
         """
-        raw_linkapi = api_provider == "linkapi"
+        raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
         try:
-            if not raw_linkapi:
+            if not raw_passthrough:
                 circuit_response = cls._circuit_open_response(api_provider)
                 if circuit_response is not None:
                     return circuit_response
@@ -1029,13 +1063,13 @@ class ProxyService:
                 data=data,
                 stream=True,  # always enable streaming
                 timeout=timeout,
-                allow_redirects=not raw_linkapi,
+                allow_redirects=not raw_passthrough,
             )
 
-            # LinkAPI exposes multiple native protocols. Reading, normalizing, or
-            # retrying here would alter event streams and could double-bill a
-            # generation request, so return the untouched streaming response.
-            if raw_linkapi:
+            # Native/raw providers expose protocol-specific streams and binary
+            # bodies. Reading, normalizing, or retrying here would alter output
+            # and could double-bill generation requests.
+            if raw_passthrough:
                 return response
 
             # Handle response content
@@ -1140,9 +1174,13 @@ class ProxyService:
             return response
 
         except requests.exceptions.RequestException as e:
-            if raw_linkapi:
+            if raw_passthrough:
+                provider_name = (
+                    "LinkAPI" if api_provider == "linkapi" else "Codex Everywhere"
+                )
                 logger.error(
-                    "LinkAPI upstream transport request failed (%s)",
+                    "Raw upstream transport request failed for %s (%s)",
+                    api_provider,
                     type(e).__name__,
                 )
                 error_response = requests.Response()
@@ -1150,7 +1188,7 @@ class ProxyService:
                 error_response._content = json.dumps(
                     {
                         "error": {
-                            "message": "LinkAPI upstream transport request failed",
+                            "message": f"{provider_name} upstream transport request failed",
                             "type": "upstream_transport_error",
                             "code": 502,
                         }
@@ -1162,7 +1200,7 @@ class ProxyService:
             error_msg = f"Request failed: {str(e)}"
             logger.error(error_msg)
             if (
-                not raw_linkapi
+                not raw_passthrough
                 and cls._should_retry_exception(method, data, e)
                 and retry_count < MAX_RETRIES
             ):
@@ -1178,7 +1216,7 @@ class ProxyService:
                     use_cache=use_cache,
                     retry_count=retry_count + 1
                 )
-            if not raw_linkapi:
+            if not raw_passthrough:
                 cls._record_circuit_result(api_provider, 503)
             
             # If all retries fail, return a JSON error response
@@ -3108,10 +3146,14 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
-        logger.info(f"Making request to {url} with method {method}")
+        raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
+        if raw_passthrough:
+            logger.info("Making raw request for %s with method %s", api_provider, method)
+        else:
+            logger.info("Making request to %s with method %s", url, method)
         
         try:
-            if api_provider == "linkapi":
+            if raw_passthrough:
                 return cls._make_base_request(
                     method=method,
                     url=url,

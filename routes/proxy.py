@@ -19,6 +19,29 @@ from route_helpers import (
 
 logger = logging.getLogger(__name__)
 
+RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+CODEX_EASY_EXACT_PATHS = frozenset(
+    {
+        "v1/models",
+        "v1/responses",
+        "v1/chat/completions",
+        "v1/images",
+    }
+)
+
+
+def _is_valid_codex_easy_path(path: str) -> bool:
+    """Allow only the documented Codex Everywhere OpenAI-compatible surface."""
+    if not path or any(delimiter in path for delimiter in "%?#\\"):
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in path):
+        return False
+    if path in CODEX_EASY_EXACT_PATHS:
+        return True
+    if not path.startswith("v1/images/"):
+        return False
+    return all(segment not in {"", ".", ".."} for segment in path.split("/"))
+
 def _dashboard_chat_completions_url(app, provider):
     if provider == "googleai":
         project_id = os.environ.get("PROJECT_ID")
@@ -61,6 +84,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
             if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):
                 raise APIError("Invalid LinkAPI path", status_code=400)
+            if api_provider == "codex-easy" and not _is_valid_codex_easy_path(path):
+                raise APIError("Invalid Codex Everywhere path", status_code=400)
+
+            raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
 
             base_url = app.config["API_BASE_URLS"][api_provider]
             if api_provider == "groq":
@@ -90,7 +117,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 path = ""
 
             url = f"{base_url}/{path}" if path else base_url
-            logger.info("Proxying request to: %s", url)
+            if raw_passthrough:
+                logger.info("Proxying raw request for %s", api_provider)
+            else:
+                logger.info("Proxying request to: %s", url)
 
             if api_provider == "googleai":
                 auth_token = auth_service_cls.get_google_token()
@@ -121,13 +151,13 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     auth_token,
                     upstream_path=path,
                 )
-                if api_provider == "linkapi"
+                if raw_passthrough
                 else request.args
             )
             raw_request_data = request.get_data()
             request_data = (
                 raw_request_data
-                if api_provider == "linkapi"
+                if raw_passthrough
                 else proxy_service_cls.filter_request_data(api_provider, raw_request_data)
             )
 
@@ -138,7 +168,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 params=params,
                 data=request_data,
                 api_provider=api_provider,
-                use_cache=(request.method.upper() == "GET" and not is_streaming),
+                use_cache=(
+                    request.method.upper() == "GET"
+                    and not is_streaming
+                    and not raw_passthrough
+                ),
             )
 
             response_time = (time.time() - start_time) * 1000
@@ -148,7 +182,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 response_time=response_time,
             )
 
-            if api_provider == "linkapi":
+            if raw_passthrough:
                 if isinstance(response, Response):
                     return response
                 return stream_upstream_response(response)
@@ -224,9 +258,18 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 status_code=status_code,
                 response_time=response_time,
             )
-            logger.error("Proxy error for %s: %s", api_provider, error)
+            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+                logger.error(
+                    "Raw proxy request failed for %s (%s)",
+                    api_provider,
+                    type(error).__name__,
+                )
+            else:
+                logger.error("Proxy error for %s: %s", api_provider, error)
             if isinstance(error, APIError):
                 raise error
+            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+                raise APIError("Upstream proxy request failed", status_code=502)
             raise APIError(f"Proxy error: {str(error)}", status_code=500)
 
     @app.route("/api/backends/chat-completions/generate", methods=["POST"])

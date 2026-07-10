@@ -17,6 +17,9 @@ from services.auth_service import AuthService
 from services.model_registry import ModelRegistry
 
 
+RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+
+
 def _provider_token(auth_service_cls, provider: str) -> str:
     token = auth_service_cls.get_google_token() if provider == "googleai" else auth_service_cls.get_api_key(provider)
     if not token:
@@ -181,8 +184,14 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     token,
                     upstream_path=upstream_path,
                 )
-                if provider == "linkapi"
+                if provider in RAW_PASSTHROUGH_PROVIDERS
                 else request.args
+            )
+
+            request_data = (
+                raw_body
+                if provider in RAW_PASSTHROUGH_PROVIDERS
+                else proxy_service_cls.filter_request_data(provider, raw_body)
             )
 
             response = proxy_service_cls.make_request(
@@ -190,7 +199,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 url=adapter.chat_completions_url(),
                 headers=headers,
                 params=params,
-                data=proxy_service_cls.filter_request_data(provider, raw_body),
+                data=request_data,
                 api_provider=provider,
                 use_cache=False,
             )
@@ -203,7 +212,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
             if isinstance(response, Response):
                 return response
-            if provider == "linkapi":
+            if provider in RAW_PASSTHROUGH_PROVIDERS:
                 return stream_upstream_response(response)
             return Response(
                 response.content,
@@ -234,7 +243,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
             token = _provider_token(auth_service_cls, provider)
 
-            if provider == "linkapi":
+            if provider in RAW_PASSTHROUGH_PROVIDERS:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
                 headers = proxy_service_cls.prepare_headers(

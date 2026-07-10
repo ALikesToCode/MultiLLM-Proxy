@@ -23,6 +23,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "OPENCODE_API_KEY": "opencode-provider-key",
                 "MIMO_API_KEY": "mimo-provider-key",
                 "LINKAPI_KEY": "linkapi-provider-key",
+                "CODEX_EASY_API_KEY": "codex-easy-provider-key",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(self.temp_dir.name, "limits.sqlite3"),
                 "MODEL_REGISTRY_DB_PATH": os.path.join(self.temp_dir.name, "models.sqlite3"),
@@ -361,9 +362,10 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "/v1/responses?include=usage&include=output_text",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "linkapi:gpt-live-model",
+                    "model": "linkapi:grok-4.5",
                     "input": "Say hi",
                     "max_output_tokens": 12,
+                    "reasoning": {"effort": "high"},
                     "metadata": {"tenant": "test"},
                 },
             )
@@ -385,9 +387,99 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertEqual(
             json.loads(request_kwargs["data"]),
             {
-                "model": "gpt-live-model",
+                "model": "grok-4.5",
                 "input": "Say hi",
                 "max_output_tokens": 12,
+                "reasoning": {"effort": "high"},
+                "metadata": {"tenant": "test"},
+            },
+        )
+
+    def test_codex_easy_responses_preserves_grok_high_reasoning_and_all_fields(self):
+        native_body = b'{"id":"resp_grok","object":"response","status":"completed"}'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_body)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/responses?include=usage&include=output_text",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "codex-easy:grok-4.5",
+                    "input": "Solve this",
+                    "reasoning": {"effort": "high"},
+                    "prompt_cache_key": "conversation-123",
+                    "tools": [{"type": "web_search"}],
+                    "metadata": {"tenant": "test"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_body)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["api_provider"], "codex-easy")
+        self.assertEqual(request_kwargs["url"], "https://codex-easy.ai/v1/responses")
+        self.assertEqual(
+            request_kwargs["params"],
+            [("include", "usage"), ("include", "output_text")],
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "grok-4.5",
+                "input": "Solve this",
+                "reasoning": {"effort": "high"},
+                "prompt_cache_key": "conversation-123",
+                "tools": [{"type": "web_search"}],
+                "metadata": {"tenant": "test"},
+            },
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer codex-easy-provider-key",
+        )
+
+    def test_codex_easy_chat_preserves_grok_high_reasoning_and_all_fields(self):
+        native_body = b'{"id":"chatcmpl_grok","object":"chat.completion","choices":[]}'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_body)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "codex-easy:grok-4.5",
+                    "messages": [{"role": "user", "content": "Solve this"}],
+                    "reasoning_effort": "high",
+                    "parallel_tool_calls": False,
+                    "metadata": {"tenant": "test"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_body)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["api_provider"], "codex-easy")
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://codex-easy.ai/v1/chat/completions",
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer codex-easy-provider-key",
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "grok-4.5",
+                "messages": [{"role": "user", "content": "Solve this"}],
+                "reasoning_effort": "high",
+                "parallel_tool_calls": False,
                 "metadata": {"tenant": "test"},
             },
         )

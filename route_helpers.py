@@ -1,10 +1,11 @@
 import inspect
 import logging
 import os
+import re
 from functools import wraps
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from flask import Response, g, jsonify, redirect, request, url_for
+from flask import Response, g, has_request_context, jsonify, redirect, request, url_for
 
 from config import Config
 from services.auth_service import AuthService
@@ -32,7 +33,7 @@ HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
         "upgrade",
     }
 )
-LINKAPI_RESPONSE_HEADER_ALLOWLIST = frozenset(
+RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST = frozenset(
     {
         "accept-ranges",
         "age",
@@ -44,6 +45,8 @@ LINKAPI_RESPONSE_HEADER_ALLOWLIST = frozenset(
         "etag",
         "expires",
         "last-modified",
+        "openai-processing-ms",
+        "openai-version",
         "request-id",
         "retry-after",
         "vary",
@@ -51,7 +54,7 @@ LINKAPI_RESPONSE_HEADER_ALLOWLIST = frozenset(
         "x-should-retry",
     }
 )
-LINKAPI_RESPONSE_HEADER_PREFIXES = (
+RAW_PROVIDER_RESPONSE_HEADER_PREFIXES = (
     "anthropic-ratelimit-",
     "ratelimit-",
     "x-ratelimit-",
@@ -67,14 +70,21 @@ def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[
     }
 
 
-def copy_linkapi_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
-    """Copy the small, explicit response-header surface safe for native LinkAPI."""
+def copy_raw_provider_response_headers(
+    upstream_headers: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Copy the explicit response-header surface safe for raw API passthrough."""
     return {
         key: value
         for key, value in upstream_headers.items()
-        if key.lower() in LINKAPI_RESPONSE_HEADER_ALLOWLIST
-        or key.lower().startswith(LINKAPI_RESPONSE_HEADER_PREFIXES)
+        if key.lower() in RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST
+        or key.lower().startswith(RAW_PROVIDER_RESPONSE_HEADER_PREFIXES)
     }
+
+
+def copy_linkapi_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
+    """Backward-compatible alias for raw-provider response header filtering."""
+    return copy_raw_provider_response_headers(upstream_headers)
 
 
 def mask_secret(value: Optional[str]) -> str:
@@ -183,10 +193,22 @@ def stream_upstream_response(upstream_response: Any) -> Response:
         finally:
             close_once()
 
+    response_headers = copy_raw_provider_response_headers(upstream_response.headers)
+    upstream_request_id = response_headers.get("X-Request-ID") or response_headers.get(
+        "x-request-id"
+    )
+    if has_request_context() and upstream_request_id and re.fullmatch(
+        r"[A-Za-z0-9_.:-]{1,128}",
+        str(upstream_request_id),
+    ):
+        # The app's generic after-request hook emits g.request_id. Keep a safe
+        # upstream OpenAI request ID intact for support and billing correlation.
+        g.request_id = str(upstream_request_id)
+
     response = Response(
         generate(),
         status=upstream_response.status_code,
-        headers=copy_linkapi_response_headers(upstream_response.headers),
+        headers=response_headers,
     )
     response.call_on_close(close_once)
     return response
