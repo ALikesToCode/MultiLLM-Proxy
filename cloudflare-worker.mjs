@@ -34,7 +34,6 @@ const CORS_EXPOSE_HEADERS =
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
-const KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1";
 const KIMI_CODE_ROUTE_PREFIX = "/kimi-code";
 const CONTAINER_PACKAGE_STARTUP_ERROR_PREFIXES = new Map([
   [500, "Failed to start container:"],
@@ -127,31 +126,6 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
   "x-should-retry",
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
-const KIMI_CODE_REQUEST_HEADER_WHITELIST = new Set([
-  "accept",
-  "accept-language",
-  "content-type",
-  "idempotency-key",
-  "openai-beta",
-  "openai-organization",
-  "openai-project",
-  "user-agent",
-  "x-client-request-id",
-  "x-request-id",
-]);
-const KIMI_CODE_RESPONSE_HEADER_WHITELIST = new Set([
-  "cache-control",
-  "content-type",
-  "date",
-  "openai-processing-ms",
-  "openai-version",
-  "request-id",
-  "retry-after",
-  "vary",
-  "x-request-id",
-  "x-should-retry",
-]);
-const KIMI_CODE_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 const UPSTREAM_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -769,55 +743,6 @@ function isKimiCodeMethodAllowed(upstreamPath, method) {
     (upstreamPath === "/models" && method === "GET") ||
     (upstreamPath === "/chat/completions" && method === "POST")
   );
-}
-
-function buildKimiCodeUpstreamUrl(requestUrl, upstreamPath) {
-  const upstreamUrl = new URL(KIMI_CODE_BASE_URL);
-  upstreamUrl.pathname = `${upstreamUrl.pathname.replace(/\/$/, "")}${upstreamPath}`;
-
-  for (const [name, value] of requestUrl.searchParams.entries()) {
-    if (name.toLowerCase() !== "key") {
-      upstreamUrl.searchParams.append(name, value);
-    }
-  }
-
-  return upstreamUrl;
-}
-
-function buildKimiCodeUpstreamHeaders(request, upstreamToken) {
-  const headers = new Headers();
-
-  for (const [header, value] of request.headers.entries()) {
-    const normalized = header.toLowerCase();
-    if (
-      KIMI_CODE_REQUEST_HEADER_WHITELIST.has(normalized) ||
-      normalized.startsWith("x-stainless-")
-    ) {
-      headers.set(header, value);
-    }
-  }
-
-  if (!headers.has("Accept")) {
-    headers.set("Accept", "application/json");
-  }
-  headers.set("Authorization", `Bearer ${upstreamToken}`);
-  return headers;
-}
-
-function copyKimiCodeResponseHeaders(headers) {
-  const responseHeaders = new Headers();
-
-  for (const [header, value] of headers.entries()) {
-    const normalized = header.toLowerCase();
-    if (
-      KIMI_CODE_RESPONSE_HEADER_WHITELIST.has(normalized) ||
-      KIMI_CODE_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
-    ) {
-      responseHeaders.set(header, value);
-    }
-  }
-
-  return responseHeaders;
 }
 
 function buildOpencodeUpstreamUrl(requestUrl) {
@@ -1645,26 +1570,21 @@ async function handleDirectKimiCodeRequest(request, env, requestUrl) {
     return applyCorsHeaders(request, buildMissingKimiCodeKeyResponse(), env);
   }
 
-  const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
-  const upstreamRequest = new Request(buildKimiCodeUpstreamUrl(requestUrl, upstreamPath), {
-    method: request.method,
-    headers: buildKimiCodeUpstreamHeaders(request, upstreamToken),
-    body: bodyAllowed ? request.body : undefined,
-    redirect: "manual",
-    signal: request.signal,
-    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
-  });
-  const upstreamResponse = await fetch(upstreamRequest);
+  if (upstreamPath === "/models") {
+    return applyCorsHeaders(
+      request,
+      jsonResponse({
+        object: "list",
+        data: [{ id: "k3", object: "model", owned_by: "kimi" }],
+      }),
+      env,
+    );
+  }
 
-  return applyCorsHeaders(
-    request,
-    new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      statusText: upstreamResponse.statusText,
-      headers: copyKimiCodeResponseHeaders(upstreamResponse.headers),
-    }),
-    env,
-  );
+  // Kimi's edge currently challenges requests made from Workers. Keep the
+  // edge authentication and exact route gate, then let the trusted Container
+  // perform the single upstream chat request from its working egress path.
+  return null;
 }
 
 function buildCorsHeaders(request) {
@@ -1779,7 +1699,10 @@ export default {
 
     if (kimiCodePath) {
       try {
-        return await handleDirectKimiCodeRequest(request, env, requestUrl);
+        const response = await handleDirectKimiCodeRequest(request, env, requestUrl);
+        if (response) {
+          return response;
+        }
       } catch (error) {
         logStructuredError("direct_kimi_code_fetch_failed", error);
         return applyCorsHeaders(

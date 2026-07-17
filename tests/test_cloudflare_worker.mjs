@@ -1822,7 +1822,7 @@ test("worker deploy config never stores Codex Everywhere secrets in plaintext", 
   assert.equal(config.vars?.CODEX_API_KEY, undefined);
 });
 
-test("worker proxies Kimi Code chat bytes and safe OpenAI headers without the container", async () => {
+test("worker authenticates Kimi Code at the edge and streams chat through the container", async () => {
   const requestBytes =
     '{"model":"k3","messages":[{"role":"assistant","content":"","reasoning_content":"thinking","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"ok"}],"reasoning_effort":"max","prompt_cache_key":"session-123","stream":true}';
   const responseChunks = [
@@ -1831,8 +1831,24 @@ test("worker proxies Kimi Code chat bytes and safe OpenAI headers without the co
     "data: [DONE]\n\n",
   ];
   const stub = makeEnv(
-    async () => {
-      throw new Error("Kimi Code fast path should bypass the container");
+    async (containerRequest) => {
+      assert.equal(
+        containerRequest.url,
+        "https://multillm-proxy.cserules.workers.dev/kimi-code/v1/chat/completions?trace=one&key=caller-secret&trace=two&KEY=caller-two",
+      );
+      assert.equal(containerRequest.method, "POST");
+      assert.equal(await containerRequest.text(), requestBytes);
+      assert.equal(containerRequest.headers.get("Authorization"), "Bearer admin-live-key");
+      assert.equal(containerRequest.headers.get("User-Agent"), "KimiCLI/1.2.3");
+      return new Response(makeChunkedBody(responseChunks), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-store",
+          "X-Request-Id": "request-kimi-1",
+          "X-RateLimit-Remaining-Requests": "9",
+        },
+      });
     },
     {
       ADMIN_API_KEY: "admin-live-key",
@@ -1842,41 +1858,9 @@ test("worker proxies Kimi Code chat bytes and safe OpenAI headers without the co
   let fetchCalls = 0;
 
   await withGlobalFetch(
-    async (input) => {
+    async () => {
       fetchCalls += 1;
-      const upstreamRequest = input instanceof Request ? input : new Request(input);
-      assert.equal(
-        upstreamRequest.url,
-        "https://api.kimi.com/coding/v1/chat/completions?trace=one&trace=two",
-      );
-      assert.equal(upstreamRequest.method, "POST");
-      assert.equal(upstreamRequest.redirect, "manual");
-      assert.equal(await upstreamRequest.text(), requestBytes);
-      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer kimi-code-live-key");
-      assert.equal(upstreamRequest.headers.get("User-Agent"), "KimiCLI/1.2.3");
-      assert.equal(upstreamRequest.headers.get("Accept-Language"), "en-US");
-      assert.equal(upstreamRequest.headers.get("OpenAI-Beta"), "chat=v1");
-      assert.equal(upstreamRequest.headers.get("OpenAI-Project"), "proj_123");
-      assert.equal(upstreamRequest.headers.get("Idempotency-Key"), "idempotent-123");
-      assert.equal(upstreamRequest.headers.get("X-Client-Request-ID"), "client-request-123");
-      assert.equal(upstreamRequest.headers.get("x-stainless-lang"), "js");
-      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
-      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
-      assert.equal(upstreamRequest.headers.has("Cookie"), false);
-
-      return new Response(makeChunkedBody(responseChunks), {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-store",
-          "X-Request-Id": "request-kimi-1",
-          "X-RateLimit-Remaining-Requests": "9",
-          "Set-Cookie": "must-not-leak=yes",
-          Location: "https://untrusted.example/redirect",
-          "Content-Encoding": "gzip",
-          "Content-Length": "999",
-        },
-      });
+      throw new Error("Kimi Code chat must not use Worker egress");
     },
     async () => {
       const response = await worker.fetch(
@@ -1913,18 +1897,14 @@ test("worker proxies Kimi Code chat bytes and safe OpenAI headers without the co
       assert.equal(response.headers.get("X-Request-Id"), "request-kimi-1");
       assert.equal(response.headers.get("X-RateLimit-Remaining-Requests"), "9");
       assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://client.example");
-      assert.equal(response.headers.has("Set-Cookie"), false);
-      assert.equal(response.headers.has("Location"), false);
-      assert.equal(response.headers.has("Content-Encoding"), false);
-      assert.equal(response.headers.has("Content-Length"), false);
     },
   );
 
-  assert.equal(fetchCalls, 1);
-  assert.equal(stub.getCalls(), 0);
+  assert.equal(fetchCalls, 0);
+  assert.equal(stub.getCalls(), 1);
 });
 
-test("worker maps the Kimi Code model catalog exactly and strips caller credentials", async () => {
+test("worker serves the configured Kimi Code model catalog without upstream or container I/O", async () => {
   const stub = makeEnv(
     async () => {
       throw new Error("Kimi Code fast path should bypass the container");
@@ -1937,19 +1917,9 @@ test("worker maps the Kimi Code model catalog exactly and strips caller credenti
   let fetchCalls = 0;
 
   await withGlobalFetch(
-    async (input) => {
+    async () => {
       fetchCalls += 1;
-      const upstreamRequest = input instanceof Request ? input : new Request(input);
-      assert.equal(
-        upstreamRequest.url,
-        "https://api.kimi.com/coding/v1/models?after=one&after=two",
-      );
-      assert.equal(upstreamRequest.method, "GET");
-      assert.equal(upstreamRequest.body, null);
-      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer kimi-code-live-key");
-      return new Response('{"object":"list","data":[{"id":"k3"}]}', {
-        headers: { "Content-Type": "application/json" },
-      });
+      throw new Error("Kimi Code catalog must not use Worker egress");
     },
     async () => {
       const response = await worker.fetch(
@@ -1961,12 +1931,12 @@ test("worker maps the Kimi Code model catalog exactly and strips caller credenti
       );
       assert.deepEqual(await response.json(), {
         object: "list",
-        data: [{ id: "k3" }],
+        data: [{ id: "k3", object: "model", owned_by: "kimi" }],
       });
     },
   );
 
-  assert.equal(fetchCalls, 1);
+  assert.equal(fetchCalls, 0);
   assert.equal(stub.getCalls(), 0);
 });
 
@@ -2047,7 +2017,7 @@ test("worker authenticates Kimi Code before configuration and restricts exact me
   assert.equal(missingSecretStub.getCalls(), 0);
 });
 
-test("worker returns one manual Kimi Code failure and strict CORS without Cache or container use", async () => {
+test("worker returns one Kimi Code container failure with strict CORS and no Cache use", async () => {
   const originalCaches = globalThis.caches;
   let cacheReads = 0;
   Object.defineProperty(globalThis, "caches", {
@@ -2058,9 +2028,14 @@ test("worker returns one manual Kimi Code failure and strict CORS without Cache 
     },
   });
   const stub = makeEnv(
-    async () => {
-      throw new Error("Kimi Code fast path should bypass the container");
-    },
+    async () =>
+      new Response("upstream unavailable", {
+        status: 503,
+        headers: {
+          "Content-Type": "text/plain",
+          "Retry-After": "5",
+        },
+      }),
     {
       ADMIN_API_KEY: "admin-live-key",
       KIMI_CODE_API_KEY: "kimi-code-live-key",
@@ -2070,18 +2045,9 @@ test("worker returns one manual Kimi Code failure and strict CORS without Cache 
 
   try {
     await withGlobalFetch(
-      async (input) => {
+      async () => {
         fetchCalls += 1;
-        const upstreamRequest = input instanceof Request ? input : new Request(input);
-        assert.equal(upstreamRequest.redirect, "manual");
-        return new Response("upstream unavailable", {
-          status: 503,
-          headers: {
-            "Content-Type": "text/plain",
-            "Retry-After": "5",
-            Location: "https://untrusted.example/redirect",
-          },
-        });
+        throw new Error("Kimi Code chat must not use Worker egress");
       },
       async () => {
         const origin = "https://client.example";
@@ -2121,7 +2087,6 @@ test("worker returns one manual Kimi Code failure and strict CORS without Cache 
         );
         assert.equal(response.status, 503);
         assert.equal(response.headers.get("Retry-After"), "5");
-        assert.equal(response.headers.has("Location"), false);
       },
     );
   } finally {
@@ -2136,9 +2101,9 @@ test("worker returns one manual Kimi Code failure and strict CORS without Cache 
     }
   }
 
-  assert.equal(fetchCalls, 1);
+  assert.equal(fetchCalls, 0);
   assert.equal(cacheReads, 0);
-  assert.equal(stub.getCalls(), 0);
+  assert.equal(stub.getCalls(), 1);
 });
 
 test("worker deploy config never stores the Kimi Code secret in plaintext", async () => {
