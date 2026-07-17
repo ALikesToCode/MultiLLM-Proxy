@@ -2,7 +2,7 @@
 
 ## Supported Runtime
 
-The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*` and Codex Everywhere OpenAI traffic under `/codex-easy/*` take direct Worker fast paths to avoid a Container wakeup and preserve provider-native streaming.
+The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*`, Codex Everywhere OpenAI traffic under `/codex-easy/*`, and Kimi Code traffic under `/kimi-code/*` take direct Worker fast paths to avoid a Container wakeup and preserve provider-native streaming.
 
 `wrangler.jsonc` deploys:
 
@@ -34,7 +34,26 @@ The upstream origin is fixed to `https://codex-easy.ai`. If a client appends `/v
 
 The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces it with `CODEX_EASY_API_KEY` or its alias before contacting Codex Everywhere. It bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. Use the Container-backed `/v1/responses` or `/v1/chat/completions` route with a `codex-easy:<model>` model ID when those controls are required.
 
-Catalog results are specific to the API-key group, so discover current model IDs through `/codex-easy/v1/models`. Image routes work only for image-generation key groups. The Worker preserves raw JSON, SSE, binary, and multipart bodies. On both raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, it retains a Responses `prompt_cache_key` and forwards Chat's `X-Grok-Conv-Id`. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) these fields for cache routing, but neither the proxy nor either provider guarantees a cache hit. Generation POSTs are single-attempt; the proxy does not provide idempotency.
+Catalog results are specific to the API-key group, so discover current model IDs through `/codex-easy/v1/models`. Image routes work only for image-generation key groups. The Worker preserves raw JSON, SSE, binary, and multipart bodies. On the Codex Everywhere and LinkAPI raw OpenAI fast paths, it retains a Responses `prompt_cache_key` and forwards Chat's `X-Grok-Conv-Id`. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) these fields for cache routing, but neither the proxy nor either provider guarantees a cache hit. Generation POSTs are single-attempt; the proxy does not provide idempotency.
+
+## Kimi Code Worker Fast Path
+
+Configure the upstream credential as a Worker secret:
+
+```bash
+npx wrangler secret put KIMI_CODE_API_KEY
+```
+
+The upstream base is fixed to `https://api.kimi.com/coding/v1`.
+
+| Operation | Direct Worker route | Caller credential |
+| --- | --- | --- |
+| Model catalog | `/kimi-code/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `/kimi-code/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+
+Kimi Code generation is Chat Completions only in this integration. Use `k3` on the direct route, `reasoning_effort: "max"` for K3's strongest reasoning setting, and a stable `prompt_cache_key` when the conversation prefix is stable. Cache affinity is upstream behavior and a hit is not guaranteed.
+
+The Worker validates `ADMIN_API_KEY`, removes the caller credential, and sends `KIMI_CODE_API_KEY` upstream. The direct route bypasses Flask dashboard-user authentication, request-size checks, RPM/TPM/daily limits, accounting, and metrics. Use Container-backed `/v1/chat/completions` with model `kimi-code:k3` when those controls are needed. Requests and streams are preserved, and generation is single-attempt to avoid duplicate work and billing.
 
 ## LinkAPI Worker Fast Path
 
@@ -61,6 +80,18 @@ Gemini clients should prefer `x-goog-api-key`. Query-string `?key=` remains avai
 
 The Worker streams request and response bodies without parsing or translating native SSE frames. Its raw OpenAI routes preserve Responses `prompt_cache_key` and Chat `X-Grok-Conv-Id`; for Grok, xAI recommends those shapes for cache routing, but neither this proxy nor LinkAPI guarantees a cache hit. The proxy never retries generation POSTs and does not provide idempotency, avoiding accidental duplicate generations and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
 
+## Opt-in Context Optimization
+
+`POST /optimize/v1/chat/completions` is a Container-backed opt-in route. Normal `/v1/chat/completions`, `/v1/responses`, and provider-specific routes remain unchanged. The route uses the unified `provider:model` namespace and the normal Flask authentication, request-size, rate-limit, accounting, and metrics path.
+
+The default `deterministic` mode makes no additional provider call. Above `optimization.trigger_input_tokens`, it can compact high-confidence older detailed image prompts while retaining the newest detailed image prompt, recent turns, system/developer instructions, multimodal exchanges, tool chains, and reasoning/thinking data. `target_input_tokens` defaults to 75% of the target provider's configured prompt limit. Reported token counts are provider-neutral byte-based estimates, not exact tokenizer usage or billing values.
+
+`summarize` mode requires an explicit `optimization.summary_model` in `provider:model` form. When summarization is needed, it makes one additional billed and separately rate-limited summary call before the final request. Summary providers are restricted to `codex-easy`, `kimi-code`, or `linkapi` to keep transport single-attempt; calls use a bounded 45-second read timeout and two-slot per-process pool, and failed or capacity-denied summaries are not retried. Inspect `X-MultiLLM-Optimization`, `X-MultiLLM-Optimization-Mode`, `X-MultiLLM-Estimated-Input-Before`, `X-MultiLLM-Estimated-Input-After`, `X-MultiLLM-Image-Prompts-Compacted`, `X-MultiLLM-Messages-Summarized`, `X-MultiLLM-Optimization-Target-Met`, and `X-MultiLLM-Summary` headers for optimization metadata. Upstream JSON and SSE response bodies remain unchanged, and browser clients can read these headers through CORS.
+
+The summary model must use the final model's provider by default. Eligible historical user/assistant plaintext is sent verbatim to that summary provider and can contain sensitive text. Prefer the same provider, remove secrets, and protect excluded history with `optimization.preserve_message_indices`. Cross-provider history transfer requires `optimization.allow_cross_provider_summary: true`; without that explicit disclosure opt-in the route returns `400`. The bounded digest is inserted as an untrusted historical assistant message.
+
+Set `OPTIMIZER_MAX_REQUEST_BYTES` to control the pre-parse ingress cap (default 16 MiB) and `OPTIMIZER_SUMMARY_TIMEOUT_SECONDS` for the summary read timeout (default 45 seconds, clamped to 5-120). The transformed final body still must satisfy the selected provider's body/prompt/output limits. The target model/key, output cap, and RPM/daily capacity are checked before a paid summary.
+
 ## Important State Limitation
 
 Cloudflare Containers have ephemeral disk when an instance sleeps or restarts. The Worker passes these default SQLite paths into the container:
@@ -80,31 +111,32 @@ Use one of these architectures before relying on durable app state:
 ## Required Secrets
 
 ```bash
-wrangler secret put ADMIN_API_KEY
-wrangler secret put FLASK_SECRET_KEY
-wrangler secret put JWT_SECRET
+npx wrangler secret put ADMIN_API_KEY
+npx wrangler secret put FLASK_SECRET_KEY
+npx wrangler secret put JWT_SECRET
 ```
 
 Provider secrets are optional and should be set only when used:
 
 ```bash
-wrangler secret put OPENAI_API_KEY
-wrangler secret put OPENROUTER_API_KEY
-wrangler secret put OPENCODE_API_KEY
-wrangler secret put CODEX_EASY_API_KEY
-wrangler secret put LINKAPI_KEY
-wrangler secret put GEMINI_API_KEY
-wrangler secret put GROQ_API_KEY_1
-wrangler secret put CHUTES_API_TOKEN
+npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put OPENCODE_API_KEY
+npx wrangler secret put CODEX_EASY_API_KEY
+npx wrangler secret put KIMI_CODE_API_KEY
+npx wrangler secret put LINKAPI_KEY
+npx wrangler secret put GEMINI_API_KEY
+npx wrangler secret put GROQ_API_KEY_1
+npx wrangler secret put CHUTES_API_TOKEN
 ```
 
 For Vertex-style Google auth:
 
 ```bash
-wrangler secret put GOOGLE_APPLICATION_CREDENTIALS_JSON
-wrangler secret put PROJECT_ID
-wrangler secret put LOCATION
-wrangler secret put GOOGLE_ENDPOINT
+npx wrangler secret put GOOGLE_APPLICATION_CREDENTIALS_JSON
+npx wrangler secret put PROJECT_ID
+npx wrangler secret put LOCATION
+npx wrangler secret put GOOGLE_ENDPOINT
 ```
 
 Do not place API keys in `wrangler.jsonc` `vars`. Use Worker secrets.
@@ -112,19 +144,19 @@ Do not place API keys in `wrangler.jsonc` `vars`. Use Worker secrets.
 ## Deploy Steps
 
 ```bash
-pnpm install --frozen-lockfile
+npm ci
 python scripts/validate_sqlite_schema.py
 python scripts/check_static_secrets.py
 python -m pytest -q
 node --test tests/test_cloudflare_worker.mjs
-pnpm exec wrangler deploy --dry-run
-pnpm exec wrangler deploy
+npx wrangler deploy --dry-run
+npx wrangler deploy
 ```
 
 For a one-shot full rollout of a changed container image:
 
 ```bash
-pnpm exec wrangler deploy --containers-rollout immediate
+npx wrangler deploy --containers-rollout immediate
 ```
 
 ## Runtime Tuning

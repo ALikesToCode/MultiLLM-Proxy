@@ -199,6 +199,25 @@ PROVIDER_DETAILS = {
             'raw_streaming': True
         }
     },
+    'kimi-code': {
+        'description': 'Kimi Code OpenAI-compatible coding endpoint at https://api.kimi.com/coding/v1; Chat Completions model k3',
+        'endpoints': [
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/kimi-code/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/kimi-code/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"k3\\", \\"reasoning_effort\\": \\"max\\", \\"prompt_cache_key\\": \\"conversation-123\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"stream\\": true}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True,
+            'function_calling': True
+        },
+        'default_model': 'k3'
+    },
     'linkapi': {
         'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, and OpenAI-compatible passthrough',
         'endpoints': [

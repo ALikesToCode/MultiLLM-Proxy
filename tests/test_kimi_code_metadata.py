@@ -9,18 +9,21 @@ from unittest.mock import patch
 from proxy import PROVIDER_DETAILS
 
 
-class CodexEasyMetadataTest(unittest.TestCase):
+class KimiCodeMetadataTest(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[1]
 
     @staticmethod
     def _clear_runtime_modules():
         for module_name in list(sys.modules):
-            if module_name.startswith("routes."):
+            if module_name.startswith(("routes.", "providers.")):
                 sys.modules.pop(module_name, None)
         for module_name in (
             "app",
             "route_helpers",
             "services.auth_service",
+            "services.context_optimizer",
+            "services.model_registry",
+            "services.proxy_service",
             "services.rate_limit_service",
         ):
             sys.modules.pop(module_name, None)
@@ -43,7 +46,7 @@ class CodexEasyMetadataTest(unittest.TestCase):
                     self.tempdir.name,
                     "models.sqlite3",
                 ),
-                "CODEX_EASY_API_KEY": "codex-easy-test-key",
+                "KIMI_CODE_API_KEY": "kimi-code-test-key",
             },
             clear=False,
         )
@@ -60,7 +63,7 @@ class CodexEasyMetadataTest(unittest.TestCase):
                 "is_admin": True,
                 "api_key_prefix": "admin-test",
                 "scopes": ["admin"],
-                "session_id": "codex-easy-dashboard-test",
+                "session_id": "kimi-code-dashboard-test",
             }
 
     def tearDown(self):
@@ -68,52 +71,37 @@ class CodexEasyMetadataTest(unittest.TestCase):
         self.env_patch.stop()
         self.tempdir.cleanup()
 
-    def test_codex_everywhere_metadata_is_dynamic_and_conservative(self):
-        details = PROVIDER_DETAILS["codex-easy"]
+    def test_kimi_code_metadata_is_chat_only_and_documents_k3_controls(self):
+        details = PROVIDER_DETAILS["kimi-code"]
         endpoint_by_url = {
             endpoint["url"]: endpoint for endpoint in details["endpoints"]
         }
 
-        self.assertIn("Codex Everywhere", details["description"])
+        self.assertIn("https://api.kimi.com/coding/v1", details["description"])
         self.assertEqual(
             set(endpoint_by_url),
-            {
-                "/v1/models",
-                "/v1/responses",
-                "/v1/chat/completions",
-                "/v1/images/generations",
-            },
+            {"/v1/models", "/v1/chat/completions"},
         )
-        self.assertEqual(
-            details["supported_features"],
-            {"streaming": True, "raw_streaming": True},
-        )
-        self.assertNotIn("default_model", details)
-
-        for endpoint in endpoint_by_url.values():
-            self.assertIn("$PROXY_BASE_URL/codex-easy", endpoint["curl"])
-            self.assertIn("$ADMIN_API_KEY", endpoint["curl"])
-            self.assertNotIn("$CODEX_EASY_API_KEY", endpoint["curl"])
-
-        responses_curl = endpoint_by_url["/v1/responses"]["curl"]
-        self.assertIn("grok-4.5", responses_curl)
-        self.assertIn("reasoning", responses_curl)
-        self.assertIn("effort", responses_curl)
-        self.assertIn("high", responses_curl)
-        self.assertIn("prompt_cache_key", responses_curl)
+        self.assertNotIn("/v1/responses", endpoint_by_url)
+        self.assertEqual(details["default_model"], "k3")
+        self.assertTrue(details["supported_features"]["raw_streaming"])
 
         chat_curl = endpoint_by_url["/v1/chat/completions"]["curl"]
-        self.assertIn("reasoning_effort", chat_curl)
-        self.assertIn("X-Grok-Conv-Id", chat_curl)
+        self.assertIn("$PROXY_BASE_URL/kimi-code/v1/chat/completions", chat_curl)
+        self.assertIn("$ADMIN_API_KEY", chat_curl)
+        self.assertNotIn("$KIMI_CODE_API_KEY", chat_curl)
+        self.assertIn('\\"model\\": \\"k3\\"', chat_curl)
+        self.assertIn('\\"reasoning_effort\\": \\"max\\"', chat_curl)
+        self.assertIn("prompt_cache_key", chat_curl)
 
-    def test_rendered_dashboard_lists_codex_everywhere_routes_and_boundaries(self):
+    def test_dashboard_lists_kimi_code_routes_and_operating_boundaries(self):
         def provider_status(provider, details, _app_config):
             return {
                 "name": provider.upper(),
                 "description": details.get("description", ""),
                 "endpoints": details.get("endpoints", []),
-                "active": provider == "codex-easy",
-                "is_configured": provider == "codex-easy",
+                "active": provider == "kimi-code",
+                "is_configured": provider == "kimi-code",
                 "requests_24h": 0,
                 "success_rate": 0,
                 "error_rate": 0,
@@ -128,24 +116,17 @@ class CodexEasyMetadataTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         dashboard = response.get_data(as_text=True)
-        self.assertIn('id="codex-easy-native-endpoints"', dashboard)
-        for endpoint in (
-            "/codex-easy/v1/models",
-            "/codex-easy/v1/responses",
-            "/codex-easy/v1/chat/completions",
-            "/codex-easy/v1/images/generations",
-        ):
-            self.assertIn(endpoint, dashboard)
-        self.assertIn("Authorization: Bearer YOUR_API_KEY", dashboard)
-        self.assertIn(
-            "bypass Flask user, request-size, rate-limit, and metrics controls",
-            dashboard,
-        )
-        self.assertIn("codex-easy:&lt;model&gt;", dashboard)
-        self.assertIn("CODEX_EASY_API_KEY", dashboard)
-        self.assertIn("image-generation key groups", dashboard)
+        self.assertIn('id="kimi-code-native-endpoints"', dashboard)
+        self.assertIn("/kimi-code/v1/models", dashboard)
+        self.assertIn("/kimi-code/v1/chat/completions", dashboard)
+        self.assertIn("https://api.kimi.com/coding/v1", dashboard)
+        self.assertIn("KIMI_CODE_API_KEY", dashboard)
+        self.assertIn("kimi-code:k3", dashboard)
+        self.assertIn("Chat Completions only", dashboard)
+        self.assertIn("reasoning_effort: max", dashboard)
+        self.assertIn("prompt_cache_key", dashboard)
 
-    def test_codex_everywhere_docs_cover_dynamic_catalog_cache_and_base_urls(self):
+    def test_docs_cover_kimi_secret_optimizer_cost_and_deployment_commands(self):
         readme = (self.repo_root / "README.md").read_text(encoding="utf-8")
         container_docs = (self.repo_root / "docs/cloudflare-containers.md").read_text(
             encoding="utf-8"
@@ -153,33 +134,39 @@ class CodexEasyMetadataTest(unittest.TestCase):
         deployment_docs = (self.repo_root / "docs/deployment-cloudflare.md").read_text(
             encoding="utf-8"
         )
+        env_example = (self.repo_root / ".env.example").read_text(encoding="utf-8")
         combined = "\n".join((readme, container_docs, deployment_docs))
 
         for value in (
-            "CODEX_EASY_API_KEY",
-            "CODEX_API_KEY",
-            "https://codex-easy.ai",
-            "$PROXY_BASE_URL/codex-easy",
-            "$PROXY_BASE_URL/codex-easy/v1",
-            "/codex-easy/v1/models",
-            "/codex-easy/v1/responses",
-            "/codex-easy/v1/chat/completions",
-            "/codex-easy/v1/images/*",
+            "KIMI_CODE_API_KEY",
+            "https://api.kimi.com/coding/v1",
+            "kimi-code:k3",
+            "/kimi-code/v1/models",
+            "/kimi-code/v1/chat/completions",
+            'reasoning_effort: "max"',
             "prompt_cache_key",
-            "X-Grok-Conv-Id",
-            "image-generation key groups",
+            "POST /optimize/v1/chat/completions",
+            "deterministic",
+            "summary_model",
+            "allow_cross_provider_summary",
+            "eligible historical user/assistant plaintext",
+            "additional billed",
+            "newest detailed image prompt",
+            "provider-neutral byte-based estimates",
+            "X-MultiLLM-Estimated-Input-Before",
+            "X-MultiLLM-Summary",
         ):
             self.assertIn(value, combined)
 
-        self.assertIn('"reasoning":{"effort":"high"}', readme)
-        self.assertIn('"reasoning_effort":"high"', readme)
-        self.assertIn("key-group", combined)
-        self.assertIn("codex everywhere and linkapi raw openai fast paths", combined.lower())
-        self.assertIn("/codex-easy/v1/*", combined)
-        self.assertIn("/linkapi/v1/*", combined)
-        self.assertIn("xAI", combined)
-        self.assertIn("do not guarantee a cache hit", combined)
-        self.assertIn("does not provide idempotency", combined)
+        self.assertIn("KIMI_CODE_API_KEY=your-kimi-code-api-key", env_example)
+        self.assertIn("OPTIMIZER_MAX_REQUEST_BYTES=16777216", env_example)
+        self.assertIn("OPTIMIZER_SUMMARY_TIMEOUT_SECONDS=45", env_example)
+        self.assertIn("normal `/v1/chat/completions`", combined.lower())
+        self.assertIn("remain unchanged", combined)
+        self.assertIn("npm ci", container_docs)
+        self.assertIn("npm ci", deployment_docs)
+        self.assertNotIn("pnpm install", container_docs)
+        self.assertNotIn("pnpm install", deployment_docs)
 
 
 if __name__ == "__main__":

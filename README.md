@@ -22,6 +22,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Xiaomi MiMo Token Plan
   - NanoGPT
   - Codex Everywhere
+  - Kimi Code
   - LinkAPI
   - PaLM API
   - Nineteen AI
@@ -112,6 +113,9 @@ NANOGPT_API_KEY=your-nanogpt-api-key
 # Codex Everywhere (preferred key name)
 CODEX_EASY_API_KEY=your-codex-everywhere-key
 # Optional compatibility alias: CODEX_API_KEY=your-codex-everywhere-key
+
+# Kimi Code
+KIMI_CODE_API_KEY=your-kimi-code-key
 
 # LinkAPI (preferred key name)
 LINKAPI_KEY=your-linkapi-key
@@ -221,6 +225,10 @@ http://localhost:1400/codex-easy/v1/responses
 http://localhost:1400/codex-easy/v1/chat/completions
 http://localhost:1400/codex-easy/v1/images/*
 
+# Kimi Code OpenAI-compatible routes
+http://localhost:1400/kimi-code/v1/models
+http://localhost:1400/kimi-code/v1/chat/completions
+
 # LinkAPI native and OpenAI-compatible routes
 http://localhost:1400/linkapi/v1/messages
 http://localhost:1400/linkapi/v1/responses
@@ -250,6 +258,7 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
 - **NanoGPT**: OpenAI-compatible chat, streaming, model catalog, embeddings, images, audio, memory, and search via `/nanogpt/v1/*`; use `/nanogpt/v1/models?detailed=true` before selecting model IDs
 - **Codex Everywhere**: Raw OpenAI Responses, Chat Completions, key-group-specific model discovery, and conditional image routes under `/codex-easy/v1/*`
+- **Kimi Code**: OpenAI-compatible Chat Completions for `k3` through the fixed `https://api.kimi.com/coding/v1` coding endpoint
 - **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, and OpenAI-compatible routes under `/linkapi/*`; consult LinkAPI's live pricing/model page instead of relying on a hard-coded model list
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
@@ -291,9 +300,63 @@ curl "$PROXY_BASE_URL/codex-easy/v1/chat/completions" \
   -d '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"Explain this repository"}],"stream":true}'
 ```
 
-Request and response bytes are passed through unchanged, including native SSE and multipart/image bodies. Both raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, preserve a Responses `prompt_cache_key` in the request body and forward the Chat `X-Grok-Conv-Id` header. For Grok requests, [xAI's prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) recommends a stable `prompt_cache_key` for Responses or `x-grok-conv-id` for Chat to improve cache routing. These fields do not guarantee a cache hit; caching remains an upstream behavior and stable request prefixes still matter.
+Request and response bytes are passed through unchanged, including native SSE and multipart/image bodies. The Codex Everywhere and LinkAPI raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, preserve a Responses `prompt_cache_key` in the request body and forward the Chat `X-Grok-Conv-Id` header. For Grok requests, [xAI's prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) recommends a stable `prompt_cache_key` for Responses or `x-grok-conv-id` for Chat to improve cache routing. These fields do not guarantee a cache hit; caching remains an upstream behavior and stable request prefixes still matter.
 
 `/v1/images/*` works only for image-generation key groups. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency. Retry only when the selected upstream endpoint explicitly documents an idempotency guarantee.
+
+### Kimi Code OpenAI fast path
+
+Cloudflare serves `/kimi-code/*` directly from the Worker, so model discovery and Chat Completions do not wake the Flask Container. Configure `KIMI_CODE_API_KEY` as a Worker secret. The upstream base is fixed to `https://api.kimi.com/coding/v1`.
+
+| Operation | Proxy route | Caller authentication |
+| --- | --- | --- |
+| Model catalog | `$PROXY_BASE_URL/kimi-code/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `$PROXY_BASE_URL/kimi-code/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+
+Kimi Code's generation API is Chat Completions only in this integration; `/kimi-code/v1/responses` is not supported. Use model `k3` on the direct route, or `kimi-code:k3` through the Container-backed unified `/v1/chat/completions` route when dashboard-user authentication, request-size checks, rate limits, accounting, and metrics are required.
+
+For K3's strongest reasoning setting, send `"reasoning_effort":"max"`. A stable `prompt_cache_key` can improve upstream cache affinity for repeated conversation prefixes, but it does not guarantee a cache hit:
+
+```bash
+curl "$PROXY_BASE_URL/kimi-code/v1/chat/completions" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"k3","reasoning_effort":"max","prompt_cache_key":"conversation-123","messages":[{"role":"user","content":"Explain this repository"}],"stream":true}'
+```
+
+The direct path validates `ADMIN_API_KEY`, replaces it with `KIMI_CODE_API_KEY`, and preserves the OpenAI-compatible request and response stream. Generation requests are single-attempt to avoid duplicated work and billing.
+
+### Opt-in context optimization
+
+`POST /optimize/v1/chat/completions` is an opt-in, Container-backed wrapper around the unified Chat Completions route. Existing `/v1/chat/completions`, `/v1/responses`, and provider-specific routes are unchanged and never optimize context automatically.
+
+The default `deterministic` mode makes no extra model call. After `trigger_input_tokens` is exceeded, it can replace high-confidence older detailed image-generation prompts with a stable marker while retaining the newest detailed image prompt, recent turns, system/developer instructions, multimodal exchanges, tool chains, and reasoning/thinking structures. Set `image_prompt_history` to `all` to disable image-prompt compaction, and use `preserve_message_indices` for messages that must remain byte-for-byte present.
+
+```bash
+curl "$PROXY_BASE_URL/optimize/v1/chat/completions" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"kimi-code:k3",
+    "messages":[{"role":"user","content":"Continue the conversation."}],
+    "reasoning_effort":"max",
+    "prompt_cache_key":"conversation-123",
+    "optimization":{
+      "mode":"deterministic",
+      "trigger_input_tokens":96000,
+      "target_input_tokens":96000,
+      "keep_recent_turns":8
+    }
+  }'
+```
+
+`summarize` mode requires an explicit `summary_model` in `provider:model` form. When older safe plain-text history needs compression, it makes exactly one additional billed, rate-limited summary request before the final request. Summary transport is restricted to `codex-easy`, `kimi-code`, or `linkapi`; summary calls use a bounded 45-second read timeout and two-slot per-process pool, never retry, and fall back to deterministic safe pruning on failure or local saturation. Example options are `"mode":"summarize"`, `"summary_model":"kimi-code:k3"`, and `"summary_max_tokens":800`.
+
+By default, the summary model must use the same provider as the final model. The selected summary provider receives the eligible historical user/assistant plaintext verbatim before returning a bounded digest, so that history can include sensitive text. Prefer the same provider, use `preserve_message_indices` for messages that must never leave the final request, and remove secrets before sending. To deliberately send eligible history to another provider, set `"allow_cross_provider_summary":true`; omitting this explicit disclosure opt-in returns `400`. The validated digest is reinserted as an untrusted historical assistant message so old assistant text is never promoted to user authority.
+
+The optimizer accepts at most `OPTIMIZER_MAX_REQUEST_BYTES` (16 MiB by default) before parsing. The transformed final request must still satisfy the selected provider's `MAX_REQUEST_BYTES`, prompt, output, RPM, TPM, and daily limits. The final provider's model, key, output cap, and an RPM/daily slot are validated before any paid summary call.
+
+Optimization metadata is returned in headers without changing the upstream JSON or SSE body: `X-MultiLLM-Optimization`, `X-MultiLLM-Optimization-Mode`, `X-MultiLLM-Estimated-Input-Before`, `X-MultiLLM-Estimated-Input-After`, `X-MultiLLM-Image-Prompts-Compacted`, `X-MultiLLM-Messages-Summarized`, `X-MultiLLM-Optimization-Target-Met`, and `X-MultiLLM-Summary`. Token values are provider-neutral byte-based estimates, not tokenizer-exact usage or billing counts.
 
 ### LinkAPI native fast path
 
