@@ -62,6 +62,7 @@ class Config:
         'nanogpt': 'https://nano-gpt.com/api',
         'linkapi': 'https://api.linkapi.ai',
         'codex-easy': 'https://codex-easy.ai',
+        'kimi-code': 'https://api.kimi.com/coding/v1',
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
         'nineteen': 'https://api.nineteen.ai',
         'chutes': 'https://llm.chutes.ai',
@@ -87,6 +88,7 @@ class Config:
         'nanogpt': (5, 120),  # NanoGPT routes to many providers and supports web/memory augmentation
         'linkapi': (5, 600),  # LinkAPI supports long-running native agent requests
         'codex-easy': (5, 600),  # Codex Easy supports long-running Responses API agent requests
+        'kimi-code': (5, 600),  # Kimi Code supports long-running agent and tool requests
         'palm': (10, 120),  # PaLM API can be slow to respond
         'nineteen': (5, 120),
         'chutes': (5, 120),  # Chutes API can take longer for larger models

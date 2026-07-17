@@ -380,6 +380,7 @@ test("container envVars are derived from the live Durable Object env", () => {
       LINKAPI_BASE_URL: "https://hk.linkapi.ai",
       CODEX_EASY_API_KEY: "codex-easy-live-key",
       CODEX_API_KEY: "codex-easy-alias-key",
+      KIMI_CODE_API_KEY: "kimi-code-live-key",
       MIMO_MAX_PROMPT_TOKENS: "1048576",
       MIMO_MAX_OUTPUT_TOKENS: "131072",
       MIMO_MAX_REQUEST_BYTES: "16777216",
@@ -389,6 +390,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       LINKAPI_RATE_LIMIT_RPM: "120",
       CODEX_EASY_MAX_REQUEST_BYTES: "67108864",
       CODEX_EASY_RATE_LIMIT_RPM: "180",
+      KIMI_CODE_MAX_REQUEST_BYTES: "33554432",
+      KIMI_CODE_RATE_LIMIT_RPM: "90",
       RATE_LIMIT_ENABLED: "true",
       GUNICORN_GRACEFUL_TIMEOUT: "45",
       GUNICORN_ACCESS_LOG: "-",
@@ -406,6 +409,7 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
   assert.equal(container.envVars.CODEX_EASY_API_KEY, "codex-easy-live-key");
   assert.equal(container.envVars.CODEX_API_KEY, "codex-easy-alias-key");
+  assert.equal(container.envVars.KIMI_CODE_API_KEY, "kimi-code-live-key");
   assert.equal(container.envVars.MIMO_MAX_PROMPT_TOKENS, "1048576");
   assert.equal(container.envVars.MIMO_MAX_OUTPUT_TOKENS, "131072");
   assert.equal(container.envVars.MIMO_MAX_REQUEST_BYTES, "16777216");
@@ -415,6 +419,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.LINKAPI_RATE_LIMIT_RPM, "120");
   assert.equal(container.envVars.CODEX_EASY_MAX_REQUEST_BYTES, "67108864");
   assert.equal(container.envVars.CODEX_EASY_RATE_LIMIT_RPM, "180");
+  assert.equal(container.envVars.KIMI_CODE_MAX_REQUEST_BYTES, "33554432");
+  assert.equal(container.envVars.KIMI_CODE_RATE_LIMIT_RPM, "90");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
   assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");
@@ -1744,6 +1750,332 @@ test("worker deploy config never stores Codex Everywhere secrets in plaintext", 
 
   assert.equal(config.vars?.CODEX_EASY_API_KEY, undefined);
   assert.equal(config.vars?.CODEX_API_KEY, undefined);
+});
+
+test("worker proxies Kimi Code chat bytes and safe OpenAI headers without the container", async () => {
+  const requestBytes =
+    '{"model":"k3","messages":[{"role":"assistant","content":"","reasoning_content":"thinking","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"ok"}],"reasoning_effort":"max","prompt_cache_key":"session-123","stream":true}';
+  const responseChunks = [
+    'data: {"id":"chatcmpl_1","choices":[{"delta":{"reasoning_content":"work"}}]}\n\n',
+    'data: {"id":"chatcmpl_1","choices":[{"delta":{"content":"done"}}]}\n\n',
+    "data: [DONE]\n\n",
+  ];
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Kimi Code fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      KIMI_CODE_API_KEY: "kimi-code-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(
+        upstreamRequest.url,
+        "https://api.kimi.com/coding/v1/chat/completions?trace=one&trace=two",
+      );
+      assert.equal(upstreamRequest.method, "POST");
+      assert.equal(upstreamRequest.redirect, "manual");
+      assert.equal(await upstreamRequest.text(), requestBytes);
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer kimi-code-live-key");
+      assert.equal(upstreamRequest.headers.get("User-Agent"), "KimiCLI/1.2.3");
+      assert.equal(upstreamRequest.headers.get("Accept-Language"), "en-US");
+      assert.equal(upstreamRequest.headers.get("OpenAI-Beta"), "chat=v1");
+      assert.equal(upstreamRequest.headers.get("OpenAI-Project"), "proj_123");
+      assert.equal(upstreamRequest.headers.get("Idempotency-Key"), "idempotent-123");
+      assert.equal(upstreamRequest.headers.get("X-Client-Request-ID"), "client-request-123");
+      assert.equal(upstreamRequest.headers.get("x-stainless-lang"), "js");
+      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("Cookie"), false);
+
+      return new Response(makeChunkedBody(responseChunks), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-store",
+          "X-Request-Id": "request-kimi-1",
+          "X-RateLimit-Remaining-Requests": "9",
+          "Set-Cookie": "must-not-leak=yes",
+          Location: "https://untrusted.example/redirect",
+          "Content-Encoding": "gzip",
+          "Content-Length": "999",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/kimi-code/v1/chat/completions?trace=one&key=caller-secret&trace=two&KEY=caller-two",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+              "User-Agent": "KimiCLI/1.2.3",
+              "Accept-Language": "en-US",
+              "OpenAI-Beta": "chat=v1",
+              "OpenAI-Project": "proj_123",
+              "Idempotency-Key": "idempotent-123",
+              "X-Client-Request-ID": "client-request-123",
+              "x-stainless-lang": "js",
+              "x-api-key": "must-not-leak",
+              "x-goog-api-key": "must-not-leak",
+              Cookie: "must-not-leak=yes",
+              Origin: "https://client.example",
+            },
+            body: makeChunkedBody([requestBytes]),
+            duplex: "half",
+          },
+        ),
+        stub.env,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), responseChunks.join(""));
+      assert.equal(response.headers.get("Content-Type"), "text/event-stream");
+      assert.equal(response.headers.get("Cache-Control"), "no-store");
+      assert.equal(response.headers.get("X-Request-Id"), "request-kimi-1");
+      assert.equal(response.headers.get("X-RateLimit-Remaining-Requests"), "9");
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://client.example");
+      assert.equal(response.headers.has("Set-Cookie"), false);
+      assert.equal(response.headers.has("Location"), false);
+      assert.equal(response.headers.has("Content-Encoding"), false);
+      assert.equal(response.headers.has("Content-Length"), false);
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker maps the Kimi Code model catalog exactly and strips caller credentials", async () => {
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Kimi Code fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      KIMI_CODE_API_KEY: "kimi-code-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(
+        upstreamRequest.url,
+        "https://api.kimi.com/coding/v1/models?after=one&after=two",
+      );
+      assert.equal(upstreamRequest.method, "GET");
+      assert.equal(upstreamRequest.body, null);
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer kimi-code-live-key");
+      return new Response('{"object":"list","data":[{"id":"k3"}]}', {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/kimi-code/v1/models?after=one&key=caller&after=two&KeY=caller-two",
+          { headers: { Authorization: "Bearer admin-live-key" } },
+        ),
+        stub.env,
+      );
+      assert.deepEqual(await response.json(), {
+        object: "list",
+        data: [{ id: "k3" }],
+      });
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker authenticates Kimi Code before configuration and restricts exact methods and paths", async () => {
+  const configuredStub = makeEnv(
+    async () => {
+      throw new Error("invalid Kimi Code paths must bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      KIMI_CODE_API_KEY: "kimi-code-live-key",
+    },
+  );
+  const missingSecretStub = makeEnv(
+    async () => {
+      throw new Error("Kimi Code auth failures must bypass the container");
+    },
+    { ADMIN_API_KEY: "admin-live-key" },
+  );
+  const rejectedCases = [
+    ["GET", "/kimi-code"],
+    ["GET", "/kimi-code/"],
+    ["POST", "/kimi-code/v1/models"],
+    ["GET", "/kimi-code/v1/chat/completions"],
+    ["POST", "/kimi-code/v1/responses"],
+    ["POST", "/kimi-code/v1/chat/completions/extra"],
+    ["GET", "/kimi-code/v1/models/"],
+    ["GET", "/kimi-code/v1%2Fmodels"],
+    ["GET", "/kimi-code%2Fv1/models"],
+    ["GET", "/kimi-code%252Fv1/models"],
+    ["GET", "/k%69mi-code%252Fv1/models"],
+    ["GET", "/kimi-code/v1/models%253Fkey%253Dsecret"],
+  ];
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 204 });
+    },
+    async () => {
+      const unauthorized = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/kimi-code/v1/models"),
+        missingSecretStub.env,
+      );
+      assert.equal(unauthorized.status, 401);
+
+      const missingSecret = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/kimi-code/v1/models", {
+          headers: { Authorization: "Bearer admin-live-key" },
+        }),
+        missingSecretStub.env,
+      );
+      const missingBody = await missingSecret.text();
+      assert.equal(missingSecret.status, 500);
+      assert.doesNotMatch(missingBody, /KIMI|API_KEY|kimi-code/i);
+
+      for (const [method, path] of rejectedCases) {
+        const hasBody = method === "POST";
+        const response = await worker.fetch(
+          new Request(`https://multillm-proxy.cserules.workers.dev${path}`, {
+            method,
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              ...(hasBody ? { "Content-Type": "application/json" } : {}),
+            },
+            ...(hasBody ? { body: "{}" } : {}),
+          }),
+          configuredStub.env,
+        );
+        assert.equal(response.status, 404, `${method} ${path}`);
+      }
+    },
+  );
+
+  assert.equal(fetchCalls, 0);
+  assert.equal(configuredStub.getCalls(), 0);
+  assert.equal(missingSecretStub.getCalls(), 0);
+});
+
+test("worker returns one manual Kimi Code failure and strict CORS without Cache or container use", async () => {
+  const originalCaches = globalThis.caches;
+  let cacheReads = 0;
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    get() {
+      cacheReads += 1;
+      throw new Error("Cache API must not be accessed");
+    },
+  });
+  const stub = makeEnv(
+    async () => {
+      throw new Error("Kimi Code fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      KIMI_CODE_API_KEY: "kimi-code-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  try {
+    await withGlobalFetch(
+      async (input) => {
+        fetchCalls += 1;
+        const upstreamRequest = input instanceof Request ? input : new Request(input);
+        assert.equal(upstreamRequest.redirect, "manual");
+        return new Response("upstream unavailable", {
+          status: 503,
+          headers: {
+            "Content-Type": "text/plain",
+            "Retry-After": "5",
+            Location: "https://untrusted.example/redirect",
+          },
+        });
+      },
+      async () => {
+        const origin = "https://client.example";
+        const preflight = await worker.fetch(
+          new Request(
+            "https://multillm-proxy.cserules.workers.dev/kimi-code/v1/chat/completions",
+            { method: "OPTIONS", headers: { Origin: origin } },
+          ),
+          stub.env,
+        );
+        assert.equal(preflight.status, 204);
+        assert.equal(preflight.headers.get("Access-Control-Allow-Origin"), origin);
+        assert.match(preflight.headers.get("Access-Control-Allow-Headers") ?? "", /OpenAI-Project/i);
+
+        const invalidPreflight = await worker.fetch(
+          new Request("https://multillm-proxy.cserules.workers.dev/kimi-code/v1/responses", {
+            method: "OPTIONS",
+            headers: { Origin: origin },
+          }),
+          stub.env,
+        );
+        assert.equal(invalidPreflight.status, 404);
+
+        const response = await worker.fetch(
+          new Request(
+            "https://multillm-proxy.cserules.workers.dev/kimi-code/v1/chat/completions",
+            {
+              method: "POST",
+              headers: {
+                Authorization: "Bearer admin-live-key",
+                "Content-Type": "application/json",
+              },
+              body: '{"model":"k3","reasoning_effort":"max"}',
+            },
+          ),
+          stub.env,
+        );
+        assert.equal(response.status, 503);
+        assert.equal(response.headers.get("Retry-After"), "5");
+        assert.equal(response.headers.has("Location"), false);
+      },
+    );
+  } finally {
+    if (originalCaches === undefined) {
+      delete globalThis.caches;
+    } else {
+      Object.defineProperty(globalThis, "caches", {
+        configurable: true,
+        value: originalCaches,
+        writable: true,
+      });
+    }
+  }
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(cacheReads, 0);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker deploy config never stores the Kimi Code secret in plaintext", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  assert.equal(config.vars?.KIMI_CODE_API_KEY, undefined);
 });
 
 test("worker answers /health directly without touching the container", async () => {

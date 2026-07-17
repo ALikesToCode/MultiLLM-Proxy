@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "kimi-code", "linkapi"})
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -356,12 +356,21 @@ class ProxyService:
                     "x-grok-conv-id": "X-Grok-Conv-Id",
                 }
             )
+        elif api_provider == "kimi-code":
+            header_whitelist.update(
+                {
+                    "idempotency-key": "Idempotency-Key",
+                    "openai-beta": "OpenAI-Beta",
+                    "openai-project": "OpenAI-Project",
+                    "x-client-request-id": "X-Client-Request-ID",
+                }
+            )
 
         for header, value in request_headers.items():
             canonical_header = header_whitelist.get(header.lower())
             if canonical_header:
                 headers[canonical_header] = value
-            elif api_provider == "codex-easy" and header.lower().startswith(
+            elif api_provider in {"codex-easy", "kimi-code"} and header.lower().startswith(
                 "x-stainless-"
             ):
                 headers[header] = value
@@ -1177,9 +1186,11 @@ class ProxyService:
 
         except requests.exceptions.RequestException as e:
             if raw_passthrough:
-                provider_name = (
-                    "LinkAPI" if api_provider == "linkapi" else "Codex Everywhere"
-                )
+                provider_name = {
+                    "codex-easy": "Codex Everywhere",
+                    "kimi-code": "Kimi Code",
+                    "linkapi": "LinkAPI",
+                }.get(api_provider, "Provider")
                 logger.error(
                     "Raw upstream transport request failed for %s (%s)",
                     api_provider,

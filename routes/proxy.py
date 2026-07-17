@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from urllib.parse import unquote
 
 from flask import Response, jsonify, request
 
@@ -19,7 +20,7 @@ from route_helpers import (
 
 logger = logging.getLogger(__name__)
 
-RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "kimi-code", "linkapi"})
 CODEX_EASY_EXACT_PATHS = frozenset(
     {
         "v1/models",
@@ -28,6 +29,10 @@ CODEX_EASY_EXACT_PATHS = frozenset(
         "v1/images",
     }
 )
+KIMI_CODE_METHODS_BY_PATH = {
+    "v1/models": frozenset({"GET"}),
+    "v1/chat/completions": frozenset({"POST"}),
+}
 
 
 def _is_valid_codex_easy_path(path: str) -> bool:
@@ -41,6 +46,31 @@ def _is_valid_codex_easy_path(path: str) -> bool:
     if not path.startswith("v1/images/"):
         return False
     return all(segment not in {"", ".", ".."} for segment in path.split("/"))
+
+
+def _is_valid_kimi_code_request(path: str, method: str) -> bool:
+    """Allow only Kimi Code's documented OpenAI-compatible routes."""
+    if not path or any(delimiter in path for delimiter in "%?#\\"):
+        return False
+    if any(ord(character) < 32 or ord(character) == 127 for character in path):
+        return False
+    return method.upper() in KIMI_CODE_METHODS_BY_PATH.get(path, frozenset())
+
+
+def _is_encoded_kimi_code_namespace(provider: str) -> bool:
+    candidate = provider.lower()
+    for _ in range(4):
+        if candidate == "kimi-code" or candidate.startswith(
+            ("kimi-code%", "kimi-code/", "kimi-code\\")
+        ):
+            return True
+        if "%" not in candidate:
+            return False
+        decoded_candidate = unquote(candidate)
+        if decoded_candidate == candidate:
+            return False
+        candidate = decoded_candidate
+    return False
 
 def _dashboard_chat_completions_url(app, provider):
     if provider == "googleai":
@@ -80,12 +110,22 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         """
         start_time = time.time()
         try:
+            if api_provider != "kimi-code" and _is_encoded_kimi_code_namespace(
+                api_provider
+            ):
+                api_provider = "kimi-code"
+                raise APIError("Invalid Kimi Code path", status_code=400)
             if api_provider not in app.config["API_BASE_URLS"]:
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
             if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):
                 raise APIError("Invalid LinkAPI path", status_code=400)
             if api_provider == "codex-easy" and not _is_valid_codex_easy_path(path):
                 raise APIError("Invalid Codex Everywhere path", status_code=400)
+            if api_provider == "kimi-code" and not _is_valid_kimi_code_request(
+                path,
+                request.method,
+            ):
+                raise APIError("Invalid Kimi Code path", status_code=400)
 
             raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
 
@@ -100,6 +140,8 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             elif api_provider == "nineteen":
                 if path in {"v1/chat/completions", "v1/completions"}:
                     pass
+            elif api_provider == "kimi-code":
+                path = path.removeprefix("v1/")
             elif api_provider == "googleai" and path == "models":
                 project_id = os.environ.get("PROJECT_ID")
                 location = os.environ.get("LOCATION")

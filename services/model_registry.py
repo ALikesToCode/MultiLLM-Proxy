@@ -37,6 +37,7 @@ DEFAULT_MODEL_IDS = {
         "qwen3.5-plus",
     ],
     "mimo": ["mimo-v2.5-pro"],
+    "kimi-code": ["k3"],
     "xai": ["grok-4"],
     "cerebras": ["llama3.1-8b"],
     "azure": ["gpt-4o-mini"],

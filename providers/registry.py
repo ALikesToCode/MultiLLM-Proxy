@@ -40,6 +40,11 @@ PROVIDER_SPECS = (
         ProviderCapabilities(),
     ),
     (
+        "kimi-code",
+        "chat/completions",
+        ProviderCapabilities(supports_tools=True),
+    ),
+    (
         "gemini",
         "chat/completions",
         ProviderCapabilities(

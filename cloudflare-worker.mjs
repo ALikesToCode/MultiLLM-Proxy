@@ -10,6 +10,7 @@ const API_ROUTE_PREFIXES = new Set([
   "googleai",
   "groq",
   "hyperbolic",
+  "kimi-code",
   "linkapi",
   "mimo",
   "nanogpt",
@@ -30,6 +31,8 @@ const CORS_DEFAULT_HEADERS =
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
+const KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1";
+const KIMI_CODE_ROUTE_PREFIX = "/kimi-code";
 const CONTAINER_PACKAGE_STARTUP_ERROR_PREFIXES = new Map([
   [500, "Failed to start container:"],
   [503, "There is no Container instance available at this time."],
@@ -121,6 +124,31 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
   "x-should-retry",
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
+const KIMI_CODE_REQUEST_HEADER_WHITELIST = new Set([
+  "accept",
+  "accept-language",
+  "content-type",
+  "idempotency-key",
+  "openai-beta",
+  "openai-organization",
+  "openai-project",
+  "user-agent",
+  "x-client-request-id",
+  "x-request-id",
+]);
+const KIMI_CODE_RESPONSE_HEADER_WHITELIST = new Set([
+  "cache-control",
+  "content-type",
+  "date",
+  "openai-processing-ms",
+  "openai-version",
+  "request-id",
+  "retry-after",
+  "vary",
+  "x-request-id",
+  "x-should-retry",
+]);
+const KIMI_CODE_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 const UPSTREAM_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -168,6 +196,7 @@ const DIRECT_ENV_KEYS = [
   "LINKAPI_BASE_URL",
   "CODEX_EASY_API_KEY",
   "CODEX_API_KEY",
+  "KIMI_CODE_API_KEY",
   "OPENROUTER_SITE_URL",
   "OPENROUTER_APP_NAME",
   "OPENROUTER_REFERER",
@@ -185,7 +214,7 @@ const DIRECT_ENV_KEYS = [
 
 const DYNAMIC_ENV_PATTERNS = [
   /^GROQ_API_KEY_\d+$/,
-  /^(?:AZURE|CEREBRAS|CHUTES|CODEX_EASY|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|LINKAPI|MIMO|NANOGPT|NINETEEN|OPENAI|OPENCODE|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
+  /^(?:AZURE|CEREBRAS|CHUTES|CODEX_EASY|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|KIMI_CODE|LINKAPI|MIMO|NANOGPT|NINETEEN|OPENAI|OPENCODE|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
 ];
 
 function shouldPassThroughKey(key) {
@@ -255,6 +284,37 @@ function isCodexEasyNamespacePath(pathname) {
       candidate.startsWith(`${CODEX_EASY_ROUTE_PREFIX}/`) ||
       candidate.startsWith(`${CODEX_EASY_ROUTE_PREFIX}\\`) ||
       candidate.startsWith(`${CODEX_EASY_ROUTE_PREFIX}%`)
+    ) {
+      return true;
+    }
+
+    if (!candidate.includes("%")) {
+      return false;
+    }
+
+    try {
+      const decodedCandidate = decodeURIComponent(candidate);
+      if (decodedCandidate === candidate) {
+        return false;
+      }
+      candidate = decodedCandidate;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function isKimiCodeNamespacePath(pathname) {
+  let candidate = pathname.toLowerCase();
+
+  for (let decodeCount = 0; decodeCount < 4; decodeCount += 1) {
+    if (
+      candidate === KIMI_CODE_ROUTE_PREFIX ||
+      candidate.startsWith(`${KIMI_CODE_ROUTE_PREFIX}/`) ||
+      candidate.startsWith(`${KIMI_CODE_ROUTE_PREFIX}\\`) ||
+      candidate.startsWith(`${KIMI_CODE_ROUTE_PREFIX}%`)
     ) {
       return true;
     }
@@ -412,6 +472,26 @@ function buildCodexEasyUnsupportedPathResponse() {
 }
 
 function buildMissingCodexEasyKeyResponse() {
+  return jsonResponse(
+    {
+      error: "Server configuration error",
+      message: "The requested provider is not configured on the worker.",
+    },
+    { status: 500 },
+  );
+}
+
+function buildKimiCodeUnsupportedPathResponse() {
+  return jsonResponse(
+    {
+      error: "Not found",
+      message: "The requested provider path is not supported.",
+    },
+    { status: 404 },
+  );
+}
+
+function buildMissingKimiCodeKeyResponse() {
   return jsonResponse(
     {
       error: "Server configuration error",
@@ -652,6 +732,81 @@ function copyCodexEasyResponseHeaders(headers) {
     if (
       CODEX_EASY_RESPONSE_HEADER_WHITELIST.has(normalized) ||
       CODEX_EASY_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+    ) {
+      responseHeaders.set(header, value);
+    }
+  }
+
+  return responseHeaders;
+}
+
+function getKimiCodeUpstreamPath(pathname) {
+  if (
+    !pathname.startsWith(`${KIMI_CODE_ROUTE_PREFIX}/`) ||
+    pathname.includes("%") ||
+    pathname.includes("\\")
+  ) {
+    return null;
+  }
+
+  const suffix = pathname.slice(KIMI_CODE_ROUTE_PREFIX.length);
+  if (suffix === "/v1/models") {
+    return "/models";
+  }
+  if (suffix === "/v1/chat/completions") {
+    return "/chat/completions";
+  }
+  return null;
+}
+
+function isKimiCodeMethodAllowed(upstreamPath, method) {
+  return (
+    (upstreamPath === "/models" && method === "GET") ||
+    (upstreamPath === "/chat/completions" && method === "POST")
+  );
+}
+
+function buildKimiCodeUpstreamUrl(requestUrl, upstreamPath) {
+  const upstreamUrl = new URL(KIMI_CODE_BASE_URL);
+  upstreamUrl.pathname = `${upstreamUrl.pathname.replace(/\/$/, "")}${upstreamPath}`;
+
+  for (const [name, value] of requestUrl.searchParams.entries()) {
+    if (name.toLowerCase() !== "key") {
+      upstreamUrl.searchParams.append(name, value);
+    }
+  }
+
+  return upstreamUrl;
+}
+
+function buildKimiCodeUpstreamHeaders(request, upstreamToken) {
+  const headers = new Headers();
+
+  for (const [header, value] of request.headers.entries()) {
+    const normalized = header.toLowerCase();
+    if (
+      KIMI_CODE_REQUEST_HEADER_WHITELIST.has(normalized) ||
+      normalized.startsWith("x-stainless-")
+    ) {
+      headers.set(header, value);
+    }
+  }
+
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+  headers.set("Authorization", `Bearer ${upstreamToken}`);
+  return headers;
+}
+
+function copyKimiCodeResponseHeaders(headers) {
+  const responseHeaders = new Headers();
+
+  for (const [header, value] of headers.entries()) {
+    const normalized = header.toLowerCase();
+    if (
+      KIMI_CODE_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      KIMI_CODE_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
     ) {
       responseHeaders.set(header, value);
     }
@@ -1469,6 +1624,44 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
   );
 }
 
+async function handleDirectKimiCodeRequest(request, env, requestUrl) {
+  const providedToken = extractBearerToken(request);
+  if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
+    return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
+  }
+
+  const upstreamPath = getKimiCodeUpstreamPath(requestUrl.pathname);
+  if (!upstreamPath || !isKimiCodeMethodAllowed(upstreamPath, request.method)) {
+    return applyCorsHeaders(request, buildKimiCodeUnsupportedPathResponse(), env);
+  }
+
+  const upstreamToken = env.KIMI_CODE_API_KEY;
+  if (!upstreamToken) {
+    return applyCorsHeaders(request, buildMissingKimiCodeKeyResponse(), env);
+  }
+
+  const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
+  const upstreamRequest = new Request(buildKimiCodeUpstreamUrl(requestUrl, upstreamPath), {
+    method: request.method,
+    headers: buildKimiCodeUpstreamHeaders(request, upstreamToken),
+    body: bodyAllowed ? request.body : undefined,
+    redirect: "manual",
+    signal: request.signal,
+    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
+  });
+  const upstreamResponse = await fetch(upstreamRequest);
+
+  return applyCorsHeaders(
+    request,
+    new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: copyKimiCodeResponseHeaders(upstreamResponse.headers),
+    }),
+    env,
+  );
+}
+
 function buildCorsHeaders(request) {
   const origin = request.headers.get("Origin");
   const { pathname } = new URL(request.url);
@@ -1554,6 +1747,14 @@ export default {
     const linkapiPath = isDirectLinkApiPath(requestUrl.pathname);
     const opencodePath = isDirectOpencodePath(requestUrl.pathname);
     const codexEasyPath = isCodexEasyNamespacePath(requestUrl.pathname);
+    const kimiCodePath = isKimiCodeNamespacePath(requestUrl.pathname);
+
+    if (request.method === "OPTIONS" && kimiCodePath) {
+      if (!getKimiCodeUpstreamPath(requestUrl.pathname)) {
+        return applyCorsHeaders(request, buildKimiCodeUnsupportedPathResponse(), env);
+      }
+      return buildPreflightResponse(request, env);
+    }
 
     if (request.method === "OPTIONS" && codexEasyPath) {
       if (!getCodexEasyUpstreamPath(requestUrl.pathname)) {
@@ -1568,6 +1769,25 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (kimiCodePath) {
+      try {
+        return await handleDirectKimiCodeRequest(request, env, requestUrl);
+      } catch (error) {
+        logStructuredError("direct_kimi_code_fetch_failed", error);
+        return applyCorsHeaders(
+          request,
+          jsonResponse(
+            {
+              error: "Proxy unavailable",
+              message: "The direct provider route could not handle the request.",
+            },
+            { status: 502 },
+          ),
+          env,
+        );
+      }
     }
 
     if (codexEasyPath) {

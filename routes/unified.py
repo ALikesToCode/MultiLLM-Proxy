@@ -17,7 +17,10 @@ from services.auth_service import AuthService
 from services.model_registry import ModelRegistry
 
 
-RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+RAW_CHAT_PASSTHROUGH_PROVIDERS = frozenset(
+    {"codex-easy", "kimi-code", "linkapi"}
+)
+NATIVE_RESPONSES_PROVIDERS = frozenset({"codex-easy", "linkapi"})
 
 
 def _provider_token(auth_service_cls, provider: str) -> str:
@@ -184,13 +187,13 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     token,
                     upstream_path=upstream_path,
                 )
-                if provider in RAW_PASSTHROUGH_PROVIDERS
+                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
                 else request.args
             )
 
             request_data = (
                 raw_body
-                if provider in RAW_PASSTHROUGH_PROVIDERS
+                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
                 else proxy_service_cls.filter_request_data(provider, raw_body)
             )
 
@@ -212,7 +215,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
             if isinstance(response, Response):
                 return response
-            if provider in RAW_PASSTHROUGH_PROVIDERS:
+            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS:
                 return stream_upstream_response(response)
             return Response(
                 response.content,
@@ -241,9 +244,15 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             payload = request.get_json(silent=True) or {}
             requested_model = payload.get("model")
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
-            token = _provider_token(auth_service_cls, provider)
 
-            if provider in RAW_PASSTHROUGH_PROVIDERS:
+            if provider == "kimi-code":
+                raise APIError(
+                    "Kimi Code does not support the Responses API; use /v1/chat/completions",
+                    status_code=400,
+                )
+
+            token = _provider_token(auth_service_cls, provider)
+            if provider in NATIVE_RESPONSES_PROVIDERS:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
                 headers = proxy_service_cls.prepare_headers(
