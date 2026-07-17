@@ -364,10 +364,10 @@
                             <i class="fas fa-moon" aria-hidden="true"></i>
                         </span>
                         <div>
-                            <p class="font-semibold text-violet-950">Kimi Code OpenAI fast path</p>
+                            <p class="font-semibold text-violet-950">Kimi Code protected routes</p>
                             <p class="mt-1 text-xs leading-5 text-violet-900">
-                                Cloudflare sends these admin-key-only routes directly to <code>https://api.kimi.com/coding/v1</code> without waking Flask. The Worker keeps <code>KIMI_CODE_API_KEY</code> server-side.
-                                Use the Container-backed <code>/v1/chat/completions</code> route with <code>kimi-code:k3</code> when Flask authentication, request limits, accounting, and metrics are required.
+                                Cloudflare authenticates these routes before any Container wakeup and serves the <code>k3</code> model catalog at the edge. Chat streams through Flask to <code>https://api.kimi.com/coding/v1</code>, with <code>KIMI_CODE_API_KEY</code> kept server-side.
+                                Use <code>/v1/chat/completions</code> with <code>kimi-code:k3</code> when unified request limits and accounting are required.
                             </p>
                             <p class="mt-2 text-xs leading-5 text-violet-900">
                                 Generation uses Chat Completions only. For K3's strongest reasoning, send <code>reasoning_effort: max</code>; keep <code>prompt_cache_key</code> stable when the conversation prefix is stable.

@@ -304,16 +304,16 @@ Request and response bytes are passed through unchanged, including native SSE an
 
 `/v1/images/*` works only for image-generation key groups. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency. Retry only when the selected upstream endpoint explicitly documents an idempotency guarantee.
 
-### Kimi Code OpenAI fast path
+### Kimi Code OpenAI-compatible routes
 
-Cloudflare serves `/kimi-code/*` directly from the Worker, so model discovery and Chat Completions do not wake the Flask Container. Configure `KIMI_CODE_API_KEY` as a Worker secret. The upstream base is fixed to `https://api.kimi.com/coding/v1`.
+Configure `KIMI_CODE_API_KEY` as a Cloudflare secret. The Worker authenticates `/kimi-code/*` callers before any Container wakeup and serves the configured `k3` model catalog at the edge. Chat Completions then stream through the Container because Kimi's edge rejects Worker-origin egress; the Container makes one request to the fixed `https://api.kimi.com/coding/v1` upstream.
 
 | Operation | Proxy route | Caller authentication |
 | --- | --- | --- |
 | Model catalog | `$PROXY_BASE_URL/kimi-code/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
 | Chat Completions | `$PROXY_BASE_URL/kimi-code/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
 
-Kimi Code's generation API is Chat Completions only in this integration; `/kimi-code/v1/responses` is not supported. Use model `k3` on the direct route, or `kimi-code:k3` through the Container-backed unified `/v1/chat/completions` route when dashboard-user authentication, request-size checks, rate limits, accounting, and metrics are required.
+Kimi Code's generation API is Chat Completions only in this integration; `/kimi-code/v1/responses` is not supported. Use model `k3` on the raw route, or `kimi-code:k3` through the unified `/v1/chat/completions` route when request-size checks, rate limits, and unified accounting are required. Both generation routes are single-attempt and preserve the provider stream.
 
 For K3's strongest reasoning setting, send `"reasoning_effort":"max"`. A stable `prompt_cache_key` can improve upstream cache affinity for repeated conversation prefixes, but it does not guarantee a cache hit:
 

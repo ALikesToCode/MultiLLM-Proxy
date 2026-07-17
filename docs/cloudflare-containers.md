@@ -1,6 +1,6 @@
 # Deploying MultiLLM-Proxy to Cloudflare Containers
 
-This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and Kimi Code OpenAI-compatible traffic directly; the Flask proxy handles the remaining routes in a Container.
+This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and the Kimi Code model catalog directly. Kimi Code chat and the remaining Flask routes run through a Container.
 
 ## Why Containers, not Python Workers
 
@@ -11,7 +11,7 @@ Cloudflare's Python Workers runtime runs on Pyodide. Cloudflare's docs note that
 - threaded execution and SSE streaming
 - service-account JSON support for the `googleai` provider
 
-That makes Cloudflare Containers the safer target for the Python application. `/linkapi/*`, `/codex-easy/*`, and `/kimi-code/*` are raw Worker fast paths, so their provider-native traffic does not wake the Container.
+That makes Cloudflare Containers the safer target for the Python application. `/linkapi/*` and `/codex-easy/*` are raw Worker fast paths. The Worker serves `/kimi-code/v1/models` locally and rejects unauthorized or invalid Kimi requests without waking the Container; valid Kimi chat streams through Flask because Kimi's edge rejects Worker-origin egress.
 
 ## Prerequisites
 
@@ -76,14 +76,14 @@ On the Codex Everywhere and LinkAPI raw OpenAI fast paths, a Responses `prompt_c
 
 Set `KIMI_CODE_API_KEY` as a Worker secret. The upstream base is fixed to `https://api.kimi.com/coding/v1`.
 
-| Operation | Direct Worker route | Caller authentication |
-| --- | --- | --- |
-| Model catalog | `/kimi-code/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
-| Chat Completions | `/kimi-code/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Operation | Proxy route | Execution path | Caller authentication |
+| --- | --- | --- | --- |
+| Model catalog | `/kimi-code/v1/models` | Worker-local configured catalog | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `/kimi-code/v1/chat/completions` | Edge auth, then Container raw pass-through | `Authorization: Bearer $ADMIN_API_KEY` |
 
-Kimi Code generation is Chat Completions only in this integration. Use model `k3` on the direct route. Send `reasoning_effort: "max"` for K3's strongest reasoning setting, and keep `prompt_cache_key` stable for stable conversation prefixes when seeking upstream cache affinity. Cache hits are not guaranteed.
+Kimi Code generation is Chat Completions only in this integration. Use model `k3` on the raw route. Send `reasoning_effort: "max"` for K3's strongest reasoning setting, and keep `prompt_cache_key` stable for stable conversation prefixes when seeking upstream cache affinity. Cache hits are not guaranteed.
 
-The Worker authenticates the caller with `ADMIN_API_KEY`, replaces it with `KIMI_CODE_API_KEY`, and preserves the OpenAI-compatible request/response stream. The direct route bypasses Flask user authentication, request-size checks, rate limits, accounting, and metrics. Use the Container-backed `/v1/chat/completions` route with model `kimi-code:k3` when those controls are required. Chat generation is single-attempt to avoid duplicated work and billing.
+The Worker authenticates the caller with `ADMIN_API_KEY` before forwarding valid chat requests to Flask. Flask replaces the caller credential with `KIMI_CODE_API_KEY` and preserves the OpenAI-compatible request/response stream. The raw route bypasses unified request-size checks, rate limits, and accounting; use `/v1/chat/completions` with model `kimi-code:k3` when those controls are required. Chat generation is single-attempt to avoid duplicated work and billing.
 
 `LINKAPI_KEY` is used both by the direct Worker fast path and the Container fallback. `LINKAPI_API_KEY` is supported as an alias, but `LINKAPI_KEY` is preferred. The optional, non-secret `LINKAPI_BASE_URL` variable defaults to `https://api.linkapi.ai` and is restricted to the Worker's allowlist of official LinkAPI hosts; arbitrary HTTPS origins are rejected.
 

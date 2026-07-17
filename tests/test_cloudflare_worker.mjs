@@ -1907,7 +1907,7 @@ test("worker authenticates Kimi Code at the edge and streams chat through the co
 test("worker serves the configured Kimi Code model catalog without upstream or container I/O", async () => {
   const stub = makeEnv(
     async () => {
-      throw new Error("Kimi Code fast path should bypass the container");
+      throw new Error("Kimi Code catalog should bypass the container");
     },
     {
       ADMIN_API_KEY: "admin-live-key",

@@ -2,7 +2,7 @@
 
 ## Supported Runtime
 
-The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*`, Codex Everywhere OpenAI traffic under `/codex-easy/*`, and Kimi Code traffic under `/kimi-code/*` take direct Worker fast paths to avoid a Container wakeup and preserve provider-native streaming.
+The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*` and Codex Everywhere OpenAI traffic under `/codex-easy/*` take direct Worker fast paths. Kimi model discovery is Worker-local; valid Kimi chat is authenticated at the edge and streamed through the Container because Kimi's edge rejects Worker-origin egress.
 
 `wrangler.jsonc` deploys:
 
@@ -36,7 +36,7 @@ The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces it with `C
 
 Catalog results are specific to the API-key group, so discover current model IDs through `/codex-easy/v1/models`. Image routes work only for image-generation key groups. The Worker preserves raw JSON, SSE, binary, and multipart bodies. On the Codex Everywhere and LinkAPI raw OpenAI fast paths, it retains a Responses `prompt_cache_key` and forwards Chat's `X-Grok-Conv-Id`. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) these fields for cache routing, but neither the proxy nor either provider guarantees a cache hit. Generation POSTs are single-attempt; the proxy does not provide idempotency.
 
-## Kimi Code Worker Fast Path
+## Kimi Code protected routes
 
 Configure the upstream credential as a Worker secret:
 
@@ -46,14 +46,14 @@ npx wrangler secret put KIMI_CODE_API_KEY
 
 The upstream base is fixed to `https://api.kimi.com/coding/v1`.
 
-| Operation | Direct Worker route | Caller credential |
-| --- | --- | --- |
-| Model catalog | `/kimi-code/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
-| Chat Completions | `/kimi-code/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| Operation | Proxy route | Execution path | Caller credential |
+| --- | --- | --- | --- |
+| Model catalog | `/kimi-code/v1/models` | Worker-local configured catalog | `Authorization: Bearer $ADMIN_API_KEY` |
+| Chat Completions | `/kimi-code/v1/chat/completions` | Edge auth, then Container raw pass-through | `Authorization: Bearer $ADMIN_API_KEY` |
 
-Kimi Code generation is Chat Completions only in this integration. Use `k3` on the direct route, `reasoning_effort: "max"` for K3's strongest reasoning setting, and a stable `prompt_cache_key` when the conversation prefix is stable. Cache affinity is upstream behavior and a hit is not guaranteed.
+Kimi Code generation is Chat Completions only in this integration. Use `k3` on the raw route, `reasoning_effort: "max"` for K3's strongest reasoning setting, and a stable `prompt_cache_key` when the conversation prefix is stable. Cache affinity is upstream behavior and a hit is not guaranteed.
 
-The Worker validates `ADMIN_API_KEY`, removes the caller credential, and sends `KIMI_CODE_API_KEY` upstream. The direct route bypasses Flask dashboard-user authentication, request-size checks, RPM/TPM/daily limits, accounting, and metrics. Use Container-backed `/v1/chat/completions` with model `kimi-code:k3` when those controls are needed. Requests and streams are preserved, and generation is single-attempt to avoid duplicate work and billing.
+The Worker validates `ADMIN_API_KEY` before waking the Container. It serves model discovery locally; for valid chat, Flask removes the caller credential and sends `KIMI_CODE_API_KEY` upstream. The raw route bypasses unified request-size checks, RPM/TPM/daily limits, and accounting. Use `/v1/chat/completions` with model `kimi-code:k3` when those controls are needed. Requests and streams are preserved, and generation is single-attempt to avoid duplicate work and billing.
 
 ## LinkAPI Worker Fast Path
 
