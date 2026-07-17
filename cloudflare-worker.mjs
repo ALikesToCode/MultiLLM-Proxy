@@ -18,6 +18,7 @@ const API_ROUTE_PREFIXES = new Set([
   "openai",
   "opencode",
   "openrouter",
+  "optimize",
   "palm",
   "sambanova",
   "scaleway",
@@ -28,6 +29,8 @@ const API_ROUTE_PREFIXES = new Set([
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, X-Client-Request-ID";
+const CORS_EXPOSE_HEADERS =
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -171,6 +174,8 @@ const DIRECT_ENV_KEYS = [
   "MAX_REQUEST_BYTES",
   "MAX_PROMPT_TOKENS",
   "MAX_OUTPUT_TOKENS",
+  "OPTIMIZER_MAX_REQUEST_BYTES",
+  "OPTIMIZER_SUMMARY_TIMEOUT_SECONDS",
   "RATE_LIMIT_USAGE_RETENTION_SECONDS",
   "FLASK_SECRET_KEY",
   "JWT_SECRET",
@@ -1675,6 +1680,7 @@ function buildCorsHeaders(request) {
     "Access-Control-Allow-Methods": CORS_ALLOWED_METHODS,
     "Access-Control-Allow-Headers":
       request.headers.get("Access-Control-Request-Headers") ?? CORS_DEFAULT_HEADERS,
+    "Access-Control-Expose-Headers": CORS_EXPOSE_HEADERS,
     "Access-Control-Max-Age": "86400",
   };
 }

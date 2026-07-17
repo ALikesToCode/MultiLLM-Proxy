@@ -318,6 +318,30 @@ class KimiCodeRawRequestServiceTest(unittest.TestCase):
         circuit_open.assert_not_called()
         sleep.assert_not_called()
 
+    def test_raw_summary_transport_honors_bounded_timeout_override(self):
+        upstream_response = self._response(200)
+        session = Mock()
+        session.request.return_value = upstream_response
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_get_provider_session",
+            return_value=session,
+        ):
+            response = self.proxy_module.ProxyService.make_request(
+                method="POST",
+                url="https://api.kimi.com/coding/v1/chat/completions",
+                headers={"Authorization": "Bearer provider-key"},
+                params=[],
+                data=b'{"model":"k3","stream":false}',
+                api_provider="kimi-code",
+                use_cache=False,
+                timeout_override=(5, 45),
+            )
+
+        self.assertIs(response, upstream_response)
+        self.assertEqual(session.request.call_args.kwargs["timeout"], (5, 45))
+
     def test_transport_error_is_generic_and_never_retried_or_leaked(self):
         secret = "kimi-code-upstream-secret"
         session = Mock()

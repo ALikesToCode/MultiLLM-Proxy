@@ -166,6 +166,72 @@ test("worker treats unified v1 routes as API paths for CORS preflight", async ()
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
 });
 
+test("worker treats optimized chat as a CORS-safe Container API route", async () => {
+  const origin = "https://client.example";
+  const stub = makeEnv(async (request) => {
+    const url = new URL(request.url);
+    assert.equal(url.pathname, "/optimize/v1/chat/completions");
+    assert.equal(url.search, "?trace=one&trace=two");
+    assert.equal(request.method, "POST");
+    assert.equal(request.headers.get("Authorization"), "Bearer admin-live-key");
+    assert.deepEqual(await request.json(), {
+      model: "kimi-code:k3",
+      messages: [{ role: "user", content: "hello" }],
+      optimization: { mode: "deterministic", trigger_input_tokens: 0 },
+    });
+    return new Response('{"ok":true}', {
+      headers: {
+        "Content-Type": "application/json",
+        "X-MultiLLM-Optimization": "applied",
+      },
+    });
+  });
+
+  const preflight = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/optimize/v1/chat/completions", {
+      method: "OPTIONS",
+      headers: { Origin: origin },
+    }),
+    stub.env,
+  );
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-MultiLLM-Optimization/,
+  );
+  assert.equal(stub.getCalls(), 0);
+
+  const response = await worker.fetch(
+    new Request(
+      "https://multillm-proxy.cserules.workers.dev/optimize/v1/chat/completions?trace=one&trace=two",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-live-key",
+          Origin: origin,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "kimi-code:k3",
+          messages: [{ role: "user", content: "hello" }],
+          optimization: { mode: "deterministic", trigger_input_tokens: 0 },
+        }),
+      },
+    ),
+    stub.env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.equal(response.headers.get("X-MultiLLM-Optimization"), "applied");
+  assert.match(
+    response.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-MultiLLM-Summary/,
+  );
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(stub.getCalls(), 1);
+});
+
 test("worker treats mimo provider routes as API paths for CORS preflight", async () => {
   const origin = "https://janitorai.com";
   const stub = makeEnv(async () => {
@@ -392,6 +458,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       CODEX_EASY_RATE_LIMIT_RPM: "180",
       KIMI_CODE_MAX_REQUEST_BYTES: "33554432",
       KIMI_CODE_RATE_LIMIT_RPM: "90",
+      OPTIMIZER_MAX_REQUEST_BYTES: "8388608",
+      OPTIMIZER_SUMMARY_TIMEOUT_SECONDS: "30",
       RATE_LIMIT_ENABLED: "true",
       GUNICORN_GRACEFUL_TIMEOUT: "45",
       GUNICORN_ACCESS_LOG: "-",
@@ -421,6 +489,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.CODEX_EASY_RATE_LIMIT_RPM, "180");
   assert.equal(container.envVars.KIMI_CODE_MAX_REQUEST_BYTES, "33554432");
   assert.equal(container.envVars.KIMI_CODE_RATE_LIMIT_RPM, "90");
+  assert.equal(container.envVars.OPTIMIZER_MAX_REQUEST_BYTES, "8388608");
+  assert.equal(container.envVars.OPTIMIZER_SUMMARY_TIMEOUT_SECONDS, "30");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
   assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");

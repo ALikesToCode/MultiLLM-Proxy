@@ -5,6 +5,7 @@ import requests
 from flask import Flask, Response
 
 from route_helpers import (
+    api_authenticate_only,
     api_auth_required,
     apply_cors_headers,
     build_cors_preflight_response,
@@ -245,6 +246,23 @@ class RouteHelperCorsTest(unittest.TestCase):
         self.assertIn("x-goog-api-key", allowed_headers)
         self.assertIn("anthropic-version", allowed_headers)
 
+    def test_optimizer_cors_exposes_optimization_metadata_headers(self):
+        with self.app.test_request_context(
+            "/optimize/v1/chat/completions",
+            method="OPTIONS",
+            headers={"Origin": "https://client.example"},
+        ):
+            response = build_cors_preflight_response()
+
+        exposed_headers = response.headers["Access-Control-Expose-Headers"].lower()
+        self.assertEqual(
+            response.headers["Access-Control-Allow-Origin"],
+            "https://client.example",
+        )
+        self.assertIn("x-multillm-optimization", exposed_headers)
+        self.assertIn("x-multillm-estimated-input-after", exposed_headers)
+        self.assertIn("x-multillm-summary", exposed_headers)
+
 
 class RouteHelperRateLimitTest(unittest.TestCase):
     def setUp(self):
@@ -304,6 +322,35 @@ class RouteHelperRateLimitTest(unittest.TestCase):
         )
 
         self.assertEqual(provider, "openrouter")
+
+    def test_authenticate_only_validates_key_without_reserving_rate_limit(self):
+        app = Flask(__name__)
+
+        @app.route("/optimize/v1/chat/completions", methods=["POST"])
+        @api_authenticate_only
+        def optimized_route():
+            return {"ok": True}
+
+        auth_service = api_authenticate_only.__globals__["AuthService"]
+        rate_limit_service = api_authenticate_only.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
+            return_value={
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+                "scopes": ["chat"],
+            },
+        ), patch.object(rate_limit_service, "enforce_request") as enforce_request:
+            response = app.test_client().post(
+                "/optimize/v1/chat/completions",
+                headers={"Authorization": "Bearer user-key"},
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"ok": True})
+        enforce_request.assert_not_called()
 
 
 class LinkAPINativeProxyAuthenticationTest(unittest.TestCase):

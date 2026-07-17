@@ -17,6 +17,7 @@ from route_helpers import (
     login_required,
 )
 from routes.core import register_core_routes
+from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.unified import register_unified_routes
 from security_config import validate_runtime_secrets
@@ -94,6 +95,7 @@ def create_app() -> Flask:
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_core_routes(app)
 
     return app

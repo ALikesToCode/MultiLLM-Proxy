@@ -9,7 +9,7 @@ from error_handlers import APIError
 from providers.registry import get_adapter
 from route_helpers import (
     api_auth_required,
-    copy_upstream_response_headers,
+    copy_raw_provider_response_headers,
     login_required,
     stream_upstream_response,
 )
@@ -58,12 +58,28 @@ def _copy_request_payload(payload: dict, provider_model: str) -> dict:
     return upstream_payload
 
 
+def serialize_unified_chat_payload(payload: dict) -> bytes:
+    """Serialize the exact Chat Completions body used for limits and dispatch."""
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def validate_unified_chat_target(app, auth_service_cls, model_id: str) -> str:
+    """Validate model availability and credentials without dispatching upstream."""
+    provider, _, _ = _resolve_enabled_model(app, model_id)
+    _provider_token(auth_service_cls, provider)
+    return provider
+
+
 def _pass_through_response(response: requests.Response) -> Response:
     return Response(
         response.content,
         status=response.status_code,
         content_type=response.headers.get("content-type", "application/json"),
-        headers=copy_upstream_response_headers(response.headers),
+        headers=copy_raw_provider_response_headers(response.headers),
     )
 
 
@@ -97,6 +113,97 @@ def _chat_response_to_responses_payload(chat_payload: dict, requested_model: str
         "output_text": text,
         "usage": chat_payload.get("usage"),
     }
+
+
+def dispatch_unified_chat_completion(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    *,
+    request_headers=None,
+    request_args=None,
+    request_timeout=None,
+):
+    """Dispatch a validated unified Chat Completions payload."""
+    start_time = time.time()
+    provider = "unknown"
+    headers_source = request.headers if request_headers is None else request_headers
+    args_source = request.args if request_args is None else request_args
+    try:
+        provider, provider_model, adapter = _resolve_enabled_model(
+            app,
+            payload.get("model"),
+        )
+        token = _provider_token(auth_service_cls, provider)
+        upstream_payload = _copy_request_payload(payload, provider_model)
+        raw_body = serialize_unified_chat_payload(upstream_payload)
+        upstream_path = "v1/chat/completions"
+        headers = proxy_service_cls.prepare_headers(
+            headers_source,
+            provider,
+            token,
+            upstream_path=upstream_path,
+        )
+        params = (
+            proxy_service_cls.prepare_params(
+                args_source,
+                provider,
+                token,
+                upstream_path=upstream_path,
+            )
+            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
+            else args_source
+        )
+
+        request_data = (
+            raw_body
+            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
+            else proxy_service_cls.filter_request_data(provider, raw_body)
+        )
+
+        request_kwargs = {
+            "method": "POST",
+            "url": adapter.chat_completions_url(),
+            "headers": headers,
+            "params": params,
+            "data": request_data,
+            "api_provider": provider,
+            "use_cache": False,
+        }
+        if request_timeout is not None:
+            request_kwargs["timeout_override"] = request_timeout
+        response = proxy_service_cls.make_request(
+            **request_kwargs,
+        )
+
+        metrics_service_cls.get_instance().track_request(
+            provider=provider,
+            status_code=response.status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+
+        if isinstance(response, Response):
+            return response
+        if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS or payload.get("stream"):
+            return stream_upstream_response(response)
+        return Response(
+            response.content,
+            status=response.status_code,
+            content_type=response.headers.get("content-type", "application/json"),
+            headers=copy_raw_provider_response_headers(response.headers),
+        )
+    except ValueError as error:
+        raise APIError(str(error), status_code=400) from error
+    except Exception as error:
+        status_code = error.status_code if isinstance(error, APIError) else 502
+        metrics_service_cls.get_instance().track_request(
+            provider=provider,
+            status_code=status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+        raise
 
 
 def _responses_input_to_messages(payload: dict) -> list[dict]:
@@ -165,74 +272,14 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     def unified_chat_completions():
-        start_time = time.time()
-        provider = "unknown"
-        try:
-            payload = request.get_json(silent=True) or {}
-            provider, provider_model, adapter = _resolve_enabled_model(app, payload.get("model"))
-            token = _provider_token(auth_service_cls, provider)
-            upstream_payload = _copy_request_payload(payload, provider_model)
-            raw_body = json.dumps(upstream_payload).encode("utf-8")
-            upstream_path = "v1/chat/completions"
-            headers = proxy_service_cls.prepare_headers(
-                request.headers,
-                provider,
-                token,
-                upstream_path=upstream_path,
-            )
-            params = (
-                proxy_service_cls.prepare_params(
-                    request.args,
-                    provider,
-                    token,
-                    upstream_path=upstream_path,
-                )
-                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
-                else request.args
-            )
-
-            request_data = (
-                raw_body
-                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
-                else proxy_service_cls.filter_request_data(provider, raw_body)
-            )
-
-            response = proxy_service_cls.make_request(
-                method="POST",
-                url=adapter.chat_completions_url(),
-                headers=headers,
-                params=params,
-                data=request_data,
-                api_provider=provider,
-                use_cache=False,
-            )
-
-            metrics_service_cls.get_instance().track_request(
-                provider=provider,
-                status_code=response.status_code,
-                response_time=(time.time() - start_time) * 1000,
-            )
-
-            if isinstance(response, Response):
-                return response
-            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS:
-                return stream_upstream_response(response)
-            return Response(
-                response.content,
-                status=response.status_code,
-                content_type=response.headers.get("content-type", "application/json"),
-                headers=copy_upstream_response_headers(response.headers),
-            )
-        except ValueError as error:
-            raise APIError(str(error), status_code=400) from error
-        except Exception as error:
-            status_code = error.status_code if isinstance(error, APIError) else 502
-            metrics_service_cls.get_instance().track_request(
-                provider=provider,
-                status_code=status_code,
-                response_time=(time.time() - start_time) * 1000,
-            )
-            raise
+        payload = request.get_json(silent=True) or {}
+        return dispatch_unified_chat_completion(
+            app,
+            auth_service_cls,
+            metrics_service_cls,
+            proxy_service_cls,
+            payload,
+        )
 
     @app.route("/v1/responses", methods=["POST", "OPTIONS"])
     @csrf.exempt
@@ -303,7 +350,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 if source_key in payload:
                     chat_payload[target_key] = payload[source_key]
 
-            raw_body = json.dumps(chat_payload).encode("utf-8")
+            raw_body = serialize_unified_chat_payload(chat_payload)
             headers = proxy_service_cls.prepare_headers(request.headers, provider, token)
             response = proxy_service_cls.make_request(
                 method="POST",

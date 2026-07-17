@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 import random
 import re
@@ -176,6 +177,8 @@ class RateLimitService:
 
     @classmethod
     def _payload_text_values(cls, payload: Dict[str, Any]):
+        if "instructions" in payload:
+            yield from cls._iter_content_text(payload["instructions"])
         if isinstance(payload.get("messages"), list):
             yield from cls._message_text_values(payload["messages"])
             return
@@ -195,9 +198,36 @@ class RateLimitService:
             return 0
 
         text = " ".join(cls._payload_text_values(payload))
-        if not text:
-            return 0
-        return max(1, len(text) // 4)
+        text_tokens = max(1, len(text) // 4) if text else 0
+
+        billable_structures: list[Any] = []
+        for key in (
+            "functions",
+            "json_schema",
+            "response_format",
+            "response_schema",
+            "tool_choice",
+            "tools",
+        ):
+            if key in payload:
+                billable_structures.append({key: payload[key]})
+        for message in payload.get("messages", []):
+            if not isinstance(message, dict):
+                continue
+            for key in ("function_call", "tool_calls"):
+                if key in message:
+                    billable_structures.append({key: message[key]})
+
+        structured_tokens = 0
+        if billable_structures:
+            serialized = json.dumps(
+                billable_structures,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            structured_tokens = max(1, (len(serialized) + 3) // 4)
+        return text_tokens + structured_tokens
 
     @staticmethod
     def requested_output_tokens(payload: Optional[Dict[str, Any]]) -> int:
@@ -229,6 +259,356 @@ class RateLimitService:
         return (_utcnow() - timedelta(seconds=seconds)).isoformat()
 
     @classmethod
+    def check_request_size(cls, provider: str, payload_bytes: bytes) -> LimitDecision:
+        """Apply the provider body-size safety limit without reserving usage."""
+        max_request_bytes = cls._provider_limit(
+            provider,
+            "MAX_REQUEST_BYTES",
+            1024 * 1024,
+        )
+        if len(payload_bytes or b"") > max_request_bytes:
+            return LimitDecision(
+                False,
+                status_code=413,
+                error="request_too_large",
+                message="Request body exceeds the configured maximum size.",
+                metadata={"max_request_bytes": max_request_bytes},
+            )
+        return LimitDecision(
+            True,
+            metadata={"max_request_bytes": max_request_bytes},
+        )
+
+    @classmethod
+    def reserve_request_slot(
+        cls,
+        provider: str,
+        user: Optional[Dict[str, Any]],
+        remote_addr: Optional[str],
+        payload_json: Optional[Dict[str, Any]] = None,
+    ) -> LimitDecision:
+        """Atomically reserve RPM and daily capacity before expensive preprocessing."""
+        output_tokens = cls.requested_output_tokens(payload_json)
+        max_output_tokens = cls._provider_limit(
+            provider,
+            "MAX_OUTPUT_TOKENS",
+            8192,
+        )
+        if output_tokens and output_tokens > max_output_tokens:
+            return LimitDecision(
+                False,
+                status_code=400,
+                error="max_output_too_large",
+                message="Requested output token count exceeds the configured maximum.",
+                metadata={
+                    "output_tokens": output_tokens,
+                    "max_output_tokens": max_output_tokens,
+                },
+            )
+        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
+            "0",
+            "false",
+            "no",
+        }:
+            return LimitDecision(
+                True,
+                metadata={"provider": provider, "reservation_id": None},
+            )
+
+        identity, key_prefix = cls._identity_for_user(user, remote_addr)
+        rpm_limit = cls._provider_limit(
+            provider,
+            "RATE_LIMIT_RPM",
+            cls.RATE_LIMITS.get(provider, cls.RATE_LIMITS["default"])["requests"],
+        )
+        tpm_limit = cls._provider_limit(provider, "RATE_LIMIT_TPM", 200000)
+        daily_limit = cls._provider_limit(provider, "DAILY_REQUEST_LIMIT", 10000)
+        metadata = {
+            "identity": identity,
+            "provider": provider,
+            "key_prefix": key_prefix,
+            "rpm_limit": rpm_limit,
+            "tpm_limit": tpm_limit,
+            "daily_request_limit": daily_limit,
+        }
+
+        with closing(cls._connect()) as connection:
+            cls._ensure_storage(connection)
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            if random.random() < 0.01:  # nosec B311
+                cls._prune_old_usage(connection)
+            minute_stats = connection.execute(
+                    """
+                    SELECT COUNT(*) AS request_count,
+                           COALESCE(SUM(estimated_tokens), 0) AS token_count
+                    FROM request_usage
+                    WHERE identity = ? AND provider = ? AND created_at >= ?
+                    """,
+                    (identity, provider, cls._iso_cutoff(60)),
+                ).fetchone()
+            minute_count = int(minute_stats["request_count"])
+            minute_tokens = int(minute_stats["token_count"])
+            daily_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS request_count
+                    FROM request_usage
+                    WHERE identity = ? AND provider = ? AND created_at >= ?
+                    """,
+                    (identity, provider, cls._iso_cutoff(24 * 60 * 60)),
+                ).fetchone()["request_count"]
+            )
+            if minute_count >= rpm_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="rate_limit_exceeded",
+                    message="Request-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
+                )
+            if (
+                minute_tokens >= tpm_limit
+                or minute_tokens + output_tokens > tpm_limit
+            ):
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="token_rate_limit_exceeded",
+                    message="Token-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
+                )
+            if daily_count >= daily_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="daily_budget_exceeded",
+                    message="Daily request budget exceeded.",
+                    retry_after=60 * 60,
+                    metadata=metadata,
+                )
+
+            cursor = connection.execute(
+                """
+                INSERT INTO request_usage (
+                    created_at, identity, key_prefix, provider, remote_addr,
+                    input_tokens, output_tokens, estimated_tokens, stream
+                )
+                VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0)
+                """,
+                (
+                    _utcnow().isoformat(),
+                    identity,
+                    key_prefix,
+                    provider,
+                    remote_addr,
+                ),
+            )
+            connection.commit()
+            metadata["reservation_id"] = int(cursor.lastrowid)
+            return LimitDecision(True, metadata=metadata)
+
+    @classmethod
+    def finalize_request_slot(
+        cls,
+        reservation_id: Optional[int],
+        provider: str,
+        user: Optional[Dict[str, Any]],
+        payload_bytes: bytes,
+        payload_json: Optional[Dict[str, Any]],
+        remote_addr: Optional[str],
+    ) -> LimitDecision:
+        """Validate and attach exact transformed-token estimates to a reserved slot."""
+        size_decision = cls.check_request_size(provider, payload_bytes)
+        if not size_decision.allowed:
+            return size_decision
+
+        input_tokens = cls.estimate_input_tokens(payload_json)
+        output_tokens = cls.requested_output_tokens(payload_json)
+        estimated_tokens = input_tokens + output_tokens
+        max_prompt_tokens = cls._provider_limit(
+            provider,
+            "MAX_PROMPT_TOKENS",
+            128000,
+        )
+        max_output_tokens = cls._provider_limit(
+            provider,
+            "MAX_OUTPUT_TOKENS",
+            8192,
+        )
+        if input_tokens > max_prompt_tokens:
+            return LimitDecision(
+                False,
+                status_code=400,
+                error="prompt_too_large",
+                message="Prompt token estimate exceeds the configured maximum.",
+                metadata={
+                    "input_tokens": input_tokens,
+                    "max_prompt_tokens": max_prompt_tokens,
+                },
+            )
+        if output_tokens and output_tokens > max_output_tokens:
+            return LimitDecision(
+                False,
+                status_code=400,
+                error="max_output_too_large",
+                message="Requested output token count exceeds the configured maximum.",
+                metadata={
+                    "output_tokens": output_tokens,
+                    "max_output_tokens": max_output_tokens,
+                },
+            )
+
+        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
+            "0",
+            "false",
+            "no",
+        }:
+            return LimitDecision(
+                True,
+                metadata={
+                    "provider": provider,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "estimated_tokens": estimated_tokens,
+                    "reservation_id": None,
+                },
+            )
+
+        if isinstance(reservation_id, bool) or not isinstance(reservation_id, int):
+            return LimitDecision(
+                False,
+                status_code=500,
+                error="invalid_rate_reservation",
+                message="The request rate-limit reservation is invalid.",
+            )
+
+        identity, key_prefix = cls._identity_for_user(user, remote_addr)
+        rpm_limit = cls._provider_limit(
+            provider,
+            "RATE_LIMIT_RPM",
+            cls.RATE_LIMITS.get(provider, cls.RATE_LIMITS["default"])["requests"],
+        )
+        tpm_limit = cls._provider_limit(provider, "RATE_LIMIT_TPM", 200000)
+        daily_limit = cls._provider_limit(provider, "DAILY_REQUEST_LIMIT", 10000)
+        metadata = {
+            "identity": identity,
+            "provider": provider,
+            "key_prefix": key_prefix,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_tokens": estimated_tokens,
+            "rpm_limit": rpm_limit,
+            "tpm_limit": tpm_limit,
+            "daily_request_limit": daily_limit,
+            "reservation_id": reservation_id,
+        }
+
+        with closing(cls._connect()) as connection:
+            cls._ensure_storage(connection)
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            reservation = connection.execute(
+                """
+                SELECT id FROM request_usage
+                WHERE id = ? AND identity = ? AND provider = ?
+                """,
+                (reservation_id, identity, provider),
+            ).fetchone()
+            if reservation is None:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=500,
+                    error="invalid_rate_reservation",
+                    message="The request rate-limit reservation was not found.",
+                    metadata=metadata,
+                )
+
+            minute_stats = connection.execute(
+                """
+                SELECT COUNT(*) AS request_count,
+                       COALESCE(SUM(estimated_tokens), 0) AS token_count
+                FROM request_usage
+                WHERE identity = ? AND provider = ? AND created_at >= ? AND id != ?
+                """,
+                (identity, provider, cls._iso_cutoff(60), reservation_id),
+            ).fetchone()
+            minute_count = int(minute_stats["request_count"])
+            minute_tokens = int(minute_stats["token_count"])
+            daily_count = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*) AS request_count
+                    FROM request_usage
+                    WHERE identity = ? AND provider = ? AND created_at >= ? AND id != ?
+                    """,
+                    (
+                        identity,
+                        provider,
+                        cls._iso_cutoff(24 * 60 * 60),
+                        reservation_id,
+                    ),
+                ).fetchone()["request_count"]
+            )
+            if minute_count >= rpm_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="rate_limit_exceeded",
+                    message="Request-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
+                )
+            if estimated_tokens and minute_tokens + estimated_tokens > tpm_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="token_rate_limit_exceeded",
+                    message="Token-per-minute limit exceeded.",
+                    retry_after=60,
+                    metadata=metadata,
+                )
+            if daily_count >= daily_limit:
+                connection.rollback()
+                return LimitDecision(
+                    False,
+                    status_code=429,
+                    error="daily_budget_exceeded",
+                    message="Daily request budget exceeded.",
+                    retry_after=60 * 60,
+                    metadata=metadata,
+                )
+
+            connection.execute(
+                """
+                UPDATE request_usage
+                SET created_at = ?, input_tokens = ?, output_tokens = ?,
+                    estimated_tokens = ?, stream = ?
+                WHERE id = ?
+                """,
+                (
+                    _utcnow().isoformat(),
+                    input_tokens,
+                    output_tokens,
+                    estimated_tokens,
+                    int(bool(payload_json.get("stream")))
+                    if isinstance(payload_json, dict)
+                    else 0,
+                    reservation_id,
+                ),
+            )
+            connection.commit()
+            return LimitDecision(True, metadata=metadata)
+
+    @classmethod
     def _prune_old_usage(cls, connection: sqlite3.Connection) -> None:
         retention_seconds = cls._env_int("RATE_LIMIT_USAGE_RETENTION_SECONDS", 48 * 60 * 60)
         connection.execute(
@@ -252,18 +632,16 @@ class RateLimitService:
         probes cannot bypass RPM/TPM gates. Failed upstream requests currently
         remain counted until request usage reconciliation is added.
         """
-        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {"0", "false", "no"}:
-            return LimitDecision(True)
+        size_decision = cls.check_request_size(provider, payload_bytes)
+        if not size_decision.allowed:
+            return size_decision
 
-        max_request_bytes = cls._provider_limit(provider, "MAX_REQUEST_BYTES", 1024 * 1024)
-        if len(payload_bytes or b"") > max_request_bytes:
-            return LimitDecision(
-                False,
-                status_code=413,
-                error="request_too_large",
-                message="Request body exceeds the configured maximum size.",
-                metadata={"max_request_bytes": max_request_bytes},
-            )
+        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
+            "0",
+            "false",
+            "no",
+        }:
+            return LimitDecision(True, metadata=size_decision.metadata)
 
         input_tokens = cls.estimate_input_tokens(payload_json)
         output_tokens = cls.requested_output_tokens(payload_json)

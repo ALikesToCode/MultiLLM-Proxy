@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from services.rate_limit_service import RateLimitService
@@ -33,6 +34,113 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 413)
         self.assertEqual(decision.error, "request_too_large")
+
+    def test_body_size_safety_limit_remains_active_when_rate_limits_are_disabled(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+        os.environ["MAX_REQUEST_BYTES"] = "8"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"0123456789",
+            payload_json={"messages": [{"role": "user", "content": "hello"}]},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 413)
+
+    def test_reserved_request_slot_is_finalized_into_one_exact_usage_row(self):
+        user = {"username": "alice", "api_key_prefix": "mllm_live_alice"}
+        reservation = RateLimitService.reserve_request_slot(
+            provider="kimi-code",
+            user=user,
+            remote_addr="203.0.113.10",
+        )
+        payload = {
+            "messages": [{"role": "user", "content": "0123456789ab"}],
+            "max_completion_tokens": 5,
+        }
+
+        finalized = RateLimitService.finalize_request_slot(
+            reservation_id=reservation.metadata["reservation_id"],
+            provider="kimi-code",
+            user=user,
+            payload_bytes=b"{}",
+            payload_json=payload,
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(reservation.allowed)
+        self.assertTrue(finalized.allowed)
+        self.assertEqual(finalized.metadata["input_tokens"], 3)
+        self.assertEqual(finalized.metadata["output_tokens"], 5)
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            rows = connection.execute(
+                "SELECT provider, input_tokens, output_tokens, estimated_tokens "
+                "FROM request_usage"
+            ).fetchall()
+        self.assertEqual(rows, [("kimi-code", 3, 5, 8)])
+
+    def test_reservation_rejects_impossible_output_before_preprocessing(self):
+        os.environ["KIMI_CODE_MAX_OUTPUT_TOKENS"] = "8"
+
+        decision = RateLimitService.reserve_request_slot(
+            provider="kimi-code",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            remote_addr="203.0.113.10",
+            payload_json={"max_completion_tokens": 9},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.error, "max_output_too_large")
+
+    def test_stale_reservation_rechecks_current_rpm_before_finalizing(self):
+        os.environ["KIMI_CODE_RATE_LIMIT_RPM"] = "1"
+        user = {"username": "alice", "api_key_prefix": "mllm_live_alice"}
+        old_time = datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc)
+        current_time = datetime(2026, 7, 17, 10, 2, tzinfo=timezone.utc)
+        with patch("services.rate_limit_service._utcnow", return_value=old_time):
+            reservation = RateLimitService.reserve_request_slot(
+                provider="kimi-code",
+                user=user,
+                remote_addr="203.0.113.10",
+            )
+
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            connection.execute(
+                """
+                INSERT INTO request_usage (
+                    created_at, identity, key_prefix, provider, remote_addr,
+                    input_tokens, output_tokens, estimated_tokens, stream
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    current_time.isoformat(),
+                    "alice",
+                    "mllm_live_alice",
+                    "kimi-code",
+                    "203.0.113.10",
+                    1,
+                    0,
+                    1,
+                    0,
+                ),
+            )
+            connection.commit()
+
+        with patch("services.rate_limit_service._utcnow", return_value=current_time):
+            finalized = RateLimitService.finalize_request_slot(
+                reservation_id=reservation.metadata["reservation_id"],
+                provider="kimi-code",
+                user=user,
+                payload_bytes=b"{}",
+                payload_json={"messages": [{"role": "user", "content": "hello"}]},
+                remote_addr="203.0.113.10",
+            )
+
+        self.assertFalse(finalized.allowed)
+        self.assertEqual(finalized.error, "rate_limit_exceeded")
 
     def test_rejects_output_token_cap_before_upstream_call(self):
         os.environ["MAX_OUTPUT_TOKENS"] = "5"
@@ -157,6 +265,38 @@ class RateLimitServiceTest(unittest.TestCase):
         }
 
         self.assertEqual(RateLimitService.estimate_input_tokens(payload), 2)
+
+    def test_estimate_input_tokens_counts_tool_schemas_and_arguments(self):
+        payload = {
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": "{\"query\":\"" + "x" * 200 + "\"}",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "description": "y" * 200,
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        }
+
+        self.assertGreater(RateLimitService.estimate_input_tokens(payload), 100)
 
     def test_prunes_old_usage_when_sampled(self):
         with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:

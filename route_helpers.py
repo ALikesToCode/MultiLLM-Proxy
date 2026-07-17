@@ -1,6 +1,5 @@
 import inspect
 import logging
-import os
 import re
 from functools import wraps
 from typing import Any, Callable, Dict, Mapping, Optional
@@ -18,6 +17,13 @@ CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = (
     "Authorization, Content-Type, Accept, Origin, X-Requested-With, "
     "X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta"
+)
+CORS_EXPOSE_HEADERS = (
+    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, "
+    "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
+    "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
+    "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
+    "X-MultiLLM-Summary"
 )
 HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
     {
@@ -223,7 +229,11 @@ def is_api_request_path(path: str) -> bool:
         return False
 
     first_segment = stripped.split("/", 1)[0]
-    return first_segment in Config.API_BASE_URLS or first_segment == "v1" or stripped in {"health", "healthz"}
+    return (
+        first_segment in Config.API_BASE_URLS
+        or first_segment in {"optimize", "v1"}
+        or stripped in {"health", "healthz"}
+    )
 
 
 def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
@@ -252,6 +262,7 @@ def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Resp
         "Access-Control-Request-Headers",
         CORS_DEFAULT_HEADERS,
     )
+    response.headers["Access-Control-Expose-Headers"] = CORS_EXPOSE_HEADERS
     response.headers["Access-Control-Max-Age"] = "86400"
 
     vary = response.headers.get("Vary")
@@ -282,84 +293,45 @@ def login_required(func: Callable) -> Callable:
     return wrapper
 
 
-def api_auth_required(func: Callable) -> Callable:
-    """
-    Validate proxy authentication, including native LinkAPI credential fields.
-    """
+def _authenticate_api_request():
+    """Authenticate the proxy caller and return an error response on failure."""
+    auth_header = request.headers.get("Authorization")
+    logger.debug("Authorization header: %s", mask_authorization_header(auth_header))
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if request.method == "OPTIONS":
-            return build_cors_preflight_response()
-
-        auth_header = request.headers.get("Authorization")
-        logger.debug("Authorization header: %s", mask_authorization_header(auth_header))
-
-        api_key = request_api_key()
-        if not api_key:
-            if auth_header:
-                logger.error(
-                    "Invalid Authorization header: %s",
-                    mask_authorization_header(auth_header),
-                )
-                return jsonify(
-                    {
-                        "error": "Invalid Authorization header",
-                        "message": "Please use the Bearer authentication scheme.",
-                    }
-                ), 401
-
-            logger.error("No proxy API credential found")
-            native_hint = (
-                " Native LinkAPI clients may also use X-Api-Key, X-Goog-Api-Key, "
-                "or the Gemini key query parameter."
-                if _is_linkapi_request_path(request.path)
-                else ""
+    api_key = request_api_key()
+    if not api_key:
+        if auth_header:
+            logger.error(
+                "Invalid Authorization header: %s",
+                mask_authorization_header(auth_header),
             )
             return jsonify(
                 {
-                    "error": "Authentication required",
-                    "message": (
-                        "Please provide your API key in the Authorization header. "
-                        f"Example: Authorization: Bearer YOUR_API_KEY{native_hint}"
-                    ),
+                    "error": "Invalid Authorization header",
+                    "message": "Please use the Bearer authentication scheme.",
                 }
             ), 401
 
-        logger.debug("Extracted API key: %s", mask_secret(api_key))
+        logger.error("No proxy API credential found")
+        native_hint = (
+            " Native LinkAPI clients may also use X-Api-Key, X-Goog-Api-Key, "
+            "or the Gemini key query parameter."
+            if _is_linkapi_request_path(request.path)
+            else ""
+        )
+        return jsonify(
+            {
+                "error": "Authentication required",
+                "message": (
+                    "Please provide your API key in the Authorization header. "
+                    f"Example: Authorization: Bearer YOUR_API_KEY{native_hint}"
+                ),
+            }
+        ), 401
 
-        authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
-        if authenticated_user:
-            logger.info(
-                "Request authenticated with API key prefix %s for %s",
-                authenticated_user.get("api_key_prefix"),
-                authenticated_user.get("username"),
-            )
-            g.authenticated_user = authenticated_user
-
-            payload_bytes = request.get_data(cache=True) or b""
-            payload_json = request.get_json(silent=True) if request.is_json else None
-            provider = provider_from_request_path(request.path, payload_json)
-            limit_decision = RateLimitService.enforce_request(
-                provider=provider,
-                user=authenticated_user,
-                payload_bytes=payload_bytes,
-                payload_json=payload_json,
-                remote_addr=request.remote_addr,
-            )
-            g.rate_limit = limit_decision.metadata
-            if not limit_decision.allowed:
-                response = jsonify(
-                    {
-                        "error": limit_decision.error,
-                        "message": limit_decision.message,
-                    }
-                )
-                if limit_decision.retry_after:
-                    response.headers["Retry-After"] = str(limit_decision.retry_after)
-                return response, limit_decision.status_code
-            return func(*args, **kwargs)
-
+    logger.debug("Extracted API key: %s", mask_secret(api_key))
+    authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
+    if not authenticated_user:
         logger.error("Invalid API key provided: %s", mask_secret(api_key))
         return jsonify(
             {
@@ -367,6 +339,67 @@ def api_auth_required(func: Callable) -> Callable:
                 "message": "The provided API key is not valid",
             }
         ), 401
+
+    logger.info(
+        "Request authenticated with API key prefix %s for %s",
+        authenticated_user.get("api_key_prefix"),
+        authenticated_user.get("username"),
+    )
+    g.authenticated_user = authenticated_user
+    return None
+
+
+def api_authenticate_only(func: Callable) -> Callable:
+    """Authenticate a proxy request without reserving a rate-limit slot."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return build_cors_preflight_response()
+
+        authentication_error = _authenticate_api_request()
+        if authentication_error is not None:
+            return authentication_error
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def api_auth_required(func: Callable) -> Callable:
+    """Authenticate a proxy request and reserve its provider rate budget."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return build_cors_preflight_response()
+
+        authentication_error = _authenticate_api_request()
+        if authentication_error is not None:
+            return authentication_error
+
+        payload_bytes = request.get_data(cache=True) or b""
+        payload_json = request.get_json(silent=True) if request.is_json else None
+        provider = provider_from_request_path(request.path, payload_json)
+        authenticated_user = g.authenticated_user
+        limit_decision = RateLimitService.enforce_request(
+            provider=provider,
+            user=authenticated_user,
+            payload_bytes=payload_bytes,
+            payload_json=payload_json,
+            remote_addr=request.remote_addr,
+        )
+        g.rate_limit = limit_decision.metadata
+        if not limit_decision.allowed:
+            response = jsonify(
+                {
+                    "error": limit_decision.error,
+                    "message": limit_decision.message,
+                }
+            )
+            if limit_decision.retry_after:
+                response.headers["Retry-After"] = str(limit_decision.retry_after)
+            return response, limit_decision.status_code
+        return func(*args, **kwargs)
 
     return wrapper
 

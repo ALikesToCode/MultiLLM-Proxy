@@ -103,6 +103,11 @@ Summary mode sends only eligible old ordinary user/assistant text to the chosen
 summary model. It never sends system/developer messages, tools, tool results,
 media, current tool loops, reasoning content, or signed thinking blocks.
 
+The summary model is same-provider by default because eligible plaintext is sent
+verbatim and may contain sensitive text. Cross-provider transfer requires the
+explicit `allow_cross_provider_summary` option. Callers can use
+`preserve_message_indices` to keep selected messages out of the summary source.
+
 The summary prompt treats the history as untrusted data and requests validated
 JSON fields:
 
@@ -113,7 +118,8 @@ JSON fields:
 - visual continuity.
 
 The proxy validates and bounds every returned string, then inserts the digest as
-an explicitly untrusted historical-memory user message. Invalid output, an
+an explicitly untrusted historical-memory assistant message so old assistant
+text is not elevated to user authority. Invalid output, an
 upstream failure, or a denied summary budget causes a deterministic fallback
 without retry. The final provider request still proceeds unless
 `require_target` is true and the safe result cannot reach the requested target.
@@ -122,9 +128,10 @@ without retry. The final provider request still proceeds unless
 
 The existing API decorator authenticates and reserves rate-limit usage before a
 route runs. The optimized route instead uses a shared authenticate-only
-decorator, checks the original body-size limit, performs optimization, then
-reserves rate and token budgets against the transformed request exactly once.
-Summary mode reserves its separate model call separately.
+decorator, applies a bounded optimizer ingress limit, validates the final model,
+credential, output cap, and request capacity, then reserves an RPM/daily slot
+before preprocessing. It finalizes that same slot with the transformed token
+estimate exactly once. Summary mode reserves its separate model call separately.
 
 This prevents a long but safely compactable prompt from being rejected or
 counted against the pre-compaction estimate.

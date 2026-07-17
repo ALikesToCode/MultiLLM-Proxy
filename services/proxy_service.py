@@ -1040,7 +1040,8 @@ class ProxyService:
         data: Optional[bytes],
         api_provider: str,
         use_cache: bool = True,
-        retry_count: int = 0
+        retry_count: int = 0,
+        timeout_override: Optional[Tuple[int, int]] = None,
     ) -> requests.Response:
         """
         Make a base request with retries and error handling
@@ -1061,7 +1062,7 @@ class ProxyService:
                 # For localhost, explicitly disable compression
                 headers['Accept-Encoding'] = 'identity'
 
-            timeout = Config.API_TIMEOUTS.get(
+            timeout = timeout_override or Config.API_TIMEOUTS.get(
                 api_provider,
                 Config.API_TIMEOUTS.get("default", (5, 60)),
             )
@@ -1580,7 +1581,13 @@ class ProxyService:
                                             
                                             yield f"data: {json.dumps(json_data)}\n\n"
                                         except json.JSONDecodeError as e:
-                                            logger.error(f"Error parsing streaming response: {e}, line: {line}")
+                                            logger.error(
+                                                "Error parsing Google AI stream JSON at line %s "
+                                                "column %s (%s bytes)",
+                                                e.lineno,
+                                                e.colno,
+                                                len(line),
+                                            )
                                             continue
                                         except Exception as e:
                                             logger.error(f"Error in Google AI streaming: {str(e)}")
@@ -1624,7 +1631,13 @@ class ProxyService:
                         try:
                             response_data = response.json()
                         except json.JSONDecodeError as e:
-                                logger.error(f"Error parsing JSON response: {e}, content: {response.content[:200]}")
+                                logger.error(
+                                    "Error parsing Google AI JSON response at line %s "
+                                    "column %s (%s bytes)",
+                                    e.lineno,
+                                    e.colno,
+                                    len(response.content),
+                                )
                                 response_data = {"error": "Invalid JSON response from Google AI"}
                             
                         logger.debug("Google AI parsed response: %s", redact_payload(response_data))
@@ -1733,7 +1746,10 @@ class ProxyService:
             completion_data_bytes = json.dumps(completion_data).encode('utf-8')
             headers["Content-Length"] = str(len(completion_data_bytes))
 
-            logger.info(f"Converted chat request to completion for Rogue Rose: {completion_data}")
+            logger.info(
+                "Converted chat request to completion for Rogue Rose: %s",
+                redact_payload(completion_data),
+            )
             logger.info(f"New URL: {completion_url}")
 
             # Make the request
@@ -2580,7 +2596,13 @@ class ProxyService:
                                             yield f"data: {json.dumps(google_chunk)}\n\n"
                                             
                                     except json.JSONDecodeError as e:
-                                        logger.error(f"Error parsing streaming response from Gemini: {e}, line: {line}")
+                                        logger.error(
+                                            "Error parsing Gemini stream JSON at line %s "
+                                            "column %s (%s bytes)",
+                                            e.lineno,
+                                            e.colno,
+                                            len(line),
+                                        )
                                         continue
                                     except Exception as e:
                                         logger.error(f"Error processing Gemini streaming chunk: {e}")
@@ -2829,7 +2851,13 @@ class ProxyService:
                                     yield f"data: {json.dumps(normalized_data)}\n\n"
                                     
                                 except json.JSONDecodeError as e:
-                                    logger.error(f"Error parsing streaming response: {e}, line: {line}")
+                                    logger.error(
+                                        "Error parsing OpenRouter stream JSON at line %s "
+                                        "column %s (%s bytes)",
+                                        e.lineno,
+                                        e.colno,
+                                        len(line),
+                                    )
                                     continue
                                 except Exception as e:
                                     logger.error(f"Error processing streaming chunk: {e}")
@@ -3155,6 +3183,7 @@ class ProxyService:
         data: Optional[bytes],
         api_provider: str,
         use_cache: bool = True,
+        timeout_override: Optional[Tuple[int, int]] = None,
     ) -> requests.Response:
         """
         Make a request with retries and error handling
@@ -3175,6 +3204,7 @@ class ProxyService:
                     data=data,
                     api_provider=api_provider,
                     use_cache=use_cache,
+                    timeout_override=timeout_override,
                 )
 
             # Check if this is a streaming request
