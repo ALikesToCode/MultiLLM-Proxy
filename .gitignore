@@ -44,6 +44,8 @@ ENV/
 .idea/
 .vscode/
 .vercel/
+.playwright-cli/
+.fuse_hidden*
 *.swp
 *.swo
 .DS_Store
