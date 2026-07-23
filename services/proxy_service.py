@@ -12,6 +12,25 @@ import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
+from providers.nanogpt import (
+    NANOGPT_REQUEST_HEADER_WHITELIST,
+    is_nanogpt_accountless_request,
+    nanogpt_caller_api_key,
+    nanogpt_caller_authorization,
+    nanogpt_l402_authorization,
+)
+from providers.navyai import (
+    NAVYAI_REQUEST_HEADER_WHITELIST,
+    navyai_caller_api_key,
+    navyai_caller_authorization,
+)
+from providers.opencode_go import (
+    OPENCODE_GO_REQUEST_HEADER_WHITELIST,
+    is_opencode_go_anthropic_request,
+    is_opencode_go_native_path,
+    opencode_go_caller_api_key,
+    opencode_go_caller_authorization,
+)
 from streaming.openai import sanitize_openai_stream_payload
 from streaming.sse import iter_sse_data
 import time
@@ -29,7 +48,9 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "kimi-code", "linkapi"})
+RAW_PASSTHROUGH_PROVIDERS = frozenset(
+    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
+)
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -103,14 +124,23 @@ class ProxyService:
         return normalized_path == "v1beta" or normalized_path.startswith("v1beta/")
 
     @classmethod
-    def _get_provider_session(cls, api_provider: str) -> requests.Session:
+    def _get_provider_session(
+        cls,
+        api_provider: str,
+        raw_passthrough: bool = False,
+    ) -> requests.Session:
+        session_key = (
+            f"{api_provider}:raw"
+            if raw_passthrough and api_provider not in RAW_PASSTHROUGH_PROVIDERS
+            else api_provider
+        )
         with cls._session_lock:
-            session = cls._sessions.get(api_provider)
+            session = cls._sessions.get(session_key)
             if session is not None:
                 return session
 
             session = requests.Session()
-            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+            if raw_passthrough or api_provider in RAW_PASSTHROUGH_PROVIDERS:
                 session.cookies.set_policy(_RejectAllCookiesPolicy())
             adapter = requests.adapters.HTTPAdapter(
                 pool_connections=100,
@@ -119,7 +149,7 @@ class ProxyService:
             )
             session.mount("http://", adapter)
             session.mount("https://", adapter)
-            cls._sessions[api_provider] = session
+            cls._sessions[session_key] = session
             return session
 
     @classmethod
@@ -323,15 +353,11 @@ class ProxyService:
         if api_provider in ["googleai", "gemini", "gemma"]:
             header_whitelist["x-goog-user-project"] = "X-Goog-User-Project"
         elif api_provider == "nanogpt":
-            header_whitelist.update(
-                {
-                    "anthropic-beta": "anthropic-beta",
-                    "memory": "memory",
-                    "memory-expiration-days": "memory_expiration_days",
-                    "memory_expiration_days": "memory_expiration_days",
-                    "x-use-byok": "x-use-byok",
-                }
-            )
+            header_whitelist.update(NANOGPT_REQUEST_HEADER_WHITELIST)
+        elif api_provider == "navyai":
+            header_whitelist.update(NAVYAI_REQUEST_HEADER_WHITELIST)
+        elif api_provider == "opencode":
+            header_whitelist.update(OPENCODE_GO_REQUEST_HEADER_WHITELIST)
         elif api_provider == "linkapi":
             header_whitelist.update(
                 {
@@ -370,15 +396,29 @@ class ProxyService:
             canonical_header = header_whitelist.get(header.lower())
             if canonical_header:
                 headers[canonical_header] = value
-            elif api_provider in {"codex-easy", "kimi-code"} and header.lower().startswith(
-                "x-stainless-"
+            elif (
+                api_provider
+                in {"codex-easy", "kimi-code", "nanogpt", "navyai", "opencode"}
+                and header.lower().startswith("x-stainless-")
             ):
                 headers[header] = value
 
-        if not cls._has_header(headers, "Content-Type"):
+        opencode_native = (
+            api_provider == "opencode"
+            and is_opencode_go_native_path(upstream_path)
+        )
+        if (
+            not cls._has_header(headers, "Content-Type")
+            and api_provider not in {"nanogpt", "navyai"}
+            and not opencode_native
+        ):
             headers["Content-Type"] = "application/json"
 
-        if not cls._has_header(headers, "Accept"):
+        if (
+            not cls._has_header(headers, "Accept")
+            and api_provider not in {"nanogpt", "navyai"}
+            and not opencode_native
+        ):
             if 'stream=true' in request_headers.get('Cookie', '').lower() or \
                request_headers.get('X-Stream', '').lower() == 'true':
                 headers['Accept'] = 'text/event-stream'
@@ -392,15 +432,80 @@ class ProxyService:
         is_linkapi_gemini = api_provider == "linkapi" and cls._is_linkapi_gemini_path(
             normalized_path
         )
+        is_opencode_go_anthropic = (
+            api_provider == "opencode"
+            and is_opencode_go_anthropic_request(upstream_path)
+        )
 
         # Handle API key authentication
-        if auth_token:
+        nanogpt_accountless = (
+            api_provider == "nanogpt"
+            and is_nanogpt_accountless_request(request_headers, upstream_path)
+        )
+        nanogpt_l402 = (
+            nanogpt_l402_authorization(request_headers)
+            if api_provider == "nanogpt"
+            else None
+        )
+        nanogpt_authorization = (
+            nanogpt_caller_authorization(request_headers)
+            if api_provider == "nanogpt" and not nanogpt_accountless
+            else None
+        )
+        nanogpt_api_key = (
+            nanogpt_caller_api_key(request_headers)
+            if api_provider == "nanogpt" and not nanogpt_accountless
+            else None
+        )
+        navyai_authorization = (
+            navyai_caller_authorization(request_headers)
+            if api_provider == "navyai"
+            else None
+        )
+        navyai_api_key = (
+            navyai_caller_api_key(request_headers)
+            if api_provider == "navyai"
+            else None
+        )
+        opencode_go_authorization = (
+            opencode_go_caller_authorization(request_headers)
+            if api_provider == "opencode"
+            else None
+        )
+        opencode_go_api_key = (
+            opencode_go_caller_api_key(request_headers)
+            if api_provider == "opencode"
+            else None
+        )
+
+        if opencode_go_authorization or opencode_go_api_key:
+            if opencode_go_authorization:
+                headers["Authorization"] = opencode_go_authorization
+            if opencode_go_api_key:
+                headers["X-Api-Key"] = opencode_go_api_key
+        elif nanogpt_authorization or nanogpt_api_key:
+            if nanogpt_authorization:
+                headers["Authorization"] = nanogpt_authorization
+            if nanogpt_api_key:
+                headers["X-Api-Key"] = nanogpt_api_key
+        elif navyai_authorization or navyai_api_key:
+            if navyai_authorization:
+                headers["Authorization"] = navyai_authorization
+            if navyai_api_key:
+                headers["X-Api-Key"] = navyai_api_key
+        elif nanogpt_l402:
+            headers["Authorization"] = nanogpt_l402
+        elif auth_token and not nanogpt_accountless:
             if is_linkapi_claude:
                 headers["X-Api-Key"] = auth_token
             elif is_linkapi_gemini:
                 headers["X-Goog-Api-Key"] = auth_token
+            elif is_opencode_go_anthropic:
+                headers["X-Api-Key"] = auth_token
             else:
                 headers['Authorization'] = f"Bearer {auth_token}"
+                if api_provider in {"nanogpt", "navyai"}:
+                    headers["X-Api-Key"] = auth_token
 
         # Add provider-specific headers
         if api_provider == 'openrouter':
@@ -414,6 +519,11 @@ class ProxyService:
             if not cls._has_header(headers, "Anthropic-Version"):
                 headers['Anthropic-Version'] = '2023-06-01'
         elif is_linkapi_claude and not cls._has_header(headers, "Anthropic-Version"):
+            headers["Anthropic-Version"] = "2023-06-01"
+        elif (
+            is_opencode_go_anthropic
+            and not cls._has_header(headers, "Anthropic-Version")
+        ):
             headers["Anthropic-Version"] = "2023-06-01"
 
         return headers
@@ -441,7 +551,8 @@ class ProxyService:
         if api_provider not in RAW_PASSTHROUGH_PROVIDERS:
             return params
 
-        params = [(key, value) for key, value in params if key.lower() != "key"]
+        if api_provider in {"codex-easy", "kimi-code", "linkapi"}:
+            params = [(key, value) for key, value in params if key.lower() != "key"]
         return params
 
     @staticmethod
@@ -1042,18 +1153,25 @@ class ProxyService:
         use_cache: bool = True,
         retry_count: int = 0,
         timeout_override: Optional[Tuple[int, int]] = None,
+        force_raw_passthrough: bool = False,
     ) -> requests.Response:
         """
         Make a base request with retries and error handling
         """
-        raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
+        raw_passthrough = (
+            force_raw_passthrough
+            or api_provider in RAW_PASSTHROUGH_PROVIDERS
+        )
         try:
             if not raw_passthrough:
                 circuit_response = cls._circuit_open_response(api_provider)
                 if circuit_response is not None:
                     return circuit_response
 
-            session = cls._get_provider_session(api_provider)
+            session = cls._get_provider_session(
+                api_provider,
+                raw_passthrough=raw_passthrough,
+            )
 
             # Only advertise encodings we can reliably decode in this runtime.
             if not url.startswith(('http://localhost:', 'http://127.0.0.1:', 'http://[::1]:')):
@@ -1191,6 +1309,9 @@ class ProxyService:
                     "codex-easy": "Codex Everywhere",
                     "kimi-code": "Kimi Code",
                     "linkapi": "LinkAPI",
+                    "nanogpt": "NanoGPT",
+                    "navyai": "NavyAI",
+                    "opencode": "OpenCode Go",
                 }.get(api_provider, "Provider")
                 logger.error(
                     "Raw upstream transport request failed for %s (%s)",
@@ -3184,11 +3305,15 @@ class ProxyService:
         api_provider: str,
         use_cache: bool = True,
         timeout_override: Optional[Tuple[int, int]] = None,
+        force_raw_passthrough: bool = False,
     ) -> requests.Response:
         """
         Make a request with retries and error handling
         """
-        raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
+        raw_passthrough = (
+            force_raw_passthrough
+            or api_provider in RAW_PASSTHROUGH_PROVIDERS
+        )
         if raw_passthrough:
             logger.info("Making raw request for %s with method %s", api_provider, method)
         else:
@@ -3205,6 +3330,7 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     timeout_override=timeout_override,
+                    force_raw_passthrough=force_raw_passthrough,
                 )
 
             # Check if this is a streaming request

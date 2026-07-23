@@ -88,6 +88,9 @@ class UnifiedApiRouteTest(unittest.TestCase):
         self.assertIn("opencode:mimo-v2-pro", model_ids)
         self.assertIn("opencode:glm-5.1", model_ids)
         self.assertIn("opencode:qwen3.6-plus", model_ids)
+        self.assertIn("opencode:kimi-k3", model_ids)
+        self.assertIn("opencode:minimax-m3", model_ids)
+        self.assertIn("opencode:deepseek-v4-flash", model_ids)
         self.assertIn("mimo:mimo-v2.5-pro", model_ids)
         self.assertIn("gemini:gemini-test-model", model_ids)
 

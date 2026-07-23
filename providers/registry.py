@@ -60,7 +60,14 @@ PROVIDER_SPECS = (
         ProviderCapabilities(supports_token_count=True),
     ),
     ("groq", "openai/v1/chat/completions", ProviderCapabilities()),
-    ("opencode", "chat/completions", ProviderCapabilities()),
+    (
+        "opencode",
+        "chat/completions",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_json_schema=True,
+        ),
+    ),
     (
         "mimo",
         "chat/completions",
@@ -72,6 +79,18 @@ PROVIDER_SPECS = (
     ),
     (
         "nanogpt",
+        "v1/chat/completions",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_vision=True,
+            supports_embeddings=True,
+            supports_audio=True,
+            supports_images=True,
+            supports_json_schema=True,
+        ),
+    ),
+    (
+        "navyai",
         "v1/chat/completions",
         ProviderCapabilities(
             supports_tools=True,

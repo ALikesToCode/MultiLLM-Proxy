@@ -23,6 +23,12 @@ PROVIDER_LIMIT_DEFAULTS = {
         "MAX_OUTPUT_TOKENS": 131_072,
         "RATE_LIMIT_TPM": 1_200_000,
     },
+    "nanogpt": {
+        "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
+    },
+    "navyai": {
+        "MAX_REQUEST_BYTES": 32 * 1024 * 1024,
+    },
 }
 
 

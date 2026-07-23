@@ -46,12 +46,20 @@ npx wrangler secret put JWT_SECRET
 npx wrangler secret put CODEX_EASY_API_KEY
 npx wrangler secret put KIMI_CODE_API_KEY
 npx wrangler secret put LINKAPI_KEY
+npx wrangler secret put OPENCODE_GO_API_KEY
+npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NAVYAI_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 ```
 
 Set only the providers you actually use. The Worker forwards these directly into the container. It also forwards numbered `GROQ_API_KEY_N` secrets automatically.
+
+NanoGPT and NavyAI routes are Container-backed raw gateways. The Worker
+forwards their keys, optional base-URL overrides, provider request limits, and
+the credential-splitting CORS headers into Flask. See
+[NanoGPT gateway](nanogpt.md) and [NavyAI gateway](navyai.md).
 
 `CODEX_EASY_API_KEY` is the preferred Codex Everywhere secret; `CODEX_API_KEY` remains a fallback alias. Both the Worker and Flask always use the fixed upstream origin `https://codex-easy.ai`.
 

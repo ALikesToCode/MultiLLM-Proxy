@@ -32,6 +32,7 @@ def _utcnow() -> datetime:
 DEFAULT_USER_SCOPES = ("chat", "models")
 DEFAULT_ADMIN_SCOPES = ("admin", "chat", "metrics", "models", "users")
 PROVIDER_API_KEY_ENV_NAMES = {
+    "opencode": ("OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"),
     "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
     "codex-easy": ("CODEX_EASY_API_KEY", "CODEX_API_KEY"),
     "kimi-code": ("KIMI_CODE_API_KEY",),
@@ -515,6 +516,7 @@ class AuthService:
             "opencode",
             "mimo",
             "nanogpt",
+            "navyai",
             "linkapi",
             "codex-easy",
             "kimi-code",

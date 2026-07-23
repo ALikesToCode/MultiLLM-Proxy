@@ -19,21 +19,39 @@ STATIC_PROVIDER_MODELS = {
     "gemma": "GEMMA_MODELS",
 }
 
-DYNAMIC_PROVIDER_MODELS = {"codex-easy", "linkapi", "nanogpt"}
+DYNAMIC_PROVIDER_MODELS = {
+    "codex-easy",
+    "linkapi",
+    "nanogpt",
+    "navyai",
+}
 
 DEFAULT_MODEL_IDS = {
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
     "opencode": [
+        "grok-4.5",
+        "glm-5.2",
         "glm-5.1",
-        "glm-5",
+        "kimi-k3",
+        "kimi-k2.7-code",
         "kimi-k2.6",
+        "mimo-v2.5",
+        "mimo-v2.5-pro",
+        "minimax-m3",
+        "minimax-m2.7",
+        "minimax-m2.5",
+        "qwen3.7-max",
+        "qwen3.7-plus",
+        "qwen3.6-plus",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "hy3",
+        # Compatibility IDs retained for existing unified-route clients.
+        "glm-5",
         "kimi-k2.5",
         "mimo-v2-pro",
         "mimo-v2-omni",
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "qwen3.6-plus",
         "qwen3.5-plus",
     ],
     "mimo": ["mimo-v2.5-pro"],

@@ -14,6 +14,7 @@ const API_ROUTE_PREFIXES = new Set([
   "linkapi",
   "mimo",
   "nanogpt",
+  "navyai",
   "nineteen",
   "openai",
   "opencode",
@@ -28,9 +29,9 @@ const API_ROUTE_PREFIXES = new Set([
 ]);
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
-  "Authorization, X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, X-Client-Request-ID";
+  "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
 const CORS_EXPOSE_HEADERS =
-  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary";
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -47,7 +48,32 @@ const LINKAPI_ALLOWED_HOSTNAMES = new Set([
   "linkapi.cc",
   "linkapi.pro",
 ]);
-const OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1";
+const OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
+const OPENCODE_ROUTE_PREFIX = "/opencode";
+const OPENCODE_REQUEST_HEADER_WHITELIST = new Set([
+  "accept",
+  "accept-language",
+  "anthropic-beta",
+  "anthropic-dangerous-direct-browser-access",
+  "anthropic-version",
+  "content-type",
+  "idempotency-key",
+  "openai-beta",
+  "openai-organization",
+  "openai-project",
+  "user-agent",
+  "x-client-request-id",
+  "x-request-id",
+  "x-stainless-arch",
+  "x-stainless-async",
+  "x-stainless-lang",
+  "x-stainless-os",
+  "x-stainless-package-version",
+  "x-stainless-retry-count",
+  "x-stainless-runtime",
+  "x-stainless-runtime-version",
+  "x-stainless-timeout",
+]);
 const LINKAPI_REQUEST_HEADER_WHITELIST = new Set([
   "accept",
   "accept-language",
@@ -126,16 +152,6 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
   "x-should-retry",
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
-const UPSTREAM_HEADER_WHITELIST = new Set([
-  "accept",
-  "accept-language",
-  "content-type",
-  "http-referer",
-  "openai-organization",
-  "user-agent",
-  "x-request-id",
-  "x-title",
-]);
 
 const DIRECT_ENV_KEYS = [
   "ADMIN_USERNAME",
@@ -167,9 +183,17 @@ const DIRECT_ENV_KEYS = [
   "HYPERBOLIC_API_KEY",
   "SAMBANOVA_API_KEY",
   "OPENROUTER_API_KEY",
+  "OPENCODE_GO_API_KEY",
   "OPENCODE_API_KEY",
+  "OPENCODE_GO_BASE_URL",
+  "OPENCODE_BASE_URL",
   "MIMO_API_KEY",
   "NANOGPT_API_KEY",
+  "NANOGPT_BASE_URL",
+  "NANOGPT_BATCH_BASE_URL",
+  "NANOGPT_ORIGIN_URL",
+  "NAVYAI_API_KEY",
+  "NAVYAI_BASE_URL",
   "LINKAPI_KEY",
   "LINKAPI_API_KEY",
   "LINKAPI_BASE_URL",
@@ -193,7 +217,7 @@ const DIRECT_ENV_KEYS = [
 
 const DYNAMIC_ENV_PATTERNS = [
   /^GROQ_API_KEY_\d+$/,
-  /^(?:AZURE|CEREBRAS|CHUTES|CODEX_EASY|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|KIMI_CODE|LINKAPI|MIMO|NANOGPT|NINETEEN|OPENAI|OPENCODE|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
+  /^(?:AZURE|CEREBRAS|CHUTES|CODEX_EASY|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|KIMI_CODE|LINKAPI|MIMO|NANOGPT|NAVYAI|NINETEEN|OPENAI|OPENCODE|OPENCODE_GO|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
 ];
 
 function shouldPassThroughKey(key) {
@@ -414,7 +438,8 @@ function buildMissingUpstreamKeyResponse() {
   return jsonResponse(
     {
       error: "Server configuration error",
-      message: "OPENCODE_API_KEY is not configured on the worker.",
+      message:
+        "OPENCODE_GO_API_KEY (or OPENCODE_API_KEY) is not configured on the worker.",
     },
     { status: 500 },
   );
@@ -745,24 +770,120 @@ function isKimiCodeMethodAllowed(upstreamPath, method) {
   );
 }
 
-function buildOpencodeUpstreamUrl(requestUrl) {
-  const upstreamUrl = new URL(OPENCODE_BASE_URL);
-  const suffix = requestUrl.pathname.replace(/^\/opencode/, "");
-  upstreamUrl.pathname = `${upstreamUrl.pathname.replace(/\/$/, "")}${suffix || ""}`;
+function getOpencodeUpstreamPath(pathname) {
+  if (
+    pathname !== OPENCODE_ROUTE_PREFIX &&
+    !pathname.startsWith(`${OPENCODE_ROUTE_PREFIX}/`)
+  ) {
+    return null;
+  }
+
+  const suffix = pathname.slice(OPENCODE_ROUTE_PREFIX.length).replace(/^\/+/, "");
+  if (!suffix || suffix.toLowerCase() === "v1") {
+    return "/v1";
+  }
+  if (suffix.toLowerCase().startsWith("v1/")) {
+    return `/${suffix}`;
+  }
+  return `/v1/${suffix}`;
+}
+
+function isOpencodeNativeRequest(pathname, method) {
+  const upstreamPath = getOpencodeUpstreamPath(pathname)?.toLowerCase();
+  const documented =
+    (upstreamPath === "/v1/chat/completions" && method === "POST") ||
+    (upstreamPath === "/v1/messages" && method === "POST") ||
+    (upstreamPath === "/v1/models" && method === "GET");
+  return documented && pathname.toLowerCase() !== "/opencode/chat/completions";
+}
+
+function getOpencodeBaseUrl(env) {
+  const configuredBaseUrl =
+    env.OPENCODE_GO_BASE_URL ||
+    env.OPENCODE_BASE_URL ||
+    OPENCODE_DEFAULT_BASE_URL;
+  try {
+    const candidate = new URL(configuredBaseUrl);
+    if (
+      candidate.protocol !== "https:" ||
+      candidate.username ||
+      candidate.password ||
+      candidate.search ||
+      candidate.hash
+    ) {
+      return new URL(OPENCODE_DEFAULT_BASE_URL);
+    }
+    return candidate;
+  } catch {
+    return new URL(OPENCODE_DEFAULT_BASE_URL);
+  }
+}
+
+function buildOpencodeUpstreamUrl(requestUrl, env, upstreamPath) {
+  const upstreamUrl = getOpencodeBaseUrl(env);
+  const normalizedBasePath = upstreamUrl.pathname.replace(/\/+$/, "");
+  let suffix = upstreamPath;
+  if (normalizedBasePath.toLowerCase().endsWith("/v1")) {
+    if (upstreamPath.toLowerCase() === "/v1") {
+      suffix = "";
+    } else if (upstreamPath.toLowerCase().startsWith("/v1/")) {
+      suffix = upstreamPath.slice("/v1".length);
+    }
+  }
+  upstreamUrl.pathname = `${normalizedBasePath}${suffix}`;
   upstreamUrl.search = requestUrl.search;
   return upstreamUrl;
 }
 
-function buildUpstreamHeaders(request, upstreamToken) {
+function extractOpencodeCallerToken(request) {
+  const proxyToken = request.headers.get("x-multillm-api-key")?.trim();
+  if (proxyToken) {
+    return proxyToken;
+  }
+
+  const bearerToken = extractBearerToken(request);
+  if (bearerToken) {
+    return bearerToken;
+  }
+
+  return request.headers.get("x-api-key")?.trim() ?? "";
+}
+
+function opencodeCallerUpstreamAuth(request) {
+  if (!request.headers.get("x-multillm-api-key")?.trim()) {
+    return {};
+  }
+
+  const authorization = request.headers.get("Authorization") ?? "";
+  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+  const apiKey = request.headers.get("x-api-key")?.trim();
+  return {
+    ...(bearerMatch?.[1]?.trim()
+      ? { authorization: `Bearer ${bearerMatch[1].trim()}` }
+      : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
+}
+
+function buildOpencodeUpstreamHeaders(
+  request,
+  upstreamPath,
+  upstreamToken,
+  callerAuth,
+) {
   const headers = new Headers();
 
   for (const [header, value] of request.headers.entries()) {
-    if (UPSTREAM_HEADER_WHITELIST.has(header.toLowerCase())) {
+    if (OPENCODE_REQUEST_HEADER_WHITELIST.has(header.toLowerCase())) {
       headers.set(header, value);
     }
   }
 
-  if (!headers.has("Content-Type")) {
+  if (
+    request.method !== "GET" &&
+    request.method !== "HEAD" &&
+    !headers.has("Content-Type")
+  ) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -770,7 +891,27 @@ function buildUpstreamHeaders(request, upstreamToken) {
     headers.set("Accept", "application/json");
   }
 
-  headers.set("Authorization", `Bearer ${upstreamToken}`);
+  if (callerAuth.authorization) {
+    headers.set("Authorization", callerAuth.authorization);
+  }
+  if (callerAuth.apiKey) {
+    headers.set("X-Api-Key", callerAuth.apiKey);
+  }
+
+  if (!callerAuth.authorization && !callerAuth.apiKey) {
+    if (upstreamPath.toLowerCase() === "/v1/messages") {
+      headers.set("X-Api-Key", upstreamToken);
+    } else {
+      headers.set("Authorization", `Bearer ${upstreamToken}`);
+    }
+  }
+
+  if (
+    upstreamPath.toLowerCase() === "/v1/messages" &&
+    !headers.has("Anthropic-Version")
+  ) {
+    headers.set("Anthropic-Version", "2023-06-01");
+  }
   return headers;
 }
 
@@ -1423,25 +1564,59 @@ function createOpencodeStreamResponse(upstreamResponse) {
 }
 
 async function handleDirectOpencodeRequest(request, env, requestUrl) {
-  const providedToken = extractBearerToken(request);
+  const providedToken = extractOpencodeCallerToken(request);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
   }
 
-  if (!env.OPENCODE_API_KEY) {
+  const upstreamPath = getOpencodeUpstreamPath(requestUrl.pathname);
+  if (!upstreamPath) {
+    return applyCorsHeaders(
+      request,
+      jsonResponse(
+        {
+          error: "Unsupported path",
+          message: "The requested OpenCode Go path is not supported.",
+        },
+        { status: 404 },
+      ),
+      env,
+    );
+  }
+
+  const callerAuth = opencodeCallerUpstreamAuth(request);
+  const upstreamToken = env.OPENCODE_GO_API_KEY || env.OPENCODE_API_KEY;
+  if (!upstreamToken && !callerAuth.authorization && !callerAuth.apiKey) {
     return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
-  const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl), {
+  const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl, env, upstreamPath), {
     method: request.method,
-    headers: buildUpstreamHeaders(request, env.OPENCODE_API_KEY),
+    headers: buildOpencodeUpstreamHeaders(
+      request,
+      upstreamPath,
+      upstreamToken,
+      callerAuth,
+    ),
     body: bodyAllowed ? request.body : undefined,
     redirect: "manual",
     signal: request.signal,
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await fetch(upstreamRequest);
+
+  if (isOpencodeNativeRequest(requestUrl.pathname, request.method)) {
+    return applyCorsHeaders(
+      request,
+      new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+      }),
+      env,
+    );
+  }
 
   const contentType = upstreamResponse.headers.get("content-type") ?? "";
   if (contentType.startsWith("text/event-stream")) {

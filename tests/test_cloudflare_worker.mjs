@@ -267,7 +267,8 @@ test("worker treats nanogpt provider routes as API paths for CORS preflight", as
       headers: {
         Origin: origin,
         "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "Authorization, Content-Type",
+        "Access-Control-Request-Headers":
+          "Authorization, Content-Type, X-MultiLLM-Api-Key, X-PAYMENT",
       },
     }),
     stub.env,
@@ -276,6 +277,46 @@ test("worker treats nanogpt provider routes as API paths for CORS preflight", as
   assert.equal(response.status, 204);
   assert.equal(stub.getCalls(), 0);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.match(
+    response.headers.get("Access-Control-Allow-Headers") ?? "",
+    /X-MultiLLM-Api-Key/i,
+  );
+  assert.match(
+    response.headers.get("Access-Control-Allow-Headers") ?? "",
+    /X-PAYMENT/i,
+  );
+  assert.match(
+    response.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-PAYMENT-RESPONSE/i,
+  );
+});
+
+test("worker treats navyai provider routes as API paths for CORS preflight", async () => {
+  const origin = "https://client.example";
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/navyai/v1/messages", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers":
+          "X-MultiLLM-Api-Key, Authorization, X-Api-Key, Anthropic-Version",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.equal(
+    response.headers.get("Access-Control-Allow-Headers"),
+    "X-MultiLLM-Api-Key, Authorization, X-Api-Key, Anthropic-Version",
+  );
 });
 
 test("worker returns CORS-safe v1 API errors when the container fetch fails", async () => {
@@ -438,9 +479,16 @@ test("container envVars are derived from the live Durable Object env", () => {
       ADMIN_API_KEY: "admin-live-key",
       FLASK_SECRET_KEY: "flask-live-secret",
       JWT_SECRET: "jwt-live-secret",
+      OPENCODE_GO_API_KEY: "opencode-go-live-key",
       OPENCODE_API_KEY: "opencode-live-key",
+      OPENCODE_GO_BASE_URL: "https://opencode.ai/zen/go/v1",
       MIMO_API_KEY: "mimo-live-key",
       NANOGPT_API_KEY: "nanogpt-live-key",
+      NANOGPT_BASE_URL: "https://cake.nano-gpt.com/api",
+      NANOGPT_BATCH_BASE_URL: "https://api.nano-gpt.com/api/v1",
+      NANOGPT_ORIGIN_URL: "https://cake.nano-gpt.com",
+      NAVYAI_API_KEY: "navyai-live-key",
+      NAVYAI_BASE_URL: "https://api.navy",
       LINKAPI_KEY: "linkapi-live-key",
       LINKAPI_API_KEY: "linkapi-alias-key",
       LINKAPI_BASE_URL: "https://hk.linkapi.ai",
@@ -452,6 +500,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       MIMO_MAX_REQUEST_BYTES: "16777216",
       MIMO_RATE_LIMIT_TPM: "1200000",
       NANOGPT_RATE_LIMIT_RPM: "60",
+      NANOGPT_MAX_REQUEST_BYTES: "16777216",
+      NAVYAI_MAX_REQUEST_BYTES: "33554432",
       LINKAPI_MAX_REQUEST_BYTES: "33554432",
       LINKAPI_RATE_LIMIT_RPM: "120",
       CODEX_EASY_MAX_REQUEST_BYTES: "67108864",
@@ -469,9 +519,28 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.ADMIN_API_KEY, "admin-live-key");
   assert.equal(container.envVars.FLASK_SECRET_KEY, "flask-live-secret");
   assert.equal(container.envVars.JWT_SECRET, "jwt-live-secret");
+  assert.equal(container.envVars.OPENCODE_GO_API_KEY, "opencode-go-live-key");
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
+  assert.equal(
+    container.envVars.OPENCODE_GO_BASE_URL,
+    "https://opencode.ai/zen/go/v1",
+  );
   assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
   assert.equal(container.envVars.NANOGPT_API_KEY, "nanogpt-live-key");
+  assert.equal(
+    container.envVars.NANOGPT_BASE_URL,
+    "https://cake.nano-gpt.com/api",
+  );
+  assert.equal(
+    container.envVars.NANOGPT_BATCH_BASE_URL,
+    "https://api.nano-gpt.com/api/v1",
+  );
+  assert.equal(
+    container.envVars.NANOGPT_ORIGIN_URL,
+    "https://cake.nano-gpt.com",
+  );
+  assert.equal(container.envVars.NAVYAI_API_KEY, "navyai-live-key");
+  assert.equal(container.envVars.NAVYAI_BASE_URL, "https://api.navy");
   assert.equal(container.envVars.LINKAPI_KEY, "linkapi-live-key");
   assert.equal(container.envVars.LINKAPI_API_KEY, "linkapi-alias-key");
   assert.equal(container.envVars.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
@@ -483,6 +552,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.MIMO_MAX_REQUEST_BYTES, "16777216");
   assert.equal(container.envVars.MIMO_RATE_LIMIT_TPM, "1200000");
   assert.equal(container.envVars.NANOGPT_RATE_LIMIT_RPM, "60");
+  assert.equal(container.envVars.NANOGPT_MAX_REQUEST_BYTES, "16777216");
+  assert.equal(container.envVars.NAVYAI_MAX_REQUEST_BYTES, "33554432");
   assert.equal(container.envVars.LINKAPI_MAX_REQUEST_BYTES, "33554432");
   assert.equal(container.envVars.LINKAPI_RATE_LIMIT_RPM, "120");
   assert.equal(container.envVars.CODEX_EASY_MAX_REQUEST_BYTES, "67108864");
@@ -2552,6 +2623,161 @@ test("worker authenticates OpenCode callers before revealing provider configurat
   }
 
   assert.equal(timingSafeCalls, 2);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker exposes protocol-native OpenCode Go chat and model routes", async () => {
+  const requestBody =
+    '{"model":"kimi-k3","messages":[{"role":"user","content":"ping"}],"stream":false}';
+  const rawResponse =
+    '{"choices":[{"message":{"content":"pong","reasoning_content":"native"}}]}';
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode Go native routes must bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_GO_API_KEY: "go-live-key",
+    },
+  );
+  const upstreamRequests = [];
+
+  await withGlobalFetch(
+    async (input, init) => {
+      const upstreamRequest =
+        input instanceof Request ? input : new Request(input, init);
+      upstreamRequests.push(upstreamRequest);
+
+      if (upstreamRequest.method === "GET") {
+        assert.equal(
+          upstreamRequest.url,
+          "https://opencode.ai/zen/go/v1/models?region=us&region=eu",
+        );
+        assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer go-live-key");
+        assert.equal(upstreamRequest.headers.get("Content-Type"), null);
+        return new Response('{"object":"list","data":[]}', {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      assert.equal(
+        upstreamRequest.url,
+        "https://opencode.ai/zen/go/v1/chat/completions",
+      );
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer go-live-key");
+      assert.equal(await upstreamRequest.text(), requestBody);
+      return new Response(rawResponse, {
+        headers: {
+          "Content-Type": "application/json",
+          "Set-Cookie": "must-not-leak=yes",
+          "X-RateLimit-Remaining": "9",
+        },
+      });
+    },
+    async () => {
+      const chatResponse = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/opencode/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: requestBody,
+          },
+        ),
+        stub.env,
+      );
+      assert.equal(chatResponse.status, 200);
+      assert.equal(await chatResponse.text(), rawResponse);
+      assert.equal(chatResponse.headers.get("Set-Cookie"), null);
+      assert.equal(chatResponse.headers.get("X-RateLimit-Remaining"), "9");
+
+      const modelsResponse = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/opencode/v1/models?region=us&region=eu",
+          { headers: { Authorization: "Bearer admin-live-key" } },
+        ),
+        stub.env,
+      );
+      assert.equal(modelsResponse.status, 200);
+      assert.deepEqual(await modelsResponse.json(), { object: "list", data: [] });
+    },
+  );
+
+  assert.equal(upstreamRequests.length, 2);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker preserves OpenCode Go Anthropic messages and caller-owned credentials", async () => {
+  const events =
+    'event: message_start\ndata: {"type":"message_start"}\n\n' +
+    'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode Go messages must bypass the container");
+    },
+    { ADMIN_API_KEY: "admin-live-key" },
+  );
+
+  await withGlobalFetch(
+    async (input, init) => {
+      const upstreamRequest =
+        input instanceof Request ? input : new Request(input, init);
+      assert.equal(
+        upstreamRequest.url,
+        "https://opencode.ai/zen/go/v1/messages",
+      );
+      assert.equal(upstreamRequest.headers.get("X-Api-Key"), "caller-go-key");
+      assert.equal(upstreamRequest.headers.get("Authorization"), null);
+      assert.equal(
+        upstreamRequest.headers.get("Anthropic-Version"),
+        "2023-06-01",
+      );
+      assert.equal(
+        upstreamRequest.headers.get("Anthropic-Dangerous-Direct-Browser-Access"),
+        "true",
+      );
+      return new Response(events, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Anthropic-RateLimit-Requests-Remaining": "4",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/opencode/v1/messages",
+          {
+            method: "POST",
+            headers: {
+              "X-MultiLLM-Api-Key": "admin-live-key",
+              "X-Api-Key": "caller-go-key",
+              "Anthropic-Dangerous-Direct-Browser-Access": "true",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "minimax-m3",
+              max_tokens: 128,
+              messages: [{ role: "user", content: "ping" }],
+              stream: true,
+            }),
+          },
+        ),
+        stub.env,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), events);
+      assert.equal(
+        response.headers.get("Anthropic-RateLimit-Requests-Remaining"),
+        "4",
+      );
+    },
+  );
+
   assert.equal(stub.getCalls(), 0);
 });
 

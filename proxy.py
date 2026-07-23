@@ -114,18 +114,33 @@ PROVIDER_DETAILS = {
         }
     },
     'opencode': {
-        'description': 'OpenCode Zen Go plan - OpenAI-compatible access to curated models like Kimi K2.6',
+        'description': 'OpenCode Go subscription - native OpenAI Chat Completions, Anthropic Messages, streaming, and dynamic model discovery for curated coding models',
         'endpoints': [
             {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/opencode/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"kimi-k3\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"max_tokens\\": 128}"'
+            },
+            {
+                'url': '/v1/messages',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/opencode/v1/messages" -H "X-Api-Key: $ADMIN_API_KEY" -H "Anthropic-Version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"minimax-m3\\", \\"max_tokens\\": 128, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/opencode/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
                 'url': '/chat/completions',
-                'curl': 'curl -X POST "http://localhost:1400/opencode/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"kimi-k2.6\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}], \\"max_tokens\\": 128}"'
+                'curl': 'curl -X POST "$PROXY_BASE_URL/opencode/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"kimi-k3\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Legacy normalized chat route\\"}]}"'
             }
         ],
         'supported_features': {
             'streaming': True,
+            'function_calling': True,
+            'anthropic_messages': True,
+            'model_discovery': True,
             'json_mode': True
         },
-        'default_model': 'kimi-k2.6'
+        'default_model': 'kimi-k3'
     },
     'mimo': {
         'description': 'Xiaomi MiMo Token Plan - OpenAI-compatible access to MiMo-V2.5-Pro',
@@ -143,35 +158,156 @@ PROVIDER_DETAILS = {
         'default_model': 'mimo-v2.5-pro'
     },
     'nanogpt': {
-        'description': 'NanoGPT - OpenAI-compatible access to chat, models, embeddings, images, audio, memory, and search',
+        'description': 'NanoGPT raw multi-modal gateway for OpenAI and Anthropic text APIs, media, data, memory, moderation, batches, usage, TEE, and accountless x402 payments',
         'endpoints': [
             {
                 'url': '/v1/chat/completions',
-                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/chat/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/messages',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/messages" -H "X-Api-Key: $ADMIN_API_KEY" -H "Anthropic-Version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_MODEL\\", \\"max_tokens\\": 1024, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/responses',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_MODEL\\", \\"input\\": \\"Hello!\\"}"'
             },
             {
                 'url': '/v1/models?detailed=true',
-                'curl': 'curl -X GET "http://localhost:1400/nanogpt/v1/models?detailed=true" -H "Authorization: Bearer $API_KEY"'
+                'curl': 'curl -X GET "$PROXY_BASE_URL/nanogpt/v1/models?detailed=true" -H "Authorization: Bearer $ADMIN_API_KEY"'
             },
             {
-                'url': '/v1/embeddings',
-                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/embeddings" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_EMBEDDING_MODEL\\", \\"input\\": \\"NanoGPT embeddings\\"}"'
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_IMAGE_MODEL\\", \\"prompt\\": \\"A lighthouse at dusk\\"}"'
+            },
+            {
+                'url': '/generate-video',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/generate-video" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_VIDEO_MODEL\\", \\"prompt\\": \\"A lighthouse at dusk\\"}"'
             },
             {
                 'url': '/v1/audio/speech',
-                'curl': 'curl -X POST "http://localhost:1400/nanogpt/v1/audio/speech" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_TTS_MODEL\\", \\"voice\\": \\"alloy\\", \\"input\\": \\"Welcome to NanoGPT.\\"}"'
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/audio/speech" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NANOGPT_TTS_MODEL\\", \\"voice\\": \\"alloy\\", \\"input\\": \\"Welcome to NanoGPT.\\"}"'
+            },
+            {
+                'url': '/v1/audio/transcriptions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/audio/transcriptions" -H "Authorization: Bearer $ADMIN_API_KEY" -F "file=@audio.mp3" -F "model=$NANOGPT_STT_MODEL"'
+            },
+            {
+                'url': '/v1/data/web/search',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/data/web/search" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"query\\": \\"latest AI news\\"}"'
+            },
+            {
+                'url': '/v1/batches',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/nanogpt/v1/batches" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"input_file_id\\": \\"file_...\\", \\"endpoint\\": \\"/v1/chat/completions\\", \\"completion_window\\": \\"24h\\"}"'
             }
         ],
         'supported_features': {
             'streaming': True,
+            'raw_streaming': True,
             'function_calling': True,
             'json_mode': True,
             'vision': True,
             'embeddings': True,
             'audio': True,
             'images': True,
+            'video': True,
             'web_search': True,
-            'memory': True
+            'memory': True,
+            'moderation': True,
+            'batch': True,
+            'x402': True
+        }
+    },
+    'navyai': {
+        'description': 'NavyAI raw unified gateway for OpenAI Chat and Responses, Anthropic Messages, images, video jobs, embeddings, speech, moderation, model status, usage, and OAuth tokens',
+        'endpoints': [
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/messages',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/messages" -H "X-Api-Key: $ADMIN_API_KEY" -H "Anthropic-Version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_MODEL\\", \\"max_tokens\\": 1024, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/responses',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_MODEL\\", \\"input\\": \\"Hello!\\"}"'
+            },
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/models/status',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/models/status" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_IMAGE_MODEL\\", \\"prompt\\": \\"A naval command room at dusk\\", \\"sync\\": false}"'
+            },
+            {
+                'url': '/v1/images/generations/{id}',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/images/generations/$JOB_ID" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/audio/speech',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/audio/speech" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_TTS_MODEL\\", \\"voice\\": \\"alloy\\", \\"input\\": \\"Welcome aboard.\\"}"'
+            },
+            {
+                'url': '/v1/audio/transcriptions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/audio/transcriptions" -H "Authorization: Bearer $ADMIN_API_KEY" -F "file=@audio.mp3" -F "model=$NAVYAI_STT_MODEL"'
+            },
+            {
+                'url': '/v1/audio/transcriptions/jobs',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/audio/transcriptions/jobs" -H "Authorization: Bearer $ADMIN_API_KEY" -F "file=@audio.mp3" -F "model=$NAVYAI_STT_MODEL"'
+            },
+            {
+                'url': '/v1/audio/transcriptions/jobs/{id}/status',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/audio/transcriptions/jobs/$JOB_ID/status" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/audio/transcriptions/jobs/{id}/download',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/audio/transcriptions/jobs/$JOB_ID/download" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/embeddings',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/embeddings" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$NAVYAI_EMBEDDING_MODEL\\", \\"input\\": \\"NavyAI embeddings\\"}"'
+            },
+            {
+                'url': '/v1/moderations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/moderations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"input\\": \\"Text to review\\"}"'
+            },
+            {
+                'url': '/v1/usage',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/usage" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/oauth/token',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/oauth/token" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"grant_type\\": \\"authorization_code\\", \\"code\\": \\"$NAVY_CODE\\", \\"client_id\\": \\"$NAVY_CLIENT_ID\\", \\"code_verifier\\": \\"$NAVY_CODE_VERIFIER\\"}"'
+            },
+            {
+                'url': '/v1/oauth/me',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/navyai/v1/oauth/me" -H "X-MultiLLM-Api-Key: $ADMIN_API_KEY" -H "Authorization: Bearer $NAVY_OAUTH_ACCESS_TOKEN"'
+            },
+            {
+                'url': '/v1/oauth/revoke',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/navyai/v1/oauth/revoke" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"token\\": \\"$NAVY_OAUTH_TOKEN\\"}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True,
+            'function_calling': True,
+            'json_mode': True,
+            'vision': True,
+            'embeddings': True,
+            'audio': True,
+            'images': True,
+            'video': True,
+            'moderation': True,
+            'oauth': True,
+            'coding_agents': True,
+            'roleplay_clients': True
         }
     },
     'codex-easy': {

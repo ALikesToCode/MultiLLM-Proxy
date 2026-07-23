@@ -318,6 +318,61 @@ class RawPassthroughTest(unittest.TestCase):
         self.assertIs(response, upstream_response)
         self.assertNotIn(b"[DONE]", response.content)
 
+    def test_paid_multimodal_gateways_do_not_retry_or_follow_redirects(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 503
+        upstream_response._content = b'{"error":{"message":"busy"}}'
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        cases = (
+            ("nanogpt", "https://nano-gpt.com/api/v1/images/generations"),
+            ("navyai", "https://api.navy/v1/images/generations"),
+        )
+        for provider, url in cases:
+            with self.subTest(provider=provider), patch(
+                "services.proxy_service.requests.Session.request",
+                return_value=upstream_response,
+            ) as request_call, patch("services.proxy_service.time.sleep") as sleep:
+                response = self.proxy_module.ProxyService._make_base_request(
+                    method="POST",
+                    url=url,
+                    headers={"Idempotency-Key": "request-123"},
+                    params=[],
+                    data=b'{"model":"image-model","prompt":"hello"}',
+                    api_provider=provider,
+                    use_cache=False,
+                )
+
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(request_call.call_count, 1)
+            self.assertFalse(request_call.call_args.kwargs["allow_redirects"])
+            sleep.assert_not_called()
+
+    def test_new_raw_gateways_preserve_repeated_and_key_named_query_parameters(self):
+        request_args = MultiDict(
+            [
+                ("tag", "one"),
+                ("tag", "two"),
+                ("key", "documented-filter-value"),
+            ]
+        )
+
+        for provider in ("nanogpt", "navyai"):
+            with self.subTest(provider=provider):
+                params = self.proxy_module.ProxyService.prepare_params(
+                    request_args,
+                    provider,
+                )
+
+                self.assertEqual(
+                    params,
+                    [
+                        ("tag", "one"),
+                        ("tag", "two"),
+                        ("key", "documented-filter-value"),
+                    ],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

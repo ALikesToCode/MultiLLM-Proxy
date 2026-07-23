@@ -100,7 +100,8 @@ class RateLimitServiceTest(unittest.TestCase):
         user = {"username": "alice", "api_key_prefix": "mllm_live_alice"}
         old_time = datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc)
         current_time = datetime(2026, 7, 17, 10, 2, tzinfo=timezone.utc)
-        with patch("services.rate_limit_service._utcnow", return_value=old_time):
+        reserve_globals = RateLimitService.reserve_request_slot.__func__.__globals__
+        with patch.dict(reserve_globals, {"_utcnow": lambda: old_time}):
             reservation = RateLimitService.reserve_request_slot(
                 provider="kimi-code",
                 user=user,
@@ -129,7 +130,8 @@ class RateLimitServiceTest(unittest.TestCase):
             )
             connection.commit()
 
-        with patch("services.rate_limit_service._utcnow", return_value=current_time):
+        finalize_globals = RateLimitService.finalize_request_slot.__func__.__globals__
+        with patch.dict(finalize_globals, {"_utcnow": lambda: current_time}):
             finalized = RateLimitService.finalize_request_slot(
                 reservation_id=reservation.metadata["reservation_id"],
                 provider="kimi-code",
@@ -186,6 +188,35 @@ class RateLimitServiceTest(unittest.TestCase):
         )
 
         self.assertTrue(decision.allowed, decision)
+
+    def test_media_gateway_defaults_allow_documented_upload_sizes(self):
+        class SizedPayload:
+            def __init__(self, size):
+                self.size = size
+
+            def __len__(self):
+                return self.size
+
+        for name in (
+            "MAX_REQUEST_BYTES",
+            "NANOGPT_MAX_REQUEST_BYTES",
+            "NAVYAI_MAX_REQUEST_BYTES",
+        ):
+            os.environ.pop(name, None)
+
+        nanogpt = RateLimitService.check_request_size(
+            "nanogpt",
+            SizedPayload(16 * 1024 * 1024),
+        )
+        navyai = RateLimitService.check_request_size(
+            "navyai",
+            SizedPayload(25 * 1024 * 1024 + 1024),
+        )
+
+        self.assertTrue(nanogpt.allowed)
+        self.assertTrue(navyai.allowed)
+        self.assertEqual(nanogpt.metadata["max_request_bytes"], 16 * 1024 * 1024)
+        self.assertEqual(navyai.metadata["max_request_bytes"], 32 * 1024 * 1024)
 
     def test_enforces_request_per_minute_limit_by_user_provider(self):
         os.environ["RATE_LIMIT_RPM"] = "1"

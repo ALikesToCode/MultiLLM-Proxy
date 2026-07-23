@@ -4,7 +4,7 @@ import os
 import sys
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from flask import Response
@@ -16,6 +16,7 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         os.environ["ADMIN_API_KEY"] = "admin-test-key"
         os.environ["FLASK_SECRET_KEY"] = "flask-test-secret"
         os.environ["JWT_SECRET"] = "jwt-test-secret"
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-provider-key"
         os.environ["OPENCODE_API_KEY"] = "opencode-provider-key"
         os.environ["ALLOWED_ORIGINS"] = "https://example.com"
 
@@ -92,6 +93,155 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         self.assertEqual(
             make_request.call_args.kwargs["headers"]["Authorization"],
             "Bearer opencode-provider-key",
+        )
+
+    def test_native_openai_path_uses_raw_go_transport(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response._content = (
+            b'{"id":"chatcmpl-go","choices":[{"message":{"content":"raw"},'
+            b'"reasoning_content":"native"}}]}'
+        )
+        upstream_response.headers["Content-Type"] = "application/json"
+        upstream_response.headers["X-Request-ID"] = "go-request-1"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/opencode/v1/chat/completions",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "Content-Type": "application/json",
+                },
+                data=(
+                    b'{"model":"kimi-k3","messages":[{"role":"user",'
+                    b'"content":"Hello"}]}'
+                ),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(), upstream_response.content)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://opencode.ai/zen/go/v1/chat/completions",
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer opencode-provider-key",
+        )
+
+    def test_native_anthropic_messages_preserve_sse_and_use_x_api_key(self):
+        anthropic_events = (
+            'event: message_start\ndata: {"type":"message_start"}\n\n'
+            'event: content_block_delta\ndata: {"type":"content_block_delta",'
+            '"delta":{"type":"text_delta","text":"Hello"}}\n\n'
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+        )
+        upstream_response = Response(
+            anthropic_events,
+            status=200,
+            content_type="text/event-stream",
+        )
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/opencode/v1/messages",
+                headers={
+                    "X-Api-Key": "admin-test-key",
+                    "Anthropic-Version": "2023-06-01",
+                    "Anthropic-Dangerous-Direct-Browser-Access": "true",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "minimax-m3",
+                    "max_tokens": 256,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), anthropic_events)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://opencode.ai/zen/go/v1/messages",
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
+        self.assertEqual(
+            request_kwargs["headers"]["X-Api-Key"],
+            "opencode-provider-key",
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Anthropic-Version"],
+            "2023-06-01",
+        )
+        self.assertEqual(
+            request_kwargs["headers"][
+                "Anthropic-Dangerous-Direct-Browser-Access"
+            ],
+            "true",
+        )
+        self.assertNotIn("Authorization", request_kwargs["headers"])
+
+    def test_native_models_preserve_repeated_query_parameters(self):
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response._content = b'{"object":"list","data":[]}'
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.get(
+                "/opencode/v1/models?region=us&region=eu",
+                headers={"Authorization": "Bearer admin-test-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://opencode.ai/zen/go/v1/models",
+        )
+        self.assertEqual(
+            request_kwargs["params"],
+            [("region", "us"), ("region", "eu")],
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
+
+    def test_native_route_accepts_caller_owned_go_credential(self):
+        self.auth_module.AuthService._api_keys.pop("opencode", None)
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response._content = b'{"object":"list","data":[]}'
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.get(
+                "/opencode/v1/models",
+                headers={
+                    "X-MultiLLM-Api-Key": "admin-test-key",
+                    "Authorization": "Bearer caller-go-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        request_headers = make_request.call_args.kwargs["headers"]
+        self.assertEqual(
+            request_headers["Authorization"],
+            "Bearer caller-go-key",
         )
 
     def test_proxy_preflight_returns_cors_headers(self):
@@ -582,6 +732,38 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["choices"][0]["message"]["content"], "Recovered after retry")
         self.assertEqual(request_mock.call_count, 2)
+
+    def test_forced_raw_opencode_transport_is_single_attempt_and_cookie_isolated(self):
+        raw_response = requests.Response()
+        raw_response.status_code = 503
+        raw_response._content = b'{"error":{"message":"busy"}}'
+        raw_response.headers["Content-Type"] = "application/json"
+
+        fake_session = Mock()
+        fake_session.request.return_value = raw_response
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_get_provider_session",
+            return_value=fake_session,
+        ) as get_session:
+            response = self.proxy_module.ProxyService.make_request(
+                method="POST",
+                url="https://opencode.ai/zen/go/v1/messages",
+                headers={
+                    "X-Api-Key": "provider-key",
+                    "Content-Type": "application/json",
+                },
+                params=[],
+                data=b'{"model":"minimax-m3","stream":true}',
+                api_provider="opencode",
+                use_cache=False,
+                force_raw_passthrough=True,
+            )
+
+        self.assertIs(response, raw_response)
+        get_session.assert_called_once_with("opencode", raw_passthrough=True)
+        self.assertEqual(fake_session.request.call_count, 1)
+        self.assertFalse(fake_session.request.call_args.kwargs["allow_redirects"])
 
 
 if __name__ == "__main__":

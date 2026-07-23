@@ -9,6 +9,24 @@ from urllib.parse import unquote
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
+from providers.nanogpt import (
+    build_nanogpt_url,
+    is_nanogpt_accountless_request,
+    is_nanogpt_interactive_browser_request,
+    is_nanogpt_public_request,
+    nanogpt_allows_missing_api_key,
+    nanogpt_has_caller_auth,
+)
+from providers.navyai import (
+    is_navyai_interactive_oauth_request,
+    is_navyai_public_request,
+    navyai_has_caller_auth,
+)
+from providers.opencode_go import (
+    build_opencode_go_url,
+    is_opencode_go_native_request,
+    opencode_go_has_caller_auth,
+)
 from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
 from route_helpers import (
@@ -20,7 +38,9 @@ from route_helpers import (
 
 logger = logging.getLogger(__name__)
 
-RAW_PASSTHROUGH_PROVIDERS = frozenset({"codex-easy", "kimi-code", "linkapi"})
+RAW_PASSTHROUGH_PROVIDERS = frozenset(
+    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
+)
 CODEX_EASY_EXACT_PATHS = frozenset(
     {
         "v1/models",
@@ -109,6 +129,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         Proxy requests to the appropriate API provider.
         """
         start_time = time.time()
+        raw_passthrough = False
         try:
             if api_provider != "kimi-code" and _is_encoded_kimi_code_namespace(
                 api_provider
@@ -126,8 +147,35 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 request.method,
             ):
                 raise APIError("Invalid Kimi Code path", status_code=400)
+            if api_provider == "navyai" and is_navyai_interactive_oauth_request(
+                path,
+                request.method,
+            ):
+                raise APIError(
+                    "Start NavyAI OAuth directly at "
+                    "https://api.navy/v1/oauth/authorize; browser redirects and "
+                    "session cookies are not proxied",
+                    status_code=400,
+                )
+            if api_provider == "nanogpt" and is_nanogpt_interactive_browser_request(
+                path,
+                request.method,
+            ):
+                raise APIError(
+                    "Start NanoGPT browser authentication directly at "
+                    "https://nano-gpt.com/auth or "
+                    "https://nano-gpt.com/oauth/authorize; browser redirects "
+                    "and session cookies are not proxied",
+                    status_code=400,
+                )
 
-            raw_passthrough = api_provider in RAW_PASSTHROUGH_PROVIDERS
+            raw_passthrough = (
+                api_provider in RAW_PASSTHROUGH_PROVIDERS
+                or (
+                    api_provider == "opencode"
+                    and is_opencode_go_native_request(path, request.method)
+                )
+            )
 
             base_url = app.config["API_BASE_URLS"][api_provider]
             if api_provider == "groq":
@@ -158,7 +206,17 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 )
                 path = ""
 
-            url = f"{base_url}/{path}" if path else base_url
+            if api_provider == "nanogpt":
+                url = build_nanogpt_url(
+                    base_url,
+                    app.config["NANOGPT_BATCH_BASE_URL"],
+                    path,
+                    app.config["NANOGPT_ORIGIN_URL"],
+                )
+            elif api_provider == "opencode":
+                url = build_opencode_go_url(base_url, path)
+            else:
+                url = f"{base_url}/{path}" if path else base_url
             if raw_passthrough:
                 logger.info("Proxying raw request for %s", api_provider)
             else:
@@ -169,7 +227,41 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             else:
                 auth_token = auth_service_cls.get_api_key(api_provider)
 
-            if not auth_token:
+            if (
+                api_provider == "nanogpt"
+                and (
+                    is_nanogpt_accountless_request(request.headers, path)
+                    or is_nanogpt_public_request(path, request.method)
+                )
+            ):
+                auth_token = None
+            elif (
+                api_provider == "navyai"
+                and is_navyai_public_request(path, request.method)
+            ):
+                auth_token = None
+
+            missing_key_allowed = (
+                api_provider == "nanogpt"
+                and nanogpt_allows_missing_api_key(
+                    request.headers,
+                    path,
+                    request.method,
+                )
+            )
+            if api_provider == "nanogpt":
+                missing_key_allowed = (
+                    missing_key_allowed
+                    or nanogpt_has_caller_auth(request.headers)
+                )
+            if api_provider == "navyai":
+                missing_key_allowed = (
+                    is_navyai_public_request(path, request.method)
+                    or navyai_has_caller_auth(request.headers)
+                )
+            if api_provider == "opencode":
+                missing_key_allowed = opencode_go_has_caller_auth(request.headers)
+            if not auth_token and not missing_key_allowed:
                 raise APIError(f"API key not configured for {api_provider}", status_code=503)
 
             is_streaming = False
@@ -186,6 +278,12 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 auth_token,
                 upstream_path=path,
             )
+            if (
+                api_provider in {"nanogpt", "navyai", "opencode"}
+                and is_streaming
+                and not proxy_service_cls._has_header(headers, "Accept")
+            ):
+                headers["Accept"] = "text/event-stream"
             params = (
                 proxy_service_cls.prepare_params(
                     request.args,
@@ -215,6 +313,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     and not is_streaming
                     and not raw_passthrough
                 ),
+                force_raw_passthrough=raw_passthrough,
             )
 
             response_time = (time.time() - start_time) * 1000
@@ -300,7 +399,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 status_code=status_code,
                 response_time=response_time,
             )
-            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+            if raw_passthrough:
                 logger.error(
                     "Raw proxy request failed for %s (%s)",
                     api_provider,
@@ -310,7 +409,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 logger.error("Proxy error for %s: %s", api_provider, error)
             if isinstance(error, APIError):
                 raise error
-            if api_provider in RAW_PASSTHROUGH_PROVIDERS:
+            if raw_passthrough:
                 raise APIError("Upstream proxy request failed", status_code=502)
             raise APIError(f"Proxy error: {str(error)}", status_code=500)
 

@@ -16,14 +16,23 @@ logger = logging.getLogger(__name__)
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = (
     "Authorization, Content-Type, Accept, Origin, X-Requested-With, "
-    "X-Api-Key, X-Goog-Api-Key, Anthropic-Version, Anthropic-Beta"
+    "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
+    "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
+    "Idempotency-Key, OpenAI-Beta, OpenAI-Organization, "
+    "OpenAI-Project, Moderation, Moderation-Model, Redaction, X-App-Name, "
+    "X-Billing-Mode, X-BYOK-Provider, X-Client-Request-ID, X-Encryption-Key, "
+    "X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, "
+    "X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402"
 )
 CORS_EXPOSE_HEADERS = (
     "Retry-After, X-Request-ID, X-MultiLLM-Optimization, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
-    "X-MultiLLM-Summary"
+    "X-MultiLLM-Summary, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
+    "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
+    "X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, "
+    "X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model"
 )
 HOP_BY_HOP_RESPONSE_HEADERS = frozenset(
     {
@@ -56,6 +65,9 @@ RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST = frozenset(
         "request-id",
         "retry-after",
         "vary",
+        "www-authenticate",
+        "x-payment-response",
+        "x-poll-after",
         "x-request-id",
         "x-should-retry",
     }
@@ -63,6 +75,8 @@ RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST = frozenset(
 RAW_PROVIDER_RESPONSE_HEADER_PREFIXES = (
     "anthropic-ratelimit-",
     "ratelimit-",
+    "x-fal-",
+    "x-nanogpt-",
     "x-ratelimit-",
 )
 
@@ -125,26 +139,40 @@ def extract_bearer_token(value: Optional[str]) -> Optional[str]:
     return token or None
 
 
+def _provider_prefix(path: str) -> str:
+    return path.strip("/").split("/", 1)[0].lower()
+
+
 def _is_linkapi_request_path(path: str) -> bool:
-    return path.strip("/").split("/", 1)[0].lower() == "linkapi"
+    return _provider_prefix(path) == "linkapi"
+
+
+def _accepts_native_api_key(path: str) -> bool:
+    return _provider_prefix(path) in {"linkapi", "nanogpt", "navyai", "opencode"}
 
 
 def request_api_key() -> Optional[str]:
     """Read the proxy credential without leaking native provider credentials upstream."""
+    proxy_api_key = request.headers.get("X-MultiLLM-Api-Key")
+    if proxy_api_key and proxy_api_key.strip():
+        return proxy_api_key.strip()
+
     bearer_token = extract_bearer_token(request.headers.get("Authorization"))
     if bearer_token:
         return bearer_token
 
-    if not _is_linkapi_request_path(request.path):
-        return None
+    if _accepts_native_api_key(request.path):
+        api_key = request.headers.get("X-Api-Key")
+        if api_key and api_key.strip():
+            return api_key.strip()
 
-    for value in (
-        request.headers.get("X-Api-Key"),
-        request.headers.get("X-Goog-Api-Key"),
-        request.args.get("key"),
-    ):
-        if value and value.strip():
-            return value.strip()
+    if _is_linkapi_request_path(request.path):
+        for value in (
+            request.headers.get("X-Goog-Api-Key"),
+            request.args.get("key"),
+        ):
+            if value and value.strip():
+                return value.strip()
     return None
 
 
@@ -313,17 +341,22 @@ def _authenticate_api_request():
             ), 401
 
         logger.error("No proxy API credential found")
-        native_hint = (
-            " Native LinkAPI clients may also use X-Api-Key, X-Goog-Api-Key, "
-            "or the Gemini key query parameter."
-            if _is_linkapi_request_path(request.path)
-            else ""
-        )
+        provider_prefix = _provider_prefix(request.path)
+        if provider_prefix == "linkapi":
+            native_hint = (
+                " Native LinkAPI clients may also use X-Api-Key, "
+                "X-Goog-Api-Key, or the Gemini key query parameter."
+            )
+        elif provider_prefix in {"nanogpt", "navyai", "opencode"}:
+            native_hint = " Native Anthropic clients may also use X-Api-Key."
+        else:
+            native_hint = ""
         return jsonify(
             {
                 "error": "Authentication required",
                 "message": (
-                    "Please provide your API key in the Authorization header. "
+                    "Please provide your API key in the Authorization header "
+                    "or X-MultiLLM-Api-Key. "
                     f"Example: Authorization: Bearer YOUR_API_KEY{native_hint}"
                 ),
             }

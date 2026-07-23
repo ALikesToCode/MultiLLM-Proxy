@@ -19,8 +19,10 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Hyperbolic
   - SambaNova
   - OpenRouter
+  - OpenCode Go
   - Xiaomi MiMo Token Plan
   - NanoGPT
+  - NavyAI
   - Codex Everywhere
   - Kimi Code
   - LinkAPI
@@ -104,11 +106,18 @@ SAMBANOVA_API_KEY=your-sambanova-api-key
 # OpenRouter
 OPENROUTER_API_KEY=your-openrouter-api-key
 
+# OpenCode Go
+OPENCODE_GO_API_KEY=your-opencode-go-key
+# Optional compatibility alias: OPENCODE_API_KEY=your-opencode-go-key
+
 # Xiaomi MiMo Token Plan
 MIMO_API_KEY=your-mimo-token-plan-api-key
 
 # NanoGPT
 NANOGPT_API_KEY=your-nanogpt-api-key
+
+# NavyAI
+NAVYAI_API_KEY=your-navyai-api-key
 
 # Codex Everywhere (preferred key name)
 CODEX_EASY_API_KEY=your-codex-everywhere-key
@@ -174,6 +183,18 @@ curl -X POST "http://localhost:1400/groq/openai/v1/chat/completions" \
 
 ### Provider Endpoints
 
+OpenCode Go supports both native client protocols through the proxy:
+
+```text
+OpenAI-compatible base:   http://localhost:1400/opencode/v1
+Anthropic-compatible base: http://localhost:1400/opencode
+Models:                    http://localhost:1400/opencode/v1/models
+```
+
+See [OpenCode Go integration](docs/opencode-go.md) for model/protocol mapping,
+authentication, subscription limits, and the backward-compatible legacy chat
+route.
+
 Quick reference for all provider endpoint URLs:
 
 ```plaintext
@@ -217,7 +238,29 @@ http://localhost:1400/mimo/chat/completions
 
 # NanoGPT
 http://localhost:1400/nanogpt/v1/chat/completions
+http://localhost:1400/nanogpt/v1/messages
+http://localhost:1400/nanogpt/v1/responses
 http://localhost:1400/nanogpt/v1/models?detailed=true
+http://localhost:1400/nanogpt/v1/images/*
+http://localhost:1400/nanogpt/v1/audio/*
+http://localhost:1400/nanogpt/v1/files
+http://localhost:1400/nanogpt/v1/batches
+
+# NavyAI
+http://localhost:1400/navyai/v1/chat/completions
+http://localhost:1400/navyai/v1/messages
+http://localhost:1400/navyai/v1/responses
+http://localhost:1400/navyai/v1/models
+http://localhost:1400/navyai/v1/images/generations
+http://localhost:1400/navyai/v1/audio/*
+http://localhost:1400/navyai/v1/embeddings
+http://localhost:1400/navyai/v1/moderations
+http://localhost:1400/navyai/v1/usage
+
+# OpenCode Go native protocol routes
+http://localhost:1400/opencode/v1/chat/completions
+http://localhost:1400/opencode/v1/messages
+http://localhost:1400/opencode/v1/models
 
 # Codex Everywhere OpenAI-compatible routes
 http://localhost:1400/codex-easy/v1/models
@@ -255,13 +298,50 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **Azure AI**: Support for Azure-hosted models
 - **SambaNova**: Text generation with streaming support
 - **OpenRouter**: Gateway to multiple AI providers
+- **OpenCode Go**: Protocol-native OpenAI Chat Completions, Anthropic Messages, streaming, and live model discovery under `/opencode/v1/*`
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
-- **NanoGPT**: OpenAI-compatible chat, streaming, model catalog, embeddings, images, audio, memory, and search via `/nanogpt/v1/*`; use `/nanogpt/v1/models?detailed=true` before selecting model IDs
+- **NanoGPT**: Raw OpenAI and Anthropic text APIs plus models, embeddings, images, video, audio, memory, search/extraction, moderation, batches, evals, TEE verification, partner auth, and x402 payments under `/nanogpt/*`
+- **NavyAI**: Raw OpenAI Chat and Responses, Anthropic Messages, images and video jobs, embeddings, speech, moderation, models/status, usage, and OAuth token flows under `/navyai/*`
 - **Codex Everywhere**: Raw OpenAI Responses, Chat Completions, key-group-specific model discovery, and conditional image routes under `/codex-easy/v1/*`
 - **Kimi Code**: OpenAI-compatible Chat Completions for `k3` through the fixed `https://api.kimi.com/coding/v1` coding endpoint
 - **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, and OpenAI-compatible routes under `/linkapi/*`; consult LinkAPI's live pricing/model page instead of relying on a hard-coded model list
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
+
+### NanoGPT and NavyAI raw gateways
+
+Both integrations preserve upstream request and response protocols: JSON bytes,
+multipart boundaries, binary media, SSE event types, query parameters, status
+codes, and safe response metadata. They are single-attempt transports so paid
+generation requests are never duplicated by an automatic proxy retry.
+
+Use OpenAI-style clients with these base URLs:
+
+```text
+$PROXY_BASE_URL/nanogpt/v1
+$PROXY_BASE_URL/navyai/v1
+```
+
+Use Anthropic-style clients with:
+
+```text
+$PROXY_BASE_URL/nanogpt
+$PROXY_BASE_URL/navyai
+```
+
+Normal clients send the MultiLLM Proxy key in `Authorization: Bearer ...` or
+`X-Api-Key`; the server replaces it with `NANOGPT_API_KEY` or
+`NAVYAI_API_KEY`. To forward a caller-owned upstream bearer/API key, partner
+JWT, Navy OAuth token, or NanoGPT L402 credential, authenticate the proxy with
+`X-MultiLLM-Api-Key` and keep the provider credential in its native header.
+
+NanoGPT batch routes are automatically sent to its dedicated batch host.
+Browser-based NanoGPT and NavyAI authorization pages remain direct because the
+proxy deliberately does not retain upstream cookies or follow redirects.
+
+See the complete capability, authentication, polling, x402, OAuth, and route
+matrices in [NanoGPT gateway](docs/nanogpt.md) and
+[NavyAI gateway](docs/navyai.md).
 
 ### Codex Everywhere OpenAI fast path
 

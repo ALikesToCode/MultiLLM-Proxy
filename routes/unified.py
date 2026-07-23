@@ -18,9 +18,11 @@ from services.model_registry import ModelRegistry
 
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = frozenset(
-    {"codex-easy", "kimi-code", "linkapi"}
+    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
 )
-NATIVE_RESPONSES_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+NATIVE_RESPONSES_PROVIDERS = frozenset(
+    {"codex-easy", "linkapi", "nanogpt", "navyai"}
+)
 
 
 def _provider_token(auth_service_cls, provider: str) -> str:

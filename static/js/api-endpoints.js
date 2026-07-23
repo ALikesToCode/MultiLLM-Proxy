@@ -12,8 +12,36 @@ document.addEventListener('DOMContentLoaded', function() {
         ['Hyperbolic', '/hyperbolic/chat/completions'],
         ['SambaNova', ['/sambanova/chat/completions', '/sambanova/completions']],
         ['OpenRouter', ['/openrouter/chat/completions', '/openrouter/models']],
+        ['OpenCode Go', [
+            '/opencode/v1/chat/completions',
+            '/opencode/v1/messages',
+            '/opencode/v1/models'
+        ]],
         ['Xiaomi MiMo', '/mimo/chat/completions'],
-        ['NanoGPT', ['/nanogpt/v1/chat/completions', '/nanogpt/v1/models?detailed=true']],
+        ['NanoGPT', [
+            '/nanogpt/v1/chat/completions',
+            '/nanogpt/v1/messages',
+            '/nanogpt/v1/responses',
+            '/nanogpt/v1/models?detailed=true',
+            '/nanogpt/v1/images/generations',
+            '/nanogpt/v1/audio/transcriptions'
+        ]],
+        ['NavyAI', [
+            '/navyai/v1/chat/completions',
+            '/navyai/v1/messages',
+            '/navyai/v1/responses',
+            '/navyai/v1/models',
+            '/navyai/v1/models/status',
+            '/navyai/v1/images/generations',
+            '/navyai/v1/audio/transcriptions',
+            '/navyai/v1/audio/transcriptions/jobs',
+            '/navyai/v1/embeddings',
+            '/navyai/v1/moderations',
+            '/navyai/v1/usage',
+            '/navyai/v1/oauth/token',
+            '/navyai/v1/oauth/me',
+            '/navyai/v1/oauth/revoke'
+        ]],
         ['PaLM', '/palm/models/chat-bison-001:generateText'],
         ['Nineteen AI', '/nineteen/v1/completions']
     ];

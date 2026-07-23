@@ -14,6 +14,7 @@ from route_helpers import (
     mask_authorization_header,
     mask_secret,
     provider_from_request_path,
+    request_api_key,
     stream_upstream_response,
 )
 from services.rate_limit_service import LimitDecision
@@ -39,6 +40,26 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
         self.assertIsNone(extract_bearer_token(None))
         self.assertIsNone(extract_bearer_token("Basic token-value"))
         self.assertIsNone(extract_bearer_token("Bearer "))
+
+    def test_dedicated_proxy_header_takes_priority_over_upstream_bearer(self):
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/navyai/v1/oauth/me",
+            headers={
+                "X-MultiLLM-Api-Key": "proxy-admin-key",
+                "Authorization": "Bearer navy-oat-user-token",
+            },
+        ):
+            self.assertEqual(request_api_key(), "proxy-admin-key")
+
+    def test_native_api_key_auth_is_available_for_anthropic_gateways(self):
+        app = Flask(__name__)
+        for path in ("/linkapi/v1/messages", "/nanogpt/v1/messages", "/navyai/v1/messages"):
+            with self.subTest(path=path), app.test_request_context(
+                path,
+                headers={"X-Api-Key": "proxy-admin-key"},
+            ):
+                self.assertEqual(request_api_key(), "proxy-admin-key")
 
     def test_copy_upstream_response_headers_drops_hop_by_hop_values(self):
         headers = copy_upstream_response_headers(
@@ -84,6 +105,10 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
                 "X-Request-ID": "req_proxy",
                 "X-RateLimit-Remaining-Requests": "0",
                 "Anthropic-RateLimit-Requests-Reset": "2026-07-10T10:00:00Z",
+                "WWW-Authenticate": "L402 challenge",
+                "X-PAYMENT-RESPONSE": "receipt",
+                "X-Poll-After": "2",
+                "X-NanoGPT-Advisor-ID": "advisor_123",
                 "Set-Cookie": "session=upstream-secret; Secure",
                 "Location": "https://attacker.example/redirect",
                 "Connection": "keep-alive",
@@ -107,6 +132,10 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
             response.headers["Anthropic-RateLimit-Requests-Reset"],
             "2026-07-10T10:00:00Z",
         )
+        self.assertEqual(response.headers["WWW-Authenticate"], "L402 challenge")
+        self.assertEqual(response.headers["X-PAYMENT-RESPONSE"], "receipt")
+        self.assertEqual(response.headers["X-Poll-After"], "2")
+        self.assertEqual(response.headers["X-NanoGPT-Advisor-ID"], "advisor_123")
         for header_name in (
             "Set-Cookie",
             "Location",
@@ -244,7 +273,15 @@ class RouteHelperCorsTest(unittest.TestCase):
         allowed_headers = response.headers["Access-Control-Allow-Headers"].lower()
         self.assertIn("x-api-key", allowed_headers)
         self.assertIn("x-goog-api-key", allowed_headers)
+        self.assertIn("x-multillm-api-key", allowed_headers)
+        self.assertIn("x-payment", allowed_headers)
+        self.assertIn("x-x402", allowed_headers)
         self.assertIn("anthropic-version", allowed_headers)
+
+        exposed_headers = response.headers["Access-Control-Expose-Headers"].lower()
+        self.assertIn("www-authenticate", exposed_headers)
+        self.assertIn("x-payment-response", exposed_headers)
+        self.assertIn("x-nanogpt-advisor-id", exposed_headers)
 
     def test_optimizer_cors_exposes_optimization_metadata_headers(self):
         with self.app.test_request_context(

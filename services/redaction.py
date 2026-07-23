@@ -8,21 +8,30 @@ SENSITIVE_HEADERS = {
     "authorization",
     "api-key",
     "x-api-key",
+    "x-encryption-key",
+    "x-encryption-passphrase",
     "x-goog-api-key",
+    "x-multillm-api-key",
+    "x-payment",
     "cookie",
     "set-cookie",
 }
 
 SENSITIVE_JSON_KEYS = {
+    "access_token",
     "api_key",
     "apikey",
     "authorization",
+    "client_secret",
+    "code",
+    "code_verifier",
     "content",
     "input",
     "messages",
     "output",
     "password",
     "prompt",
+    "refresh_token",
     "secret",
     "text",
     "token",
@@ -33,7 +42,11 @@ SENSITIVE_QUERY_KEYS = {
     "api_key",
     "apikey",
     "authorization",
+    "client_secret",
+    "code",
+    "code_verifier",
     "key",
+    "refresh_token",
     "token",
 }
 
@@ -41,10 +54,19 @@ REDACTED = "<redacted>"
 MAX_STRING_LENGTH = 256
 SECRET_TEXT_PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
+    re.compile(r"L402\s+[A-Za-z0-9._~+/=:-]+", re.IGNORECASE),
     re.compile(r"sk-[A-Za-z0-9_-]{8,}"),
     re.compile(r"AIza[0-9A-Za-z_-]{12,}"),
-    re.compile(r'("(?:api[_-]?key|authorization|token|secret)"\s*:\s*")[^"]+(")', re.IGNORECASE),
-    re.compile(r"((?:api[_-]?key|authorization|token|secret|key)=)[^&\s]+", re.IGNORECASE),
+    re.compile(
+        r'("(?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|'
+        r'code[_-]?verifier|refresh[_-]?token|token|secret)"\s*:\s*")[^"]+(")',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"((?:access[_-]?token|api[_-]?key|authorization|client[_-]?secret|"
+        r"code[_-]?verifier|refresh[_-]?token|token|secret|key)=)[^&\s]+",
+        re.IGNORECASE,
+    ),
 ]
 
 
