@@ -355,8 +355,12 @@ PROVIDER_DETAILS = {
         'default_model': 'k3'
     },
     'linkapi': {
-        'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, and OpenAI-compatible passthrough',
+        'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, OpenAI-compatible chat, and image generation/editing',
         'endpoints': [
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/linkapi/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
             {
                 'url': '/v1/messages',
                 'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/messages" -H "x-api-key: $ADMIN_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"$LINKAPI_MODEL\\", \\"max_tokens\\": 1024, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
@@ -370,13 +374,23 @@ PROVIDER_DETAILS = {
                 'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"$LINKAPI_MODEL\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
             },
             {
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"gpt-image-2-c\\", \\"prompt\\": \\"A cinematic lighthouse during a storm\\", \\"size\\": \\"1024x1024\\", \\"quality\\": \\"standard\\", \\"style\\": \\"vivid\\", \\"n\\": 1, \\"response_format\\": \\"url\\"}"'
+            },
+            {
+                'url': '/v1/images/edits',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1/images/edits" -H "Authorization: Bearer $ADMIN_API_KEY" -F "model=gpt-image-2-c" -F "prompt=Add soft cinematic lighting" -F "image=@input.png"'
+            },
+            {
                 'url': '/v1beta/models/{model}:generateContent',
-                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1beta/models/$LINKAPI_MODEL:generateContent" -H "x-goog-api-key: $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\": [{\\"text\\": \\"Hello!\\"}]}]}"'
+                'curl': 'curl -X POST "$PROXY_BASE_URL/linkapi/v1beta/models/gemini-2.5-flash-image:generateContent" -H "x-goog-api-key: $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\": [{\\"text\\": \\"Create a watercolor lighthouse at dawn\\"}]}], \\"generationConfig\\": {\\"responseModalities\\": [\\"TEXT\\", \\"IMAGE\\"]}}"'
             }
         ],
         'supported_features': {
             'streaming': True,
-            'raw_streaming': True
+            'raw_streaming': True,
+            'vision': True,
+            'images': True
         }
     },
     'nineteen': {

@@ -139,6 +139,99 @@ class UnifiedApiRouteTest(unittest.TestCase):
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual(upstream_payload["model"], "mimo-v2-pro")
 
+    def test_v1_image_generations_routes_linkapi_model_and_preserves_response(self):
+        native_body = (
+            b'{"created":1716112000,"data":[{"url":"https://images.example/result.png"}]}'
+        )
+        upstream_response = requests.Response()
+        upstream_response.status_code = 201
+        upstream_response._content = native_body
+        upstream_response.headers["Content-Type"] = "application/json"
+        upstream_response.headers["X-Request-ID"] = "req_linkapi_image"
+
+        with patch("app.ProxyService.make_request", return_value=upstream_response) as make_request:
+            response = self.client.post(
+                "/v1/images/generations?trace=image",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "Idempotency-Key": "image-request-123",
+                },
+                json={
+                    "model": "linkapi:gpt-image-2-c",
+                    "prompt": "A lighthouse at dusk",
+                    "size": "1024x1024",
+                    "quality": "standard",
+                    "style": "vivid",
+                    "n": 1,
+                    "response_format": "url",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data, native_body)
+        self.assertEqual(response.headers["X-Request-ID"], "req_linkapi_image")
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(request_kwargs["api_provider"], "linkapi")
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://api.linkapi.ai/v1/images/generations",
+        )
+        self.assertEqual(request_kwargs["params"], [("trace", "image")])
+        self.assertFalse(request_kwargs["use_cache"])
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer linkapi-provider-key",
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Idempotency-Key"],
+            "image-request-123",
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "gpt-image-2-c",
+                "prompt": "A lighthouse at dusk",
+                "size": "1024x1024",
+                "quality": "standard",
+                "style": "vivid",
+                "n": 1,
+                "response_format": "url",
+            },
+        )
+
+    def test_v1_image_generations_rejects_provider_without_image_support(self):
+        with patch("app.ProxyService.make_request") as make_request:
+            response = self.client.post(
+                "/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:kimi-k2.6",
+                    "prompt": "This provider cannot generate images",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Image generation is not supported for provider: opencode",
+            response.get_json()["message"],
+        )
+        make_request.assert_not_called()
+
+    def test_v1_image_generations_rejects_non_object_json(self):
+        with patch("app.ProxyService.make_request") as make_request:
+            response = self.client.post(
+                "/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json=["linkapi:gpt-image-2"],
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Request body must be a JSON object",
+            response.get_json()["message"],
+        )
+        make_request.assert_not_called()
+
     def test_v1_chat_completions_routes_mimo_token_plan_model(self):
         upstream_response = self._chat_response("hello")
 
@@ -646,6 +739,90 @@ class UnifiedApiRouteTest(unittest.TestCase):
             "prompt-caching-2024-07-31",
         )
         self.assertNotIn("Authorization", request_kwargs["headers"])
+
+    def test_linkapi_native_image_generation_preserves_json_bytes(self):
+        native_request = (
+            b'{"model":"gpt-image-2-c","prompt":"A lighthouse",'
+            b'"size":"1024x1024","response_format":"url"}'
+        )
+        native_response = b'{"data":[{"url":"https://images.example/result.png"}]}'
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_response)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/linkapi/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                data=native_request,
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_response)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://api.linkapi.ai/v1/images/generations",
+        )
+        self.assertEqual(request_kwargs["data"], native_request)
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer linkapi-provider-key",
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
+
+    def test_linkapi_native_image_edit_preserves_multipart_bytes(self):
+        boundary = "----linkapi-test-boundary"
+        native_request = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="model"\r\n\r\n'
+            "gpt-image-2-c\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="image"; filename="input.png"\r\n'
+            "Content-Type: image/png\r\n\r\n"
+        ).encode("utf-8") + b"\x89PNG\r\n\x1a\n\x00\xff" + (
+            f"\r\n--{boundary}--\r\n"
+        ).encode("utf-8")
+        native_response = b"\x89PNG\r\n\x1a\nedited"
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_response)
+        upstream_response.headers["Content-Type"] = "image/png"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/linkapi/v1/images/edits",
+                headers={"Authorization": "Bearer admin-test-key"},
+                data=native_request,
+                content_type=f"multipart/form-data; boundary={boundary}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_response)
+        self.assertEqual(response.content_type, "image/png")
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://api.linkapi.ai/v1/images/edits",
+        )
+        self.assertEqual(request_kwargs["data"], native_request)
+        self.assertEqual(
+            request_kwargs["headers"]["Content-Type"],
+            f"multipart/form-data; boundary={boundary}",
+        )
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer linkapi-provider-key",
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
 
     def test_linkapi_native_catchall_rejects_decoded_query_and_fragment_delimiters(self):
         encoded_paths = (

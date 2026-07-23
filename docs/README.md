@@ -7,4 +7,5 @@
 - [OpenCode Go integration](opencode-go.md)
 - [NanoGPT raw gateway](nanogpt.md)
 - [NavyAI raw gateway](navyai.md)
+- [LinkAPI chat and image generation](linkapi.md)
 - [Deployment planning notes](deployment/)

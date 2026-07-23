@@ -74,13 +74,17 @@ class LinkAPIMetadataTest(unittest.TestCase):
         self.assertEqual(
             endpoint_urls,
             {
+                "/v1/models",
                 "/v1/messages",
                 "/v1/responses",
                 "/v1/chat/completions",
+                "/v1/images/generations",
+                "/v1/images/edits",
                 "/v1beta/models/{model}:generateContent",
             },
         )
         self.assertTrue(details["supported_features"]["raw_streaming"])
+        self.assertTrue(details["supported_features"]["images"])
 
     def test_rendered_dashboard_lists_linkapi_native_routes_and_caller_auth(self):
         def provider_status(provider, details, _app_config):
@@ -106,12 +110,17 @@ class LinkAPIMetadataTest(unittest.TestCase):
         dashboard = response.get_data(as_text=True)
         self.assertIn('id="linkapi-native-endpoints"', dashboard)
         for endpoint in (
+            "/linkapi/v1/models",
             "/linkapi/v1/messages",
             "/linkapi/v1/responses",
             "/linkapi/v1/chat/completions",
+            "/linkapi/v1/images/generations",
+            "/linkapi/v1/images/edits",
             "/linkapi/v1beta/models/{model}:generateContent",
         ):
             self.assertIn(endpoint, dashboard)
+        self.assertIn("gpt-image-2-c", dashboard)
+        self.assertIn("gemini-2.5-flash-image", dashboard)
         self.assertIn("x-api-key: YOUR_API_KEY", dashboard)
         self.assertIn("Authorization: Bearer YOUR_API_KEY", dashboard)
         self.assertIn("x-goog-api-key: YOUR_API_KEY", dashboard)

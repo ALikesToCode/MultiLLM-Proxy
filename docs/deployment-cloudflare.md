@@ -72,13 +72,18 @@ Native routes keep their upstream protocol shape:
 | Claude Messages | `/linkapi/v1/messages` | `x-api-key: $ADMIN_API_KEY` |
 | OpenAI Responses | `/linkapi/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
 | OpenAI compatible | `/linkapi/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI model catalog | `/linkapi/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI image generation | `/linkapi/v1/images/generations` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI image editing | `/linkapi/v1/images/edits` | `Authorization: Bearer $ADMIN_API_KEY` |
 | Gemini native | `/linkapi/v1beta/models/{model}:generateContent` | Prefer `x-goog-api-key: $ADMIN_API_KEY`; `?key=$ADMIN_API_KEY` is compatibility-only |
 
-The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces the caller credential with `LINKAPI_KEY` before contacting LinkAPI. It intentionally bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. When those controls are required, use the Container-backed `/v1/chat/completions` endpoint with a `linkapi:<model>` model ID.
+The fast path accepts only the bootstrap `ADMIN_API_KEY` and replaces the caller credential with `LINKAPI_KEY` before contacting LinkAPI. It intentionally bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. When those controls are required, use the Container-backed `/v1/chat/completions` endpoint with a `linkapi:<model>` model ID, or `/v1/images/generations` with an image-capable `linkapi:<model>` model ID.
 
 Gemini clients should prefer `x-goog-api-key`. Query-string `?key=` remains available for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
 
 The Worker streams request and response bodies without parsing or translating native SSE frames. Its raw OpenAI routes preserve Responses `prompt_cache_key` and Chat `X-Grok-Conv-Id`; for Grok, xAI recommends those shapes for cache routing, but neither this proxy nor LinkAPI guarantees a cache hit. The proxy never retries generation POSTs and does not provide idempotency, avoiding accidental duplicate generations and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
+
+LinkAPI's live pricing page lists `gpt-image-2-c` for `/linkapi/v1/images/generations` and `/linkapi/v1/images/edits`. Use native Gemini `generateContent` for Gemini Flash Image models such as `gemini-2.5-flash-image`. See [the LinkAPI image guide](linkapi.md) for complete examples.
 
 ## Opt-in Context Optimization
 

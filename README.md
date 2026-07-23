@@ -273,9 +273,12 @@ http://localhost:1400/kimi-code/v1/models
 http://localhost:1400/kimi-code/v1/chat/completions
 
 # LinkAPI native and OpenAI-compatible routes
+http://localhost:1400/linkapi/v1/models
 http://localhost:1400/linkapi/v1/messages
 http://localhost:1400/linkapi/v1/responses
 http://localhost:1400/linkapi/v1/chat/completions
+http://localhost:1400/linkapi/v1/images/generations
+http://localhost:1400/linkapi/v1/images/edits
 http://localhost:1400/linkapi/v1beta/models/{model}:generateContent
 
 # PaLM
@@ -304,7 +307,7 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **NavyAI**: Raw OpenAI Chat and Responses, Anthropic Messages, images and video jobs, embeddings, speech, moderation, models/status, usage, and OAuth token flows under `/navyai/*`
 - **Codex Everywhere**: Raw OpenAI Responses, Chat Completions, key-group-specific model discovery, and conditional image routes under `/codex-easy/v1/*`
 - **Kimi Code**: OpenAI-compatible Chat Completions for `k3` through the fixed `https://api.kimi.com/coding/v1` coding endpoint
-- **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, and OpenAI-compatible routes under `/linkapi/*`; consult LinkAPI's live pricing/model page instead of relying on a hard-coded model list
+- **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, OpenAI-compatible chat, model discovery, and image generation/editing under `/linkapi/*`; JSON generation is also available through unified `/v1/images/generations` with a `linkapi:<model>` ID
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
 
@@ -447,15 +450,20 @@ On Cloudflare, requests under `/linkapi/*` run directly in the Worker and do not
 | Claude Messages | `$PROXY_BASE_URL/linkapi/v1/messages` | `x-api-key: $ADMIN_API_KEY` plus `anthropic-version` |
 | OpenAI Responses | `$PROXY_BASE_URL/linkapi/v1/responses` | `Authorization: Bearer $ADMIN_API_KEY` |
 | OpenAI compatible | `$PROXY_BASE_URL/linkapi/v1/chat/completions` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI model catalog | `$PROXY_BASE_URL/linkapi/v1/models` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI image generation | `$PROXY_BASE_URL/linkapi/v1/images/generations` | `Authorization: Bearer $ADMIN_API_KEY` |
+| OpenAI image editing | `$PROXY_BASE_URL/linkapi/v1/images/edits` | `Authorization: Bearer $ADMIN_API_KEY` |
 | Gemini native | `$PROXY_BASE_URL/linkapi/v1beta/models/{model}:generateContent` | Prefer `x-goog-api-key: $ADMIN_API_KEY`; `?key=$ADMIN_API_KEY` is compatibility-only |
 
 The Worker validates the caller against `ADMIN_API_KEY`, removes that credential, and authenticates upstream with `LINKAPI_KEY`. `LINKAPI_BASE_URL` is restricted to the allowlisted official LinkAPI hosts; arbitrary HTTPS origins are rejected.
 
-This fast path is `ADMIN_API_KEY`-only and intentionally bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. When those controls are required, use the Container-backed `/v1/chat/completions` endpoint with a `linkapi:<model>` model ID.
+This fast path is `ADMIN_API_KEY`-only and intentionally bypasses Flask dashboard-user authentication, application-level request-size checks, RPM/TPM/daily limits, Flask request/rate-limit accounting, and request metrics. When those controls are required, use the Container-backed `/v1/chat/completions` endpoint with a `linkapi:<model>` model ID, or `/v1/images/generations` with an image-capable `linkapi:<model>` ID.
 
 Gemini clients should prefer the `x-goog-api-key` header. Query-string `?key=` authentication is supported for compatibility, but it places the caller key in the URL, where clients and intermediaries may retain it, even though automatic Worker invocation logs are disabled.
 
 Native request and response bodies, including SSE event types and bytes, are streamed without compatibility translation. On the raw OpenAI routes, the Worker leaves `prompt_cache_key` in Responses bodies and forwards the Chat `X-Grok-Conv-Id` header; for Grok, these are the request shapes recommended by xAI for cache routing, not a proxy or provider-level cache guarantee. The proxy never retries generation POSTs and does not provide idempotency, because repeating a request can duplicate work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee, using its own retry policy.
+
+LinkAPI's live pricing page lists `gpt-image-2-c` for both `/linkapi/v1/images/generations` and `/linkapi/v1/images/edits`. Gemini Flash Image models use the native Gemini route, for example `/linkapi/v1beta/models/gemini-2.5-flash-image:generateContent`. See [the LinkAPI image guide](docs/linkapi.md) for complete examples, current model guidance, and the distinction between the raw and unified routes.
 
 ## Configuration Options
 

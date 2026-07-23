@@ -208,6 +208,76 @@ def dispatch_unified_chat_completion(
         raise
 
 
+def dispatch_unified_image_generation(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    *,
+    request_headers=None,
+    request_args=None,
+):
+    """Dispatch an OpenAI Images generation request without changing its response."""
+    start_time = time.time()
+    provider = "unknown"
+    headers_source = request.headers if request_headers is None else request_headers
+    args_source = request.args if request_args is None else request_args
+    try:
+        provider, provider_model, adapter = _resolve_enabled_model(
+            app,
+            payload.get("model"),
+        )
+        if not adapter.capabilities().supports_images:
+            raise APIError(
+                f"Image generation is not supported for provider: {provider}",
+                status_code=400,
+            )
+
+        token = _provider_token(auth_service_cls, provider)
+        upstream_path = "v1/images/generations"
+        upstream_payload = _copy_request_payload(payload, provider_model)
+        response = proxy_service_cls.make_request(
+            method="POST",
+            url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+            headers=proxy_service_cls.prepare_headers(
+                headers_source,
+                provider,
+                token,
+                upstream_path=upstream_path,
+            ),
+            params=proxy_service_cls.prepare_params(
+                args_source,
+                provider,
+                token,
+                upstream_path=upstream_path,
+            ),
+            data=serialize_unified_chat_payload(upstream_payload),
+            api_provider=provider,
+            use_cache=False,
+        )
+
+        metrics_service_cls.get_instance().track_request(
+            provider=provider,
+            status_code=response.status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+
+        if isinstance(response, Response):
+            return response
+        return stream_upstream_response(response)
+    except ValueError as error:
+        raise APIError(str(error), status_code=400) from error
+    except Exception as error:
+        status_code = error.status_code if isinstance(error, APIError) else 502
+        metrics_service_cls.get_instance().track_request(
+            provider=provider,
+            status_code=status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+        raise
+
+
 def _responses_input_to_messages(payload: dict) -> list[dict]:
     messages: list[dict] = []
     instructions = payload.get("instructions")
@@ -276,6 +346,21 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     def unified_chat_completions():
         payload = request.get_json(silent=True) or {}
         return dispatch_unified_chat_completion(
+            app,
+            auth_service_cls,
+            metrics_service_cls,
+            proxy_service_cls,
+            payload,
+        )
+
+    @app.route("/v1/images/generations", methods=["POST", "OPTIONS"])
+    @csrf.exempt
+    @api_auth_required
+    def unified_image_generations():
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            raise APIError("Request body must be a JSON object", status_code=400)
+        return dispatch_unified_image_generation(
             app,
             auth_service_cls,
             metrics_service_cls,

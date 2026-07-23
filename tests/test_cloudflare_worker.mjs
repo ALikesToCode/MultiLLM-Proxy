@@ -841,6 +841,142 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
   assert.equal(stub.getCalls(), 0);
 });
 
+test("worker preserves LinkAPI image generation request and response bytes", async () => {
+  const requestBytes =
+    '{"model":"gpt-image-2-c","prompt":"A lighthouse at dusk","size":"1024x1024","quality":"standard","style":"vivid","n":1,"response_format":"url"}';
+  const responseBytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI image fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, "https://api.linkapi.ai/v1/images/generations");
+      assert.equal(upstreamRequest.method, "POST");
+      assert.equal(upstreamRequest.redirect, "manual");
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer linkapi-live-key");
+      assert.equal(upstreamRequest.headers.get("Idempotency-Key"), "image-request-123");
+      assert.equal(upstreamRequest.headers.has("x-api-key"), false);
+      assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
+      assert.equal(await upstreamRequest.text(), requestBytes);
+      return new Response(responseBytes, {
+        status: 201,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Request-ID": "req_linkapi_image",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/linkapi/v1/images/generations",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+              "Idempotency-Key": "image-request-123",
+            },
+            body: requestBytes,
+          },
+        ),
+        stub.env,
+      );
+
+      assert.equal(response.status, 201);
+      assert.equal(response.headers.get("Content-Type"), "application/octet-stream");
+      assert.equal(response.headers.get("X-Request-ID"), "req_linkapi_image");
+      assert.deepEqual(new Uint8Array(await response.arrayBuffer()), responseBytes);
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
+test("worker preserves LinkAPI multipart image edits and binary responses", async () => {
+  const boundary = "----linkapi-image-boundary";
+  const requestBytes = new TextEncoder().encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\ngpt-image-2-c\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="input.png"\r\n` +
+      "Content-Type: image/png\r\n\r\nPNG-BYTES\r\n" +
+      `--${boundary}--\r\n`,
+  );
+  const responseBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  const stub = makeEnv(
+    async () => {
+      throw new Error("LinkAPI image fast path should bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      LINKAPI_KEY: "linkapi-live-key",
+    },
+  );
+  let fetchCalls = 0;
+
+  await withGlobalFetch(
+    async (input) => {
+      fetchCalls += 1;
+      const upstreamRequest = input instanceof Request ? input : new Request(input);
+      assert.equal(upstreamRequest.url, "https://api.linkapi.ai/v1/images/edits");
+      assert.equal(upstreamRequest.method, "POST");
+      assert.equal(upstreamRequest.redirect, "manual");
+      assert.equal(upstreamRequest.headers.get("Authorization"), "Bearer linkapi-live-key");
+      assert.equal(
+        upstreamRequest.headers.get("Content-Type"),
+        `multipart/form-data; boundary=${boundary}`,
+      );
+      assert.deepEqual(new Uint8Array(await upstreamRequest.arrayBuffer()), requestBytes);
+      return new Response(responseBytes, {
+        headers: {
+          "Content-Type": "image/png",
+          "Content-Disposition": 'attachment; filename="edited.png"',
+          "X-Request-ID": "req_linkapi_edit",
+          "Set-Cookie": "must-not-leak=yes",
+        },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/linkapi/v1/images/edits",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            },
+            body: requestBytes,
+          },
+        ),
+        stub.env,
+      );
+
+      assert.deepEqual(new Uint8Array(await response.arrayBuffer()), responseBytes);
+      assert.equal(response.headers.get("Content-Type"), "image/png");
+      assert.equal(
+        response.headers.get("Content-Disposition"),
+        'attachment; filename="edited.png"',
+      );
+      assert.equal(response.headers.get("X-Request-ID"), "req_linkapi_edit");
+      assert.equal(response.headers.has("Set-Cookie"), false);
+    },
+  );
+
+  assert.equal(fetchCalls, 1);
+  assert.equal(stub.getCalls(), 0);
+});
+
 test("worker preserves LinkAPI Grok Chat cache affinity on the OpenAI protocol only", async () => {
   const requestBytes =
     '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"ping"}],"stream":true}';

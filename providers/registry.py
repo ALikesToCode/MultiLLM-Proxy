@@ -32,7 +32,10 @@ PROVIDER_SPECS = (
     (
         "linkapi",
         "v1/chat/completions",
-        ProviderCapabilities(),
+        ProviderCapabilities(
+            supports_vision=True,
+            supports_images=True,
+        ),
     ),
     (
         "codex-easy",

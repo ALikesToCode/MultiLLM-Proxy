@@ -29,10 +29,10 @@ class LinkAPIProviderRegistrationTest(unittest.TestCase):
         self.assertTrue(capabilities.supports_chat)
         self.assertTrue(capabilities.supports_streaming)
         self.assertFalse(capabilities.supports_tools)
-        self.assertFalse(capabilities.supports_vision)
+        self.assertTrue(capabilities.supports_vision)
         self.assertFalse(capabilities.supports_embeddings)
         self.assertFalse(capabilities.supports_audio)
-        self.assertFalse(capabilities.supports_images)
+        self.assertTrue(capabilities.supports_images)
         self.assertFalse(capabilities.supports_json_schema)
 
     def test_linkapi_key_alias_is_loaded_and_preferred(self):
@@ -139,6 +139,24 @@ class LinkAPINativeTransportPreparationTest(unittest.TestCase):
         self.assertEqual(headers["Idempotency-Key"], "request-123")
         self.assertEqual(headers["OpenAI-Beta"], "responses=v1")
         self.assertNotIn("X-Api-Key", headers)
+
+    def test_openai_image_generation_uses_bearer_auth(self):
+        headers = ProxyService.prepare_headers(
+            {
+                "Authorization": "Bearer downstream-proxy-key",
+                "Content-Type": "application/json",
+                "Idempotency-Key": "image-request-123",
+            },
+            "linkapi",
+            "upstream-linkapi-key",
+            upstream_path="/v1/images/generations",
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer upstream-linkapi-key")
+        self.assertEqual(headers["Content-Type"], "application/json")
+        self.assertEqual(headers["Idempotency-Key"], "image-request-123")
+        self.assertNotIn("X-Api-Key", headers)
+        self.assertNotIn("X-Goog-Api-Key", headers)
 
     def test_gemini_query_key_is_stripped_and_upstream_header_is_replaced(self):
         params = ProxyService.prepare_params(
