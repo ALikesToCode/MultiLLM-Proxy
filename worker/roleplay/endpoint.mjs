@@ -16,6 +16,7 @@ import {
   createCompactionCheckpoint,
   reuseCompactionCheckpoint,
 } from "./checkpoint.mjs";
+import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
@@ -63,6 +64,7 @@ function initialState() {
     stats: {},
     turns: 0,
     compactions: 0,
+    localCompactions: 0,
     storageOverflow: false,
     recentRequests: [],
     updatedAt: 0,
@@ -380,6 +382,7 @@ export class RoleplaySession extends DurableObject {
       return jsonResponse({
         turns: state.turns,
         compactions: state.compactions,
+        local_compactions: state.localCompactions,
         storage_overflow: state.storageOverflow,
         stored_messages: state.messages.length,
         compacted_prefix_messages:
@@ -505,6 +508,8 @@ export class RoleplaySession extends DurableObject {
     );
 
     if (plan.requested) {
+      let compactionDigest;
+      let compactionSource = "model";
       try {
         const compacted = await requestCompaction(
           memoryState,
@@ -514,7 +519,33 @@ export class RoleplaySession extends DurableObject {
           settings,
           request.signal,
         );
-        const nextCheckpoint = compacted.digest.compact
+        compactionDigest = compacted.digest;
+        if (plan.forced && !compactionDigest.compact) {
+          throw new Error("Model declined required memory compaction");
+        }
+      } catch (error) {
+        logRoleplayError("roleplay_compaction_failed", error, {
+          forced: plan.forced,
+          olderMessages: plan.olderMessages.length,
+        });
+        if (plan.forced) {
+          compactionDigest = createExtractiveCompactionDigest(
+            memoryState,
+            plan,
+            settings,
+          );
+          compactionSource = "local";
+          state = {
+            ...state,
+            localCompactions: (state.localCompactions ?? 0) + 1,
+          };
+        } else {
+          memoryStatus = "compaction_failed_retained";
+        }
+      }
+
+      if (compactionDigest) {
+        const nextCheckpoint = compactionDigest.compact
           ? await createCompactionCheckpoint(
               state,
               parsed,
@@ -526,36 +557,20 @@ export class RoleplaySession extends DurableObject {
         const applied = applyCompaction(
           state,
           plan,
-          compacted.digest,
+          compactionDigest,
           nextCheckpoint,
         );
-        if (plan.forced && !applied.compacted) {
-          throw new Error("Model declined required memory compaction");
-        }
         state = applied.state;
         persistedConversation = applied.conversation;
         conversation = applied.compacted
           ? [...applied.conversation, ...plan.transientMessages]
           : applied.conversation;
-        memoryStatus = applied.compacted ? "model_compacted" : "model_retained";
+        memoryStatus = applied.compacted
+          ? `${compactionSource}_compacted`
+          : "model_retained";
         if (applied.compacted) {
           await saveState(this.ctx.storage, state);
         }
-      } catch (error) {
-        logRoleplayError("roleplay_compaction_failed", error);
-        if (plan.forced) {
-          state = markRequest(state, idempotencyKey, "compaction_failed");
-          await saveState(this.ctx.storage, state);
-          return {
-            response: errorResponse(
-              "Memory exceeded the safe context limit and model compaction failed",
-              503,
-              "memory_compaction_failed",
-            ),
-            completion: Promise.resolve(),
-          };
-        }
-        memoryStatus = "compaction_failed_retained";
       }
     }
 

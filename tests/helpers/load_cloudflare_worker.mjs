@@ -17,6 +17,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/config.mjs",
     import.meta.url,
   );
+  const fallbackMemoryUrl = new URL(
+    "../../worker/roleplay/fallback-memory.mjs",
+    import.meta.url,
+  );
   const memoryUrl = new URL(
     "../../worker/roleplay/memory.mjs",
     import.meta.url,
@@ -33,6 +37,7 @@ export async function roleplayModuleUrl() {
     compatibilitySource,
     checkpointSource,
     configSource,
+    fallbackMemorySource,
     memorySource,
     transportSource,
     endpointSource,
@@ -41,6 +46,7 @@ export async function roleplayModuleUrl() {
       readFile(compatibilityUrl, "utf8"),
       readFile(checkpointUrl, "utf8"),
       readFile(configUrl, "utf8"),
+      readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
@@ -48,6 +54,7 @@ export async function roleplayModuleUrl() {
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
   const checkpointDataUrl = dataModuleUrl(checkpointSource);
   const configDataUrl = dataModuleUrl(configSource);
+  const fallbackMemoryDataUrl = dataModuleUrl(fallbackMemorySource);
   const memoryDataUrl = dataModuleUrl(memorySource);
   const transportDataUrl = dataModuleUrl(
     transportSource
@@ -58,6 +65,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'import { DurableObject } from "cloudflare:workers";',
       "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
+    )
+    .replace(
+      'from "./fallback-memory.mjs";',
+      `from "${fallbackMemoryDataUrl}";`,
     )
     .replace(
       'from "./compatibility.mjs";',

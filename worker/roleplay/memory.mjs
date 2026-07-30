@@ -745,19 +745,63 @@ export function buildCompactionPayload(state, plan, candidate, settings) {
     temperature: 0.1,
     max_tokens: settings.compactionMaxTokens,
     stream: false,
-    response_format: { type: "json_object" },
   };
 }
 
-function stripJsonFence(value) {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("```")) {
-    return trimmed;
+function textContent(value) {
+  if (typeof value === "string") {
+    return value;
   }
-  return trimmed
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
+  if (Array.isArray(value)) {
+    return value
+      .filter(
+        (part) =>
+          part &&
+          typeof part === "object" &&
+          typeof part.text === "string",
+      )
+      .map((part) => part.text)
+      .join("");
+  }
+  return "";
+}
+
+function firstJsonObject(value) {
+  const text = value.trim();
+  let start = -1;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quoted) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        quoted = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) {
+        start = index;
+      }
+      depth += 1;
+    } else if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+  throw new Error("Compaction response did not contain a JSON object");
 }
 
 function boundedStringArray(value) {
@@ -772,16 +816,28 @@ function boundedStringArray(value) {
 }
 
 export function parseCompactionResponse(payload) {
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") {
+  const rawContent = payload?.choices?.[0]?.message?.content;
+  if (
+    rawContent &&
+    typeof rawContent === "object" &&
+    !Array.isArray(rawContent)
+  ) {
+    return normalizeCompactionDigest(rawContent);
+  }
+  const content = textContent(rawContent);
+  if (!content) {
     throw new Error("Compaction response did not contain text");
   }
-  const parsed = JSON.parse(stripJsonFence(content));
+  const parsed = JSON.parse(firstJsonObject(content));
+  return normalizeCompactionDigest(parsed);
+}
+
+function normalizeCompactionDigest(parsed) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Compaction response was not an object");
   }
   const digest = {
-    compact: parsed.compact === true,
+    compact: parsed.compact === true || parsed.compact === "true",
     summary:
       typeof parsed.summary === "string"
         ? parsed.summary.replace(/\s+/g, " ").trim().slice(0, 4_000)

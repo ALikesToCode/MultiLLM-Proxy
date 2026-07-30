@@ -226,6 +226,12 @@ export function getRoleplaySettings(env) {
       256,
       4_096,
     ),
+    compactionTimeoutMs: boundedInteger(
+      env.ROLEPLAY_COMPACTION_TIMEOUT_MS,
+      25_000,
+      5_000,
+      90_000,
+    ),
     upstreamHeaderTimeoutMs: boundedInteger(
       env.ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS,
       90_000,

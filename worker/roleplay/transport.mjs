@@ -272,7 +272,10 @@ export async function requestCompaction(
         candidate,
         payload,
         env,
-        settings,
+        {
+          ...settings,
+          upstreamHeaderTimeoutMs: settings.compactionTimeoutMs,
+        },
         signal,
         "",
       );
@@ -285,8 +288,18 @@ export async function requestCompaction(
     }
 
     const { response } = attempted;
-    attempted.cleanup();
     if (!response.ok) {
+      attempted.cleanup();
+      logRoleplayError(
+        "roleplay_compaction_provider_rejected",
+        new Error("Compaction provider rejected the request"),
+        {
+          provider: candidate.provider,
+          model: candidate.model,
+          status: response.status,
+          safeFallback: isSafeFallbackStatus(response.status),
+        },
+      );
       if (isSafeFallbackStatus(response.status)) {
         fallbackCount += 1;
         await response.body?.cancel();
@@ -296,17 +309,28 @@ export async function requestCompaction(
       throw new Error("Compaction provider returned an ambiguous failure");
     }
 
-    const { bytes } = await readBoundedBytes(
-      response.body,
-      MAX_COMPACTION_RESPONSE_BYTES,
-      signal,
-    );
-    const payloadJson = JSON.parse(new TextDecoder().decode(bytes));
-    return {
-      candidate,
-      digest: parseCompactionResponse(payloadJson),
-      fallbackCount,
-    };
+    try {
+      const { bytes } = await readBoundedBytes(
+        response.body,
+        MAX_COMPACTION_RESPONSE_BYTES,
+        attempted.controller.signal,
+      );
+      const payloadJson = JSON.parse(new TextDecoder().decode(bytes));
+      return {
+        candidate,
+        digest: parseCompactionResponse(payloadJson),
+        fallbackCount,
+      };
+    } catch (error) {
+      logRoleplayError("roleplay_compaction_parse_failed", error, {
+        provider: candidate.provider,
+        model: candidate.model,
+        status: response.status,
+      });
+      throw error;
+    } finally {
+      attempted.cleanup();
+    }
   }
   throw new Error("No configured model accepted memory compaction");
 }

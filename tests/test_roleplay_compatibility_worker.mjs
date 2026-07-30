@@ -50,6 +50,12 @@ function compactionResponse(model) {
   );
 }
 
+function isCompactionPayload(payload) {
+  return payload.messages?.[0]?.content?.startsWith(
+    "You manage continuity for a long-running roleplay.",
+  );
+}
+
 test("Janitor Chat Completions stays native and exposes session metadata", async () => {
   const fixture = makeRoleplayEnv();
   fixture.env.MULTILLM_PROXY_CONTAINER = {
@@ -248,7 +254,7 @@ test("Janitor derived sessions retain compacted continuity on later turns", asyn
     async (_input, init) => {
       const payload = JSON.parse(init.body);
       upstreamPayloads.push(payload);
-      return payload.response_format?.type === "json_object"
+      return isCompactionPayload(payload)
         ? compactionResponse(payload.model)
         : completionResponse(payload.model, "First reply");
     },

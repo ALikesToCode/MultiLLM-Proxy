@@ -160,9 +160,13 @@ checkpoint optimization disabled and falls back to the normal history merge
 and compaction rules; approximate or similarity-based checkpoint matches are
 never accepted.
 
-At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If it fails or
-declines, the endpoint returns an error before final generation. It never
-silently discards history to make a request fit. Compaction is an additional
+At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If the model
+request fails, returns malformed JSON, or declines, the Worker creates a
+bounded, role-labelled extractive memory from the prior digest, continuity
+prompts, and newest archived turns. Omissions are marked, the same SHA-256
+checkpoint is stored, and final generation continues without retrying the
+summarizer. `X-Roleplay-Memory: local_compacted` and `local_compactions` in
+session metrics expose this degraded path. Model compaction is an additional
 provider request and can be billable.
 
 Token counts are fast UTF-8 byte estimates, not provider tokenizer or billing
@@ -245,6 +249,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
+| `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `25000` | Total model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
