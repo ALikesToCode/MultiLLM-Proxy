@@ -509,6 +509,9 @@ export class RoleplaySession extends DurableObject {
       ? state
       : { ...state, memory: null, messages: [], profile: {} };
     let conversation = mergeSessionMessages(memoryState, parsed);
+    // Generation may include one raw overflow turn that the compacted state
+    // intentionally retains only through its semantic digest.
+    let persistedConversation = conversation;
     let memoryStatus = memoryEnabled ? "retained" : "off";
     const plan = compactionPlan(
       memoryState,
@@ -536,7 +539,10 @@ export class RoleplaySession extends DurableObject {
           throw new Error("Model declined required memory compaction");
         }
         state = applied.state;
-        conversation = applied.conversation;
+        persistedConversation = applied.conversation;
+        conversation = applied.compacted
+          ? [...applied.conversation, ...plan.transientMessages]
+          : applied.conversation;
         memoryStatus = applied.compacted ? "model_compacted" : "model_retained";
         if (applied.compacted) {
           await saveState(this.ctx.storage, state);
@@ -560,19 +566,21 @@ export class RoleplaySession extends DurableObject {
     }
 
     const projectedStoredBytes =
-      new TextEncoder().encode(JSON.stringify(conversation)).byteLength +
+      new TextEncoder().encode(
+        JSON.stringify(persistedConversation),
+      ).byteLength +
       parsed.maxTokens * 12;
     if (
       memoryEnabled &&
       projectedStoredBytes > settings.maxStoredBytes
     ) {
-      state = markRequest(state, idempotencyKey, "memory_storage_too_large");
+      state = markRequest(state, idempotencyKey, "compaction_failed");
       await saveState(this.ctx.storage, state);
       return {
         response: errorResponse(
-          "Recent roleplay history is too large to retain safely; reduce one oversized recent message or raise the configured storage budget",
-          413,
-          "roleplay_memory_too_large",
+          "Automatic memory compaction could not produce a safe retained window",
+          503,
+          "memory_compaction_failed",
         ),
         completion: Promise.resolve(),
       };
@@ -662,7 +670,7 @@ export class RoleplaySession extends DurableObject {
           if (success && memoryEnabled) {
             nextState = appendAssistantMessage(
               nextState,
-              conversation,
+              persistedConversation,
               assistant,
               settings,
             );
@@ -712,7 +720,7 @@ export class RoleplaySession extends DurableObject {
     if (memoryEnabled) {
       state = appendAssistantMessage(
         state,
-        conversation,
+        persistedConversation,
         assistant,
         settings,
       );

@@ -24,6 +24,7 @@ class AppStructureTest(unittest.TestCase):
         self.assertIn("npm run test:worker", workflow_text)
         self.assertIn("node --test tests/test_cloudflare_worker.mjs", worker_test)
         self.assertIn("tests/test_roleplay_worker.mjs", worker_test)
+        self.assertIn("tests/test_roleplay_memory_worker.mjs", worker_test)
         self.assertNotIn("node --test test_cloudflare_worker.mjs", workflow_text)
 
 

@@ -111,6 +111,13 @@ summary, character facts, relationships, world state, unresolved threads, and
 style. The digest is reinserted as untrusted historical context. Recent turns
 remain raw.
 
+Storage pressure always makes compaction mandatory. The raw recent-message
+window automatically shrinks below `ROLEPLAY_KEEP_RECENT_MESSAGES` until the
+retained history and expected reply fit the storage budget. If one latest turn
+is too large to retain raw, that turn is included in the continuity digest but
+is still sent unchanged to the current generation; later turns retain the
+digest and the resulting assistant response.
+
 At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If it fails or
 declines, the endpoint returns an error before final generation. It never
 silently discards history to make a request fit. Compaction is an additional
@@ -182,7 +189,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `12000` | Ask model about compaction |
 | `ROLEPLAY_HARD_INPUT_TOKENS` | `24000` | Require compaction or reject |
 | `ROLEPLAY_MEMORY_TARGET_TOKENS` | `8000` | Compaction target |
-| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `12` | Raw recent history retained |
+| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `12` | Maximum raw recent history retained; shrinks under storage pressure |
 | `ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS` | `900` | Smart output-budget baseline |
 | `ROLEPLAY_MAX_OUTPUT_TOKENS` | `2048` | Per-turn output ceiling |
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |

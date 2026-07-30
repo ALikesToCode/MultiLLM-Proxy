@@ -1,130 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import {
-  loadRoleplayModule,
-  loadWorkerModule,
-} from "./helpers/load_cloudflare_worker.mjs";
-
-const {
-  RoleplaySession,
+  completionResponse,
   handleRoleplayEdgeRequest,
-} = await loadRoleplayModule();
+  makeRoleplayEnv,
+  roleplayRequest,
+  withGlobalFetch,
+} from "./helpers/roleplay_fixture.mjs";
+
 const worker = (await loadWorkerModule()).default;
-
-class FakeStorage {
-  constructor() {
-    this.values = new Map();
-    this.alarm = null;
-  }
-
-  async get(key) {
-    return structuredClone(this.values.get(key));
-  }
-
-  async put(key, value) {
-    if (key && typeof key === "object" && !Array.isArray(key)) {
-      for (const [entryKey, entryValue] of Object.entries(key)) {
-        this.values.set(entryKey, structuredClone(entryValue));
-      }
-      return;
-    }
-    this.values.set(key, structuredClone(value));
-  }
-
-  async setAlarm(value) {
-    this.alarm = value;
-  }
-
-  async deleteAll() {
-    this.values.clear();
-    this.alarm = null;
-  }
-}
-
-function makeRoleplayEnv(overrides = {}) {
-  const storageBySession = new Map();
-  const waits = [];
-  const env = {
-    ADMIN_API_KEY: "admin-roleplay-key",
-    OPENCODE_GO_API_KEY: "opencode-roleplay-key",
-    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "12000",
-    ROLEPLAY_HARD_INPUT_TOKENS: "24000",
-    ROLEPLAY_KEEP_RECENT_MESSAGES: "12",
-    ...overrides,
-  };
-
-  env.ROLEPLAY_SESSION = {
-    getByName(sessionId) {
-      if (!storageBySession.has(sessionId)) {
-        const storage = new FakeStorage();
-        const ctx = {
-          storage,
-          waitUntil(promise) {
-            waits.push(Promise.resolve(promise));
-          },
-        };
-        storageBySession.set(sessionId, {
-          instance: new RoleplaySession(ctx, env),
-          storage,
-        });
-      }
-      return {
-        fetch(request) {
-          return storageBySession.get(sessionId).instance.fetch(request);
-        },
-      };
-    },
-  };
-
-  return {
-    env,
-    storageBySession,
-    async waitForBackgroundWork() {
-      await Promise.allSettled(waits.splice(0));
-    },
-  };
-}
-
-function roleplayRequest(body, headers = {}) {
-  return new Request("https://proxy.example/v1/roleplay", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer admin-roleplay-key",
-      "Content-Type": "application/json",
-      ...headers,
-    },
-    body: JSON.stringify(body),
-  });
-}
-
-async function withGlobalFetch(fetchImpl, operation) {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = fetchImpl;
-  try {
-    return await operation();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-}
-
-function completionResponse(model, content = "In character.") {
-  return new Response(
-    JSON.stringify({
-      id: "chatcmpl-roleplay",
-      object: "chat.completion",
-      model,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content },
-          finish_reason: "stop",
-        },
-      ],
-    }),
-    { headers: { "Content-Type": "application/json" } },
-  );
-}
 
 test("roleplay model catalog exposes configured adaptive tiers without secrets", async () => {
   const fixture = makeRoleplayEnv({
@@ -352,63 +238,6 @@ test("roleplay streams SSE unchanged and records assistant continuity after EOF"
   assert.equal(payload.turns, 1);
   assert.equal(payload.stored_messages, 2);
   assert.equal(payload.models["opencode:kimi-k2.6"].successes, 1);
-});
-
-test("roleplay asks model to compact older memory before forced turn", async () => {
-  const fixture = makeRoleplayEnv({
-    ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
-  });
-  const requests = [];
-
-  const response = await withGlobalFetch(async (_input, init) => {
-    const payload = JSON.parse(init.body);
-    requests.push(payload);
-    if (payload.response_format?.type === "json_object") {
-      return completionResponse(
-        payload.model,
-        JSON.stringify({
-          compact: true,
-          summary: "Mira entered the moonlit hall and heard footsteps.",
-          character_facts: ["Mira is a guarded court mage."],
-          relationships: [],
-          world_state: ["The party is inside the moonlit hall."],
-          open_threads: ["Identify the follower."],
-          tone_style: ["Tense gothic fantasy."],
-        }),
-      );
-    }
-    return completionResponse(payload.model, "Mira turns toward the door.");
-  }, () =>
-    handleRoleplayEdgeRequest(
-      roleplayRequest({
-        session_id: "session-compaction",
-        messages: Array.from({ length: 8 }, (_, index) => ({
-          role: index % 2 === 0 ? "user" : "assistant",
-          content: `Roleplay event ${index}`,
-        })),
-        character: { name: "Mira" },
-        memory: { mode: "force" },
-        stream: false,
-      }),
-      fixture.env,
-    ),
-  );
-
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("X-Roleplay-Memory"), "model_compacted");
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].stream, false);
-  assert.equal(requests[1].messages.some((message) =>
-    message.content.includes("Untrusted roleplay continuity memory")), true);
-
-  const metrics = await handleRoleplayEdgeRequest(
-    new Request(
-      "https://proxy.example/v1/roleplay/metrics?session_id=session-compaction",
-      { headers: { Authorization: "Bearer admin-roleplay-key" } },
-    ),
-    fixture.env,
-  );
-  assert.equal((await metrics.json()).compactions, 1);
 });
 
 test("roleplay idempotency key blocks duplicate paid generation", async () => {

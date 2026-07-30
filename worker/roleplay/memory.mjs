@@ -595,6 +595,50 @@ export function buildRoleplayMessages(state, parsed, conversation) {
   return messages;
 }
 
+function encodedBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function storageAwareRecentWindow(conversation, parsed, settings) {
+  const outputReserveBytes = Math.min(
+    settings.maxStoredBytes,
+    parsed.maxTokens * 12,
+  );
+  const recentBudgetBytes = Math.max(
+    0,
+    settings.maxStoredBytes - outputReserveBytes,
+  );
+  const earliestCandidate = Math.max(
+    0,
+    conversation.length - settings.keepRecentMessages,
+  );
+  let cutoff = conversation.length;
+
+  for (
+    let index = conversation.length - 1;
+    index >= earliestCandidate;
+    index -= 1
+  ) {
+    const candidate = conversation.slice(index);
+    if (encodedBytes(candidate) > recentBudgetBytes) {
+      break;
+    }
+    cutoff = index;
+  }
+
+  const recentMessages = conversation.slice(cutoff);
+  // An individually oversized latest turn still needs its exact text for the
+  // current generation. The compaction digest carries it into later turns.
+  return {
+    olderMessages: conversation.slice(0, cutoff),
+    recentMessages,
+    transientMessages:
+      recentMessages.length === 0 && conversation.length > 0
+        ? conversation.slice(-1)
+        : [],
+  };
+}
+
 export function compactionPlan(state, parsed, conversation, settings) {
   const roleplayMessages = buildRoleplayMessages(
     state,
@@ -603,8 +647,7 @@ export function compactionPlan(state, parsed, conversation, settings) {
   );
   const estimatedTokens = estimateTokens(roleplayMessages);
   const projectedStoredBytes =
-    new TextEncoder().encode(JSON.stringify(conversation)).byteLength +
-    parsed.maxTokens * 12;
+    encodedBytes(conversation) + parsed.maxTokens * 12;
   const forced =
     parsed.memory.mode === "force" ||
     estimatedTokens > settings.hardInputTokens ||
@@ -622,20 +665,21 @@ export function compactionPlan(state, parsed, conversation, settings) {
       projectedStoredBytes,
       olderMessages: [],
       recentMessages: conversation,
+      transientMessages: [],
     };
   }
 
-  const cutoff = Math.max(
-    0,
-    conversation.length - settings.keepRecentMessages,
+  const window = storageAwareRecentWindow(
+    conversation,
+    parsed,
+    settings,
   );
   return {
-    requested: cutoff > 0,
+    requested: window.olderMessages.length > 0,
     forced,
     estimatedTokens,
     projectedStoredBytes,
-    olderMessages: conversation.slice(0, cutoff),
-    recentMessages: conversation.slice(cutoff),
+    ...window,
   };
 }
 
