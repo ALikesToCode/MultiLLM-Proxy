@@ -5,6 +5,14 @@ function dataModuleUrl(source) {
 }
 
 export async function roleplayModuleUrl() {
+  const compatibilityUrl = new URL(
+    "../../worker/roleplay/compatibility.mjs",
+    import.meta.url,
+  );
+  const checkpointUrl = new URL(
+    "../../worker/roleplay/checkpoint.mjs",
+    import.meta.url,
+  );
   const configUrl = new URL(
     "../../worker/roleplay/config.mjs",
     import.meta.url,
@@ -21,13 +29,24 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/transport.mjs",
     import.meta.url,
   );
-  const [configSource, memorySource, transportSource, endpointSource] =
+  const [
+    compatibilitySource,
+    checkpointSource,
+    configSource,
+    memorySource,
+    transportSource,
+    endpointSource,
+  ] =
     await Promise.all([
+      readFile(compatibilityUrl, "utf8"),
+      readFile(checkpointUrl, "utf8"),
       readFile(configUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
+  const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
+  const checkpointDataUrl = dataModuleUrl(checkpointSource);
   const configDataUrl = dataModuleUrl(configSource);
   const memoryDataUrl = dataModuleUrl(memorySource);
   const transportDataUrl = dataModuleUrl(
@@ -39,6 +58,14 @@ export async function roleplayModuleUrl() {
     .replace(
       'import { DurableObject } from "cloudflare:workers";',
       "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
+    )
+    .replace(
+      'from "./compatibility.mjs";',
+      `from "${compatibilityDataUrl}";`,
+    )
+    .replace(
+      'from "./checkpoint.mjs";',
+      `from "${checkpointDataUrl}";`,
     )
     .replace('from "./config.mjs";', `from "${configDataUrl}";`)
     .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)

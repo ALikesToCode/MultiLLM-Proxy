@@ -334,6 +334,48 @@ function smartOutputBudget(
   );
 }
 
+function modelPreference(payload) {
+  const explicit =
+    typeof payload.model_preference === "string"
+      ? payload.model_preference.trim().toLowerCase()
+      : "";
+  if (explicit) {
+    if (!["auto", "speed", "kimi", "glm"].includes(explicit)) {
+      throw new RoleplayRequestError(
+        "model_preference must be auto, speed, kimi, or glm",
+      );
+    }
+    return explicit;
+  }
+
+  const model =
+    typeof payload.model === "string"
+      ? payload.model.trim().toLowerCase()
+      : "";
+  const aliases = {
+    auto: "auto",
+    speed: "speed",
+    kimi: "kimi",
+    glm: "glm",
+    roleplay: "auto",
+    "roleplay:auto": "auto",
+    "roleplay:speed": "speed",
+    "roleplay:kimi": "kimi",
+    "roleplay:glm": "glm",
+    "kimi-k2.6": "kimi",
+    "glm-5.2": "glm",
+  };
+  if (aliases[model]) {
+    return aliases[model];
+  }
+  if (model.startsWith("roleplay:")) {
+    throw new RoleplayRequestError(
+      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, or roleplay:glm",
+    );
+  }
+  return "auto";
+}
+
 export function parseRoleplayPayload(payload, settings) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new RoleplayRequestError("Request body must be a JSON object");
@@ -359,15 +401,7 @@ export function parseRoleplayPayload(payload, settings) {
     throw new RoleplayRequestError("stream must be a boolean");
   }
 
-  const preference =
-    typeof payload.model_preference === "string"
-      ? payload.model_preference.toLowerCase()
-      : "auto";
-  if (!["auto", "speed", "kimi", "glm"].includes(preference)) {
-    throw new RoleplayRequestError(
-      "model_preference must be auto, speed, kimi, or glm",
-    );
-  }
+  const preference = modelPreference(payload);
 
   const historyMode =
     typeof payload.history_mode === "string"
@@ -759,7 +793,12 @@ export function parseCompactionResponse(payload) {
   return digest;
 }
 
-export function applyCompaction(state, plan, digest) {
+export function applyCompaction(
+  state,
+  plan,
+  digest,
+  compactionCheckpoint = state.compactionCheckpoint ?? null,
+) {
   if (!digest.compact) {
     return {
       state,
@@ -776,6 +815,7 @@ export function applyCompaction(state, plan, digest) {
       ),
     },
     messages: plan.recentMessages,
+    compactionCheckpoint,
     compactions: (state.compactions ?? 0) + 1,
   };
   return {

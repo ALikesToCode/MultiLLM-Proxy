@@ -58,11 +58,11 @@ Set only the providers you actually use. The Worker forwards these directly into
 
 ### Native roleplay sessions
 
-`POST /v1/roleplay` authenticates at the edge and routes directly to
-`ROLEPLAY_SESSION`, a SQLite-backed Durable Object binding. One object per
-session serializes turns without creating a global bottleneck. It stores bounded
-continuity memory, idempotency guards, and Kimi/GLM latency and reliability
-statistics.
+`POST /v1/roleplay` and `/roleplay/v1/chat/completions` authenticate at the
+edge and route directly to `ROLEPLAY_SESSION`, a SQLite-backed Durable Object
+binding. One object per session serializes turns without creating a global
+bottleneck. It stores bounded continuity memory, idempotency guards, and
+Kimi/GLM latency and reliability statistics.
 
 OpenCode Go is the first provider tier and defaults to `kimi-k2.6` and
 `glm-5.2`. NavyAI is second; configured LinkAPI, NanoGPT, and OpenRouter

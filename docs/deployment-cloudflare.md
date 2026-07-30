@@ -16,9 +16,11 @@ The supported Cloudflare target is a hybrid Worker plus Container deployment. Mo
 
 ## Cloudflare-native roleplay
 
-`POST /v1/roleplay` does not wake the Container. The Worker authenticates the
-caller with `ADMIN_API_KEY`, validates a bounded JSON request, and sends it to
-the session's `ROLEPLAY_SESSION` Durable Object. Each session stores recent
+`POST /v1/roleplay` and its OpenAI-compatible
+`/roleplay/v1/chat/completions` alias do not wake the Container. The Worker
+authenticates the caller with `ROLEPLAY_API_KEY` or the bootstrap
+`ADMIN_API_KEY`, validates a bounded JSON request, and sends it to the
+session's `ROLEPLAY_SESSION` Durable Object. Each session stores recent
 dialogue, a compact continuity digest, idempotency keys, and per-model EWMA
 latency/reliability statistics.
 

@@ -1,6 +1,22 @@
 import { DurableObject } from "cloudflare:workers";
 
 import {
+  ROLEPLAY_METRICS_PATH,
+  ROLEPLAY_MODELS_PATH,
+  extractBearerToken,
+  hasRoleplayAuthentication,
+  isAuthorizedRoleplayToken,
+  isRoleplayPath,
+  isRoleplayTurnPath,
+  isValidRoleplaySessionId,
+  resolveRoleplaySession,
+  responseWithRoleplaySession,
+} from "./compatibility.mjs";
+import {
+  createCompactionCheckpoint,
+  reuseCompactionCheckpoint,
+} from "./checkpoint.mjs";
+import {
   buildConfiguredCandidates,
   getRoleplaySettings,
   rankRoleplayCandidates,
@@ -32,9 +48,7 @@ import {
   requestCompaction,
 } from "./transport.mjs";
 
-export const ROLEPLAY_PATH = "/v1/roleplay";
-export const ROLEPLAY_MODELS_PATH = "/v1/roleplay/models";
-export const ROLEPLAY_METRICS_PATH = "/v1/roleplay/metrics";
+export { isRoleplayPath };
 
 const STATE_KEY = "roleplay-session";
 const MESSAGES_KEY = "roleplay-messages";
@@ -43,6 +57,7 @@ function initialState() {
   return {
     version: 1,
     memory: null,
+    compactionCheckpoint: null,
     messages: [],
     profile: {},
     stats: {},
@@ -62,6 +77,12 @@ function normalizeState(value) {
     ...initialState(),
     ...value,
     messages: Array.isArray(value.messages) ? value.messages : [],
+    compactionCheckpoint:
+      value.compactionCheckpoint &&
+      typeof value.compactionCheckpoint === "object" &&
+      !Array.isArray(value.compactionCheckpoint)
+        ? value.compactionCheckpoint
+        : null,
     profile:
       value.profile && typeof value.profile === "object" ? value.profile : {},
     stats: value.stats && typeof value.stats === "object" ? value.stats : {},
@@ -90,36 +111,6 @@ async function saveState(storage, state) {
   });
 }
 
-async function timingSafeTokenMatch(providedToken, expectedToken) {
-  const encoder = new TextEncoder();
-  const [providedDigest, expectedDigest] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(String(providedToken ?? ""))),
-    crypto.subtle.digest("SHA-256", encoder.encode(String(expectedToken ?? ""))),
-  ]);
-  const providedBytes = new Uint8Array(providedDigest);
-  const expectedBytes = new Uint8Array(expectedDigest);
-
-  if (typeof crypto.subtle.timingSafeEqual === "function") {
-    return (
-      Boolean(providedToken) &&
-      Boolean(expectedToken) &&
-      crypto.subtle.timingSafeEqual(providedBytes, expectedBytes)
-    );
-  }
-
-  let mismatch = providedBytes.byteLength ^ expectedBytes.byteLength;
-  for (let index = 0; index < providedBytes.byteLength; index += 1) {
-    mismatch |= providedBytes[index] ^ expectedBytes[index];
-  }
-  return Boolean(providedToken) && Boolean(expectedToken) && mismatch === 0;
-}
-
-function extractBearerToken(request) {
-  const authorization = request.headers.get("Authorization") ?? "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() ?? "";
-}
-
 async function readBoundedJsonRequest(request, maximumBytes) {
   const declaredLength = Number.parseInt(
     request.headers.get("Content-Length") ?? "",
@@ -145,30 +136,6 @@ async function readBoundedJsonRequest(request, maximumBytes) {
   } catch {
     throw new RoleplayRequestError("Request body must be valid JSON");
   }
-}
-
-function validSessionId(value) {
-  return (
-    typeof value === "string" &&
-    /^[A-Za-z0-9_-]{8,128}$/.test(value)
-  );
-}
-
-function getSessionId(payload, request) {
-  const headerValue = request.headers.get("X-Roleplay-Session-ID");
-  const candidate =
-    typeof headerValue === "string" && headerValue.trim()
-      ? headerValue.trim()
-      : payload?.session_id;
-  if (candidate === undefined || candidate === null || candidate === "") {
-    return crypto.randomUUID();
-  }
-  if (!validSessionId(candidate)) {
-    throw new RoleplayRequestError(
-      "session_id must contain 8-128 letters, digits, underscores, or hyphens",
-    );
-  }
-  return candidate;
 }
 
 function getIdempotencyKey(payload, request) {
@@ -220,20 +187,6 @@ function roleplayStub(env, sessionId, request) {
     : env.ROLEPLAY_SESSION.getByName(sessionId);
 }
 
-function responseWithSession(response, sessionId) {
-  const decorated = new Response(response.body, response);
-  decorated.headers.set("X-Roleplay-Session-ID", sessionId);
-  return decorated;
-}
-
-export function isRoleplayPath(pathname) {
-  return (
-    pathname === ROLEPLAY_PATH ||
-    pathname === ROLEPLAY_MODELS_PATH ||
-    pathname === ROLEPLAY_METRICS_PATH
-  );
-}
-
 export async function handleRoleplayEdgeRequest(request, env) {
   if (
     !env.ROLEPLAY_SESSION ||
@@ -246,7 +199,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
     );
   }
 
-  if (!env.ADMIN_API_KEY) {
+  if (!hasRoleplayAuthentication(env)) {
     return errorResponse(
       "Roleplay authentication is not configured",
       503,
@@ -254,7 +207,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
     );
   }
   const providedToken = extractBearerToken(request);
-  if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
+  if (!(await isAuthorizedRoleplayToken(providedToken, env))) {
     return errorResponse("Authentication required", 401, "unauthorized");
   }
 
@@ -281,7 +234,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
       return errorResponse("Method not allowed", 405, "method_not_allowed");
     }
     const sessionId = requestUrl.searchParams.get("session_id") ?? "";
-    if (!validSessionId(sessionId)) {
+    if (!isValidRoleplaySessionId(sessionId)) {
       return errorResponse(
         "session_id query parameter is required",
         400,
@@ -295,10 +248,13 @@ export async function handleRoleplayEdgeRequest(request, env) {
         signal: request.signal,
       }),
     );
-    return responseWithSession(response, sessionId);
+    return responseWithRoleplaySession(response, sessionId, "explicit");
   }
 
-  if (requestUrl.pathname !== ROLEPLAY_PATH || request.method !== "POST") {
+  if (
+    !isRoleplayTurnPath(requestUrl.pathname) ||
+    request.method !== "POST"
+  ) {
     return errorResponse("Method not allowed", 405, "method_not_allowed");
   }
 
@@ -307,9 +263,16 @@ export async function handleRoleplayEdgeRequest(request, env) {
       request,
       settings.maxRequestBytes,
     );
-    const sessionId = getSessionId(payload, request);
+    const session = await resolveRoleplaySession(
+      payload,
+      request,
+      providedToken,
+    );
+    if (session.error) {
+      throw new RoleplayRequestError(session.error);
+    }
     const idempotencyKey = getIdempotencyKey(payload, request);
-    const stub = roleplayStub(env, sessionId, request);
+    const stub = roleplayStub(env, session.id, request);
     const headers = new Headers({ "Content-Type": "application/json" });
     if (idempotencyKey) {
       headers.set("Idempotency-Key", idempotencyKey);
@@ -322,7 +285,11 @@ export async function handleRoleplayEdgeRequest(request, env) {
         signal: request.signal,
       }),
     );
-    return responseWithSession(response, sessionId);
+    return responseWithRoleplaySession(
+      response,
+      session.id,
+      session.source,
+    );
   } catch (error) {
     if (error instanceof RoleplayRequestError) {
       return errorResponse(
@@ -415,6 +382,8 @@ export class RoleplaySession extends DurableObject {
         compactions: state.compactions,
         storage_overflow: state.storageOverflow,
         stored_messages: state.messages.length,
+        compacted_prefix_messages:
+          state.compactionCheckpoint?.messageCount ?? 0,
         estimated_stored_tokens: estimateTokens({
           memory: state.memory,
           messages: state.messages,
@@ -465,7 +434,10 @@ export class RoleplaySession extends DurableObject {
     const payload = await request.json();
     let state = await loadState(this.ctx.storage);
     const parsedInitial = parseRoleplayPayload(payload, settings);
-    const { profile, parsed } = effectiveCharacter(state, parsedInitial);
+    const { profile, parsed: parsedWithProfile } = effectiveCharacter(
+      state,
+      parsedInitial,
+    );
     const idempotencyKey = request.headers.get("Idempotency-Key") ?? "";
     const duplicate = existingRequest(state, idempotencyKey);
     if (duplicate) {
@@ -479,7 +451,15 @@ export class RoleplaySession extends DurableObject {
       };
     }
 
-    const memoryEnabled = parsed.memory.mode !== "off";
+    const memoryEnabled = parsedWithProfile.memory.mode !== "off";
+    const checkpoint = memoryEnabled
+      ? await reuseCompactionCheckpoint(state, parsedWithProfile)
+      : {
+          parsed: parsedWithProfile,
+          sourceMessages: parsedWithProfile.messages,
+          matched: false,
+        };
+    const parsed = checkpoint.parsed;
     state = {
       ...state,
       ...(memoryEnabled ? { profile } : {}),
@@ -512,7 +492,11 @@ export class RoleplaySession extends DurableObject {
     // Generation may include one raw overflow turn that the compacted state
     // intentionally retains only through its semantic digest.
     let persistedConversation = conversation;
-    let memoryStatus = memoryEnabled ? "retained" : "off";
+    let memoryStatus = memoryEnabled
+      ? checkpoint.matched
+        ? "checkpoint_reused"
+        : "retained"
+      : "off";
     const plan = compactionPlan(
       memoryState,
       parsed,
@@ -530,10 +514,20 @@ export class RoleplaySession extends DurableObject {
           settings,
           request.signal,
         );
+        const nextCheckpoint = compacted.digest.compact
+          ? await createCompactionCheckpoint(
+              state,
+              parsed,
+              checkpoint.sourceMessages,
+              plan,
+              checkpoint.matched,
+            )
+          : state.compactionCheckpoint;
         const applied = applyCompaction(
           state,
           plan,
           compacted.digest,
+          nextCheckpoint,
         );
         if (plan.forced && !applied.compacted) {
           throw new Error("Model declined required memory compaction");

@@ -1,9 +1,11 @@
 # Cloudflare-native roleplay endpoint
 
 `POST /v1/roleplay` is a native Cloudflare Worker route for long-running,
-streaming roleplay. It does not wake the Flask Container. Each session maps to
-one SQLite-backed Durable Object, so turns for that session stay ordered while
-different sessions scale independently.
+streaming roleplay. OpenAI-compatible clients can use
+`POST /roleplay/v1/chat/completions` or
+`POST /v1/roleplay/chat/completions`. These routes do not wake the Flask
+Container. Each session maps to one SQLite-backed Durable Object, so turns for
+that session stay ordered while different sessions scale independently.
 
 The default model policy uses OpenCode Go first and learns between:
 
@@ -16,11 +18,12 @@ choose Kimi or GLM within each tier.
 
 ## Request
 
-Authenticate with the bootstrap `ADMIN_API_KEY`:
+Authenticate with the dedicated `ROLEPLAY_API_KEY`. The bootstrap
+`ADMIN_API_KEY` remains accepted for administrative clients:
 
 ```bash
 curl "$PROXY_BASE_URL/v1/roleplay" \
-  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Authorization: Bearer $ROLEPLAY_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: story-42-turn-1" \
   -d '{
@@ -45,10 +48,14 @@ curl "$PROXY_BASE_URL/v1/roleplay" \
   }'
 ```
 
-`session_id` accepts 8-128 letters, digits, underscores, or hyphens. If it is
-omitted, the Worker creates one and returns it in
-`X-Roleplay-Session-ID`. Send that value on later turns in the body or
-`X-Roleplay-Session-ID`.
+`session_id` accepts 8-128 letters, digits, underscores, or hyphens. An
+explicit body or `X-Roleplay-Session-ID` value always wins. Without one, the
+Worker hashes a client `conversation_id`, `chat_id`, or `thread_id` when
+available. For OpenAI-style full-history requests, it otherwise derives a
+stable session from the opening messages and the roleplay credential. A
+delta-only request with no stable identifier receives a new generated session.
+The selected value and its source are returned in `X-Roleplay-Session-ID` and
+`X-Roleplay-Session-Source`.
 
 Use either:
 
@@ -67,8 +74,11 @@ When both are present, `input` is appended as the newest user message.
 request-scoped; only entries marked `always` or whose keys match recent text
 are injected, which keeps each request bounded.
 
-`model_preference` accepts `auto`, `speed`, `kimi`, or `glm`. A family-specific
-value pins the family but still follows provider priority.
+`model_preference` accepts `auto`, `speed`, `kimi`, or `glm`. OpenAI-compatible
+clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
+`roleplay:kimi`, or `roleplay:glm`. The concrete `kimi-k2.6` and `glm-5.2`
+values are also accepted. A family-specific value pins the family but still
+follows provider priority.
 
 `response_length` accepts `compact`, `balanced`, or `immersive`. It changes the
 automatic output budget and adds a matching pacing instruction. Every mode
@@ -77,6 +87,30 @@ discourages repeated recap and stagnant dialogue.
 Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
 the Worker derives a bounded output budget from the newest user turn. Explicit
 values cannot exceed `ROLEPLAY_MAX_OUTPUT_TOKENS`.
+
+## JanitorAI proxy configuration
+
+Create a proxy configuration with:
+
+| Field | Value |
+| --- | --- |
+| Name | `MultiLLM Roleplay` |
+| Proxy URL | `https://multillm-proxy.cserules.workers.dev/roleplay/v1/chat/completions` |
+| API key | The value of `ROLEPLAY_API_KEY` from the local `.env` |
+| Model | `roleplay:auto` |
+| Custom prompt | `None` unless the character needs an extra instruction |
+
+The proxy URL is already the full Chat Completions endpoint, so leave
+**Add `/chat/completions`** disabled. Save the configuration and hard-refresh
+JanitorAI before selecting it.
+
+JanitorAI normally sends OpenAI-style message history. Repeated requests with
+the same opening land on the same Durable Object, so compacted continuity
+memory survives later turns and Worker deployments until the inactivity TTL
+expires. If a client supplies a conversation ID, that ID is preferred. Two
+branches with exactly the same opening and no client conversation ID share the
+derived session; use an explicit ID with API clients that need branch
+isolation.
 
 ## Adaptive selection and fallback
 
@@ -118,6 +152,14 @@ is too large to retain raw, that turn is included in the continuity digest but
 is still sent unchanged to the current generation; later turns retain the
 digest and the resulting assistant response.
 
+Each successful compaction also stores a SHA-256 checkpoint over the character
+name and exact compacted dialogue prefix. When a later full-history request has
+the same checkpoint, the Worker removes that already-summarized prefix before
+merging and sends the durable continuity digest instead. A mismatch keeps the
+checkpoint optimization disabled and falls back to the normal history merge
+and compaction rules; approximate or similarity-based checkpoint matches are
+never accepted.
+
 At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If it fails or
 declines, the endpoint returns an error before final generation. It never
 silently discards history to make a request fit. Compaction is an additional
@@ -135,6 +177,7 @@ The upstream OpenAI-compatible JSON or SSE body stays unchanged. The Worker
 adds:
 
 - `X-Roleplay-Session-ID`
+- `X-Roleplay-Session-Source`
 - `X-Roleplay-Provider`
 - `X-Roleplay-Model`
 - `X-Roleplay-Selection`
@@ -150,20 +193,27 @@ Inspect configured tiers:
 
 ```bash
 curl "$PROXY_BASE_URL/v1/roleplay/models" \
-  -H "Authorization: Bearer $ADMIN_API_KEY"
+  -H "Authorization: Bearer $ROLEPLAY_API_KEY"
 ```
 
 Inspect one session's bounded routing metrics without returning its dialogue:
 
 ```bash
 curl "$PROXY_BASE_URL/v1/roleplay/metrics?session_id=story-42-main" \
-  -H "Authorization: Bearer $ADMIN_API_KEY"
+  -H "Authorization: Bearer $ROLEPLAY_API_KEY"
 ```
 
 ## Cloudflare configuration
 
 The Worker requires the `ROLEPLAY_SESSION` Durable Object binding configured in
-`wrangler.jsonc`. OpenCode Go is the preferred provider:
+`wrangler.jsonc`. Store a roleplay-only client credential separately from the
+administrative key:
+
+```bash
+npx wrangler secret put ROLEPLAY_API_KEY
+```
+
+OpenCode Go is the preferred provider:
 
 ```bash
 npx wrangler secret put OPENCODE_GO_API_KEY

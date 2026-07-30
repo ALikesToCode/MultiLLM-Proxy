@@ -40,6 +40,7 @@ export function makeRoleplayEnv(overrides = {}) {
   const waits = [];
   const env = {
     ADMIN_API_KEY: "admin-roleplay-key",
+    ROLEPLAY_API_KEY: "janitor-roleplay-key",
     OPENCODE_GO_API_KEY: "opencode-roleplay-key",
     ROLEPLAY_COMPACT_TRIGGER_TOKENS: "12000",
     ROLEPLAY_HARD_INPUT_TOKENS: "24000",
@@ -79,8 +80,12 @@ export function makeRoleplayEnv(overrides = {}) {
   };
 }
 
-export function roleplayRequest(body, headers = {}) {
-  return new Request("https://proxy.example/v1/roleplay", {
+export function roleplayRequest(
+  body,
+  headers = {},
+  pathname = "/v1/roleplay",
+) {
+  return new Request(`https://proxy.example${pathname}`, {
     method: "POST",
     headers: {
       Authorization: "Bearer admin-roleplay-key",
