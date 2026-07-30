@@ -1,3 +1,5 @@
+import { compactableDialogue } from "./directives.mjs";
+
 function messageSignature(message) {
   return JSON.stringify([
     message.role,
@@ -10,9 +12,7 @@ function messageSignature(message) {
 function stableHistoryAnchor(messages, character) {
   let hasPreamble = Boolean(character?.name);
   for (const message of messages.slice(0, 16)) {
-    if (
-      ["system", "developer", "assistant"].includes(message.role)
-    ) {
+    if (message.role === "assistant") {
       hasPreamble = true;
     }
     if (message.role === "user") {
@@ -25,7 +25,7 @@ function stableHistoryAnchor(messages, character) {
 async function compactedPrefixDigest(character, messages) {
   const encoded = new TextEncoder().encode(
     JSON.stringify({
-      version: 1,
+      version: 2,
       character: character?.name ?? "",
       messages: messages.map(messageSignature),
     }),
@@ -67,29 +67,41 @@ function contiguousSequenceStart(messages, sequence) {
 }
 
 export async function reuseCompactionCheckpoint(state, parsed) {
-  const sourceMessages = parsed.messages;
+  const sourceMessages = compactableDialogue(parsed.messages);
+  const dialogueParsed = { ...parsed, messages: sourceMessages };
   const checkpoint = state.compactionCheckpoint;
   if (
-    parsed.memory.mode === "off" ||
-    parsed.historyMode !== "auto" ||
+    dialogueParsed.memory.mode === "off" ||
+    dialogueParsed.historyMode !== "auto" ||
     !checkpoint ||
-    checkpoint.version !== 1 ||
+    checkpoint.version !== 2 ||
     !Number.isInteger(checkpoint.messageCount) ||
     checkpoint.messageCount < 1 ||
     checkpoint.messageCount > sourceMessages.length ||
     !/^[a-f0-9]{64}$/.test(checkpoint.digest ?? "")
   ) {
-    return { parsed, sourceMessages, matched: false };
+    return {
+      parsed: dialogueParsed,
+      sourceMessages,
+      matched: false,
+    };
   }
 
   const prefix = sourceMessages.slice(0, checkpoint.messageCount);
-  const digest = await compactedPrefixDigest(parsed.character, prefix);
+  const digest = await compactedPrefixDigest(
+    dialogueParsed.character,
+    prefix,
+  );
   if (digest !== checkpoint.digest) {
-    return { parsed, sourceMessages, matched: false };
+    return {
+      parsed: dialogueParsed,
+      sourceMessages,
+      matched: false,
+    };
   }
   return {
     parsed: {
-      ...parsed,
+      ...dialogueParsed,
       messages: sourceMessages.slice(checkpoint.messageCount),
     },
     sourceMessages,
@@ -104,7 +116,10 @@ export async function createCompactionCheckpoint(
   plan,
   previousMatched,
 ) {
-  const previous = state.compactionCheckpoint ?? null;
+  const previous =
+    state.compactionCheckpoint?.version === 2
+      ? state.compactionCheckpoint
+      : null;
   if (
     !previousMatched &&
     !stableHistoryAnchor(sourceMessages, parsed.character)
@@ -125,7 +140,7 @@ export async function createCompactionCheckpoint(
   }
 
   return {
-    version: 1,
+    version: 2,
     messageCount: boundary,
     digest: await compactedPrefixDigest(
       parsed.character,

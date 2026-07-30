@@ -16,6 +16,7 @@ import {
   createCompactionCheckpoint,
   reuseCompactionCheckpoint,
 } from "./checkpoint.mjs";
+import { prepareProtectedContext } from "./directives.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import {
   buildConfiguredCandidates,
@@ -53,13 +54,15 @@ export { isRoleplayPath };
 
 const STATE_KEY = "roleplay-session";
 const MESSAGES_KEY = "roleplay-messages";
+const DIRECTIVES_KEY = "roleplay-directives";
 
 function initialState() {
   return {
-    version: 1,
+    version: 2,
     memory: null,
     compactionCheckpoint: null,
     messages: [],
+    directives: [],
     profile: {},
     stats: {},
     turns: 0,
@@ -78,7 +81,11 @@ function normalizeState(value) {
   return {
     ...initialState(),
     ...value,
+    version: 2,
     messages: Array.isArray(value.messages) ? value.messages : [],
+    directives: Array.isArray(value.directives)
+      ? value.directives
+      : [],
     compactionCheckpoint:
       value.compactionCheckpoint &&
       typeof value.compactionCheckpoint === "object" &&
@@ -95,21 +102,28 @@ function normalizeState(value) {
 }
 
 async function loadState(storage) {
-  const [core, messages] = await Promise.all([
+  const [core, messages, directives] = await Promise.all([
     storage.get(STATE_KEY),
     storage.get(MESSAGES_KEY),
+    storage.get(DIRECTIVES_KEY),
   ]);
   return normalizeState({
     ...(core && typeof core === "object" ? core : {}),
     messages: Array.isArray(messages) ? messages : [],
+    directives: Array.isArray(directives)
+      ? directives
+      : Array.isArray(core?.directives)
+        ? core.directives
+        : [],
   });
 }
 
 async function saveState(storage, state) {
-  const { messages, ...core } = state;
+  const { directives, messages, ...core } = state;
   await storage.put({
     [STATE_KEY]: core,
     [MESSAGES_KEY]: messages,
+    [DIRECTIVES_KEY]: directives,
   });
 }
 
@@ -385,6 +399,10 @@ export class RoleplaySession extends DurableObject {
         local_compactions: state.localCompactions,
         storage_overflow: state.storageOverflow,
         stored_messages: state.messages.length,
+        protected_directives: state.directives.length,
+        estimated_protected_directive_tokens: estimateTokens(
+          state.directives,
+        ),
         compacted_prefix_messages:
           state.compactionCheckpoint?.messageCount ?? 0,
         estimated_stored_tokens: estimateTokens({
@@ -455,11 +473,29 @@ export class RoleplaySession extends DurableObject {
     }
 
     const memoryEnabled = parsedWithProfile.memory.mode !== "off";
+    const protectedContext = prepareProtectedContext(
+      state,
+      parsedWithProfile,
+      memoryEnabled,
+    );
+    state = protectedContext.state;
+    if (
+      estimateTokens(protectedContext.activeDirectives) >
+      settings.hardInputTokens
+    ) {
+      throw new RoleplayRequestError(
+        "Protected system and developer instructions exceed the safe input limit and will not be compacted",
+        413,
+      );
+    }
     const checkpoint = memoryEnabled
-      ? await reuseCompactionCheckpoint(state, parsedWithProfile)
+      ? await reuseCompactionCheckpoint(
+          state,
+          protectedContext.parsed,
+        )
       : {
-          parsed: parsedWithProfile,
-          sourceMessages: parsedWithProfile.messages,
+          parsed: protectedContext.parsed,
+          sourceMessages: protectedContext.parsed.messages,
           matched: false,
         };
     const parsed = checkpoint.parsed;
@@ -490,7 +526,13 @@ export class RoleplaySession extends DurableObject {
 
     const memoryState = memoryEnabled
       ? state
-      : { ...state, memory: null, messages: [], profile: {} };
+      : {
+          ...state,
+          memory: null,
+          messages: [],
+          directives: protectedContext.activeDirectives,
+          profile: {},
+        };
     let conversation = mergeSessionMessages(memoryState, parsed);
     // Generation may include one raw overflow turn that the compacted state
     // intentionally retains only through its semantic digest.
@@ -596,7 +638,7 @@ export class RoleplaySession extends DurableObject {
     }
 
     const roleplayMessages = buildRoleplayMessages(
-      state,
+      memoryEnabled ? state : memoryState,
       parsed,
       conversation,
     );

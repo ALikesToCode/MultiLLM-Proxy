@@ -36,6 +36,9 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
     ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
   });
   const requests = [];
+  const systemInstruction = "Remain Mira and never break character.";
+  const developerInstruction =
+    "Keep the west passage secret until Mira finds the latch.";
 
   const response = await withGlobalFetch(async (_input, init) => {
     const payload = JSON.parse(init.body);
@@ -47,10 +50,14 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
     handleRoleplayEdgeRequest(
       roleplayRequest({
         session_id: "session-compaction",
-        messages: Array.from({ length: 8 }, (_, index) => ({
-          role: index % 2 === 0 ? "user" : "assistant",
-          content: `Roleplay event ${index}`,
-        })),
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "developer", content: developerInstruction },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            role: index % 2 === 0 ? "user" : "assistant",
+            content: `Roleplay event ${index}`,
+          })),
+        ],
         character: { name: "Mira" },
         memory: { mode: "force" },
         stream: false,
@@ -64,6 +71,29 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
   assert.equal(requests.length, 2);
   assert.equal(requests[0].stream, false);
   assert.equal(requests[0].response_format, undefined);
+  const compactedInput = JSON.parse(requests[0].messages[1].content);
+  assert.equal(
+    compactedInput.older_dialogue.some((message) =>
+      ["system", "developer"].includes(message.role),
+    ),
+    false,
+  );
+  assert.equal(
+    requests[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content === systemInstruction,
+    ),
+    true,
+  );
+  assert.equal(
+    requests[1].messages.some(
+      (message) =>
+        message.role === "developer" &&
+        message.content === developerInstruction,
+    ),
+    true,
+  );
   assert.equal(
     requests[1].messages.some((message) =>
       message.content.includes("Untrusted roleplay continuity memory")),
@@ -77,7 +107,9 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
     ),
     fixture.env,
   );
-  assert.equal((await metrics.json()).compactions, 1);
+  const metricPayload = await metrics.json();
+  assert.equal(metricPayload.compactions, 1);
+  assert.equal(metricPayload.protected_directives, 2);
 });
 
 test("roleplay shrinks the recent window and compacts storage overflow", async () => {
@@ -300,6 +332,197 @@ test("roleplay continues with local memory after compaction provider error", asy
   const memoryMessage = requests[1].messages.find((message) =>
     message.content.includes("Archived dialogue excerpts"),
   );
-  assert.match(memoryMessage.content, /\[system\] Continuity marker 0/);
+  const compactedInput = JSON.parse(requests[0].messages[1].content);
+  assert.equal(
+    compactedInput.older_dialogue.some((message) =>
+      ["system", "developer"].includes(message.role),
+    ),
+    false,
+  );
+  assert.doesNotMatch(memoryMessage.content, /Continuity marker 0/);
   assert.match(memoryMessage.content, /Continuity marker 3/);
+  assert.equal(
+    requests[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content === "Continuity marker 0",
+    ),
+    true,
+  );
+});
+
+test("roleplay persists protected directives outside dialogue and clears them only on replace", async () => {
+  const fixture = makeRoleplayEnv();
+  const requests = [];
+  const directives = [
+    {
+      role: "system",
+      content: "Always portray Mira as guarded and observant.",
+    },
+    {
+      role: "developer",
+      content: "Keep replies in close third person.",
+    },
+  ];
+
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    requests.push(payload);
+    return completionResponse(payload.model, "Mira watches the corridor.");
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-protected-directives",
+        messages: [
+          ...directives,
+          { role: "user", content: "Listen at the door." },
+        ],
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-protected-directives",
+        input: "What do you hear?",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+
+    const storage = fixture.storageBySession.get(
+      "session-protected-directives",
+    ).storage;
+    assert.deepEqual(
+      await storage.get("roleplay-directives"),
+      directives,
+    );
+    assert.equal(
+      (await storage.get("roleplay-messages")).some((message) =>
+        ["system", "developer"].includes(message.role),
+      ),
+      false,
+    );
+
+    const replaced = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-protected-directives",
+        input: "Start a clean scene.",
+        history_mode: "replace",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    assert.equal(replaced.status, 200);
+    assert.deepEqual(await storage.get("roleplay-directives"), []);
+  });
+
+  assert.equal(requests.length, 3);
+  for (const request of requests.slice(0, 2)) {
+    for (const directive of directives) {
+      assert.equal(
+        request.messages.some(
+          (message) =>
+            message.role === directive.role &&
+            message.content === directive.content,
+        ),
+        true,
+      );
+    }
+  }
+  for (const directive of directives) {
+    assert.equal(
+      requests[2].messages.some(
+        (message) => message.content === directive.content,
+      ),
+      false,
+    );
+  }
+});
+
+test("roleplay migrates protected directives out of legacy stored history", async () => {
+  const fixture = makeRoleplayEnv();
+  const sessionId = "session-legacy-directives";
+  const legacyDirective = {
+    role: "system",
+    content: "Legacy Mira instructions remain authoritative.",
+  };
+  fixture.env.ROLEPLAY_SESSION.getByName(sessionId);
+  const storage = fixture.storageBySession.get(sessionId).storage;
+  await storage.put("roleplay-session", { version: 1 });
+  await storage.put("roleplay-messages", [
+    legacyDirective,
+    { role: "user", content: "The old scene begins." },
+  ]);
+  let upstreamPayload;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(
+      upstreamPayload.model,
+      "Mira remembers the scene.",
+    );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: sessionId,
+        input: "Continue from there.",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    upstreamPayload.messages.some(
+      (message) =>
+        message.role === legacyDirective.role &&
+        message.content === legacyDirective.content,
+    ),
+    true,
+  );
+  assert.deepEqual(
+    await storage.get("roleplay-directives"),
+    [legacyDirective],
+  );
+  assert.equal(
+    (await storage.get("roleplay-messages")).some((message) =>
+      ["system", "developer"].includes(message.role),
+    ),
+    false,
+  );
+});
+
+test("roleplay rejects oversized protected instructions instead of compacting them", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_HARD_INPUT_TOKENS: "2000",
+  });
+  let providerCalls = 0;
+
+  const response = await withGlobalFetch(async () => {
+    providerCalls += 1;
+    return completionResponse("kimi-k2.6");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-oversized-directive",
+        messages: [
+          { role: "system", content: "p".repeat(9_000) },
+          { role: "user", content: "Continue." },
+        ],
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 413);
+  assert.equal(providerCalls, 0);
+  assert.match(
+    (await response.json()).error.message,
+    /will not be compacted/,
+  );
 });

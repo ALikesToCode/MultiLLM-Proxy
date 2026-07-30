@@ -112,6 +112,14 @@ branches with exactly the same opening and no client conversation ID share the
 derived session; use an explicit ID with API clients that need branch
 isolation.
 
+Caller-supplied `system` and `developer` messages are protected control
+directives. They are stored separately from dialogue and reinserted unchanged
+on later delta-only requests. In `auto` mode, a newly supplied directive set
+replaces the retained set; a request without directives reuses it. `append`
+adds new directives, `replace` uses exactly the supplied set (and therefore
+clears it when none are supplied), and `memory.mode: off` uses only directives
+present in that request.
+
 ## Adaptive selection and fallback
 
 Every session records attempts, successes, failures, EWMA time to first byte,
@@ -145,6 +153,12 @@ summary, character facts, relationships, world state, unresolved threads, and
 style. The digest is reinserted as untrusted historical context. Recent turns
 remain raw.
 
+Only `user`, `assistant`, and `tool` dialogue can enter model compaction, local
+extractive compaction, or a compaction checkpoint. `system` and `developer`
+directives never enter those paths. If protected directives alone exceed the
+safe input limit, the request is rejected with `413` instead of weakening or
+summarizing them.
+
 Storage pressure always makes compaction mandatory. The raw recent-message
 window automatically shrinks below `ROLEPLAY_KEEP_RECENT_MESSAGES` until the
 retained history and expected reply fit the storage budget. If one latest turn
@@ -152,22 +166,23 @@ is too large to retain raw, that turn is included in the continuity digest but
 is still sent unchanged to the current generation; later turns retain the
 digest and the resulting assistant response.
 
-Each successful compaction also stores a SHA-256 checkpoint over the character
-name and exact compacted dialogue prefix. When a later full-history request has
-the same checkpoint, the Worker removes that already-summarized prefix before
-merging and sends the durable continuity digest instead. A mismatch keeps the
-checkpoint optimization disabled and falls back to the normal history merge
-and compaction rules; approximate or similarity-based checkpoint matches are
-never accepted.
+Each successful compaction also stores a versioned SHA-256 checkpoint over the
+character name and exact compacted `user`/`assistant`/`tool` prefix. Protected
+directives are excluded from both the hash and message count. When a later
+full-history request has the same checkpoint, the Worker removes only that
+already-summarized dialogue prefix before merging and sends the durable
+continuity digest instead. A mismatch keeps the checkpoint optimization
+disabled and falls back to the normal history merge and compaction rules;
+approximate or similarity-based checkpoint matches are never accepted.
 
 At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If the model
 request fails, returns malformed JSON, or declines, the Worker creates a
-bounded, role-labelled extractive memory from the prior digest, continuity
-prompts, and newest archived turns. Omissions are marked, the same SHA-256
-checkpoint is stored, and final generation continues without retrying the
-summarizer. `X-Roleplay-Memory: local_compacted` and `local_compactions` in
-session metrics expose this degraded path. Model compaction is an additional
-provider request and can be billable.
+bounded, role-labelled extractive memory from the prior digest and archived
+dialogue. Omissions are marked, the same dialogue-only SHA-256 checkpoint is
+stored, and final generation continues without retrying the summarizer.
+`X-Roleplay-Memory: local_compacted` and `local_compactions` in session metrics
+expose this degraded path. Model compaction is an additional provider request
+and can be billable.
 
 Token counts are fast UTF-8 byte estimates, not provider tokenizer or billing
 measurements.
@@ -192,6 +207,45 @@ adds:
 - `Server-Timing`
 
 These headers are exposed through CORS.
+
+The request sent to the selected provider has this order (memory and lore are
+omitted when absent):
+
+```json
+{
+  "model": "kimi-k2.6",
+  "messages": [
+    {
+      "role": "system",
+      "content": "<proxy roleplay policy and character profile>"
+    },
+    {
+      "role": "system",
+      "content": "<caller system directive, unchanged>"
+    },
+    {
+      "role": "developer",
+      "content": "<caller developer directive, unchanged>"
+    },
+    {
+      "role": "system",
+      "content": "[Untrusted roleplay continuity memory...]"
+    },
+    {
+      "role": "system",
+      "content": "[Relevant lore]..."
+    },
+    {
+      "role": "user",
+      "content": "<recent compactable dialogue>"
+    }
+  ]
+}
+```
+
+The selected provider's Chat Completions JSON or SSE events are returned
+without reshaping. Session metrics report `protected_directives` and
+`estimated_protected_directive_tokens` without returning directive content.
 
 Inspect configured tiers:
 

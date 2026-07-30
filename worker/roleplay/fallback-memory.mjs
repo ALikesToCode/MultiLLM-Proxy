@@ -1,3 +1,5 @@
+import { compactableDialogue } from "./directives.mjs";
+
 const MEMORY_FIELDS = [
   "character_facts",
   "relationships",
@@ -37,15 +39,6 @@ function selectedMessageIndexes(messages) {
   const selected = new Set();
   if (messages.length) {
     selected.add(0);
-  }
-
-  for (let index = 0; index < messages.length; index += 1) {
-    if (
-      ["system", "developer"].includes(messages[index]?.role) &&
-      selected.size < 5
-    ) {
-      selected.add(index);
-    }
   }
 
   for (
@@ -114,6 +107,7 @@ function boundedMemoryFields(memory) {
 }
 
 export function createExtractiveCompactionDigest(state, plan, settings) {
+  const archivedDialogue = compactableDialogue(plan.olderMessages);
   const summaryLimit = Math.min(
     MAX_SUMMARY_CHARACTERS,
     Math.max(
@@ -128,14 +122,14 @@ export function createExtractiveCompactionDigest(state, plan, settings) {
   const prior = middleExcerpt(priorSummary, priorBudget);
   const priorSection = prior ? `[Prior continuity]\n${prior}\n\n` : "";
   const archiveHeader =
-    `[Archived dialogue excerpts from ${plan.olderMessages.length} prior ` +
+    `[Archived dialogue excerpts from ${archivedDialogue.length} prior ` +
     "messages; some messages or text may be omitted]\n";
   const archiveBudget = Math.max(
     0,
     summaryLimit - priorSection.length - archiveHeader.length,
   );
   const archived = renderArchivedDialogue(
-    plan.olderMessages,
+    archivedDialogue,
     archiveBudget,
   );
 

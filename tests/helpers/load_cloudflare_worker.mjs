@@ -17,6 +17,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/config.mjs",
     import.meta.url,
   );
+  const directivesUrl = new URL(
+    "../../worker/roleplay/directives.mjs",
+    import.meta.url,
+  );
   const fallbackMemoryUrl = new URL(
     "../../worker/roleplay/fallback-memory.mjs",
     import.meta.url,
@@ -37,6 +41,7 @@ export async function roleplayModuleUrl() {
     compatibilitySource,
     checkpointSource,
     configSource,
+    directivesSource,
     fallbackMemorySource,
     memorySource,
     transportSource,
@@ -46,16 +51,33 @@ export async function roleplayModuleUrl() {
       readFile(compatibilityUrl, "utf8"),
       readFile(checkpointUrl, "utf8"),
       readFile(configUrl, "utf8"),
+      readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
-  const checkpointDataUrl = dataModuleUrl(checkpointSource);
   const configDataUrl = dataModuleUrl(configSource);
-  const fallbackMemoryDataUrl = dataModuleUrl(fallbackMemorySource);
-  const memoryDataUrl = dataModuleUrl(memorySource);
+  const directivesDataUrl = dataModuleUrl(directivesSource);
+  const checkpointDataUrl = dataModuleUrl(
+    checkpointSource.replace(
+      'from "./directives.mjs";',
+      `from "${directivesDataUrl}";`,
+    ),
+  );
+  const fallbackMemoryDataUrl = dataModuleUrl(
+    fallbackMemorySource.replace(
+      'from "./directives.mjs";',
+      `from "${directivesDataUrl}";`,
+    ),
+  );
+  const memoryDataUrl = dataModuleUrl(
+    memorySource.replace(
+      'from "./directives.mjs";',
+      `from "${directivesDataUrl}";`,
+    ),
+  );
   const transportDataUrl = dataModuleUrl(
     transportSource
       .replace('from "./config.mjs";', `from "${configDataUrl}";`)
@@ -69,6 +91,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./fallback-memory.mjs";',
       `from "${fallbackMemoryDataUrl}";`,
+    )
+    .replace(
+      'from "./directives.mjs";',
+      `from "${directivesDataUrl}";`,
     )
     .replace(
       'from "./compatibility.mjs";',

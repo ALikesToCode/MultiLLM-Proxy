@@ -315,6 +315,24 @@ test("Janitor derived sessions retain compacted continuity on later turns", asyn
     ),
     false,
   );
+  assert.equal(
+    upstreamPayloads[2].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content ===
+          "You are Mira, a guarded court mage in the palace library.",
+    ),
+    true,
+  );
+  const compactionInput = JSON.parse(
+    upstreamPayloads[0].messages[1].content,
+  );
+  assert.equal(
+    compactionInput.older_dialogue.some((message) =>
+      ["system", "developer"].includes(message.role),
+    ),
+    false,
+  );
   await fixture.waitForBackgroundWork();
   const metrics = await handleRoleplayEdgeRequest(
     new Request(
@@ -323,7 +341,7 @@ test("Janitor derived sessions retain compacted continuity on later turns", asyn
     ),
     fixture.env,
   );
-  assert.equal((await metrics.json()).compacted_prefix_messages, 4);
+  assert.equal((await metrics.json()).compacted_prefix_messages, 3);
 });
 
 test("derived sessions separate different openings", async () => {
