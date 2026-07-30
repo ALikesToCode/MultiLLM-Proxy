@@ -2,18 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function loadWorkerModule() {
-  const workerUrl = new URL("../cloudflare-worker.mjs", import.meta.url);
-  const source = await readFile(workerUrl, "utf8");
-  const patchedSource = source.replace(
-    /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
-    "class Container {}\nconst getContainer = (binding, name) => binding.getByName(name);\nconst switchPort = (request) => request;",
-  );
-
-  return import(
-    `data:text/javascript;base64,${Buffer.from(patchedSource, "utf8").toString("base64")}`
-  );
-}
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const workerModule = await loadWorkerModule();
 const worker = workerModule.default;
@@ -1433,14 +1422,16 @@ test("worker deploy config keeps LinkAPI secrets private and samples observabili
   assert.equal(config.vars?.LINKAPI_BASE_URL, "https://api.linkapi.ai");
   assert.equal(config.vars?.LINKAPI_KEY, undefined);
   assert.equal(config.vars?.LINKAPI_API_KEY, undefined);
+  assert.equal(config.compatibility_flags?.includes("nodejs_compat"), true);
   assert.equal(config.compatibility_flags?.includes("enable_request_signal"), true);
   assert.equal(config.compatibility_flags?.includes("request_signal_passthrough"), true);
-  assert.equal(config.compatibility_date, "2026-07-10");
+  assert.equal(config.compatibility_date, "2026-07-30");
   assert.equal(config.observability?.enabled, true);
   assert.equal(config.observability?.logs?.enabled, true);
   assert.equal(config.observability?.logs?.head_sampling_rate, 0.05);
   assert.equal(config.observability?.logs?.invocation_logs, false);
-  assert.equal(config.observability?.traces?.enabled, false);
+  assert.equal(config.observability?.traces?.enabled, true);
+  assert.equal(config.observability?.traces?.head_sampling_rate, 0.01);
 });
 
 test("worker proxies Codex Everywhere Responses and Chat SSE bytes without rewriting Grok reasoning", async () => {

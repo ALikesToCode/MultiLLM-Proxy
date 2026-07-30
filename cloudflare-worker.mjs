@@ -1,4 +1,11 @@
 import { Container, getContainer } from "@cloudflare/containers";
+import {
+  RoleplaySession,
+  handleRoleplayEdgeRequest,
+  isRoleplayPath,
+} from "./worker/roleplay/endpoint.mjs";
+
+export { RoleplaySession };
 
 const API_ROUTE_PREFIXES = new Set([
   "azure",
@@ -29,9 +36,9 @@ const API_ROUTE_PREFIXES = new Set([
 ]);
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
-  "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
+  "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, X-Roleplay-Session-ID, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
 const CORS_EXPOSE_HEADERS =
-  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-Roleplay-Session-ID, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -1849,6 +1856,7 @@ export default {
     const opencodePath = isDirectOpencodePath(requestUrl.pathname);
     const codexEasyPath = isCodexEasyNamespacePath(requestUrl.pathname);
     const kimiCodePath = isKimiCodeNamespacePath(requestUrl.pathname);
+    const roleplayPath = isRoleplayPath(requestUrl.pathname);
 
     if (request.method === "OPTIONS" && kimiCodePath) {
       if (!getKimiCodeUpstreamPath(requestUrl.pathname)) {
@@ -1870,6 +1878,29 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (roleplayPath) {
+      try {
+        return applyCorsHeaders(
+          request,
+          await handleRoleplayEdgeRequest(request, env),
+          env,
+        );
+      } catch (error) {
+        logStructuredError("roleplay_worker_fetch_failed", error);
+        return applyCorsHeaders(
+          request,
+          jsonResponse(
+            {
+              error: "Proxy unavailable",
+              message: "The roleplay endpoint could not handle the request.",
+            },
+            { status: 502 },
+          ),
+          env,
+        );
+      }
     }
 
     if (kimiCodePath) {

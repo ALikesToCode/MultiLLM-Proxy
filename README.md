@@ -32,6 +32,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🔄 Real-time status monitoring and provider health checks
 - 📊 Request statistics and monitoring
 - 🚀 Streaming support for compatible providers
+- 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
 
@@ -310,6 +311,43 @@ For detailed usage examples with headers and request bodies, refer to the API En
 - **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, OpenAI-compatible chat, model discovery, and image generation/editing under `/linkapi/*`; JSON generation is also available through unified `/v1/images/generations` with a `linkapi:<model>` ID
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
+
+### Cloudflare-native roleplay
+
+`POST /v1/roleplay` runs entirely in the Cloudflare Worker and a
+session-scoped Durable Object. It streams OpenAI-compatible responses without
+waking the Flask Container, keeps turns ordered, stores bounded continuity
+memory, and records per-model latency and reliability.
+
+The default policy explores and then selects between OpenCode Go
+`kimi-k2.6` and `glm-5.2`. OpenCode Go is the first provider tier, NavyAI is
+second, and configured LinkAPI, NanoGPT, and OpenRouter credentials are later
+tiers. Automatic fallback occurs only after a clear upstream rejection; an
+ambiguous transport or `5xx` outcome stops to avoid duplicate paid generation.
+
+```bash
+curl "$PROXY_BASE_URL/v1/roleplay" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: story-42-turn-1" \
+  -d '{
+    "session_id":"story-42-main",
+    "input":"Continue from the locked library door.",
+    "character":{"name":"Mira","persona":"A guarded court mage."},
+    "memory":{"mode":"auto"},
+    "stream":true
+  }'
+```
+
+Above the configured memory threshold, the selected model receives older
+dialogue and decides whether to return a compact continuity digest. If context
+reaches the hard limit and compaction fails, the final generation does not
+start; history is never silently discarded. Compaction is an extra, potentially
+billable model request.
+
+See [the roleplay endpoint guide](docs/roleplay.md) for the complete request
+contract, lore activation, adaptive metrics, token controls, retention, and
+Cloudflare configuration.
 
 ### NanoGPT and NavyAI raw gateways
 

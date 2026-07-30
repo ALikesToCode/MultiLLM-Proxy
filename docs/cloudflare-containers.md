@@ -1,6 +1,6 @@
 # Deploying MultiLLM-Proxy to Cloudflare Containers
 
-This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and the Kimi Code model catalog directly. Kimi Code chat and the remaining Flask routes run through a Container.
+This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native roleplay sessions, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and the Kimi Code model catalog directly. Kimi Code chat and the remaining Flask routes run through a Container.
 
 ## Why Containers, not Python Workers
 
@@ -11,7 +11,7 @@ Cloudflare's Python Workers runtime runs on Pyodide. Cloudflare's docs note that
 - threaded execution and SSE streaming
 - service-account JSON support for the `googleai` provider
 
-That makes Cloudflare Containers the safer target for the Python application. `/linkapi/*` and `/codex-easy/*` are raw Worker fast paths. The Worker serves `/kimi-code/v1/models` locally and rejects unauthorized or invalid Kimi requests without waking the Container; valid Kimi chat streams through Flask because Kimi's edge rejects Worker-origin egress.
+That makes Cloudflare Containers the safer target for the Python application. `/v1/roleplay`, `/linkapi/*`, and `/codex-easy/*` are Worker-native paths. The roleplay route uses one SQLite-backed Durable Object per session. The Worker serves `/kimi-code/v1/models` locally and rejects unauthorized or invalid Kimi requests without waking the Container; valid Kimi chat streams through Flask because Kimi's edge rejects Worker-origin egress.
 
 ## Prerequisites
 
@@ -55,6 +55,20 @@ npx wrangler secret put OPENROUTER_API_KEY
 ```
 
 Set only the providers you actually use. The Worker forwards these directly into the container. It also forwards numbered `GROQ_API_KEY_N` secrets automatically.
+
+### Native roleplay sessions
+
+`POST /v1/roleplay` authenticates at the edge and routes directly to
+`ROLEPLAY_SESSION`, a SQLite-backed Durable Object binding. One object per
+session serializes turns without creating a global bottleneck. It stores bounded
+continuity memory, idempotency guards, and Kimi/GLM latency and reliability
+statistics.
+
+OpenCode Go is the first provider tier and defaults to `kimi-k2.6` and
+`glm-5.2`. NavyAI is second; configured LinkAPI, NanoGPT, and OpenRouter
+credentials are later tiers. See [the roleplay guide](roleplay.md) for the
+request schema, compaction policy, safe fallback boundary, metrics route, and
+all `ROLEPLAY_*` variables.
 
 NanoGPT and NavyAI routes are Container-backed raw gateways. The Worker
 forwards their keys, optional base-URL overrides, provider request limits, and
@@ -166,6 +180,8 @@ Wrangler will:
 - Direct Worker route: `/codex-easy/*`
 - Direct Worker route: `/kimi-code/*`
 - Direct Worker route: `/linkapi/*`
+- Direct Worker route: `/v1/roleplay`
+- Durable Object class: `RoleplaySession`
 - Durable Object / Container class: `MultiLLMProxyContainer`
 - Container port: `8080`
 - Gunicorn entrypoint: `app:create_app()`

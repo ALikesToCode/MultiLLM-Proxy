@@ -2,8 +2,9 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "multillm-proxy",
   "main": "./cloudflare-worker.mjs",
-  "compatibility_date": "2026-07-10",
+  "compatibility_date": "2026-07-30",
   "compatibility_flags": [
+    "nodejs_compat",
     "enable_request_signal",
     "request_signal_passthrough"
   ],
@@ -20,6 +21,10 @@
       {
         "name": "MULTILLM_PROXY_CONTAINER",
         "class_name": "MultiLLMProxyContainer"
+      },
+      {
+        "name": "ROLEPLAY_SESSION",
+        "class_name": "RoleplaySession"
       }
     ]
   },
@@ -28,6 +33,12 @@
       "tag": "v1",
       "new_sqlite_classes": [
         "MultiLLMProxyContainer"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "RoleplaySession"
       ]
     }
   ],
@@ -39,7 +50,8 @@
       "invocation_logs": false
     },
     "traces": {
-      "enabled": false
+      "enabled": true,
+      "head_sampling_rate": 0.01
     }
   },
   "vars": {
@@ -47,6 +59,21 @@
     "SERVER_HOST": "0.0.0.0",
     "SERVER_PORT": "8080",
     "APP_NAME": "MultiLLM Proxy",
-    "LINKAPI_BASE_URL": "https://api.linkapi.ai"
+    "LINKAPI_BASE_URL": "https://api.linkapi.ai",
+    "ROLEPLAY_PROVIDER_ORDER": "opencode,navyai,linkapi,nanogpt,openrouter",
+    "ROLEPLAY_KIMI_MODEL": "kimi-k2.6",
+    "ROLEPLAY_GLM_MODEL": "glm-5.2",
+    "ROLEPLAY_PROVIDER_MODELS": "{}",
+    "ROLEPLAY_COMPACT_TRIGGER_TOKENS": "12000",
+    "ROLEPLAY_HARD_INPUT_TOKENS": "24000",
+    "ROLEPLAY_MEMORY_TARGET_TOKENS": "8000",
+    "ROLEPLAY_KEEP_RECENT_MESSAGES": "12",
+    "ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS": "900",
+    "ROLEPLAY_MAX_OUTPUT_TOKENS": "2048",
+    "ROLEPLAY_MAX_REQUEST_BYTES": "1048576",
+    "ROLEPLAY_MAX_STORED_BYTES": "64000",
+    "ROLEPLAY_COMPACTION_MAX_TOKENS": "1200",
+    "ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS": "90000",
+    "ROLEPLAY_SESSION_TTL_SECONDS": "2592000"
   }
 }

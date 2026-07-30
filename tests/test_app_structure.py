@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -14,10 +15,15 @@ class AppStructureTest(unittest.TestCase):
         )
 
     def test_ci_uses_current_worker_test_path(self):
-        workflow = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+        repository = Path(__file__).resolve().parents[1]
+        workflow = repository / ".github" / "workflows" / "ci.yml"
         workflow_text = workflow.read_text(encoding="utf-8")
+        package = json.loads((repository / "package.json").read_text(encoding="utf-8"))
+        worker_test = package["scripts"]["test:worker"]
 
-        self.assertIn("node --test tests/test_cloudflare_worker.mjs", workflow_text)
+        self.assertIn("npm run test:worker", workflow_text)
+        self.assertIn("node --test tests/test_cloudflare_worker.mjs", worker_test)
+        self.assertIn("tests/test_roleplay_worker.mjs", worker_test)
         self.assertNotIn("node --test test_cloudflare_worker.mjs", workflow_text)
 
 

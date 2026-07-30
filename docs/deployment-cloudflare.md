@@ -2,7 +2,7 @@
 
 ## Supported Runtime
 
-The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Native LinkAPI traffic under `/linkapi/*` and Codex Everywhere OpenAI traffic under `/codex-easy/*` take direct Worker fast paths. Kimi model discovery is Worker-local; valid Kimi chat is authenticated at the edge and streamed through the Container because Kimi's edge rejects Worker-origin egress.
+The supported Cloudflare target is a hybrid Worker plus Container deployment. Most routes need Flask, normal Python packages, SQLite file access, and Gunicorn, so they run in the Container. Roleplay under `/v1/roleplay`, native LinkAPI traffic under `/linkapi/*`, and Codex Everywhere OpenAI traffic under `/codex-easy/*` take direct Worker paths. Kimi model discovery is Worker-local; valid Kimi chat is authenticated at the edge and streamed through the Container because Kimi's edge rejects Worker-origin egress.
 
 `wrangler.jsonc` deploys:
 
@@ -11,7 +11,31 @@ The supported Cloudflare target is a hybrid Worker plus Container deployment. Mo
 - Container image: `Dockerfile`
 - Durable Object binding: `MULTILLM_PROXY_CONTAINER`
 - Container instance count: `max_instances=1`
+- Roleplay Durable Object: `RoleplaySession`, one instance per session
 - Observability: enabled
+
+## Cloudflare-native roleplay
+
+`POST /v1/roleplay` does not wake the Container. The Worker authenticates the
+caller with `ADMIN_API_KEY`, validates a bounded JSON request, and sends it to
+the session's `ROLEPLAY_SESSION` Durable Object. Each session stores recent
+dialogue, a compact continuity digest, idempotency keys, and per-model EWMA
+latency/reliability statistics.
+
+Default routing uses OpenCode Go first and adapts between `kimi-k2.6` and
+`glm-5.2`. NavyAI is the second provider tier. Configured LinkAPI, NanoGPT, and
+OpenRouter keys form later tiers. Only `401`, `403`, `404`, and `429` trigger
+automatic fallback. Transport errors and `5xx` responses stop because their
+billing outcome is ambiguous.
+
+At the local compaction threshold, the selected model decides whether older
+dialogue should become a bounded continuity digest. At the hard input limit,
+compaction is required; failure stops before final generation. This can create
+one additional billed request, but never silently drops history.
+
+Use `GET /v1/roleplay/models` for configured tiers and
+`GET /v1/roleplay/metrics?session_id=...` for bounded per-session routing
+metrics. Neither route returns stored dialogue. See [the roleplay guide](roleplay.md).
 
 The Worker routes Container-backed app traffic to the named `primary` container. Keeping one container instance avoids stale auth/model state from multiple Python worker processes until durable storage is introduced.
 
@@ -107,6 +131,10 @@ Cloudflare Containers have ephemeral disk when an instance sleeps or restarts. T
 
 This is fast and cheap for bootstrap state, but it is not durable. Created users, rotated keys, disabled model overrides, and rate-limit history can disappear after container restart. Keep `ADMIN_API_KEY` configured as the bootstrap admin key. The direct LinkAPI and Codex Everywhere fast paths intentionally authenticate against this bootstrap key because they do not wake or query the Container's SQLite database.
 
+Roleplay state is different: `RoleplaySession` uses Cloudflare Durable Object
+storage and survives isolate or Container restarts. Its default inactivity TTL
+is 30 days.
+
 Use one of these architectures before relying on durable app state:
 
 - Move Python state to an external DB reachable from the container.
@@ -155,7 +183,7 @@ npm ci
 python scripts/validate_sqlite_schema.py
 python scripts/check_static_secrets.py
 python -m pytest -q
-node --test tests/test_cloudflare_worker.mjs
+npm run test:worker
 npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
