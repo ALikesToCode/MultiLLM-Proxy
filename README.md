@@ -28,13 +28,17 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - LinkAPI
   - PaLM API
   - Nineteen AI
-- 🎨 Beautiful web dashboard with dark mode support
-- 🔄 Real-time status monitoring and provider health checks
-- 📊 Request statistics and monitoring
+- 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
+- 🔄 Four-state provider recovery with bounded parallel half-open probes
+- 📊 Request, latency, response-class, and configured cost telemetry
 - 🚀 Streaming support for compatible providers
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
+
+The rationale for selectively adopting OmniRoute-style operational features
+without replacing MultiLLM's provider adapters is documented in
+[the OmniRoute assessment](docs/omniroute-assessment.md).
 
 ## Setup
 
@@ -139,6 +143,31 @@ PALM_API_KEY=your-palm-api-key
 # Nineteen AI
 NINETEEN_API_KEY=your-nineteen-api-key
 ```
+
+### Resilience and operational telemetry
+
+MultiLLM tracks normalized provider transports as `closed`, `degraded`, `open`,
+or `half_open`. The defaults admit two bounded half-open probes so two Codex
+instances can verify provider recovery without opening an unlimited retry flood.
+Fidelity-first raw transports remain retry- and circuit-free and are labeled
+`passthrough`; OpenCode is shown as `mixed` because its direct native paths are
+raw while normalized routes are managed. Configure the thresholds with the
+`CIRCUIT_BREAKER_*` settings in `.env.example`. Circuit state is process-local,
+resets on restart, and is not presented as shared across application replicas.
+
+API responses expose the selected provider, model, route decision, circuit
+state, proxy latency, and—when configured—an estimated cost through
+`X-MultiLLM-*` headers. Pricing is operator-supplied:
+
+```env
+MODEL_PRICING_USD_PER_MILLION='{"provider:model":{"input":1.00,"output":2.00},"provider:*":{"input":1.00,"output":2.00}}'
+```
+
+Exact model entries take precedence over provider wildcards and the global
+`"*"` wildcard. Estimates use the incoming prompt-token estimate and the
+caller's requested output limit; they are operational planning signals, not
+provider invoices. If no output limit is supplied, MultiLLM does not invent one.
+When no matching price is configured, the request remains visibly unpriced.
 
 5. Run the server:
 ```bash

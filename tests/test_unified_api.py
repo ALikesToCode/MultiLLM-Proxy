@@ -20,6 +20,7 @@ class UnifiedApiRouteTest(unittest.TestCase):
                 "ADMIN_API_KEY": "admin-test-key",
                 "FLASK_SECRET_KEY": "flask-test-secret",
                 "JWT_SECRET": "jwt-test-secret",
+                "OPENCODE_GO_API_KEY": "opencode-provider-key",
                 "OPENCODE_API_KEY": "opencode-provider-key",
                 "MIMO_API_KEY": "mimo-provider-key",
                 "LINKAPI_KEY": "linkapi-provider-key",

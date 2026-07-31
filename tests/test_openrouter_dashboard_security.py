@@ -75,6 +75,36 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         self.assertEqual(make_request.call_args.kwargs["api_provider"], "openrouter")
         self.assertEqual(make_request.call_args.kwargs["method"], "POST")
 
+    def test_dashboard_streams_openrouter_chunks_without_buffering(self):
+        chunks = [
+            b'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n',
+            b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        fake_response = FakeOpenRouterResponse(
+            content=b"".join(chunks),
+            headers={"Content-Type": "text/event-stream"},
+            chunks=chunks,
+        )
+
+        with patch(
+            "routes.core.ProxyService.make_request",
+            return_value=fake_response,
+        ):
+            response = self.client.post(
+                "/dashboard/openrouter/chat-completions",
+                json={
+                    "model": "openai/gpt-4o",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "text/event-stream")
+        self.assertEqual(response.get_data(), b"".join(chunks))
+        self.assertTrue(fake_response.closed)
+
     def test_dashboard_credits_uses_proxy_service(self):
         fake_response = FakeOpenRouterResponse(content=b'{"data":{"limit":10}}')
 

@@ -35,12 +35,11 @@ from route_helpers import (
     login_required,
     stream_upstream_response,
 )
+from services.redaction import redact_payload
+from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
-RAW_PASSTHROUGH_PROVIDERS = frozenset(
-    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
-)
 CODEX_EASY_EXACT_PATHS = frozenset(
     {
         "v1/models",
@@ -570,7 +569,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     request_data["stream"] = bool(data["stream"])
                     logger.debug("Google AI stream parameter explicitly set to: %s", request_data["stream"])
 
-                logger.debug("Prepared request data: %s", json.dumps(request_data))
+                logger.debug(
+                    "Prepared request data: %s",
+                    redact_payload(request_data),
+                )
 
                 response = proxy_service.make_request(
                     method="POST",

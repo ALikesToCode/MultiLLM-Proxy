@@ -1,6 +1,7 @@
 import logging
 import re
 import secrets
+import time
 
 from flask import g, jsonify, render_template, request
 
@@ -76,6 +77,7 @@ def init_error_handlers(app):
     @app.before_request
     def attach_request_id():
         g.request_id = _select_request_id()
+        g.request_started_at = time.perf_counter()
 
     @app.after_request
     def add_request_id_header(response):

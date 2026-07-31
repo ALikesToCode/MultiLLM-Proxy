@@ -50,6 +50,27 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 413)
 
+    def test_disabled_rate_limits_still_report_cost_estimation_inputs(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+        payload = {
+            "messages": [{"role": "user", "content": "12345678"}],
+            "max_completion_tokens": 5,
+        }
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json=payload,
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.metadata["provider"], "openai")
+        self.assertEqual(decision.metadata["input_tokens"], 2)
+        self.assertEqual(decision.metadata["output_tokens"], 5)
+        self.assertEqual(decision.metadata["estimated_tokens"], 7)
+
     def test_reserved_request_slot_is_finalized_into_one_exact_usage_row(self):
         user = {"username": "alice", "api_key_prefix": "mllm_live_alice"}
         reservation = RateLimitService.reserve_request_slot(

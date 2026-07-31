@@ -1,4 +1,7 @@
+import json
+import os
 import unittest
+from unittest.mock import patch
 
 from flask import Flask, g
 
@@ -80,9 +83,87 @@ class MetricsServiceAnalyticsTest(unittest.TestCase):
         self.assertEqual(record["user_id"], "alice")
         self.assertEqual(record["api_key_prefix"], "mllm_live_alice")
         self.assertEqual(record["model"], "opencode:kimi-k2.5")
+        self.assertEqual(record["endpoint"], "/v1/chat/completions")
         self.assertEqual(record["input_tokens"], 12)
+        self.assertEqual(record["route_decision"], "explicit")
+        self.assertEqual(record["circuit_state"], "closed")
         self.assertNotIn("prompt", record)
         self.assertNotIn("secret prompt", str(record))
+
+    def test_unresolved_unified_route_does_not_fabricate_model_provider(self):
+        metrics = MetricsService()
+        app = Flask(__name__)
+        with app.test_request_context(
+            "/v1/chat/completions",
+            method="POST",
+            json={"model": "gpt-4o"},
+        ):
+            metrics.track_request("unknown", 400, 5)
+
+        record = metrics.get_request_records(limit=1)[0]
+
+        self.assertEqual(record["model"], "gpt-4o")
+        self.assertEqual(record["route_decision"], "unresolved")
+
+    def test_cost_summary_labels_configured_estimates_and_coverage(self):
+        pricing = json.dumps(
+            {
+                "openai:gpt-4.1": {
+                    "input": 2,
+                    "output": 8,
+                }
+            }
+        )
+        metrics = MetricsService()
+        with patch.dict(
+            os.environ,
+            {"MODEL_PRICING_USD_PER_MILLION": pricing},
+            clear=False,
+        ):
+            metrics.track_request(
+                "openai",
+                200,
+                40,
+                timestamp=self.base_time - 5,
+                model="openai:gpt-4.1",
+                input_tokens=1_000,
+                output_tokens=500,
+            )
+            metrics.track_request(
+                "groq",
+                200,
+                20,
+                timestamp=self.base_time - 4,
+                model="groq:unpriced",
+                input_tokens=1_000,
+                output_tokens=500,
+            )
+
+        summary = metrics.get_cost_summary(now=self.base_time)
+
+        self.assertEqual(summary["basis"], "reservation")
+        self.assertEqual(summary["estimated_cost"], 0.006)
+        self.assertEqual(summary["priced_requests"], 1)
+        self.assertEqual(summary["unpriced_requests"], 1)
+        self.assertEqual(summary["coverage_percent"], 50.0)
+        self.assertEqual(summary["provider_costs"][0]["provider"], "openai")
+
+    def test_cost_summary_keeps_zero_actual_cost_on_provider_basis(self):
+        metrics = MetricsService()
+        metrics.track_request(
+            "openai",
+            200,
+            20,
+            timestamp=self.base_time - 4,
+            model="openai:gpt-4.1",
+            actual_cost=0.0,
+        )
+
+        summary = metrics.get_cost_summary(now=self.base_time)
+
+        self.assertEqual(summary["basis"], "provider")
+        self.assertEqual(summary["actual_cost"], 0.0)
+        self.assertEqual(summary["priced_requests"], 1)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import inspect
 import logging
 import re
+import time
 from functools import wraps
 from typing import Any, Callable, Dict, Mapping, Optional
 
@@ -8,8 +9,14 @@ from flask import Response, g, has_request_context, jsonify, redirect, request, 
 
 from config import Config
 from services.auth_service import AuthService
+from services.cost_service import CostService
 from services.metrics_service import MetricsService
 from services.rate_limit_service import RateLimitService
+from services.resilience_service import ResilienceService
+from services.transport_policy import (
+    provider_circuit_mode,
+    request_bypasses_circuit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +36,10 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
-    "X-MultiLLM-Summary, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
+    "X-MultiLLM-Summary, X-MultiLLM-Provider, X-MultiLLM-Model, "
+    "X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, "
+    "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
+    "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
     "X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, "
     "X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model"
@@ -266,14 +276,80 @@ def is_api_request_path(path: str) -> bool:
 
 def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
     first_segment = path.strip("/").split("/", 1)[0]
-    if first_segment == "v1" and isinstance(payload_json, dict):
+    if first_segment in {"v1", "optimize"} and isinstance(payload_json, dict):
         model = payload_json.get("model")
         if isinstance(model, str) and ":" in model:
             provider = model.split(":", 1)[0].strip().lower()
             if provider:
                 return provider
-        return "unified"
+        return "unified" if first_segment == "v1" else "optimize"
     return first_segment
+
+
+def _safe_metadata_header(value: Any, max_length: int = 160) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or len(normalized) > max_length:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_.:/+@-]+", normalized):
+        return None
+    return normalized
+
+
+def apply_operational_headers(response: Response) -> Response:
+    """Expose safe routing telemetry on authenticated proxy API responses."""
+    if not is_api_request_path(request.path) or request.path in {
+        "/health",
+        "/healthz",
+    }:
+        return response
+    if not getattr(g, "authenticated_user", None):
+        return response
+
+    try:
+        payload = request.get_json(silent=True) if request.is_json else None
+    except Exception:
+        # Response decoration must not re-read a rejected request body and
+        # replace the route's original error response.
+        payload = None
+    provider = provider_from_request_path(request.path, payload)
+    model = payload.get("model") if isinstance(payload, dict) else None
+    safe_provider = _safe_metadata_header(provider)
+    safe_model = _safe_metadata_header(model)
+
+    if safe_provider:
+        response.headers["X-MultiLLM-Provider"] = safe_provider
+        response.headers["X-MultiLLM-Circuit-State"] = (
+            "passthrough"
+            if request_bypasses_circuit(provider, request.path)
+            else ResilienceService.snapshot(provider)["state"]
+        )
+    if safe_model:
+        response.headers["X-MultiLLM-Model"] = safe_model
+
+    response.headers["X-MultiLLM-Route-Decision"] = (
+        "unresolved" if provider in {"unified", "optimize"} else "explicit"
+    )
+
+    started_at = getattr(g, "request_started_at", None)
+    if isinstance(started_at, (int, float)):
+        latency_ms = max(0, round((time.perf_counter() - started_at) * 1000))
+        response.headers["X-MultiLLM-Latency-Ms"] = str(latency_ms)
+
+    rate_limit = getattr(g, "rate_limit", None) or {}
+    estimated_cost = CostService.estimate(
+        model,
+        rate_limit.get("input_tokens"),
+        rate_limit.get("output_tokens"),
+        provider=provider,
+    )
+    if estimated_cost is not None:
+        response.headers["X-MultiLLM-Estimated-Cost-USD"] = (
+            f"{estimated_cost:.10f}".rstrip("0").rstrip(".")
+        )
+        response.headers["X-MultiLLM-Cost-Basis"] = "reservation"
+    return response
 
 
 def apply_cors_headers(response: Response, origin: Optional[str] = None) -> Response:
@@ -448,6 +524,8 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
     except Exception as error:
         logger.error("Error fetching provider stats for %s: %s", provider, error)
 
+    circuit = ResilienceService.snapshot(provider)
+    circuit["mode"] = provider_circuit_mode(provider)
     base_payload = {
         "name": provider.upper(),
         "description": details.get("description", ""),
@@ -460,6 +538,7 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
         "p95_latency": provider_stats.get("p95_latency", 0),
         "last_request_at": provider_stats.get("last_request_at"),
         "example_curl": details.get("example_curl", ""),
+        "circuit": circuit,
     }
 
     try:

@@ -14,14 +14,18 @@ from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, int
 from proxy import PROVIDER_DETAILS
 from route_helpers import (
     apply_cors_headers,
+    apply_operational_headers,
     check_provider,
     copy_upstream_response_headers,
     login_required,
     request_api_key,
+    stream_upstream_response,
 )
 from services.auth_service import AuthService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
+from services.resilience_service import ResilienceService
+from services.transport_policy import provider_circuit_mode
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +95,22 @@ def build_dashboard_analytics(metrics_service: MetricsService, providers: dict, 
     stats = stats or metrics_service.get_stats()
     provider_breakdown = metrics_service.get_provider_breakdown()
     recent_failures = metrics_service.get_recent_failures(limit=6)
+    circuits = [
+        {
+            **ResilienceService.snapshot(provider),
+            "mode": provider_circuit_mode(provider),
+        }
+        for provider in sorted(providers)
+    ]
+    circuit_counts = {
+        state: sum(
+            1
+            for circuit in circuits
+            if circuit["mode"] != "bypassed"
+            and circuit["state"] == state
+        )
+        for state in ("closed", "degraded", "open", "half_open")
+    }
 
     configured_providers = sum(
         1 for details in providers.values()
@@ -109,6 +129,9 @@ def build_dashboard_analytics(metrics_service: MetricsService, providers: dict, 
         "inactive_providers": max(configured_providers - active_providers, 0),
         "providers_with_traffic": len(provider_breakdown),
         "peak_hour": peak_hour,
+        "circuits": circuits,
+        "circuit_counts": circuit_counts,
+        "cost": metrics_service.get_cost_summary(),
     }
 
 
@@ -376,6 +399,7 @@ def register_core_routes(app) -> None:
         """
         Attach CORS and conservative cache headers.
         """
+        response = apply_operational_headers(response)
         response = apply_cors_headers(response)
 
         if request.endpoint in {"static_files", "favicon", "apple_touch_icon"}:
@@ -477,7 +501,7 @@ def register_core_routes(app) -> None:
                     }
                 )
             return render_template(
-                "status.html",
+                "operations.html",
                 system=system,
                 stats=stats,
                 analytics=analytics,
@@ -559,6 +583,8 @@ def register_core_routes(app) -> None:
 
             if isinstance(upstream_response, Response):
                 return upstream_response
+            if is_streaming:
+                return stream_upstream_response(upstream_response)
 
             return Response(
                 upstream_response.content,

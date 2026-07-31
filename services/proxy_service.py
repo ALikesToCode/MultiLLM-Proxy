@@ -11,7 +11,9 @@ from services.rate_limit_service import RateLimitService
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
+from services.resilience_service import ResilienceService
 from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
+from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -48,9 +50,6 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-RAW_PASSTHROUGH_PROVIDERS = frozenset(
-    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
-)
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -79,8 +78,6 @@ class ProxyService:
     _tokenizer = None  # Lazy-load tokenizer
     _sessions: Dict[str, requests.Session] = {}
     _session_lock = threading.RLock()
-    _circuit_breakers: Dict[str, Dict[str, Any]] = {}
-    _circuit_lock = threading.RLock()
     _mojibake_marker_pattern = re.compile(r"[\u0080-\u009f]|[ÃÂâðÐÑ]")
     _cp1252_utf8_continuation_chars = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
     _utf8_as_single_byte_sequence_pattern = re.compile(
@@ -171,57 +168,30 @@ class ProxyService:
         return method.upper() in cls.SAFE_RETRY_METHODS and not data
 
     @classmethod
-    def _circuit_settings(cls) -> tuple[int, int]:
-        try:
-            failure_threshold = int(os.environ.get("CIRCUIT_BREAKER_FAILURES", "5"))
-        except ValueError:
-            failure_threshold = 5
-        try:
-            cooldown_seconds = int(os.environ.get("CIRCUIT_BREAKER_COOLDOWN_SECONDS", "30"))
-        except ValueError:
-            cooldown_seconds = 30
-        return max(1, failure_threshold), max(1, cooldown_seconds)
-
-    @classmethod
     def _circuit_open_response(cls, api_provider: str) -> Optional[requests.Response]:
-        with cls._circuit_lock:
-            state = cls._circuit_breakers.get(api_provider)
-            if not state:
-                return None
-            opened_until = state.get("opened_until", 0)
-            if opened_until <= time.time():
-                state["opened_until"] = 0
-                return None
+        decision = ResilienceService.before_request(api_provider)
+        if decision.allowed:
+            return None
 
         response = requests.Response()
         response.status_code = 503
         payload = {
             "error": {
-                "message": f"Circuit breaker is open for {api_provider}",
-                "type": "circuit_open",
+                "message": f"Provider recovery is in progress for {api_provider}",
+                "type": decision.reason or "circuit_open",
                 "code": 503,
             }
         }
         response._content = json.dumps(payload).encode("utf-8")
         response.headers["Content-Type"] = "application/json"
+        response.headers["X-MultiLLM-Circuit-State"] = decision.state
+        if decision.retry_after:
+            response.headers["Retry-After"] = str(decision.retry_after)
         return response
 
     @classmethod
     def _record_circuit_result(cls, api_provider: str, status_code: int) -> None:
-        failure_threshold, cooldown_seconds = cls._circuit_settings()
-        with cls._circuit_lock:
-            state = cls._circuit_breakers.setdefault(
-                api_provider,
-                {"failures": 0, "opened_until": 0},
-            )
-            if status_code in cls.RETRYABLE_STATUS_CODES:
-                state["failures"] += 1
-                if state["failures"] >= failure_threshold:
-                    state["opened_until"] = time.time() + cooldown_seconds
-                return
-
-            state["failures"] = 0
-            state["opened_until"] = 0
+        ResilienceService.record_result(api_provider, status_code)
 
     @classmethod
     def get_google_access_token(cls) -> Optional[str]:
@@ -1163,7 +1133,7 @@ class ProxyService:
             or api_provider in RAW_PASSTHROUGH_PROVIDERS
         )
         try:
-            if not raw_passthrough:
+            if not raw_passthrough and retry_count == 0:
                 circuit_response = cls._circuit_open_response(api_provider)
                 if circuit_response is not None:
                     return circuit_response
@@ -1197,8 +1167,9 @@ class ProxyService:
             )
 
             # Native/raw providers expose protocol-specific streams and binary
-            # bodies. Reading, normalizing, or retrying here would alter output
-            # and could double-bill generation requests.
+            # bodies. Reading, normalizing, retrying, or substituting a local
+            # circuit response here could alter output or double-bill generation
+            # requests.
             if raw_passthrough:
                 return response
 

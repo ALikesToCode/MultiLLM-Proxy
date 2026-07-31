@@ -15,11 +15,10 @@ from route_helpers import (
 )
 from services.auth_service import AuthService
 from services.model_registry import ModelRegistry
+from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 
-RAW_CHAT_PASSTHROUGH_PROVIDERS = frozenset(
-    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
-)
+RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 NATIVE_RESPONSES_PROVIDERS = frozenset(
     {"codex-easy", "linkapi", "nanogpt", "navyai"}
 )

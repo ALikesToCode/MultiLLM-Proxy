@@ -642,15 +642,24 @@ class RateLimitService:
         if not size_decision.allowed:
             return size_decision
 
+        input_tokens = cls.estimate_input_tokens(payload_json)
+        output_tokens = cls.requested_output_tokens(payload_json)
         if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
             "0",
             "false",
             "no",
         }:
-            return LimitDecision(True, metadata=size_decision.metadata)
+            return LimitDecision(
+                True,
+                metadata={
+                    **size_decision.metadata,
+                    "provider": provider,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "estimated_tokens": input_tokens + output_tokens,
+                },
+            )
 
-        input_tokens = cls.estimate_input_tokens(payload_json)
-        output_tokens = cls.requested_output_tokens(payload_json)
         max_prompt_tokens = cls._provider_limit(provider, "MAX_PROMPT_TOKENS", 128000)
         max_output_tokens = cls._provider_limit(provider, "MAX_OUTPUT_TOKENS", 8192)
         if input_tokens > max_prompt_tokens:

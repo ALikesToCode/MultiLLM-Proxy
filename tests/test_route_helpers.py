@@ -1,13 +1,16 @@
+import json
+import os
 import unittest
 from unittest.mock import patch
 
 import requests
-from flask import Flask, Response
+from flask import Flask, Response, g
 
 from route_helpers import (
     api_authenticate_only,
     api_auth_required,
     apply_cors_headers,
+    apply_operational_headers,
     build_cors_preflight_response,
     copy_upstream_response_headers,
     extract_bearer_token,
@@ -299,6 +302,166 @@ class RouteHelperCorsTest(unittest.TestCase):
         self.assertIn("x-multillm-optimization", exposed_headers)
         self.assertIn("x-multillm-estimated-input-after", exposed_headers)
         self.assertIn("x-multillm-summary", exposed_headers)
+
+    def test_cors_exposes_route_observability_headers(self):
+        with self.app.test_request_context(
+            "/v1/chat/completions",
+            method="OPTIONS",
+            headers={"Origin": "https://client.example"},
+        ):
+            response = build_cors_preflight_response()
+
+        exposed_headers = response.headers["Access-Control-Expose-Headers"].lower()
+        for header in (
+            "x-multillm-provider",
+            "x-multillm-model",
+            "x-multillm-route-decision",
+            "x-multillm-circuit-state",
+            "x-multillm-latency-ms",
+            "x-multillm-estimated-cost-usd",
+            "x-multillm-cost-basis",
+        ):
+            self.assertIn(header, exposed_headers)
+
+
+class RouteHelperOperationalHeaderTest(unittest.TestCase):
+    def setUp(self):
+        self.app = Flask(__name__)
+
+    def test_explicit_route_headers_include_safe_provider_model_and_cost(self):
+        pricing = json.dumps(
+            {
+                "openai:gpt-4.1": {
+                    "input": 2,
+                    "output": 8,
+                }
+            }
+        )
+        with patch.dict(
+            os.environ,
+            {"MODEL_PRICING_USD_PER_MILLION": pricing},
+            clear=False,
+        ), self.app.test_request_context(
+            "/v1/chat/completions",
+            method="POST",
+            json={"model": "openai:gpt-4.1"},
+        ):
+            g.authenticated_user = {
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+            }
+            g.request_started_at = 1.0
+            g.rate_limit = {
+                "input_tokens": 1_000,
+                "output_tokens": 500,
+            }
+            with patch("route_helpers.time.perf_counter", return_value=1.125):
+                response = apply_operational_headers(Response(status=200))
+
+        self.assertEqual(response.headers["X-MultiLLM-Provider"], "openai")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Model"],
+            "openai:gpt-4.1",
+        )
+        self.assertEqual(
+            response.headers["X-MultiLLM-Route-Decision"],
+            "explicit",
+        )
+        self.assertEqual(
+            response.headers["X-MultiLLM-Circuit-State"],
+            "closed",
+        )
+        self.assertEqual(response.headers["X-MultiLLM-Latency-Ms"], "125")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Estimated-Cost-USD"],
+            "0.006",
+        )
+        self.assertEqual(
+            response.headers["X-MultiLLM-Cost-Basis"],
+            "reservation",
+        )
+
+    def test_unsafe_model_value_is_not_reflected_in_response_header(self):
+        with self.app.test_request_context(
+            "/v1/chat/completions",
+            method="POST",
+            json={"model": "openai:gpt\r\nX-Evil: true"},
+        ):
+            g.authenticated_user = {
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+            }
+            response = apply_operational_headers(Response(status=200))
+
+        self.assertNotIn("X-MultiLLM-Model", response.headers)
+
+    def test_rejected_body_cannot_replace_original_error_response(self):
+        with self.app.test_request_context(
+            "/optimize/v1/chat/completions",
+            method="POST",
+            data=b"{",
+            content_type="application/json",
+        ), patch(
+            "route_helpers.request.get_json",
+            side_effect=Exception("body rejected"),
+        ):
+            g.authenticated_user = {
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+            }
+            response = apply_operational_headers(Response(status=413))
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.headers["X-MultiLLM-Provider"], "optimize")
+
+    def test_unauthenticated_response_does_not_expose_operational_metadata(self):
+        pricing = json.dumps(
+            {
+                "openai:gpt-4.1": {
+                    "input": 2,
+                    "output": 8,
+                }
+            }
+        )
+        with patch.dict(
+            os.environ,
+            {"MODEL_PRICING_USD_PER_MILLION": pricing},
+            clear=False,
+        ), self.app.test_request_context(
+            "/v1/chat/completions",
+            method="POST",
+            json={"model": "openai:gpt-4.1"},
+        ):
+            g.request_started_at = 1.0
+            g.rate_limit = {
+                "input_tokens": 1_000,
+                "output_tokens": 500,
+            }
+            response = apply_operational_headers(Response(status=401))
+
+        self.assertFalse(
+            any(
+                name.startswith("X-MultiLLM-")
+                for name in response.headers.keys()
+            )
+        )
+
+    def test_raw_route_reports_passthrough_instead_of_false_closed_circuit(self):
+        with self.app.test_request_context(
+            "/navyai/v1/chat/completions",
+            method="POST",
+            json={"model": "glm-5.2"},
+        ):
+            g.authenticated_user = {
+                "username": "alice",
+                "api_key_prefix": "mllm_live_alice",
+            }
+            response = apply_operational_headers(Response(status=200))
+
+        self.assertEqual(
+            response.headers["X-MultiLLM-Circuit-State"],
+            "passthrough",
+        )
 
 
 class RouteHelperRateLimitTest(unittest.TestCase):

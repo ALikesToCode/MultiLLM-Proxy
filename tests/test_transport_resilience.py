@@ -13,6 +13,7 @@ class FakeSession:
         self.responses = list(responses)
         self.request_calls = 0
         self.mounts = []
+        self.cookies = requests.cookies.RequestsCookieJar()
 
     def mount(self, prefix, adapter):
         self.mounts.append((prefix, adapter))
@@ -41,7 +42,7 @@ class TransportResilienceTest(unittest.TestCase):
         sys.modules.pop("services.proxy_service", None)
         self.proxy_module = importlib.import_module("services.proxy_service")
         self.proxy_module.ProxyService._sessions = {}
-        self.proxy_module.ProxyService._circuit_breakers = {}
+        self.proxy_module.ResilienceService.reset()
 
     def tearDown(self):
         os.environ.clear()
@@ -174,7 +175,6 @@ class TransportResilienceTest(unittest.TestCase):
         self.assertEqual(second.status_code, 503)
         self.assertEqual(second.json()["error"]["type"], "circuit_open")
         self.assertEqual(fake_session.request_calls, 1)
-
 
 if __name__ == "__main__":
     unittest.main()

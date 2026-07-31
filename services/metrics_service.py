@@ -2,9 +2,14 @@ import time
 from collections import deque
 from threading import Lock
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from flask import g, has_request_context, request
+
+from services.cost_service import CostService
+from services.resilience_service import ResilienceService
+from services.transport_policy import request_bypasses_circuit
+
 
 class MetricsService:
     _instance = None
@@ -90,17 +95,35 @@ class MetricsService:
         rate_limit = getattr(g, "rate_limit", None) or {}
         payload = request.get_json(silent=True) if request.is_json else None
         model = payload.get("model") if isinstance(payload, dict) else None
-        if model and ":" not in str(model) and provider:
+        if (
+            model
+            and ":" not in str(model)
+            and provider not in {"", "unknown", "unified", "optimize"}
+        ):
             model = f"{provider}:{model}"
+        first_segment = request.path.strip("/").split("/", 1)[0]
+        route_decision = (
+            "unresolved"
+            if first_segment in {"v1", "optimize"}
+            and (not isinstance(model, str) or ":" not in model)
+            else "explicit"
+        )
 
         return {
             "request_id": getattr(g, "request_id", None),
             "user_id": user.get("username") or user.get("id"),
             "api_key_prefix": user.get("api_key_prefix"),
             "model": model,
+            "endpoint": request.path,
             "input_tokens": rate_limit.get("input_tokens"),
             "output_tokens": rate_limit.get("output_tokens"),
             "estimated_tokens": rate_limit.get("estimated_tokens"),
+            "circuit_state": (
+                "passthrough"
+                if request_bypasses_circuit(provider, request.path)
+                else ResilienceService.snapshot(provider).get("state")
+            ),
+            "route_decision": route_decision,
         }
 
     def track_request(
@@ -119,10 +142,31 @@ class MetricsService:
         estimated_cost: Optional[float] = None,
         actual_cost: Optional[float] = None,
         ttft_ms: Optional[float] = None,
+        endpoint: Optional[str] = None,
+        circuit_state: Optional[str] = None,
+        route_decision: Optional[str] = None,
     ):
         """Track a new request"""
         now = timestamp if timestamp is not None else time.time()
         context_metadata = self._request_context_metadata(provider)
+        resolved_model = model or context_metadata.get("model")
+        resolved_input_tokens = (
+            input_tokens
+            if input_tokens is not None
+            else context_metadata.get("input_tokens")
+        )
+        resolved_output_tokens = (
+            output_tokens
+            if output_tokens is not None
+            else context_metadata.get("output_tokens")
+        )
+        if estimated_cost is None:
+            estimated_cost = CostService.estimate(
+                resolved_model,
+                resolved_input_tokens,
+                resolved_output_tokens,
+                provider=provider,
+            )
         self.requests.append({
             'timestamp': now,
             'provider': provider,
@@ -131,13 +175,23 @@ class MetricsService:
             'request_id': request_id or context_metadata.get("request_id"),
             'user_id': user_id or context_metadata.get("user_id"),
             'api_key_prefix': api_key_prefix or context_metadata.get("api_key_prefix"),
-            'model': model or context_metadata.get("model"),
-            'input_tokens': input_tokens if input_tokens is not None else context_metadata.get("input_tokens"),
-            'output_tokens': output_tokens if output_tokens is not None else context_metadata.get("output_tokens"),
+            'model': resolved_model,
+            'endpoint': endpoint or context_metadata.get("endpoint"),
+            'input_tokens': resolved_input_tokens,
+            'output_tokens': resolved_output_tokens,
             'estimated_tokens': estimated_tokens if estimated_tokens is not None else context_metadata.get("estimated_tokens"),
             'estimated_cost': estimated_cost,
             'actual_cost': actual_cost,
+            'cost_basis': (
+                "provider"
+                if actual_cost is not None
+                else "reservation"
+                if estimated_cost is not None
+                else None
+            ),
             'ttft_ms': ttft_ms,
+            'circuit_state': circuit_state or context_metadata.get("circuit_state"),
+            'route_decision': route_decision or context_metadata.get("route_decision"),
         })
     
     def get_stats(self, hours=24, now=None):
@@ -326,17 +380,119 @@ class MetricsService:
                 "api_key_prefix": record.get("api_key_prefix"),
                 "provider": record["provider"],
                 "model": record.get("model"),
+                "endpoint": record.get("endpoint"),
                 "status_code": record["status_code"],
                 "input_tokens": record.get("input_tokens"),
                 "output_tokens": record.get("output_tokens"),
                 "estimated_tokens": record.get("estimated_tokens"),
                 "estimated_cost": record.get("estimated_cost"),
                 "actual_cost": record.get("actual_cost"),
+                "cost_basis": record.get("cost_basis"),
                 "response_time": round(record["response_time"], 2),
                 "ttft_ms": record.get("ttft_ms"),
+                "circuit_state": record.get("circuit_state"),
+                "route_decision": record.get("route_decision"),
             }
             for record in records
         ]
+
+    def get_cost_summary(self, hours=24, now=None):
+        """Summarize configured price estimates without claiming provider billing."""
+        recent_requests = self._get_recent_requests(hours=hours, now=now)
+        priced_requests = [
+            record
+            for record in recent_requests
+            if record.get("actual_cost") is not None
+            or record.get("estimated_cost") is not None
+        ]
+        total_actual = sum(
+            float(record.get("actual_cost") or 0)
+            for record in priced_requests
+        )
+        total_estimated = sum(
+            float(record.get("estimated_cost") or 0)
+            for record in priced_requests
+        )
+        effective_total = sum(
+            float(
+                record.get("actual_cost")
+                if record.get("actual_cost") is not None
+                else record.get("estimated_cost") or 0
+            )
+            for record in priced_requests
+        )
+        providers: dict[str, dict[str, Any]] = {}
+        for record in priced_requests:
+            provider = record["provider"]
+            bucket = providers.setdefault(
+                provider,
+                {
+                    "provider": provider,
+                    "requests": 0,
+                    "estimated_cost": 0.0,
+                    "actual_cost": 0.0,
+                    "effective_cost": 0.0,
+                },
+            )
+            estimated = float(record.get("estimated_cost") or 0)
+            actual = float(record.get("actual_cost") or 0)
+            bucket["requests"] += 1
+            bucket["estimated_cost"] += estimated
+            bucket["actual_cost"] += actual
+            bucket["effective_cost"] += (
+                actual
+                if record.get("actual_cost") is not None
+                else estimated
+            )
+
+        provider_costs = []
+        for bucket in providers.values():
+            provider_costs.append(
+                {
+                    **bucket,
+                    "estimated_cost": round(bucket["estimated_cost"], 10),
+                    "actual_cost": round(bucket["actual_cost"], 10),
+                    "effective_cost": round(bucket["effective_cost"], 10),
+                }
+            )
+
+        total_requests = len(recent_requests)
+        has_actual = any(
+            record.get("actual_cost") is not None
+            for record in priced_requests
+        )
+        has_estimate_only = any(
+            record.get("actual_cost") is None
+            and record.get("estimated_cost") is not None
+            for record in priced_requests
+        )
+        if has_actual and has_estimate_only:
+            basis = "mixed"
+        elif has_actual:
+            basis = "provider"
+        elif priced_requests:
+            basis = "reservation"
+        else:
+            basis = "unpriced"
+        return {
+            "currency": "USD",
+            "basis": basis,
+            "estimated_cost": round(total_estimated, 10),
+            "actual_cost": round(total_actual, 10),
+            "effective_cost": round(effective_total, 10),
+            "priced_requests": len(priced_requests),
+            "unpriced_requests": total_requests - len(priced_requests),
+            "coverage_percent": round(
+                (len(priced_requests) / total_requests * 100)
+                if total_requests
+                else 0,
+                1,
+            ),
+            "provider_costs": sorted(
+                provider_costs,
+                key=lambda item: (-item["effective_cost"], item["provider"]),
+            ),
+        }
     
     def get_recent_activity(self, limit=10):
         """Get recent activity for the status page"""
