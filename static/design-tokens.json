@@ -1,0 +1,73 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "color": {
+    "ink": {
+      "950": { "$value": "#07131f", "$type": "color" },
+      "900": { "$value": "#0d1d2d", "$type": "color" },
+      "700": { "$value": "#29475f", "$type": "color" },
+      "500": { "$value": "#657c8e", "$type": "color" },
+      "200": { "$value": "#ccd7df", "$type": "color" },
+      "100": { "$value": "#e6edf1", "$type": "color" },
+      "50": { "$value": "#f3f7f9", "$type": "color" }
+    },
+    "paper": { "$value": "#fbfcfc", "$type": "color" },
+    "cyan": {
+      "700": { "$value": "#087d8d", "$type": "color" },
+      "600": { "$value": "#0891a4", "$type": "color" },
+      "100": { "$value": "#d8f1f3", "$type": "color" }
+    },
+    "positive": {
+      "700": { "$value": "#0f7658", "$type": "color" },
+      "100": { "$value": "#dff4e9", "$type": "color" }
+    },
+    "warning": {
+      "700": { "$value": "#a45c07", "$type": "color" },
+      "100": { "$value": "#fff0cf", "$type": "color" }
+    },
+    "danger": {
+      "700": { "$value": "#b43f50", "$type": "color" },
+      "100": { "$value": "#fee8eb", "$type": "color" }
+    }
+  },
+  "space": {
+    "1": { "$value": "0.25rem", "$type": "dimension" },
+    "2": { "$value": "0.5rem", "$type": "dimension" },
+    "3": { "$value": "0.75rem", "$type": "dimension" },
+    "4": { "$value": "1rem", "$type": "dimension" },
+    "5": { "$value": "1.25rem", "$type": "dimension" },
+    "6": { "$value": "1.5rem", "$type": "dimension" },
+    "8": { "$value": "2rem", "$type": "dimension" },
+    "12": { "$value": "3rem", "$type": "dimension" }
+  },
+  "radius": {
+    "small": { "$value": "0.45rem", "$type": "dimension" },
+    "medium": { "$value": "0.8rem", "$type": "dimension" },
+    "large": { "$value": "1.1rem", "$type": "dimension" }
+  },
+  "shadow": {
+    "small": {
+      "$value": {
+        "color": "#07131f0f",
+        "offsetX": "0",
+        "offsetY": "1px",
+        "blur": "2px",
+        "spread": "0"
+      },
+      "$type": "shadow"
+    },
+    "medium": {
+      "$value": {
+        "color": "#07131f17",
+        "offsetX": "0",
+        "offsetY": "16px",
+        "blur": "45px",
+        "spread": "0"
+      },
+      "$type": "shadow"
+    }
+  },
+  "motion": {
+    "fast": { "$value": "150ms", "$type": "duration" },
+    "standard": { "$value": "220ms", "$type": "duration" }
+  }
+}

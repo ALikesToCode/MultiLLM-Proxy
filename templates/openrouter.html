@@ -1,372 +1,159 @@
 {% extends "base.html" %}
 
+{% block title %}OpenRouter lab · MultiLLM Proxy{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css') }}">
+{% endblock %}
+
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-    <!-- Header -->
-    <div class="text-center mb-12">
-        <h1 class="text-4xl font-extrabold text-gray-900 sm:text-5xl sm:tracking-tight lg:text-6xl">
-            <span class="bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">OpenRouter</span> Dashboard
-        </h1>
-        <p class="mt-5 max-w-3xl mx-auto text-xl text-gray-500">
-            Access cutting-edge AI models through a unified interface
-        </p>
-        <div class="mt-4 flex justify-center">
-            <span id="credits-display" class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                <svg class="mr-1.5 h-2 w-2 text-green-400" fill="currentColor" viewBox="0 0 8 8">
-                    <circle cx="4" cy="4" r="3" />
-                </svg>
-                Credits Available: Loading...
-            </span>
+{% set proxy_root = request.url_root.rstrip('/') %}
+<div id="openrouter-lab" data-admin="{{ 'true' if user and user.is_admin else 'false' }}">
+    <section class="surface-intro">
+        <div>
+            <p class="eyebrow">Provider workbench</p>
+            <h1>OpenRouter lab</h1>
+            <p>
+                Exercise one model at a time through the server-side dashboard proxy.
+                Credentials never enter browser JavaScript, and streamed output renders as plain text.
+            </p>
         </div>
-    </div>
-
-    <!-- OpenRouter Endpoints Section -->
-    <div class="mb-12">
-        <div class="bg-white shadow-md rounded-xl p-6 card hover:shadow-lg">
-            <div class="flex items-center justify-between mb-4">
-                <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-link mr-2 text-purple-500"></i>
-                    OpenRouter Endpoints
-                </h2>
-                <span class="text-xs px-2 py-1 rounded-full bg-purple-100 text-purple-800">Quick Access</span>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Chat Completions</h3>
-                        <span class="badge badge-primary">v1</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/openrouter/v1/chat/completions" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/chat/completions"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Completions</h3>
-                        <span class="badge badge-primary">v1</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/openrouter/v1/completions" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/completions"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-indigo-800">OpenRouter Models</h3>
-                        <span class="badge badge-primary">v1</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/openrouter/v1/models" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/v1/models"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="p-4 bg-gradient-to-br from-green-50 to-blue-50 rounded-lg border border-green-100">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-sm font-medium text-indigo-800">Legacy Models Route</h3>
-                        <span class="badge badge-secondary">Compatibility</span>
-                    </div>
-                    <div class="relative">
-                        <input type="text" value="http://localhost:8000/openrouter/models" readonly
-                               class="w-full py-2 px-3 pr-20 bg-white border border-indigo-200 rounded-md text-sm text-gray-700">
-                        <button onclick="copyToClipboard(this)" data-value="http://localhost:8000/openrouter/models"
-                                class="absolute right-1 top-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded px-2 py-1 text-xs transition-colors">
-                            <i class="fas fa-copy mr-1"></i> Copy
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- CURL Examples -->
-            <div class="mt-6">
-                <div class="flex items-center mb-3">
-                    <h3 class="text-sm font-medium text-indigo-800">CURL Examples</h3>
-                    <span class="ml-2 badge badge-secondary">Usage</span>
-                </div>
-                
-                <!-- Example tabs -->
-                <div class="mb-4">
-                    <div class="flex space-x-2 border-b">
-                        <button id="tab-chat" class="px-3 py-2 text-sm font-medium text-indigo-600 border-b-2 border-indigo-500" onclick="showTab('chat')">
-                            Chat Completion
-                        </button>
-                        <button id="tab-models" class="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700" onclick="showTab('models')">
-                            List Models
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Chat completion example -->
-                <div id="example-chat" class="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto">
-                    <pre class="text-xs"><code>curl http://localhost:8000/openrouter/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "model": "openai/gpt-3.5-turbo",
-    "messages": [
-      {
-        "role": "system",
-        "content": "You are a helpful assistant."
-      },
-      {
-        "role": "user",
-        "content": "Hello!"
-      }
-    ]
-  }'</code></pre>
-                </div>
-                
-                <!-- Models example (hidden by default) -->
-                <div id="example-models" class="hidden bg-gray-800 text-white p-4 rounded-lg overflow-x-auto">
-                    <pre class="text-xs"><code>curl http://localhost:8000/openrouter/v1/models \
-  -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
-                </div>
-            </div>
-            
-            <script>
-                function showTab(tab) {
-                    // Hide all examples
-                    document.getElementById('example-chat').classList.add('hidden');
-                    document.getElementById('example-models').classList.add('hidden');
-                    
-                    // Show selected example
-                    document.getElementById(`example-${tab}`).classList.remove('hidden');
-                    
-                    // Update tab styling
-                    document.getElementById('tab-chat').classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
-                    document.getElementById('tab-chat').classList.add('text-gray-500', 'hover:text-gray-700');
-                    document.getElementById('tab-models').classList.remove('text-indigo-600', 'border-b-2', 'border-indigo-500');
-                    document.getElementById('tab-models').classList.add('text-gray-500', 'hover:text-gray-700');
-                    
-                    // Apply active styling to selected tab
-                    document.getElementById(`tab-${tab}`).classList.remove('text-gray-500', 'hover:text-gray-700');
-                    document.getElementById(`tab-${tab}`).classList.add('text-indigo-600', 'border-b-2', 'border-indigo-500');
-                }
-            </script>
+        <div class="surface-stat">
+            <strong id="credits-display">Loading…</strong>
+            <span>reported key balance</span>
         </div>
+    </section>
+
+    {% if not user or not user.is_admin %}
+    <div class="alert" role="alert">
+        <strong>Administrator access required.</strong>
+        <span>The workbench and credit lookup are disabled for this account.</span>
     </div>
+    {% endif %}
 
-    <!-- Features Section -->
-    <div class="pb-12">
-        <div class="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            <div class="relative bg-white pt-5 px-4 pb-6 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden openrouter-card">
-                <div class="absolute inset-0 overflow-hidden">
-                    <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 to-white opacity-50"></div>
-                </div>
-                <div class="relative">
-                    <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white mb-4 feature-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                        </svg>
+    <div class="lab-grid">
+        <aside class="lab-workspace">
+            <section class="panel" aria-labelledby="endpoint-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="endpoint-heading">Proxy endpoints</h2>
+                        <p>Use your MultiLLM key from server-side clients.</p>
                     </div>
-                    <h3 class="text-lg font-medium text-gray-900">Premium AI Models</h3>
-                    <p class="mt-2 text-base text-gray-500">
-                        Access top models like Claude, GPT-4, Mistral, and Llama without managing multiple API keys.
-                    </p>
-                </div>
-            </div>
-
-            <div class="relative bg-white pt-5 px-4 pb-6 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden openrouter-card">
-                <div class="absolute inset-0 overflow-hidden">
-                    <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 to-white opacity-50"></div>
-                </div>
-                <div class="relative">
-                    <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white mb-4 feature-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
+                    <span class="panel-tag">OpenAI compatible</span>
+                </header>
+                <div class="panel__body endpoint-stack">
+                    {% for name, path in [
+                        ('Chat completions', '/openrouter/v1/chat/completions'),
+                        ('Text completions', '/openrouter/v1/completions'),
+                        ('Model catalog', '/openrouter/v1/models'),
+                        ('Legacy models', '/openrouter/models')
+                    ] %}
+                    <div class="endpoint-card">
+                        <span>
+                            <strong>{{ name }}</strong>
+                            <code>{{ proxy_root }}{{ path }}</code>
+                        </span>
+                        <button class="copy-button" type="button" data-copy-value="{{ proxy_root }}{{ path }}">Copy</button>
                     </div>
-                    <h3 class="text-lg font-medium text-gray-900">Unified API</h3>
-                    <p class="mt-2 text-base text-gray-500">
-                        One consistent API format across all models. No need to adapt to different provider specifications.
-                    </p>
+                    {% endfor %}
                 </div>
-            </div>
+            </section>
 
-            <div class="relative bg-white pt-5 px-4 pb-6 sm:pt-6 sm:px-6 shadow rounded-lg overflow-hidden openrouter-card">
-                <div class="absolute inset-0 overflow-hidden">
-                    <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 to-white opacity-50"></div>
-                </div>
-                <div class="relative">
-                    <div class="inline-flex items-center justify-center h-12 w-12 rounded-md bg-indigo-500 text-white mb-4 feature-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                        </svg>
+            <section class="panel" aria-labelledby="model-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="model-heading">Model target</h2>
+                        <p>Examples are editable. Use any ID currently available to your OpenRouter key.</p>
                     </div>
-                    <h3 class="text-lg font-medium text-gray-900">Usage Tracking</h3>
-                    <p class="mt-2 text-base text-gray-500">
-                        Track your OpenRouter credit usage and model performance all from one dashboard.
-                    </p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Model Selection -->
-    <div class="bg-white shadow rounded-lg overflow-hidden mb-8">
-        <div class="px-4 py-5 sm:p-6">
-            <h3 class="text-lg font-medium leading-6 text-gray-900">Select a Model</h3>
-            <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                <button data-model="openai/gpt-4" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    GPT-4
-                </button>
-                <button data-model="anthropic/claude-3-opus" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Claude 3 Opus
-                </button>
-                <button data-model="anthropic/claude-3-sonnet" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Claude 3 Sonnet
-                </button>
-                <button data-model="google/gemini-pro" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Gemini Pro
-                </button>
-                <button data-model="meta-llama/llama-3-70b-instruct" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Llama 3 70B
-                </button>
-                <button data-model="mistralai/mistral-7b-instruct" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Mistral 7B
-                </button>
-                <button data-model="anthropic/claude-3-haiku" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Claude 3 Haiku
-                </button>
-                <button data-model="cohere/command-r" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Cohere Command
-                </button>
-                <button data-model="perplexity/pplx-7b-online" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    <span class="absolute -top-2 -right-2 new-badge">Online</span>
-                    Perplexity 7B
-                </button>
-                <button data-model="openai/gpt-3.5-turbo" class="model-button relative px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    GPT-3.5
-                </button>
-            </div>
-            <div id="selected-model-display" class="mt-4 text-sm text-gray-500">No model selected</div>
-        </div>
-    </div>
-
-    <!-- Input Area -->
-    <div class="bg-white shadow rounded-lg overflow-hidden mb-8">
-        <div class="px-4 py-5 sm:p-6">
-            <h3 class="text-lg font-medium leading-6 text-gray-900">Test the Model</h3>
-            <div class="mt-4">
-                <label for="prompt-input" class="block text-sm font-medium text-gray-700">Enter your prompt</label>
-                <div class="mt-1">
-                    <textarea id="prompt-input" rows="4" class="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md" placeholder="Write a short poem about artificial intelligence"></textarea>
-                </div>
-            </div>
-            <div class="mt-4 flex space-x-4">
-                <button id="test-button" disabled class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
-                    Test Model
-                </button>
-                <div class="flex items-center">
-                    <input id="streaming-toggle" type="checkbox" checked class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
-                    <label for="streaming-toggle" class="ml-2 block text-sm text-gray-900">
-                        Enable streaming
+                </header>
+                <div class="panel__body form-stack">
+                    <label>
+                        <span class="field-label">OpenRouter model ID</span>
+                        <input id="model-input" class="field" type="text" value="openai/gpt-4.1-mini" autocomplete="off">
                     </label>
+                    <div class="model-picker" aria-label="Example models">
+                        <button type="button" class="model-button is-selected" data-model="openai/gpt-4.1-mini">GPT-4.1 mini</button>
+                        <button type="button" class="model-button" data-model="anthropic/claude-sonnet-4">Claude Sonnet 4</button>
+                        <button type="button" class="model-button" data-model="google/gemini-2.5-flash">Gemini 2.5 Flash</button>
+                        <button type="button" class="model-button" data-model="deepseek/deepseek-r1">DeepSeek R1</button>
+                    </div>
+                    <span id="selected-model-display" class="field-hint">Selected model: openai/gpt-4.1-mini</span>
                 </div>
-            </div>
-        </div>
-    </div>
+            </section>
+        </aside>
 
-    <!-- Response Area -->
-    <div class="bg-white shadow rounded-lg overflow-hidden">
-        <div class="px-4 py-5 sm:p-6">
-            <div class="flex items-center justify-between">
-                <h3 class="text-lg font-medium leading-6 text-gray-900">Response</h3>
-                <div id="response-status" class="hidden items-center">
-                    <div class="loading-spinner mr-2"></div>
-                    <span class="text-sm text-gray-500">Generating response...</span>
-                </div>
-            </div>
-            <div class="mt-4">
-                <div id="response-area" class="response-area">
-                    <div class="text-gray-400 italic">The model response will appear here...</div>
-                </div>
-            </div>
-            <div class="mt-4 flex justify-between items-center">
-                <div id="tokens-info" class="text-sm text-gray-500">
-                    <!-- Tokens info will be populated by JavaScript -->
-                </div>
-                <button id="copy-response" class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                    </svg>
-                    Copy
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Credit Usage Progress -->
-    <div class="mt-8 bg-white shadow rounded-lg overflow-hidden">
-        <div class="px-4 py-5 sm:p-6">
-            <h3 class="text-lg font-medium leading-6 text-gray-900">Credit Usage</h3>
-            <div class="mt-4">
-                <div class="relative pt-1">
-                    <div class="flex mb-2 items-center justify-between">
-                        <div>
-                            <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-indigo-600 bg-indigo-200">
-                                Usage
-                            </span>
-                        </div>
-                        <div class="text-right">
-                            <span id="usage-percentage" class="text-xs font-semibold inline-block text-indigo-600">
-                                0%
-                            </span>
-                        </div>
+        <section class="lab-workspace">
+            <article class="panel" aria-labelledby="prompt-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="prompt-heading">Request composer</h2>
+                        <p>One user message, optional SSE streaming, no hidden prompt rewriting.</p>
                     </div>
-                    <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-indigo-200">
-                        <div id="usage-bar" style="width:0%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-indigo-500"></div>
+                    <span class="panel-tag">Session BFF</span>
+                </header>
+                <div class="panel__body lab-controls">
+                    <label>
+                        <span class="field-label">Prompt</span>
+                        <textarea id="prompt-input" class="field-textarea" rows="6" placeholder="Ask the selected model…" maxlength="16000"></textarea>
+                    </label>
+                    <div class="lab-control-row">
+                        <label class="switch-field">
+                            <input id="streaming-toggle" type="checkbox" checked>
+                            <span>
+                                <strong>Stream response</strong>
+                                <small>Render SSE deltas as they arrive.</small>
+                            </span>
+                        </label>
+                        <button id="test-button" class="button button--primary" type="button" {% if not user or not user.is_admin %}disabled{% endif %}>
+                            Run request
+                        </button>
                     </div>
                 </div>
-                <p class="text-sm text-gray-500">
-                    <span id="usage-details">Loading credit usage details...</span>
-                </p>
-            </div>
-        </div>
+            </article>
+
+            <article class="panel" aria-labelledby="response-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="response-heading">Response</h2>
+                        <p id="tokens-info">Token usage appears after the provider reports it.</p>
+                    </div>
+                    <div class="response-toolbar">
+                        <span id="response-status" class="response-status hidden">
+                            <span class="loading-spinner" aria-hidden="true"></span>
+                            Generating
+                        </span>
+                        <button id="copy-response" class="button button--quiet" type="button">Copy output</button>
+                    </div>
+                </header>
+                <div class="panel__body">
+                    <div id="response-area" class="response-area" tabindex="0">
+                        <div class="response-placeholder">Model output will appear here.</div>
+                    </div>
+                </div>
+            </article>
+
+            <article class="panel" aria-labelledby="usage-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="usage-heading">OpenRouter usage</h2>
+                        <p>Provider-reported key usage; independent from configured MultiLLM estimates.</p>
+                    </div>
+                    <span id="usage-percentage" class="panel-tag">0%</span>
+                </header>
+                <div class="panel__body">
+                    <div class="usage-meter" aria-hidden="true"><span id="usage-bar" style="width: 0%"></span></div>
+                    <div class="usage-copy">
+                        <span id="usage-details">Loading credit usage details…</span>
+                        <span>OpenRouter</span>
+                    </div>
+                </div>
+            </article>
+        </section>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-    // Function to copy text to clipboard
-    function copyToClipboard(button) {
-        const textToCopy = button.getAttribute('data-value');
-        const tempInput = document.createElement('input');
-        tempInput.value = textToCopy;
-        document.body.appendChild(tempInput);
-        tempInput.select();
-        document.execCommand('copy');
-        document.body.removeChild(tempInput);
-        
-        // Change button text temporarily to indicate success
-        const originalHTML = button.innerHTML;
-        button.innerHTML = '<i class="fas fa-check mr-1"></i> Copied!';
-        button.classList.remove('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
-        button.classList.add('bg-green-100', 'hover:bg-green-200', 'text-green-700');
-        
-        setTimeout(() => {
-            button.innerHTML = originalHTML;
-            button.classList.remove('bg-green-100', 'hover:bg-green-200', 'text-green-700');
-            button.classList.add('bg-indigo-100', 'hover:bg-indigo-200', 'text-indigo-700');
-        }, 2000);
-    }
-
-</script>
-{% endblock %} 
+<script src="{{ url_for('static', filename='js/openrouter.js') }}"></script>
+{% endblock %}

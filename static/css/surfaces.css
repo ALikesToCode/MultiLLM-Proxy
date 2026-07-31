@@ -1,0 +1,343 @@
+.surface-intro {
+    display: flex;
+    margin-bottom: 1.5rem;
+    align-items: end;
+    justify-content: space-between;
+    gap: 2rem;
+}
+
+.surface-intro h1 {
+    margin: 0;
+    font-size: clamp(2.2rem, 4vw, 4rem);
+    letter-spacing: -0.055em;
+}
+
+.surface-intro p:not(.eyebrow) {
+    max-width: 44rem;
+    margin: 0.8rem 0 0;
+    color: var(--ink-600);
+    line-height: 1.65;
+}
+
+.surface-stat {
+    flex: 0 0 auto;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-md);
+    background: var(--white);
+    text-align: right;
+}
+
+.surface-stat strong,
+.surface-stat span {
+    display: block;
+}
+
+.surface-stat strong {
+    font-size: 1.45rem;
+}
+
+.surface-stat span {
+    margin-top: 0.15rem;
+    color: var(--ink-500);
+    font-size: 0.67rem;
+}
+
+.surface-grid {
+    display: grid;
+    grid-template-columns: minmax(18rem, 0.34fr) minmax(0, 0.66fr);
+    align-items: start;
+    gap: 1.25rem;
+}
+
+.form-stack {
+    display: grid;
+    gap: 1rem;
+}
+
+.switch-field {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+}
+
+.switch-field input {
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.18rem;
+    accent-color: var(--cyan-700);
+}
+
+.switch-field strong,
+.switch-field small {
+    display: block;
+}
+
+.switch-field strong {
+    font-size: 0.78rem;
+}
+
+.switch-field small {
+    margin-top: 0.25rem;
+    color: var(--ink-500);
+    font-size: 0.68rem;
+    line-height: 1.45;
+}
+
+.table-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.4rem;
+}
+
+.avatar-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.avatar-cell__mark {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--cyan-100);
+    color: var(--cyan-700);
+    font-size: 0.72rem;
+    font-weight: 750;
+}
+
+.secret-dialog {
+    width: min(100% - 2rem, 35rem);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 30px 80px rgb(7 19 31 / 30%);
+}
+
+.secret-dialog::backdrop {
+    background: rgb(7 19 31 / 72%);
+    backdrop-filter: blur(4px);
+}
+
+.secret-dialog__body {
+    padding: 1.5rem;
+}
+
+.secret-dialog h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.secret-dialog p {
+    color: var(--ink-600);
+    font-size: 0.8rem;
+    line-height: 1.55;
+}
+
+.secret-value {
+    display: block;
+    padding: 0.85rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    background: var(--ink-50);
+    color: var(--ink-800);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    overflow-wrap: anywhere;
+}
+
+.secret-dialog__actions {
+    display: flex;
+    margin-top: 1rem;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.lab-grid {
+    display: grid;
+    grid-template-columns: minmax(20rem, 0.4fr) minmax(0, 0.6fr);
+    align-items: start;
+    gap: 1.25rem;
+}
+
+.endpoint-stack {
+    display: grid;
+    gap: 0.65rem;
+}
+
+.endpoint-card {
+    display: grid;
+    padding: 0.8rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid var(--ink-100);
+    border-radius: var(--radius-md);
+    background: var(--ink-50);
+}
+
+.endpoint-card strong,
+.endpoint-card code {
+    display: block;
+}
+
+.endpoint-card strong {
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+}
+
+.endpoint-card code {
+    color: var(--ink-500);
+    font-size: 0.62rem;
+    overflow-wrap: anywhere;
+}
+
+.model-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+}
+
+.model-button {
+    min-height: 3rem;
+    padding: 0.65rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    color: var(--ink-700);
+    font-size: 0.75rem;
+    font-weight: 680;
+    text-align: left;
+    cursor: pointer;
+}
+
+.model-button:hover {
+    border-color: var(--cyan-600);
+}
+
+.model-button.is-selected {
+    border-color: var(--ink-950);
+    background: var(--ink-950);
+    color: var(--white);
+}
+
+.lab-workspace {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.lab-controls {
+    display: grid;
+    gap: 1rem;
+}
+
+.lab-control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+}
+
+.response-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.response-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--ink-500);
+    font-size: 0.7rem;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 2px solid var(--ink-200);
+    border-top-color: var(--cyan-600);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.response-area {
+    min-height: 18rem;
+    max-height: 32rem;
+    padding: 1rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-md);
+    background: var(--ink-950);
+    color: var(--ink-100);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.76rem;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    overflow: auto;
+}
+
+.response-placeholder {
+    color: var(--ink-300);
+}
+
+.usage-meter {
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--ink-100);
+    overflow: hidden;
+}
+
+.usage-meter > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--cyan-600);
+}
+
+.usage-copy {
+    display: flex;
+    margin-top: 0.55rem;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--ink-500);
+    font-size: 0.7rem;
+}
+
+@media (max-width: 68rem) {
+    .surface-grid,
+    .lab-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 48rem) {
+    .surface-intro {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .surface-stat {
+        width: 100%;
+        text-align: left;
+    }
+
+    .model-picker {
+        grid-template-columns: 1fr;
+    }
+
+    .table-actions {
+        justify-content: flex-start;
+    }
+}

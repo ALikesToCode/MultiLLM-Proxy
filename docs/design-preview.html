@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MultiLLM control-plane design preview</title>
+    <link rel="stylesheet" href="../static/css/shell.css">
+    <link rel="stylesheet" href="../static/css/operations.css">
+</head>
+<body>
+    <main class="app-main">
+        <section class="page-intro">
+            <div class="page-intro__copy">
+                <p class="eyebrow">Design preview</p>
+                <h1>Route control, without guesswork.</h1>
+                <p class="page-intro__description">
+                    Representative controls, data density, status language, and responsive behavior.
+                </p>
+            </div>
+            <div class="page-intro__meta">
+                <span class="live-state">Live stream</span>
+                <span class="meta-line"><span>Last refresh</span><strong>10:42:18</strong></span>
+                <span class="meta-line"><span>Process uptime</span><strong>2d 14h</strong></span>
+            </div>
+        </section>
+
+        <section class="metric-strip">
+            <div class="metric">
+                <span class="metric__label">Requests · 24h</span>
+                <strong class="metric__value">18,420</strong>
+                <span class="metric__detail">Top route openai</span>
+            </div>
+            <div class="metric">
+                <span class="metric__label">Success rate</span>
+                <strong class="metric__value">99.2%</strong>
+                <span class="metric__detail">147 failed</span>
+            </div>
+            <div class="metric">
+                <span class="metric__label">P95 latency</span>
+                <strong class="metric__value">842ms</strong>
+                <span class="metric__detail">Median 216ms</span>
+            </div>
+            <div class="metric">
+                <span class="metric__label">Configured estimate</span>
+                <strong class="metric__value">$4.218</strong>
+                <span class="metric__detail">82.4% priced</span>
+            </div>
+            <div class="metric">
+                <span class="metric__label">Provider health</span>
+                <strong class="metric__value">17/19</strong>
+                <span class="metric__detail">1 open circuit</span>
+            </div>
+        </section>
+
+        <div class="operator-grid">
+            <article class="panel span-8">
+                <header class="panel__header">
+                    <div>
+                        <h2>Provider health matrix</h2>
+                        <p>Configuration, traffic, latency, and recovery state stay separate.</p>
+                    </div>
+                    <span class="panel-tag">Example</span>
+                </header>
+                <div class="data-table-shell">
+                    <table class="data-table">
+                        <thead><tr><th>Provider</th><th>Circuit</th><th>Success</th><th>P95</th></tr></thead>
+                        <tbody>
+                            <tr><td>OpenAI</td><td><span class="status-pill state-closed">closed</span></td><td>99.8%</td><td>710ms</td></tr>
+                            <tr><td>OpenRouter</td><td><span class="status-pill state-degraded">degraded</span></td><td>96.1%</td><td>1.42s</td></tr>
+                            <tr><td>NanoGPT</td><td><span class="status-pill tone-neutral">passthrough</span></td><td>88.4%</td><td>2.80s</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+            <aside class="panel span-4">
+                <header class="panel__header">
+                    <div>
+                        <h2>Control states</h2>
+                        <p>Semantic color always includes a text label.</p>
+                    </div>
+                </header>
+                <div class="panel__body" style="display: grid; gap: 0.75rem;">
+                    <button class="button button--primary" type="button">Primary action</button>
+                    <button class="button button--secondary" type="button">Secondary action</button>
+                    <div class="alert"><strong>Recovery pressure.</strong><span>Two probes active.</span></div>
+                </div>
+            </aside>
+        </div>
+    </main>
+</body>
+</html>

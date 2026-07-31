@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Operations · MultiLLM Proxy{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
+{% endblock %}
+
+{% block content %}
+<div
+    id="operations-dashboard"
+    data-status-stream="{{ url_for('status_updates') }}"
+    data-request-log="{{ url_for('admin_request_metrics') }}"
+    data-admin="{{ 'true' if user and user.is_admin else 'false' }}"
+>
+    <script id="dashboard-initial-state" type="application/json">
+        {{ {
+            "system": system,
+            "stats": stats,
+            "analytics": analytics,
+            "providers": providers,
+            "recentActivity": recent_activity
+        } | tojson }}
+    </script>
+
+    <section class="page-intro">
+        <div class="page-intro__copy">
+            <p class="eyebrow">Live control plane</p>
+            <h1>Route control, without guesswork.</h1>
+            <p class="page-intro__description">
+                Provider health, circuit pressure, latency, request traces, and configured
+                cost estimates in one operator view. Routing stays explicit and protocol
+                fidelity remains visible.
+            </p>
+        </div>
+        <div class="page-intro__meta" aria-label="Runtime status">
+            <span class="live-state" id="stream-state">Connecting</span>
+            <span class="meta-line"><span>Last refresh</span><strong id="last-updated">Now</strong></span>
+            <span class="meta-line"><span>Process uptime</span><strong id="uptime">—</strong></span>
+            <span class="meta-line"><span>Request ID</span><strong>response header</strong></span>
+        </div>
+    </section>
+
+    {% if errors %}
+    <aside class="alert" role="alert">
+        <strong>Some provider checks failed.</strong>
+        <span>{{ errors | join(" · ") }}</span>
+    </aside>
+    {% endif %}
+
+    <section class="metric-strip" aria-label="24 hour summary">
+        <div class="metric">
+            <span class="metric__label">Requests · 24h</span>
+            <strong class="metric__value" data-metric="total-requests">{{ stats.total_requests }}</strong>
+            <span class="metric__detail">Top route <span data-metric="top-provider">{{ stats.top_provider or "none" }}</span></span>
+        </div>
+        <div class="metric">
+            <span class="metric__label">Success rate</span>
+            <strong class="metric__value" data-metric="success-rate">{{ stats.success_rate }}%</strong>
+            <span class="metric__detail"><span data-metric="failed-requests">{{ stats.failed_requests }}</span> failed</span>
+        </div>
+        <div class="metric">
+            <span class="metric__label">P95 latency</span>
+            <strong class="metric__value" data-metric="p95-latency">{{ stats.p95_response_time }}ms</strong>
+            <span class="metric__detail">Median <span data-metric="p50-latency">{{ stats.p50_response_time }}</span>ms</span>
+        </div>
+        <div class="metric">
+            <span class="metric__label">Configured estimate</span>
+            <strong class="metric__value" data-metric="estimated-cost">${{ "%.4f" | format(analytics.cost.effective_cost) }}</strong>
+            <span class="metric__detail"><span data-metric="cost-coverage">{{ analytics.cost.coverage_percent }}%</span> priced</span>
+        </div>
+        <div class="metric">
+            <span class="metric__label">Provider health</span>
+            <strong class="metric__value">
+                <span data-metric="active-providers">{{ analytics.active_providers }}</span>/<span data-metric="configured-providers">{{ analytics.configured_providers }}</span>
+            </strong>
+            <span class="metric__detail"><span data-metric="open-circuits">{{ analytics.circuit_counts.open }}</span> open circuits</span>
+        </div>
+    </section>
+
+    <div class="operator-grid">
+        <article class="panel panel--dark span-8">
+            <header class="panel__header">
+                <div>
+                    <h2>Traffic pressure</h2>
+                    <p>Hourly request volume and failed responses over the last 24 hours.</p>
+                </div>
+                <div class="legend" aria-label="Chart legend">
+                    <span><i></i>requests</span>
+                    <span><i></i>errors</span>
+                </div>
+            </header>
+            <div class="panel__body">
+                <div id="traffic-chart" class="traffic-chart" role="img" aria-label="24 hour traffic chart"></div>
+            </div>
+        </article>
+
+        <aside class="panel span-4">
+            <header class="panel__header">
+                <div>
+                    <h2>Response classes</h2>
+                    <p>Fast separation of client errors from provider faults.</p>
+                </div>
+                <span class="panel-tag">24h</span>
+            </header>
+            <div class="panel__body">
+                <div id="status-breakdown" class="status-breakdown"></div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="operator-grid">
+        <article class="panel span-8">
+            <header class="panel__header">
+                <div>
+                    <h2>Provider health matrix</h2>
+                    <p>Configuration, traffic, latency, process-local recovery, and raw passthrough are shown separately.</p>
+                </div>
+                <span class="panel-tag"><span data-metric="providers-with-traffic">{{ analytics.providers_with_traffic }}</span>&nbsp;active routes</span>
+            </header>
+            <div class="data-table-shell">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Provider</th>
+                            <th scope="col">Circuit</th>
+                            <th scope="col">Success</th>
+                            <th scope="col">Requests</th>
+                            <th scope="col">Average</th>
+                            <th scope="col">P95</th>
+                            <th scope="col">Last seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="provider-health-body"></tbody>
+                </table>
+            </div>
+        </article>
+
+        <aside class="panel span-4">
+            <header class="panel__header">
+                <div>
+                    <h2>Route trace</h2>
+                    <p>Newest requests first. No prompt or response bodies are stored.</p>
+                </div>
+                <span class="panel-tag" id="trace-count">0 events</span>
+            </header>
+            <div class="panel__body">
+                <div id="route-trace" class="route-trace"></div>
+            </div>
+        </aside>
+    </div>
+
+    <div class="operator-grid">
+        <article class="panel span-12">
+            <header class="panel__header">
+                <div>
+                    <h2>Request explorer</h2>
+                    <p>Correlate route, model, response class, circuit state, and cost estimate.</p>
+                </div>
+                <div class="panel__toolbar">
+                    <input id="request-search" class="field toolbar-field" type="search" placeholder="Request ID, model, user…" aria-label="Filter request log">
+                    <select id="request-provider-filter" class="field-select toolbar-field" aria-label="Filter requests by provider">
+                        <option value="">All providers</option>
+                    </select>
+                    <select id="request-status-filter" class="field-select toolbar-field" aria-label="Filter requests by status">
+                        <option value="">All responses</option>
+                        <option value="success">Successful</option>
+                        <option value="error">Errors</option>
+                    </select>
+                    <button id="refresh-requests" class="button button--secondary" type="button">Refresh</button>
+                </div>
+            </header>
+            <div class="data-table-shell">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Time / request</th>
+                            <th scope="col">Route</th>
+                            <th scope="col">Model</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Latency</th>
+                            <th scope="col">Circuit</th>
+                            <th scope="col">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="request-log-body"></tbody>
+                </table>
+            </div>
+            <div id="request-log-empty" class="empty-state" hidden>
+                <strong>No matching request records</strong>
+                <p>Admin request telemetry appears here after authenticated proxy traffic.</p>
+            </div>
+        </article>
+    </div>
+
+    <div class="operator-grid">
+        <article class="panel span-7">
+            <header class="panel__header">
+                <div>
+                    <h2>Endpoint catalog</h2>
+                    <p>Explicit provider routes stay inspectable instead of hiding behind an opaque auto selector.</p>
+                </div>
+                <span class="panel-tag">{{ providers | length }} providers</span>
+            </header>
+            <div class="panel__body">
+                <div class="endpoint-catalog">
+                    {% for provider_key, details in providers | dictsort %}
+                    <details
+                        class="endpoint-group"
+                        id="{% if provider_key in ['linkapi', 'codex-easy', 'kimi-code'] %}{{ provider_key }}-native-endpoints{% else %}provider-{{ provider_key }}{% endif %}"
+                    >
+                        <summary>
+                            <span>{{ details.name }}</span>
+                            <span class="status-pill {{ 'tone-positive' if details.active else 'tone-neutral' }}">
+                                {{ 'configured' if details.is_configured else 'not configured' }}
+                            </span>
+                        </summary>
+                        <div class="endpoint-group__body">
+                            {% if provider_key == 'linkapi' %}
+                            <div class="route-boundary">
+                                <strong>LinkAPI native fast path</strong>
+                                <p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>LINKAPI_KEY</code> stays server-side. Use <code>linkapi:&lt;model&gt;</code> through the unified route when Flask controls are required. Image routes include <code>gpt-image-2-c</code> and <code>gemini-2.5-flash-image</code>.</p>
+                            </div>
+                            {% elif provider_key == 'codex-easy' %}
+                            <div class="route-boundary">
+                                <strong>Codex Everywhere OpenAI fast path</strong>
+                                <p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>CODEX_EASY_API_KEY</code> stays server-side. Use <code>codex-easy:&lt;model&gt;</code> when Flask controls are required. Image routes work only for image-generation key groups.</p>
+                            </div>
+                            {% elif provider_key == 'kimi-code' %}
+                            <div class="route-boundary">
+                                <strong>Kimi Code protected routes</strong>
+                                <p>Chat streams to <code>https://api.kimi.com/coding/v1</code> while <code>KIMI_CODE_API_KEY</code> stays server-side. Use <code>kimi-code:k3</code> for unified accounting. Generation supports Chat Completions only; send <code>reasoning_effort: max</code> and keep <code>prompt_cache_key</code> stable for stable conversation prefixes.</p>
+                            </div>
+                            {% endif %}
+                            {% for endpoint in details.endpoints %}
+                            {% set endpoint_value = request.url_root.rstrip('/') ~ '/' ~ provider_key ~ endpoint.url %}
+                            <div class="endpoint-row">
+                                <span>
+                                    <code>{{ endpoint_value }}</code>
+                                    {% if provider_key == 'linkapi' and endpoint.url == '/v1/messages' %}
+                                    <small class="endpoint-auth">x-api-key: YOUR_API_KEY</small>
+                                    {% elif provider_key == 'linkapi' and endpoint.url.startswith('/v1beta/') %}
+                                    <small class="endpoint-auth">x-goog-api-key: YOUR_API_KEY</small>
+                                    {% else %}
+                                    <small class="endpoint-auth">Authorization: Bearer YOUR_API_KEY</small>
+                                    {% endif %}
+                                </span>
+                                <button class="copy-button" type="button" data-copy-value="{{ endpoint_value }}">Copy</button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                    {% endfor %}
+                </div>
+            </div>
+        </article>
+
+        <aside class="panel span-5">
+            <header class="panel__header">
+                <div>
+                    <h2>Configured cost view</h2>
+                    <p>Only operator-supplied model prices are counted.</p>
+                </div>
+                <span class="panel-tag">Estimate</span>
+            </header>
+            <div class="panel__body">
+                <div class="cost-callout">
+                    <span class="metric__label">24h effective estimate</span>
+                    <strong class="cost-callout__value" id="cost-total">$0.0000</strong>
+                    <p>
+                        Reservation-based estimates are not provider invoices. Unpriced requests remain
+                        visible and are never silently treated as free. Output cost is counted only
+                        when the request supplies an output-token limit.
+                    </p>
+                </div>
+                <div id="cost-list" class="cost-list" style="margin-top: 0.8rem;"></div>
+                <div class="empty-state" id="cost-empty" hidden>
+                    <strong>No model pricing configured</strong>
+                    <p>Set MODEL_PRICING_USD_PER_MILLION to enable estimates without guessing prices.</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

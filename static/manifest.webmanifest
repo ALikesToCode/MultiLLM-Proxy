@@ -6,8 +6,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#4f46e5",
+  "background_color": "#f3f7f9",
+  "theme_color": "#07131f",
   "icons": [
     {
       "src": "/static/icons/icon-192.png",
@@ -24,10 +24,10 @@
   ],
   "shortcuts": [
     {
-      "name": "Status",
-      "short_name": "Status",
+      "name": "Operations",
+      "short_name": "Operations",
       "url": "/",
-      "description": "Open the system status dashboard."
+      "description": "Open provider health, traffic, and route telemetry."
     },
     {
       "name": "OpenRouter",
