@@ -31,6 +31,7 @@ import {
 } from "./config.mjs";
 import {
   RoleplayRequestError,
+  assistantStorageReserveBytes,
   appendAssistantMessage,
   applyCompaction,
   buildRoleplayMessages,
@@ -38,6 +39,7 @@ import {
   compactionPlan,
   estimateTokens,
   extractAssistantContent,
+  extractFinishReason,
   mergeSessionMessages,
   parseRoleplayPayload,
 } from "./memory.mjs";
@@ -73,6 +75,7 @@ function initialState() {
     turns: 0,
     compactions: 0,
     localCompactions: 0,
+    inputTokensSaved: 0,
     compactionFailures: 0,
     compactionBackoffUntil: 0,
     storageOverflow: false,
@@ -419,6 +422,7 @@ export class RoleplaySession extends DurableObject {
           memory: state.memory,
           messages: state.messages,
         }),
+        estimated_input_tokens_saved: state.inputTokensSaved ?? 0,
         models: metrics,
         updated_at: state.updatedAt || null,
       });
@@ -562,6 +566,15 @@ export class RoleplaySession extends DurableObject {
       conversation,
       settings,
     );
+    const checkpointMessageCount = checkpoint.matched
+      ? state.compactionCheckpoint?.messageCount ?? 0
+      : 0;
+    const checkpointSavedTokens = checkpoint.matched
+      ? estimateTokens(
+          checkpoint.sourceMessages.slice(0, checkpointMessageCount),
+        )
+      : 0;
+    let messagesOptimized = checkpointMessageCount;
 
     if (plan.requested) {
       const compactionStartedAt = performance.now();
@@ -650,6 +663,7 @@ export class RoleplaySession extends DurableObject {
           ? `${compactionSource}_compacted`
           : "model_retained";
         if (applied.compacted) {
+          messagesOptimized += plan.olderMessages.length;
           await saveState(this.ctx.storage, state);
         }
       }
@@ -660,7 +674,7 @@ export class RoleplaySession extends DurableObject {
       new TextEncoder().encode(
         JSON.stringify(persistedConversation),
       ).byteLength +
-      parsed.maxTokens * 12;
+      assistantStorageReserveBytes(parsed, settings);
     if (
       memoryEnabled &&
       projectedStoredBytes > settings.maxStoredBytes
@@ -683,6 +697,14 @@ export class RoleplaySession extends DurableObject {
       conversation,
     );
     const estimatedInputTokens = estimateTokens(roleplayMessages);
+    const estimatedInputBefore = Math.max(
+      estimatedInputTokens,
+      plan.estimatedTokens + checkpointSavedTokens,
+    );
+    const inputTokensSaved = Math.max(
+      0,
+      estimatedInputBefore - estimatedInputTokens,
+    );
     if (estimatedInputTokens > settings.hardInputTokens) {
       state = markRequest(state, idempotencyKey, "context_too_large");
       await saveState(this.ctx.storage, state);
@@ -742,6 +764,11 @@ export class RoleplaySession extends DurableObject {
       queueMs,
       compactionMs,
       queueMs + performance.now() - turnStartedAt,
+      {
+        estimatedInputBefore,
+        inputTokensSaved,
+        messagesOptimized,
+      },
     );
 
     if (
@@ -754,7 +781,6 @@ export class RoleplaySession extends DurableObject {
         requestSignal: request.signal,
         upstreamController: controller,
         heartbeatMs: settings.streamHeartbeatMs,
-        idleTimeoutMs: settings.streamIdleTimeoutMs,
         onComplete: async ({
           success,
           assistant,
@@ -778,6 +804,8 @@ export class RoleplaySession extends DurableObject {
               streamMs: Math.round(streamMs),
               heartbeatCount,
               assistantCharacters: assistant.length,
+              maxOutputTokens: parsed.maxTokens,
+              inputTokensSaved,
             }),
           );
           if (reason === "incomplete_eof") {
@@ -791,12 +819,18 @@ export class RoleplaySession extends DurableObject {
               },
             );
           }
+          const modelSucceeded = success || reason === "output_limit";
           let nextState = recordModelResult(state, candidate, {
-            success,
+            success: modelSucceeded,
             ttfbMs: headerMs + ttfbMs,
             totalMs: performance.now() - startedAt,
-            status: success ? response.status : 0,
+            status: modelSucceeded ? response.status : 0,
           });
+          nextState = {
+            ...nextState,
+            inputTokensSaved:
+              (nextState.inputTokensSaved ?? 0) + inputTokensSaved,
+          };
           if (success && memoryEnabled) {
             nextState = appendAssistantMessage(
               nextState,
@@ -810,7 +844,11 @@ export class RoleplaySession extends DurableObject {
           nextState = markRequest(
             nextState,
             idempotencyKey,
-            success ? "completed" : "stream_failed",
+            success
+              ? "completed"
+              : reason === "output_limit"
+                ? "output_limited"
+                : "stream_failed",
           );
           await saveState(this.ctx.storage, nextState);
         },
@@ -837,22 +875,31 @@ export class RoleplaySession extends DurableObject {
     }
     const { bytes, firstByteMs } = bounded;
     let assistant = "";
+    let finishReason = "";
     if (contentType.toLowerCase().includes("application/json")) {
       try {
-        assistant = extractAssistantContent(
-          JSON.parse(new TextDecoder().decode(bytes)),
+        const responsePayload = JSON.parse(
+          new TextDecoder().decode(bytes),
         );
+        assistant = extractAssistantContent(responsePayload);
+        finishReason = extractFinishReason(responsePayload);
       } catch {
         assistant = "";
       }
     }
+    const outputLimited = finishReason === "length";
     state = recordModelResult(state, candidate, {
       success: true,
       ttfbMs: headerMs + firstByteMs,
       totalMs: performance.now() - startedAt,
       status: response.status,
     });
-    if (memoryEnabled) {
+    state = {
+      ...state,
+      inputTokensSaved:
+        (state.inputTokensSaved ?? 0) + inputTokensSaved,
+    };
+    if (memoryEnabled && !outputLimited) {
       state = appendAssistantMessage(
         state,
         persistedConversation,
@@ -862,7 +909,11 @@ export class RoleplaySession extends DurableObject {
     } else {
       state = { ...state, updatedAt: Date.now() };
     }
-    state = markRequest(state, idempotencyKey, "completed");
+    state = markRequest(
+      state,
+      idempotencyKey,
+      outputLimited ? "output_limited" : "completed",
+    );
     await saveState(this.ctx.storage, state);
     return {
       response: new Response(bytes, {

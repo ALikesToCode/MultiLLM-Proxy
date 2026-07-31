@@ -139,7 +139,20 @@ export function decorateRoleplayHeaders(
   queueMs = 0,
   compactionMs = 0,
   totalToHeadersMs = headerMs,
+  optimization = {},
 ) {
+  const inputBefore = Math.max(
+    estimatedInputTokens,
+    Number(optimization.estimatedInputBefore) || estimatedInputTokens,
+  );
+  const inputSaved = Math.max(
+    0,
+    Number(optimization.inputTokensSaved) || 0,
+  );
+  const messagesOptimized = Math.max(
+    0,
+    Number(optimization.messagesOptimized) || 0,
+  );
   headers.set("X-Roleplay-Provider", candidate.provider);
   headers.set("X-Roleplay-Model", candidate.model);
   headers.set("X-Roleplay-Selection", selectionReason);
@@ -150,6 +163,20 @@ export function decorateRoleplayHeaders(
   );
   headers.set("X-Roleplay-Max-Output-Tokens", String(maxOutputTokens));
   headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
+  headers.set(
+    "X-MultiLLM-Optimization",
+    inputSaved > 0 || messagesOptimized > 0 ? "applied" : "skipped",
+  );
+  headers.set("X-MultiLLM-Optimization-Mode", "summarize");
+  headers.set("X-MultiLLM-Estimated-Input-Before", String(inputBefore));
+  headers.set(
+    "X-MultiLLM-Estimated-Input-After",
+    String(estimatedInputTokens),
+  );
+  headers.set(
+    "X-MultiLLM-Messages-Summarized",
+    String(messagesOptimized),
+  );
   headers.set(
     "Server-Timing",
     [

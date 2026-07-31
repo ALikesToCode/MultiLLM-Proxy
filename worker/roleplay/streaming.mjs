@@ -27,7 +27,7 @@ function delayedOutcome(delayMs) {
   };
 }
 
-function sseAssistantCollector(maximumCharacters = 64_000) {
+function sseAssistantCollector(maximumCharacters = 128_000) {
   let buffered = "";
   let assistant = "";
   let terminated = false;
@@ -101,7 +101,6 @@ export function createObservedStream({
   requestSignal,
   upstreamController,
   heartbeatMs,
-  idleTimeoutMs,
   onComplete,
 }) {
   let resolveCompletion;
@@ -115,7 +114,6 @@ export function createObservedStream({
   let released = false;
   let pendingRead = null;
   let firstByteAt = 0;
-  let lastUpstreamByteAt = performance.now();
   let heartbeatCount = 0;
   const streamStartedAt = performance.now();
 
@@ -167,14 +165,7 @@ export function createObservedStream({
           pendingRead = observedRead(reader);
         }
 
-        const idleRemaining = Math.max(
-          1,
-          idleTimeoutMs -
-            (performance.now() - lastUpstreamByteAt),
-        );
-        const wait = delayedOutcome(
-          Math.min(heartbeatMs, idleRemaining),
-        );
+        const wait = delayedOutcome(heartbeatMs);
         const outcome = await Promise.race([
           pendingRead,
           wait.promise,
@@ -182,16 +173,6 @@ export function createObservedStream({
         wait.cancel();
 
         if (outcome.kind === "timer") {
-          if (
-            performance.now() - lastUpstreamByteAt >=
-            idleTimeoutMs
-          ) {
-            const error = new Error(
-              "Upstream stream exceeded the idle timeout",
-            );
-            error.name = "TimeoutError";
-            throw error;
-          }
           heartbeatCount += 1;
           controller.enqueue(HEARTBEAT_COMMENT.slice());
           return;
@@ -204,15 +185,18 @@ export function createObservedStream({
         const { value, done } = outcome.value;
         if (done) {
           const collected = collector.finish(decoder.decode());
+          const outputLimited = collected.finishReason === "length";
           releaseReader();
           controller.close();
           void settle({
-            success: collected.terminated,
+            success: collected.terminated && !outputLimited,
             assistant: collected.assistant,
             finishReason: collected.finishReason,
-            reason: collected.terminated
-              ? "complete"
-              : "incomplete_eof",
+            reason: outputLimited
+              ? "output_limit"
+              : collected.terminated
+                ? "complete"
+                : "incomplete_eof",
           });
           return;
         }
@@ -220,7 +204,6 @@ export function createObservedStream({
           return;
         }
         const now = performance.now();
-        lastUpstreamByteAt = now;
         if (!firstByteAt) {
           firstByteAt = now;
         }
@@ -229,9 +212,7 @@ export function createObservedStream({
       } catch (error) {
         const reason = requestSignal?.aborted
           ? "request_aborted"
-          : error?.name === "TimeoutError"
-            ? "idle_timeout"
-            : "upstream_error";
+          : "upstream_error";
         await stopUpstream(error);
         void settle({
           success: false,

@@ -174,7 +174,7 @@ export function getRoleplaySettings(env) {
   return {
     compactTriggerTokens: boundedInteger(
       env.ROLEPLAY_COMPACT_TRIGGER_TOKENS,
-      12_000,
+      8_000,
       1_000,
       500_000,
     ),
@@ -186,27 +186,27 @@ export function getRoleplaySettings(env) {
     ),
     memoryTargetTokens: boundedInteger(
       env.ROLEPLAY_MEMORY_TARGET_TOKENS,
-      8_000,
+      1_200,
       500,
       250_000,
     ),
     keepRecentMessages: boundedInteger(
       env.ROLEPLAY_KEEP_RECENT_MESSAGES,
-      12,
+      8,
       4,
       64,
     ),
     maxOutputTokens: boundedInteger(
       env.ROLEPLAY_MAX_OUTPUT_TOKENS,
-      2_048,
+      20_000,
       128,
-      16_384,
+      32_768,
     ),
     defaultMaxOutputTokens: boundedInteger(
       env.ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS,
-      900,
+      20_000,
       128,
-      8_192,
+      32_768,
     ),
     maxRequestBytes: boundedInteger(
       env.ROLEPLAY_MAX_REQUEST_BYTES,
@@ -243,12 +243,6 @@ export function getRoleplaySettings(env) {
       10_000,
       3_000,
       30_000,
-    ),
-    streamIdleTimeoutMs: boundedInteger(
-      env.ROLEPLAY_STREAM_IDLE_TIMEOUT_MS,
-      360_000,
-      15_000,
-      600_000,
     ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,

@@ -298,6 +298,18 @@ test("Janitor derived sessions retain compacted continuity on later turns", asyn
         second.headers.get("X-Roleplay-Memory"),
         "checkpoint_reused",
       );
+      assert.equal(
+        second.headers.get("X-MultiLLM-Optimization"),
+        "applied",
+      );
+      assert.ok(
+        Number(
+          second.headers.get("X-MultiLLM-Estimated-Input-Before"),
+        ) >
+          Number(
+            second.headers.get("X-MultiLLM-Estimated-Input-After"),
+          ),
+      );
       sessionId = first.headers.get("X-Roleplay-Session-ID");
     },
   );

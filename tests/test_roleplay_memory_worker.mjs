@@ -149,10 +149,30 @@ test("roleplay shrinks the recent window and compacts storage overflow", async (
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("X-Roleplay-Memory"), "model_compacted");
+  assert.equal(
+    response.headers.get("X-MultiLLM-Optimization"),
+    "applied",
+  );
+  assert.ok(
+    Number(response.headers.get("X-MultiLLM-Estimated-Input-Before")) >
+      Number(response.headers.get("X-MultiLLM-Estimated-Input-After")),
+  );
+  assert.ok(
+    Number(response.headers.get("X-MultiLLM-Messages-Summarized")) > 0,
+  );
   assert.equal(requests.length, 2);
   const compactedInput = JSON.parse(requests[0].messages[1].content);
   assert.ok(compactedInput.older_dialogue.length > 0);
   assert.ok(compactedInput.older_dialogue.length < 7);
+
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-storage-overflow",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  assert.ok((await metrics.json()).estimated_input_tokens_saved > 0);
 });
 
 test("roleplay compacts one oversized latest turn but sends it raw to generation", async () => {

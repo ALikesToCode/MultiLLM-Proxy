@@ -85,17 +85,18 @@ automatic output budget and adds a matching pacing instruction. Every mode
 discourages repeated recap and stagnant dialogue.
 
 Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
-the Worker derives a bounded output budget from the newest user turn. Explicit
-values cannot exceed `ROLEPLAY_MAX_OUTPUT_TOKENS`.
+balanced and immersive replies receive the configured 20,000-token budget;
+compact replies use a smaller smart budget. Explicit values can request up to
+`ROLEPLAY_MAX_OUTPUT_TOKENS`.
 
 During a quiet streaming interval, the Worker emits a valid SSE comment every
 10 seconds. These keepalives carry no model content and let clients distinguish
-long Kimi/GLM thinking from a dead connection. A stream may remain quiet for
-six minutes, leaving headroom for a five-minute thinking phase, before it is
-treated as stalled. Provider data events are
-forwarded byte-for-byte, and a stream is recorded as complete only after
-`[DONE]` or a non-empty `finish_reason`; an unterminated EOF is logged as a
-failed stream and is not stored as completed assistant memory.
+long Kimi/GLM thinking from a dead connection. The Worker imposes no active
+stream idle deadline; it continues until the provider finishes or the client
+disconnects. Provider data events are forwarded byte-for-byte. A stream is
+recorded as complete only after `[DONE]` or a non-`length` finish reason.
+`finish_reason: "length"` is exposed to the client but marked output-limited,
+and neither it nor an unterminated EOF is stored as completed assistant memory.
 
 ## JanitorAI proxy configuration
 
@@ -183,6 +184,15 @@ already-summarized dialogue prefix before merging and sends the durable
 continuity digest instead. A mismatch keeps the checkpoint optimization
 disabled and falls back to the normal history merge and compaction rules;
 approximate or similarity-based checkpoint matches are never accepted.
+
+Roleplay uses the same safety contract as MultiLLM context optimization:
+authoritative instructions and the newest raw turn remain unchanged, while
+eligible older dialogue becomes terse continuity notes. Repeated full-history
+requests reuse the exact checkpoint instead of paying to summarize the same
+prefix again. Response headers expose `X-MultiLLM-Estimated-Input-Before`,
+`X-MultiLLM-Estimated-Input-After`, and
+`X-MultiLLM-Messages-Summarized`; session metrics accumulate estimated input
+tokens saved. Final assistant output is never compressed.
 
 At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If the model
 request fails, returns malformed JSON, or declines, the Worker creates a
@@ -315,19 +325,18 @@ Non-secret tuning variables:
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |
-| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `12000` | Ask model about compaction |
+| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `8000` | Ask model about compaction |
 | `ROLEPLAY_HARD_INPUT_TOKENS` | `24000` | Require compaction or reject |
-| `ROLEPLAY_MEMORY_TARGET_TOKENS` | `8000` | Compaction target |
-| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `12` | Maximum raw recent history retained; shrinks under storage pressure |
-| `ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS` | `900` | Smart output-budget baseline |
-| `ROLEPLAY_MAX_OUTPUT_TOKENS` | `2048` | Per-turn output ceiling |
+| `ROLEPLAY_MEMORY_TARGET_TOKENS` | `1200` | Terse continuity-memory target |
+| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `8` | Maximum raw recent history retained; shrinks under storage pressure |
+| `ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS` | `20000` | Smart output-budget baseline |
+| `ROLEPLAY_MAX_OUTPUT_TOKENS` | `20000` | Per-turn output ceiling |
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
-| `ROLEPLAY_STREAM_IDLE_TIMEOUT_MS` | `360000` | Maximum quiet stream interval before abort |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs. Override only those providers:

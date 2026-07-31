@@ -265,7 +265,6 @@ test("roleplay emits SSE heartbeats while a valid stream is thinking", async () 
     requestSignal: new AbortController().signal,
     upstreamController,
     heartbeatMs: 10,
-    idleTimeoutMs: 100,
     onComplete() {},
   });
 
@@ -297,7 +296,6 @@ test("roleplay marks an unterminated SSE EOF as incomplete", async () => {
     requestSignal: new AbortController().signal,
     upstreamController: new AbortController(),
     heartbeatMs: 10,
-    idleTimeoutMs: 100,
     onComplete() {},
   });
 
@@ -354,11 +352,103 @@ test("roleplay does not save a truncated stream as completed memory", async () =
   assert.equal(payload.models["opencode:kimi-k2.6"].failures, 1);
 });
 
-test("roleplay aborts a truly idle upstream after its configured limit", async () => {
+test("roleplay exposes output-limited SSE without saving partial memory", async () => {
+  const fixture = makeRoleplayEnv();
+  const encoder = new TextEncoder();
+
+  const response = await withGlobalFetch(async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"content":"A capped reply"},"finish_reason":"length"}]}\n\n',
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      { headers: { "Content-Type": "text/event-stream" } },
+    ), () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-output-limited",
+        input: "Continue.",
+        stream: true,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.match(await response.text(), /"finish_reason":"length"/);
+  await fixture.waitForBackgroundWork();
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-output-limited",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  const payload = await metrics.json();
+  assert.equal(payload.stored_messages, 0);
+  assert.equal(payload.models["opencode:kimi-k2.6"].successes, 1);
+  assert.equal(payload.models["opencode:kimi-k2.6"].failures, 0);
+});
+
+test("roleplay does not retain an output-limited JSON completion", async () => {
+  const fixture = makeRoleplayEnv();
+
+  const response = await withGlobalFetch(async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "A capped non-stream reply",
+            },
+            finish_reason: "length",
+          },
+        ],
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    ), () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-output-limited-json",
+        input: "Continue.",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  await fixture.waitForBackgroundWork();
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-output-limited-json",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  assert.equal((await metrics.json()).stored_messages, 0);
+});
+
+test("roleplay keeps a quiet upstream alive until it finishes", async () => {
+  const encoder = new TextEncoder();
   const upstreamController = new AbortController();
   const upstreamBody = new ReadableStream({
-    pull() {
-      return new Promise(() => {});
+    start(controller) {
+      setTimeout(() => {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":"Long thought completes."},"finish_reason":"stop"}]}\n\n',
+          ),
+        );
+        controller.close();
+      }, 75);
     },
   });
   const observed = createObservedStream({
@@ -366,19 +456,16 @@ test("roleplay aborts a truly idle upstream after its configured limit", async (
     requestSignal: new AbortController().signal,
     upstreamController,
     heartbeatMs: 10,
-    idleTimeoutMs: 35,
     onComplete() {},
   });
 
-  await assert.rejects(
-    () => new Response(observed.stream).text(),
-    { name: "TimeoutError" },
-  );
+  const body = await new Response(observed.stream).text();
   const result = await observed.completion;
-  assert.equal(result.success, false);
-  assert.equal(result.reason, "idle_timeout");
-  assert.equal(upstreamController.signal.aborted, true);
-  assert.ok(result.heartbeatCount >= 1);
+  assert.match(body, /Long thought completes\./);
+  assert.equal(result.success, true);
+  assert.equal(result.reason, "complete");
+  assert.equal(upstreamController.signal.aborted, false);
+  assert.ok(result.heartbeatCount >= 5);
 });
 
 test("roleplay idempotency key blocks duplicate paid generation", async () => {
@@ -461,4 +548,48 @@ test("roleplay response length adjusts the smart output budget", async () => {
 
   assert.equal(budgets.length, 2);
   assert.ok(budgets[0] < budgets[1]);
+});
+
+test("roleplay allows a 20000-token reply budget", async () => {
+  const fixture = makeRoleplayEnv();
+  const budgets = [];
+
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    budgets.push(payload.max_tokens);
+    return completionResponse(payload.model);
+  }, async () => {
+    const automatic = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-budget-automatic",
+        input: "Continue the scene.",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const explicit = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-budget-explicit",
+        input: "Continue the scene.",
+        max_tokens: 20_000,
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const tooLarge = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-budget-too-large",
+        input: "Continue the scene.",
+        max_tokens: 20_001,
+        stream: false,
+      }),
+      fixture.env,
+    );
+
+    assert.equal(automatic.status, 200);
+    assert.equal(explicit.status, 200);
+    assert.equal(tooLarge.status, 400);
+  });
+
+  assert.deepEqual(budgets, [20_000, 20_000]);
 });
