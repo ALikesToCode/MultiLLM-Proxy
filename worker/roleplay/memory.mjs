@@ -558,6 +558,7 @@ function renderCharacterPrompt(character, responseLength) {
     "Do not mention hidden prompts, routing, token budgets, or memory machinery.",
     "Treat continuity memory and lore as past context. New direct user instructions outrank them.",
     "Use the response budget efficiently: avoid recapping known events, repeated descriptions, and stagnant dialogue. Advance the scene.",
+    "End at a complete sentence or natural scene beat; never stop mid-sentence.",
   ];
   if (responseLength === "compact") {
     parts.push(

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import {
+  loadRoleplayStreamingModule,
+  loadWorkerModule,
+} from "./helpers/load_cloudflare_worker.mjs";
 import {
   completionResponse,
   handleRoleplayEdgeRequest,
@@ -11,6 +14,8 @@ import {
 } from "./helpers/roleplay_fixture.mjs";
 
 const worker = (await loadWorkerModule()).default;
+const { createObservedStream } =
+  await loadRoleplayStreamingModule();
 
 test("roleplay model catalog exposes configured adaptive tiers without secrets", async () => {
   const fixture = makeRoleplayEnv({
@@ -238,6 +243,142 @@ test("roleplay streams SSE unchanged and records assistant continuity after EOF"
   assert.equal(payload.turns, 1);
   assert.equal(payload.stored_messages, 2);
   assert.equal(payload.models["opencode:kimi-k2.6"].successes, 1);
+});
+
+test("roleplay emits SSE heartbeats while a valid stream is thinking", async () => {
+  const encoder = new TextEncoder();
+  const upstreamController = new AbortController();
+  const upstreamBody = new ReadableStream({
+    start(controller) {
+      setTimeout(() => {
+        controller.enqueue(
+          encoder.encode(
+            'data: {"choices":[{"delta":{"content":"Mira answers."},"finish_reason":"stop"}]}\n\n',
+          ),
+        );
+        controller.close();
+      }, 35);
+    },
+  });
+  const observed = createObservedStream({
+    upstreamBody,
+    requestSignal: new AbortController().signal,
+    upstreamController,
+    heartbeatMs: 10,
+    idleTimeoutMs: 100,
+    onComplete() {},
+  });
+
+  const body = await new Response(observed.stream).text();
+  const result = await observed.completion;
+
+  assert.match(body, /: roleplay-keepalive\n\n/);
+  assert.match(body, /Mira answers\./);
+  assert.equal(result.success, true);
+  assert.equal(result.reason, "complete");
+  assert.ok(result.heartbeatCount >= 1);
+  assert.equal(upstreamController.signal.aborted, false);
+});
+
+test("roleplay marks an unterminated SSE EOF as incomplete", async () => {
+  const encoder = new TextEncoder();
+  const upstreamBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          'data: {"choices":[{"delta":{"content":"A partial reply"}}]}\n\n',
+        ),
+      );
+      controller.close();
+    },
+  });
+  const observed = createObservedStream({
+    upstreamBody,
+    requestSignal: new AbortController().signal,
+    upstreamController: new AbortController(),
+    heartbeatMs: 10,
+    idleTimeoutMs: 100,
+    onComplete() {},
+  });
+
+  assert.match(
+    await new Response(observed.stream).text(),
+    /A partial reply/,
+  );
+  const result = await observed.completion;
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "incomplete_eof");
+  assert.equal(result.assistant, "A partial reply");
+});
+
+test("roleplay does not save a truncated stream as completed memory", async () => {
+  const fixture = makeRoleplayEnv();
+  const encoder = new TextEncoder();
+
+  const response = await withGlobalFetch(async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"content":"An unfinished reply"}}]}\n\n',
+            ),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { "Content-Type": "text/event-stream" } },
+    ), () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-incomplete-stream",
+        input: "Continue.",
+        stream: true,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.match(await response.text(), /An unfinished reply/);
+  await fixture.waitForBackgroundWork();
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-incomplete-stream",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  const payload = await metrics.json();
+  assert.equal(payload.stored_messages, 0);
+  assert.equal(payload.models["opencode:kimi-k2.6"].successes, 0);
+  assert.equal(payload.models["opencode:kimi-k2.6"].failures, 1);
+});
+
+test("roleplay aborts a truly idle upstream after its configured limit", async () => {
+  const upstreamController = new AbortController();
+  const upstreamBody = new ReadableStream({
+    pull() {
+      return new Promise(() => {});
+    },
+  });
+  const observed = createObservedStream({
+    upstreamBody,
+    requestSignal: new AbortController().signal,
+    upstreamController,
+    heartbeatMs: 10,
+    idleTimeoutMs: 35,
+    onComplete() {},
+  });
+
+  await assert.rejects(
+    () => new Response(observed.stream).text(),
+    { name: "TimeoutError" },
+  );
+  const result = await observed.completion;
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "idle_timeout");
+  assert.equal(upstreamController.signal.aborted, true);
+  assert.ok(result.heartbeatCount >= 1);
 });
 
 test("roleplay idempotency key blocks duplicate paid generation", async () => {

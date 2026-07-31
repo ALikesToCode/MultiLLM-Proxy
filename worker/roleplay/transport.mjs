@@ -136,6 +136,9 @@ export function decorateRoleplayHeaders(
   maxOutputTokens,
   headerMs,
   fallbackCount,
+  queueMs = 0,
+  compactionMs = 0,
+  totalToHeadersMs = headerMs,
 ) {
   headers.set("X-Roleplay-Provider", candidate.provider);
   headers.set("X-Roleplay-Model", candidate.model);
@@ -149,7 +152,12 @@ export function decorateRoleplayHeaders(
   headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
   headers.set(
     "Server-Timing",
-    `roleplay_upstream_headers;dur=${Math.max(0, headerMs).toFixed(1)}`,
+    [
+      `roleplay_queue;dur=${Math.max(0, queueMs).toFixed(1)}`,
+      `roleplay_compaction;dur=${Math.max(0, compactionMs).toFixed(1)}`,
+      `roleplay_upstream_headers;dur=${Math.max(0, headerMs).toFixed(1)}`,
+      `roleplay_total_to_headers;dur=${Math.max(0, totalToHeadersMs).toFixed(1)}`,
+    ].join(", "),
   );
   return headers;
 }
@@ -219,13 +227,14 @@ export function recordModelResult(
 async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
+  let cleaned = false;
   if (signal?.aborted) {
     abort();
   } else {
     signal?.addEventListener("abort", abort, { once: true });
   }
   const timeout = setTimeout(
-    () => controller.abort("Upstream header timeout"),
+    () => controller.abort("upstream_header_timeout"),
     settings.upstreamHeaderTimeoutMs,
   );
   const startedAt = performance.now();
@@ -238,12 +247,17 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
       redirect: "manual",
       signal: controller.signal,
     });
+    clearTimeout(timeout);
     return {
       response,
       controller,
       startedAt,
       headerMs: performance.now() - startedAt,
       cleanup() {
+        if (cleaned) {
+          return;
+        }
+        cleaned = true;
         clearTimeout(timeout);
         signal?.removeEventListener("abort", abort);
       },
@@ -251,6 +265,19 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   } catch (error) {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", abort);
+    if (
+      ["upstream_header_timeout", "compaction_timeout"].includes(
+        controller.signal.reason,
+      )
+    ) {
+      const timeoutError = new Error(
+        controller.signal.reason === "compaction_timeout"
+          ? "Memory compaction exceeded its total time budget"
+          : "Upstream response headers exceeded the time budget",
+      );
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
     throw error;
   }
 }
@@ -263,76 +290,116 @@ export async function requestCompaction(
   settings,
   signal,
 ) {
+  const compactionController = new AbortController();
+  const forwardAbort = () =>
+    compactionController.abort(signal?.reason);
+  if (signal?.aborted) {
+    forwardAbort();
+  } else {
+    signal?.addEventListener("abort", forwardAbort, { once: true });
+  }
+  const startedAt = performance.now();
+  const deadlineAt = startedAt + settings.compactionTimeoutMs;
+  const deadline = setTimeout(
+    () => compactionController.abort("compaction_timeout"),
+    settings.compactionTimeoutMs,
+  );
   let fallbackCount = 0;
-  for (const candidate of candidates) {
-    const payload = buildCompactionPayload(state, plan, candidate, settings);
-    let attempted;
-    try {
-      attempted = await fetchCandidate(
+  try {
+    for (const candidate of candidates) {
+      if (compactionController.signal.aborted) {
+        const error = new Error(
+          "Memory compaction exceeded its total time budget",
+        );
+        error.name = "TimeoutError";
+        throw error;
+      }
+      const payload = buildCompactionPayload(
+        state,
+        plan,
         candidate,
-        payload,
-        env,
-        {
-          ...settings,
-          upstreamHeaderTimeoutMs: settings.compactionTimeoutMs,
-        },
-        signal,
-        "",
+        settings,
       );
-    } catch (error) {
-      logRoleplayError("roleplay_compaction_fetch_failed", error, {
-        provider: candidate.provider,
-        model: candidate.model,
-      });
-      throw error;
-    }
+      let attempted;
+      try {
+        attempted = await fetchCandidate(
+          candidate,
+          payload,
+          env,
+          {
+            ...settings,
+            upstreamHeaderTimeoutMs: Math.max(
+              1,
+              deadlineAt - performance.now(),
+            ),
+          },
+          compactionController.signal,
+          "",
+        );
+      } catch (error) {
+        logRoleplayError("roleplay_compaction_fetch_failed", error, {
+          provider: candidate.provider,
+          model: candidate.model,
+          elapsedMs: Math.round(performance.now() - startedAt),
+          budgetMs: settings.compactionTimeoutMs,
+        });
+        throw error;
+      }
 
-    const { response } = attempted;
-    if (!response.ok) {
-      attempted.cleanup();
-      logRoleplayError(
-        "roleplay_compaction_provider_rejected",
-        new Error("Compaction provider rejected the request"),
-        {
+      const { response } = attempted;
+      if (!response.ok) {
+        attempted.cleanup();
+        logRoleplayError(
+          "roleplay_compaction_provider_rejected",
+          new Error("Compaction provider rejected the request"),
+          {
+            provider: candidate.provider,
+            model: candidate.model,
+            status: response.status,
+            safeFallback: isSafeFallbackStatus(response.status),
+          },
+        );
+        if (isSafeFallbackStatus(response.status)) {
+          fallbackCount += 1;
+          await response.body?.cancel();
+          continue;
+        }
+        await response.body?.cancel();
+        throw new Error(
+          "Compaction provider returned an ambiguous failure",
+        );
+      }
+
+      try {
+        const { bytes } = await readBoundedBytes(
+          response.body,
+          MAX_COMPACTION_RESPONSE_BYTES,
+          attempted.controller.signal,
+        );
+        const payloadJson = JSON.parse(
+          new TextDecoder().decode(bytes),
+        );
+        return {
+          candidate,
+          digest: parseCompactionResponse(payloadJson),
+          fallbackCount,
+        };
+      } catch (error) {
+        logRoleplayError("roleplay_compaction_parse_failed", error, {
           provider: candidate.provider,
           model: candidate.model,
           status: response.status,
-          safeFallback: isSafeFallbackStatus(response.status),
-        },
-      );
-      if (isSafeFallbackStatus(response.status)) {
-        fallbackCount += 1;
-        await response.body?.cancel();
-        continue;
+        });
+        throw error;
+      } finally {
+        attempted.cleanup();
       }
-      await response.body?.cancel();
-      throw new Error("Compaction provider returned an ambiguous failure");
     }
-
-    try {
-      const { bytes } = await readBoundedBytes(
-        response.body,
-        MAX_COMPACTION_RESPONSE_BYTES,
-        attempted.controller.signal,
-      );
-      const payloadJson = JSON.parse(new TextDecoder().decode(bytes));
-      return {
-        candidate,
-        digest: parseCompactionResponse(payloadJson),
-        fallbackCount,
-      };
-    } catch (error) {
-      logRoleplayError("roleplay_compaction_parse_failed", error, {
-        provider: candidate.provider,
-        model: candidate.model,
-        status: response.status,
-      });
-      throw error;
-    } finally {
-      attempted.cleanup();
-    }
+    throw new Error("No configured model accepted memory compaction");
+  } finally {
+    clearTimeout(deadline);
+    signal?.removeEventListener("abort", forwardAbort);
   }
-  throw new Error("No configured model accepted memory compaction");
 }
 
 export async function attemptRoleplayCandidates(
@@ -420,143 +487,4 @@ export async function attemptRoleplayCandidates(
       "no_roleplay_provider",
     ),
   };
-}
-
-function sseAssistantCollector(maximumCharacters = 64_000) {
-  let buffered = "";
-  let assistant = "";
-
-  const consumeLine = (line) => {
-    if (!line.startsWith("data:")) {
-      return;
-    }
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") {
-      return;
-    }
-    try {
-      const payload = JSON.parse(data);
-      const content = payload?.choices?.[0]?.delta?.content;
-      if (typeof content === "string" && assistant.length < maximumCharacters) {
-        assistant += content.slice(0, maximumCharacters - assistant.length);
-      }
-    } catch {
-      // Preserve provider stream even when a non-JSON data event appears.
-    }
-  };
-
-  return {
-    consume(text) {
-      buffered += text;
-      const lines = buffered.split(/\r?\n/);
-      buffered = lines.pop() ?? "";
-      for (const line of lines) {
-        consumeLine(line);
-      }
-    },
-    finish(text = "") {
-      buffered += text;
-      if (buffered) {
-        consumeLine(buffered);
-      }
-      return assistant;
-    },
-  };
-}
-
-export function createObservedStream(
-  upstreamBody,
-  requestSignal,
-  upstreamController,
-  onComplete,
-) {
-  let resolveCompletion;
-  const completion = new Promise((resolve) => {
-    resolveCompletion = resolve;
-  });
-  const reader = upstreamBody.getReader();
-  const decoder = new TextDecoder();
-  const collector = sseAssistantCollector();
-  let settled = false;
-  let released = false;
-  let firstByteAt = 0;
-  const streamStartedAt = performance.now();
-
-  const releaseReader = () => {
-    if (!released) {
-      released = true;
-      reader.releaseLock();
-    }
-  };
-
-  const settle = async (result) => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    try {
-      await onComplete(result);
-    } catch (error) {
-      logRoleplayError("roleplay_stream_state_write_failed", error);
-    } finally {
-      resolveCompletion();
-    }
-  };
-
-  const stream = new ReadableStream({
-    async pull(controller) {
-      try {
-        if (requestSignal.aborted) {
-          throw new DOMException("Request aborted", "AbortError");
-        }
-        const { value, done } = await reader.read();
-        if (done) {
-          const assistant = collector.finish(decoder.decode());
-          releaseReader();
-          controller.close();
-          void settle({
-            success: true,
-            assistant,
-            ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
-            streamMs: performance.now() - streamStartedAt,
-          });
-          return;
-        }
-        if (!value) {
-          return;
-        }
-        if (!firstByteAt) {
-          firstByteAt = performance.now();
-        }
-        collector.consume(decoder.decode(value, { stream: true }));
-        controller.enqueue(value);
-      } catch (error) {
-        upstreamController.abort(error);
-        releaseReader();
-        void settle({
-          success: false,
-          assistant: "",
-          ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
-          streamMs: performance.now() - streamStartedAt,
-        });
-        controller.error(error);
-      }
-    },
-    async cancel(reason) {
-      upstreamController.abort(reason);
-      try {
-        await reader.cancel(reason);
-      } finally {
-        releaseReader();
-        await settle({
-          success: false,
-          assistant: "",
-          ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
-          streamMs: performance.now() - streamStartedAt,
-        });
-      }
-    },
-  });
-
-  return { stream, completion };
 }

@@ -17,6 +17,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/config.mjs",
     import.meta.url,
   );
+  const compactionPolicyUrl = new URL(
+    "../../worker/roleplay/compaction-policy.mjs",
+    import.meta.url,
+  );
   const directivesUrl = new URL(
     "../../worker/roleplay/directives.mjs",
     import.meta.url,
@@ -37,28 +41,40 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/transport.mjs",
     import.meta.url,
   );
+  const streamingUrl = new URL(
+    "../../worker/roleplay/streaming.mjs",
+    import.meta.url,
+  );
   const [
     compatibilitySource,
     checkpointSource,
     configSource,
+    compactionPolicySource,
     directivesSource,
     fallbackMemorySource,
     memorySource,
     transportSource,
+    streamingSource,
     endpointSource,
   ] =
     await Promise.all([
       readFile(compatibilityUrl, "utf8"),
       readFile(checkpointUrl, "utf8"),
       readFile(configUrl, "utf8"),
+      readFile(compactionPolicyUrl, "utf8"),
       readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(transportUrl, "utf8"),
+      readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
   const configDataUrl = dataModuleUrl(configSource);
+  const compactionPolicyDataUrl = dataModuleUrl(
+    compactionPolicySource,
+  );
+  const streamingDataUrl = dataModuleUrl(streamingSource);
   const directivesDataUrl = dataModuleUrl(directivesSource);
   const checkpointDataUrl = dataModuleUrl(
     checkpointSource.replace(
@@ -104,14 +120,27 @@ export async function roleplayModuleUrl() {
       'from "./checkpoint.mjs";',
       `from "${checkpointDataUrl}";`,
     )
+    .replace(
+      'from "./compaction-policy.mjs";',
+      `from "${compactionPolicyDataUrl}";`,
+    )
     .replace('from "./config.mjs";', `from "${configDataUrl}";`)
     .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
-    .replace('from "./transport.mjs";', `from "${transportDataUrl}";`);
+    .replace('from "./transport.mjs";', `from "${transportDataUrl}";`)
+    .replace('from "./streaming.mjs";', `from "${streamingDataUrl}";`);
   return dataModuleUrl(patchedEndpoint);
 }
 
 export async function loadRoleplayModule() {
   return import(await roleplayModuleUrl());
+}
+
+export async function loadRoleplayStreamingModule() {
+  const streamingUrl = new URL(
+    "../../worker/roleplay/streaming.mjs",
+    import.meta.url,
+  );
+  return import(dataModuleUrl(await readFile(streamingUrl, "utf8")));
 }
 
 export async function loadWorkerModule() {

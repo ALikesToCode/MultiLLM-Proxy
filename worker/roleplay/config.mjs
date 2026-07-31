@@ -228,15 +228,27 @@ export function getRoleplaySettings(env) {
     ),
     compactionTimeoutMs: boundedInteger(
       env.ROLEPLAY_COMPACTION_TIMEOUT_MS,
-      25_000,
-      5_000,
-      90_000,
+      8_000,
+      1_000,
+      30_000,
     ),
     upstreamHeaderTimeoutMs: boundedInteger(
       env.ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS,
       90_000,
       5_000,
       300_000,
+    ),
+    streamHeartbeatMs: boundedInteger(
+      env.ROLEPLAY_STREAM_HEARTBEAT_MS,
+      10_000,
+      3_000,
+      30_000,
+    ),
+    streamIdleTimeoutMs: boundedInteger(
+      env.ROLEPLAY_STREAM_IDLE_TIMEOUT_MS,
+      360_000,
+      15_000,
+      600_000,
     ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,

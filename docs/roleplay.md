@@ -88,6 +88,15 @@ Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
 the Worker derives a bounded output budget from the newest user turn. Explicit
 values cannot exceed `ROLEPLAY_MAX_OUTPUT_TOKENS`.
 
+During a quiet streaming interval, the Worker emits a valid SSE comment every
+10 seconds. These keepalives carry no model content and let clients distinguish
+long Kimi/GLM thinking from a dead connection. A stream may remain quiet for
+six minutes, leaving headroom for a five-minute thinking phase, before it is
+treated as stalled. Provider data events are
+forwarded byte-for-byte, and a stream is recorded as complete only after
+`[DONE]` or a non-empty `finish_reason`; an unterminated EOF is logged as a
+failed stream and is not stored as completed assistant memory.
+
 ## JanitorAI proxy configuration
 
 Create a proxy configuration with:
@@ -184,6 +193,12 @@ stored, and final generation continues without retrying the summarizer.
 expose this degraded path. Model compaction is an additional provider request
 and can be billable.
 
+All model-compaction candidates share one eight-second budget. A failed
+compaction starts a per-session exponential backoff (one minute up to fifteen
+minutes), so later forced turns immediately use local compaction instead of
+repeating a slow or rate-limited auxiliary call. A later successful model
+compaction clears the failure count and backoff.
+
 Token counts are fast UTF-8 byte estimates, not provider tokenizer or billing
 measurements.
 
@@ -192,8 +207,9 @@ Object alarm atomically removes that session's memory and metrics.
 
 ## Response metadata
 
-The upstream OpenAI-compatible JSON or SSE body stays unchanged. The Worker
-adds:
+The upstream OpenAI-compatible JSON body and SSE data events stay unchanged.
+During streaming silence, the Worker may interleave the SSE keepalive comment
+described above. The Worker adds:
 
 - `X-Roleplay-Session-ID`
 - `X-Roleplay-Session-Source`
@@ -207,6 +223,11 @@ adds:
 - `Server-Timing`
 
 These headers are exposed through CORS.
+
+`Server-Timing` separates session queue time, memory compaction, upstream
+header wait, and total time to response headers. This makes slow compaction,
+same-session serialization, and provider startup independently visible without
+logging roleplay content.
 
 The request sent to the selected provider has this order (memory and lore are
 omitted when absent):
@@ -303,8 +324,10 @@ Non-secret tuning variables:
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
-| `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `25000` | Total model-compaction budget before local fallback |
+| `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
+| `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
+| `ROLEPLAY_STREAM_IDLE_TIMEOUT_MS` | `360000` | Maximum quiet stream interval before abort |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs. Override only those providers:

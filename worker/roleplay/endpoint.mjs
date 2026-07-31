@@ -16,6 +16,11 @@ import {
   createCompactionCheckpoint,
   reuseCompactionCheckpoint,
 } from "./checkpoint.mjs";
+import {
+  compactionBackoffActive,
+  recordCompactionFailure,
+  recordCompactionSuccess,
+} from "./compaction-policy.mjs";
 import { prepareProtectedContext } from "./directives.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import {
@@ -40,7 +45,6 @@ import {
   MAX_RESPONSE_BYTES,
   attemptRoleplayCandidates,
   copyUpstreamResponseHeaders,
-  createObservedStream,
   decorateRoleplayHeaders,
   errorResponse,
   jsonResponse,
@@ -49,6 +53,7 @@ import {
   recordModelResult,
   requestCompaction,
 } from "./transport.mjs";
+import { createObservedStream } from "./streaming.mjs";
 
 export { isRoleplayPath };
 
@@ -68,6 +73,8 @@ function initialState() {
     turns: 0,
     compactions: 0,
     localCompactions: 0,
+    compactionFailures: 0,
+    compactionBackoffUntil: 0,
     storageOverflow: false,
     recentRequests: [],
     updatedAt: 0,
@@ -397,6 +404,9 @@ export class RoleplaySession extends DurableObject {
         turns: state.turns,
         compactions: state.compactions,
         local_compactions: state.localCompactions,
+        compaction_failures: state.compactionFailures,
+        compaction_backoff_until:
+          state.compactionBackoffUntil || null,
         storage_overflow: state.storageOverflow,
         stored_messages: state.messages.length,
         protected_directives: state.directives.length,
@@ -420,6 +430,7 @@ export class RoleplaySession extends DurableObject {
   }
 
   async enqueueTurn(request, settings) {
+    const queuedAt = performance.now();
     const previous = this.turnTail.catch(() => {});
     let release;
     const current = new Promise((resolve) => {
@@ -427,9 +438,10 @@ export class RoleplaySession extends DurableObject {
     });
     this.turnTail = previous.then(() => current);
     await previous;
+    const queueMs = performance.now() - queuedAt;
 
     try {
-      const result = await this.handleTurn(request, settings);
+      const result = await this.handleTurn(request, settings, queueMs);
       const completion = Promise.resolve(result.completion).finally(release);
       this.ctx.waitUntil(completion);
       return result.response;
@@ -451,7 +463,9 @@ export class RoleplaySession extends DurableObject {
     }
   }
 
-  async handleTurn(request, settings) {
+  async handleTurn(request, settings, queueMs = 0) {
+    const turnStartedAt = performance.now();
+    let compactionMs = 0;
     const payload = await request.json();
     let state = await loadState(this.ctx.storage);
     const parsedInitial = parseRoleplayPayload(payload, settings);
@@ -550,26 +564,10 @@ export class RoleplaySession extends DurableObject {
     );
 
     if (plan.requested) {
+      const compactionStartedAt = performance.now();
       let compactionDigest;
       let compactionSource = "model";
-      try {
-        const compacted = await requestCompaction(
-          memoryState,
-          plan,
-          candidates,
-          this.env,
-          settings,
-          request.signal,
-        );
-        compactionDigest = compacted.digest;
-        if (plan.forced && !compactionDigest.compact) {
-          throw new Error("Model declined required memory compaction");
-        }
-      } catch (error) {
-        logRoleplayError("roleplay_compaction_failed", error, {
-          forced: plan.forced,
-          olderMessages: plan.olderMessages.length,
-        });
+      if (compactionBackoffActive(state)) {
         if (plan.forced) {
           compactionDigest = createExtractiveCompactionDigest(
             memoryState,
@@ -582,7 +580,48 @@ export class RoleplaySession extends DurableObject {
             localCompactions: (state.localCompactions ?? 0) + 1,
           };
         } else {
-          memoryStatus = "compaction_failed_retained";
+          memoryStatus = "compaction_backoff_retained";
+        }
+      } else {
+        try {
+          const compacted = await requestCompaction(
+            memoryState,
+            plan,
+            candidates,
+            this.env,
+            settings,
+            request.signal,
+          );
+          compactionDigest = compacted.digest;
+          if (plan.forced && !compactionDigest.compact) {
+            throw new Error("Model declined required memory compaction");
+          }
+          state = recordCompactionSuccess(state);
+        } catch (error) {
+          if (request.signal.aborted) {
+            throw error;
+          }
+          state = recordCompactionFailure(state);
+          logRoleplayError("roleplay_compaction_failed", error, {
+            forced: plan.forced,
+            olderMessages: plan.olderMessages.length,
+            failures: state.compactionFailures,
+            backoffUntil: state.compactionBackoffUntil,
+          });
+          if (plan.forced) {
+            compactionDigest = createExtractiveCompactionDigest(
+              memoryState,
+              plan,
+              settings,
+            );
+            compactionSource = "local";
+            state = {
+              ...state,
+              localCompactions: (state.localCompactions ?? 0) + 1,
+            };
+          } else {
+            memoryStatus = "compaction_failed_retained";
+          }
         }
       }
 
@@ -614,6 +653,7 @@ export class RoleplaySession extends DurableObject {
           await saveState(this.ctx.storage, state);
         }
       }
+      compactionMs = performance.now() - compactionStartedAt;
     }
 
     const projectedStoredBytes =
@@ -685,7 +725,6 @@ export class RoleplaySession extends DurableObject {
       controller,
       cleanup,
     } = attempted;
-    cleanup();
     const selectionReason =
       (state.stats[candidate.key]?.successes ?? 0) < 2
         ? "exploration"
@@ -700,6 +739,9 @@ export class RoleplaySession extends DurableObject {
       parsed.maxTokens,
       headerMs,
       fallbackCount,
+      queueMs,
+      compactionMs,
+      queueMs + performance.now() - turnStartedAt,
     );
 
     if (
@@ -707,11 +749,48 @@ export class RoleplaySession extends DurableObject {
       response.body &&
       contentType.toLowerCase().includes("text/event-stream")
     ) {
-      const observed = createObservedStream(
-        response.body,
-        request.signal,
-        controller,
-        async ({ success, assistant, ttfbMs, streamMs }) => {
+      const observed = createObservedStream({
+        upstreamBody: response.body,
+        requestSignal: request.signal,
+        upstreamController: controller,
+        heartbeatMs: settings.streamHeartbeatMs,
+        idleTimeoutMs: settings.streamIdleTimeoutMs,
+        onComplete: async ({
+          success,
+          assistant,
+          finishReason,
+          reason,
+          ttfbMs,
+          streamMs,
+          heartbeatCount,
+        }) => {
+          cleanup();
+          console.log(
+            JSON.stringify({
+              event: "roleplay_stream_completed",
+              provider: candidate.provider,
+              model: candidate.model,
+              success,
+              reason,
+              finishReason: finishReason || undefined,
+              headerMs: Math.round(headerMs),
+              ttfbMs: Math.round(ttfbMs),
+              streamMs: Math.round(streamMs),
+              heartbeatCount,
+              assistantCharacters: assistant.length,
+            }),
+          );
+          if (reason === "incomplete_eof") {
+            logRoleplayError(
+              "roleplay_stream_incomplete",
+              new Error("Provider stream ended without a terminal event"),
+              {
+                provider: candidate.provider,
+                model: candidate.model,
+                assistantCharacters: assistant.length,
+              },
+            );
+          }
           let nextState = recordModelResult(state, candidate, {
             success,
             ttfbMs: headerMs + ttfbMs,
@@ -734,9 +813,8 @@ export class RoleplaySession extends DurableObject {
             success ? "completed" : "stream_failed",
           );
           await saveState(this.ctx.storage, nextState);
-          void streamMs;
         },
-      );
+      });
       return {
         response: new Response(observed.stream, {
           status: response.status,
@@ -747,11 +825,17 @@ export class RoleplaySession extends DurableObject {
       };
     }
 
-    const { bytes, firstByteMs } = await readBoundedBytes(
-      response.body,
-      MAX_RESPONSE_BYTES,
-      request.signal,
-    );
+    let bounded;
+    try {
+      bounded = await readBoundedBytes(
+        response.body,
+        MAX_RESPONSE_BYTES,
+        controller.signal,
+      );
+    } finally {
+      cleanup();
+    }
+    const { bytes, firstByteMs } = bounded;
     let assistant = "";
     if (contentType.toLowerCase().includes("application/json")) {
       try {

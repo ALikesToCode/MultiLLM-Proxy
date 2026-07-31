@@ -68,6 +68,14 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("X-Roleplay-Memory"), "model_compacted");
+  assert.match(
+    response.headers.get("Server-Timing"),
+    /roleplay_compaction;dur=/,
+  );
+  assert.match(
+    response.headers.get("Server-Timing"),
+    /roleplay_total_to_headers;dur=/,
+  );
   assert.equal(requests.length, 2);
   assert.equal(requests[0].stream, false);
   assert.equal(requests[0].response_format, undefined);
@@ -349,6 +357,72 @@ test("roleplay continues with local memory after compaction provider error", asy
     ),
     true,
   );
+});
+
+test("roleplay backs off failed model compaction and keeps using local memory", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
+  });
+  let compactionCalls = 0;
+  let generationCalls = 0;
+
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    if (isCompactionPayload(payload)) {
+      compactionCalls += 1;
+      return new Response(
+        JSON.stringify({ error: { message: "Compaction unavailable" } }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+    generationCalls += 1;
+    return completionResponse(payload.model, "The scene advances.");
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-compaction-backoff",
+        messages: Array.from({ length: 8 }, (_, index) => ({
+          role: index % 2 === 0 ? "user" : "assistant",
+          content: `Backoff event ${index}`,
+        })),
+        character: { name: "Mira" },
+        memory: { mode: "force" },
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-compaction-backoff",
+        input: "Continue without retrying broken compaction.",
+        memory: { mode: "force" },
+        stream: false,
+      }),
+      fixture.env,
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("X-Roleplay-Memory"), "local_compacted");
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get("X-Roleplay-Memory"), "local_compacted");
+  });
+
+  assert.equal(compactionCalls, 1);
+  assert.equal(generationCalls, 2);
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-compaction-backoff",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  const payload = await metrics.json();
+  assert.equal(payload.compaction_failures, 1);
+  assert.ok(payload.compaction_backoff_until > Date.now());
+  assert.equal(payload.local_compactions, 2);
 });
 
 test("roleplay persists protected directives outside dialogue and clears them only on replace", async () => {
