@@ -5,12 +5,14 @@ import {
   ROLEPLAY_MODELS_PATH,
   extractBearerToken,
   hasRoleplayAuthentication,
+  isDerivedRoleplaySessionId,
   isAuthorizedRoleplayToken,
   isRoleplayPath,
   isRoleplayTurnPath,
   isValidRoleplaySessionId,
   resolveRoleplaySession,
   responseWithRoleplaySession,
+  scopePublicRoleplaySessionId,
 } from "./compatibility.mjs";
 import {
   createCompactionCheckpoint,
@@ -273,7 +275,10 @@ export async function handleRoleplayEdgeRequest(request, env) {
         "invalid_session_id",
       );
     }
-    const stub = roleplayStub(env, sessionId, request);
+    const storageSessionId = isDerivedRoleplaySessionId(sessionId)
+      ? sessionId
+      : await scopePublicRoleplaySessionId(sessionId, providedToken);
+    const stub = roleplayStub(env, storageSessionId, request);
     const response = await stub.fetch(
       new Request("https://roleplay.internal/metrics", {
         method: "GET",
@@ -319,7 +324,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
     );
     return responseWithRoleplaySession(
       response,
-      session.id,
+      session.publicId,
       session.source,
     );
   } catch (error) {

@@ -25,6 +25,23 @@ class FakeSession:
         return _json_response(200, {"ok": True})
 
 
+class FailingSession:
+    def request(self, **kwargs):
+        raise requests.ConnectionError(
+            "connection failed for https://provider.invalid?key=secret-provider-key"
+        )
+
+
+class FailingStreamResponse:
+    headers = {}
+
+    def iter_lines(self, decode_unicode=True):
+        raise RuntimeError("stream failed with secret-provider-key")
+
+    def close(self):
+        return None
+
+
 def _json_response(status_code, payload):
     response = requests.Response()
     response.status_code = status_code
@@ -175,6 +192,39 @@ class TransportResilienceTest(unittest.TestCase):
         self.assertEqual(second.status_code, 503)
         self.assertEqual(second.json()["error"]["type"], "circuit_open")
         self.assertEqual(fake_session.request_calls, 1)
+
+    def test_transport_failures_do_not_reflect_upstream_exception_details(self):
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_get_provider_session",
+            return_value=FailingSession(),
+        ):
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="POST",
+                url="https://provider.invalid/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                params={},
+                data=b"{}",
+                api_provider="openai",
+                use_cache=False,
+            )
+
+        self.assertEqual(response.status_code, 502)
+        payload = response.json()
+        self.assertEqual(payload["error"]["type"], "upstream_transport_error")
+        self.assertNotIn("secret-provider-key", response.text)
+        self.assertNotIn("provider.invalid", response.text)
+
+    def test_stream_failures_emit_opaque_sse_error(self):
+        chunks = "".join(
+            self.proxy_module.ProxyService._create_streaming_response(
+                FailingStreamResponse(),
+                "openai",
+            )
+        )
+
+        self.assertIn(self.proxy_module.STREAM_FAILURE_MESSAGE, chunks)
+        self.assertNotIn("secret-provider-key", chunks)
 
 if __name__ == "__main__":
     unittest.main()

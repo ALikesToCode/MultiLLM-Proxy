@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
+UPSTREAM_FAILURE_MESSAGE = "Upstream request could not be completed."
+STREAM_FAILURE_MESSAGE = "Upstream stream terminated unexpectedly."
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -306,7 +308,11 @@ class ProxyService:
                         status_code=401
                     )
                 else:
-                    raise APIError(f"Error running gcloud command: {err_msg}", status_code=500)
+                    logger.error(
+                        "gcloud token command failed return_code=%s",
+                        e.returncode,
+                    )
+                    raise APIError("Unable to obtain a Google Cloud token", status_code=500)
 
             except FileNotFoundError:
                 # Clear token cache on error
@@ -320,9 +326,11 @@ class ProxyService:
                 # Clear token cache on error
                 cls._google_token = None
                 cls._google_token_expiry = None
-                error_msg = f"Unexpected error getting Google token: {str(e)}"
-                logger.error(error_msg)
-                raise APIError(error_msg, status_code=500)
+                logger.error(
+                    "Unexpected Google token error type=%s",
+                    type(e).__name__,
+                )
+                raise APIError("Unable to obtain a Google Cloud token", status_code=500)
 
     @classmethod
     def invalidate_google_token(cls):
@@ -1330,8 +1338,11 @@ class ProxyService:
                 error_response.headers = {"Content-Type": "application/json"}
                 return error_response
 
-            error_msg = f"Request failed: {str(e)}"
-            logger.error(error_msg)
+            logger.error(
+                "Upstream request failed provider=%s type=%s",
+                api_provider,
+                type(e).__name__,
+            )
             if (
                 not raw_passthrough
                 and cls._should_retry_exception(method, data, e)
@@ -1354,13 +1365,12 @@ class ProxyService:
             
             # If all retries fail, return a JSON error response
             error_response = requests.Response()
-            error_response.status_code = 500
+            error_response.status_code = 502
             error_json = {
                 "error": {
-                    "message": error_msg,
-                    "type": "request_error",
-                    "code": 500,
-                    "details": str(e)
+                    "message": UPSTREAM_FAILURE_MESSAGE,
+                    "type": "upstream_transport_error",
+                    "code": 502,
                 }
             }
             error_response._content = json.dumps(error_json).encode('utf-8')
@@ -1709,14 +1719,17 @@ class ProxyService:
                                             )
                                             continue
                                         except Exception as e:
-                                            logger.error(f"Error in Google AI streaming: {str(e)}")
+                                            logger.error(
+                                                "Google AI stream processing failed type=%s",
+                                                type(e).__name__,
+                                            )
                                             # Try to recover by sending an error message in the stream
                                             error_data = {
                                                 "id": str(uuid.uuid4()),
                                                 "object": "chat.completion.chunk",
                                                 "created": int(time.time()),
                                                 "model": "googleai-stream",
-                                                "choices": [{"delta": {"content": f"Error: {str(e)}"}}]
+                                                "choices": [{"delta": {"content": STREAM_FAILURE_MESSAGE}}]
                                             }
                                             yield f"data: {json.dumps(error_data)}\n\n"
                                             continue
@@ -1724,13 +1737,16 @@ class ProxyService:
                                 # Ensure we send the final [DONE] marker
                                 yield "data: [DONE]\n\n"
                             except Exception as e:
-                                logger.error(f"Critical error in Google AI streaming: {str(e)}")
+                                logger.error(
+                                    "Google AI stream failed type=%s",
+                                    type(e).__name__,
+                                )
                                 error_data = {
                                     "id": str(uuid.uuid4()),
                                     "object": "chat.completion.chunk",
                                     "created": int(time.time()),
                                     "model": "googleai-stream",
-                                    "choices": [{"delta": {"content": f"Critical streaming error: {str(e)}"}}]
+                                    "choices": [{"delta": {"content": STREAM_FAILURE_MESSAGE}}]
                                 }
                                 yield f"data: {json.dumps(error_data)}\n\n"
                                 yield "data: [DONE]\n\n"
@@ -2453,10 +2469,7 @@ class ProxyService:
                     logger.info(f"Found valid {api_provider} API key format in environment, using it instead")
                     api_key = env_key
             
-            # Log partial key for debugging (first 4 + last 4 chars)
-            if api_key and len(api_key) > 10:
-                masked_key = f"{api_key[:4]}...{api_key[-4:]}"
-                logger.info(f"Using API key: {masked_key}")
+            logger.debug("Resolved API key for %s", api_provider)
             
             headers["x-goog-api-key"] = api_key
             
@@ -2844,10 +2857,7 @@ class ProxyService:
                     raise APIError("No API key found for OpenRouter. Please set OPENROUTER_API_KEY in your .env file.", status_code=401)
                 logger.info("Using API key from AuthService for OpenRouter")
             
-            # Log partial key for debugging (first 4 + last 4 chars)
-            if api_key and len(api_key) > 10:
-                masked_key = f"{api_key[:4]}...{api_key[-4:]}"
-                logger.info(f"Using OpenRouter API key: {masked_key}")
+            logger.debug("Resolved OpenRouter API key")
             
             # Replace auth header with the real OpenRouter API key
             headers['Authorization'] = f'Bearer {api_key}'
@@ -3284,9 +3294,12 @@ class ProxyService:
                         yield closing_think_chunk
                     yield 'data: [DONE]\n\n'
         except Exception as e:
-            logger.error(f"Error in streaming response processing: {str(e)}")
-            error_msg = f"Error: {str(e)}"
-            yield f"data: {json.dumps({'choices': [{'delta': {'content': error_msg}}]})}\n\n"
+            logger.error(
+                "Streaming response processing failed provider=%s type=%s",
+                provider,
+                type(e).__name__,
+            )
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': STREAM_FAILURE_MESSAGE}}]})}\n\n"
             yield 'data: [DONE]\n\n'
         finally:
             if hasattr(response, "close"):
@@ -3342,7 +3355,7 @@ class ProxyService:
             auth_header = headers.get('Authorization', '')
             if auth_header.startswith('Bearer '):
                 auth_token = auth_header.replace('Bearer ', '').strip()
-                logger.debug(f"Extracted auth token from header: {auth_token[:5]}...")
+                logger.debug("Extracted bearer credential from request headers")
             
             # Special handling for different providers
             if api_provider == "together":

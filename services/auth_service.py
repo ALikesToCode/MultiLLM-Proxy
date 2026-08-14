@@ -677,12 +677,17 @@ class AuthService:
                 return None
 
         except subprocess.CalledProcessError as error:
-            error_output = error.stderr.decode("utf-8") if isinstance(error.stderr, bytes) else str(error.stderr)
-            logger.error("Error getting Google token: %s", error_output)
+            logger.error(
+                "gcloud token command failed return_code=%s",
+                error.returncode,
+            )
         except subprocess.TimeoutExpired:
             logger.error("Timeout while getting Google token")
         except Exception as error:
-            logger.error("Unexpected error getting Google token: %s", error)
+            logger.error(
+                "Unexpected Google token error type=%s",
+                type(error).__name__,
+            )
 
         cls._google_token = None
         cls._google_token_expiry = None

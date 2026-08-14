@@ -12,6 +12,7 @@ const ROLEPLAY_TURN_PATHS = new Set([
   ROLEPLAY_JANITOR_PATH,
 ]);
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const DERIVED_SESSION_ID_PATTERN = /^rp_[a-f0-9]{64}$/;
 const CLIENT_ID_FIELDS = [
   "conversation_id",
   "conversationId",
@@ -132,6 +133,17 @@ async function digestSessionName(kind, scopeToken, value) {
   return `rp_${hex}`;
 }
 
+export async function scopePublicRoleplaySessionId(
+  sessionId,
+  scopeToken,
+) {
+  return digestSessionName("public", scopeToken, sessionId);
+}
+
+export function isDerivedRoleplaySessionId(sessionId) {
+  return DERIVED_SESSION_ID_PATTERN.test(sessionId);
+}
+
 async function timingSafeTokenMatch(providedToken, expectedToken) {
   const encoder = new TextEncoder();
   const [providedDigest, expectedDigest] = await Promise.all([
@@ -213,30 +225,46 @@ export async function resolveRoleplaySession(
           "session_id must contain 8-128 letters, digits, underscores, or hyphens",
       };
     }
-    return { id: explicit, source: "explicit" };
+    if (isDerivedRoleplaySessionId(explicit)) {
+      return { error: "session_id uses a reserved format" };
+    }
+    return {
+      id: await scopePublicRoleplaySessionId(explicit, scopeToken),
+      publicId: explicit,
+      source: "explicit",
+    };
   }
 
   const clientIdentifier = clientConversationIdentifier(payload);
   if (clientIdentifier) {
+    const id = await digestSessionName(
+      "client",
+      scopeToken,
+      clientIdentifier,
+    );
     return {
-      id: await digestSessionName(
-        "client",
-        scopeToken,
-        clientIdentifier,
-      ),
+      id,
+      publicId: id,
       source: "client",
     };
   }
 
   const anchor = conversationAnchor(payload);
   if (anchor) {
+    const id = await digestSessionName("anchor", scopeToken, anchor);
     return {
-      id: await digestSessionName("anchor", scopeToken, anchor),
+      id,
+      publicId: id,
       source: "derived",
     };
   }
 
-  return { id: crypto.randomUUID(), source: "generated" };
+  const publicId = crypto.randomUUID();
+  return {
+    id: await scopePublicRoleplaySessionId(publicId, scopeToken),
+    publicId,
+    source: "generated",
+  };
 }
 
 export function responseWithRoleplaySession(

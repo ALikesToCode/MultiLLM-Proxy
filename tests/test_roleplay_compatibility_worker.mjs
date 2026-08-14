@@ -603,3 +603,64 @@ test("Janitor model field can pin GLM while explicit sessions remain exact", asy
     "explicit",
   );
 });
+
+test("explicit roleplay sessions are isolated between valid credentials", async () => {
+  const fixture = makeRoleplayEnv();
+  let generation = 0;
+
+  const responses = await withGlobalFetch(
+    async (_input, init) => {
+      generation += 1;
+      const payload = JSON.parse(init.body);
+      return completionResponse(payload.model, `Reply ${generation}`);
+    },
+    async () => Promise.all([
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "shared-explicit-session",
+            model: "roleplay:auto",
+            messages: openingMessages("First credential"),
+            stream: false,
+          },
+          { Authorization: "Bearer janitor-roleplay-key" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "shared-explicit-session",
+            model: "roleplay:auto",
+            messages: openingMessages("Second credential"),
+            stream: false,
+          },
+          { Authorization: "Bearer admin-roleplay-key" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+    ]),
+  );
+
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(
+    responses.map((response) => response.headers.get("X-Roleplay-Session-ID")),
+    ["shared-explicit-session", "shared-explicit-session"],
+  );
+  assert.equal(fixture.storageBySession.size, 2);
+  assert.equal(fixture.storageBySession.has("shared-explicit-session"), false);
+
+  for (const token of ["janitor-roleplay-key", "admin-roleplay-key"]) {
+    const metrics = await handleRoleplayEdgeRequest(
+      new Request(
+        "https://proxy.example/v1/roleplay/metrics?session_id=shared-explicit-session",
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      fixture.env,
+    );
+    assert.equal(metrics.status, 200);
+    assert.equal((await metrics.json()).turns, 1);
+  }
+});
