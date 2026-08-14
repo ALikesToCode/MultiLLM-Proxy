@@ -15,7 +15,7 @@ REASONING_EFFORT_ORDER = (
 GLM_52_MAX_REASONING_EFFORTS = {
     "linkapi": "high",
     "nanogpt": "max",
-    "navyai": "xhigh",
+    "navyai": "max",
     "opencode": "max",
     "openrouter": "xhigh",
 }
@@ -44,6 +44,10 @@ def _requested_effort(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
 
 
 def _bounded_effort(requested: str, maximum: str) -> str:
+    # Direct GLM transports call their strongest tier `max`; `xhigh` is an
+    # alternate gateway spelling and must not be forwarded to those contracts.
+    if requested == "xhigh" and maximum == "max":
+        return "max"
     requested_index = REASONING_EFFORT_ORDER.index(requested)
     maximum_index = REASONING_EFFORT_ORDER.index(maximum)
     return REASONING_EFFORT_ORDER[min(requested_index, maximum_index)]

@@ -1,5 +1,5 @@
 const MAXIMUM_EFFORT_BY_PROVIDER = Object.freeze({
-  navyai: "xhigh",
+  navyai: "max",
   linkapi: "high",
 });
 const REASONING_EFFORT_ORDER = Object.freeze([
@@ -74,7 +74,11 @@ function reasoningFields(candidate, effort) {
   if (maximum === "native" || (provider === "opencode" && family !== "glm")) {
     return {};
   }
-  const requestedIndex = REASONING_EFFORT_ORDER.indexOf(effort);
+  // Some transports call their strongest tier `max`; `xhigh` is an alternate
+  // gateway spelling and must not be forwarded to those contracts.
+  const providerEffort =
+    effort === "xhigh" && maximum === "max" ? "max" : effort;
+  const requestedIndex = REASONING_EFFORT_ORDER.indexOf(providerEffort);
   const maximumIndex = REASONING_EFFORT_ORDER.indexOf(maximum);
   const mappedEffort = REASONING_EFFORT_ORDER[
     Math.min(requestedIndex, maximumIndex)

@@ -176,8 +176,8 @@ test("roleplay defaults to maximum reasoning for every provider and model family
   const cases = [
     ["opencode", "OPENCODE_GO_API_KEY", "kimi", "native", undefined],
     ["opencode", "OPENCODE_GO_API_KEY", "glm", "max", undefined],
-    ["navyai", "NAVYAI_API_KEY", "kimi", "xhigh", undefined],
-    ["navyai", "NAVYAI_API_KEY", "glm", "xhigh", undefined],
+    ["navyai", "NAVYAI_API_KEY", "kimi", "max", undefined],
+    ["navyai", "NAVYAI_API_KEY", "glm", "max", undefined],
     ["linkapi", "LINKAPI_KEY", "kimi", "high", undefined],
     ["linkapi", "LINKAPI_KEY", "glm", "high", undefined],
     ["nanogpt", "NANOGPT_API_KEY", "kimi", "xhigh", undefined],
@@ -255,14 +255,14 @@ test("roleplay preserves an explicit GLM reasoning override for every provider",
   };
   const cases = [
     ["opencode", "OPENCODE_GO_API_KEY", "max", undefined],
-    ["navyai", "NAVYAI_API_KEY", "xhigh", undefined],
+    ["navyai", "NAVYAI_API_KEY", "max", undefined],
     ["linkapi", "LINKAPI_KEY", "high", undefined],
     ["nanogpt", "NANOGPT_API_KEY", "max", undefined],
     ["openrouter", "OPENROUTER_API_KEY", undefined, "xhigh"],
   ];
 
   for (const [provider, keyName, maximumEffort, nestedMaximumEffort] of cases) {
-    for (const requestedEffort of ["low", "max"]) {
+    for (const requestedEffort of ["low", "xhigh", "max"]) {
       const fixture = makeRoleplayEnv({
         ...disabledProviderKeys,
         [keyName]: `${provider}-reasoning-key`,
@@ -288,16 +288,13 @@ test("roleplay preserves an explicit GLM reasoning override for every provider",
       assert.equal(response.status, 200, `${provider}:${requestedEffort}`);
       if (nestedMaximumEffort) {
         assert.deepEqual(upstreamPayload.reasoning, {
-          effort:
-            requestedEffort === "max"
-              ? nestedMaximumEffort
-              : requestedEffort,
+          effort: requestedEffort === "low" ? "low" : nestedMaximumEffort,
         });
         assert.equal("reasoning_effort" in upstreamPayload, false);
       } else {
         assert.equal(
           upstreamPayload.reasoning_effort,
-          requestedEffort === "max" ? maximumEffort : requestedEffort,
+          requestedEffort === "low" ? "low" : maximumEffort,
           `${provider}:${requestedEffort}`,
         );
         assert.equal("reasoning" in upstreamPayload, false);

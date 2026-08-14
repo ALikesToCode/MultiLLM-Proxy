@@ -8,7 +8,7 @@ class ReasoningPolicyTest(unittest.TestCase):
         cases = {
             "opencode": {"reasoning_effort": "max"},
             "nanogpt": {"reasoning_effort": "max"},
-            "navyai": {"reasoning_effort": "xhigh"},
+            "navyai": {"reasoning_effort": "max"},
             "linkapi": {"reasoning_effort": "high"},
             "openrouter": {"reasoning": {"effort": "xhigh"}},
             "another-provider": {"reasoning_effort": "max"},
@@ -68,6 +68,17 @@ class ReasoningPolicyTest(unittest.TestCase):
             )["reasoning_effort"],
             "high",
         )
+
+    def test_xhigh_alias_maps_to_max_for_direct_glm_providers(self):
+        for provider in ("opencode", "nanogpt", "navyai"):
+            with self.subTest(provider=provider):
+                result = apply_glm_52_reasoning_policy(
+                    {"reasoning_effort": "xhigh"},
+                    provider,
+                    "glm-5.2",
+                )
+
+                self.assertEqual(result["reasoning_effort"], "max")
 
     def test_openrouter_uses_nested_reasoning_and_preserves_other_options(self):
         result = apply_glm_52_reasoning_policy(
