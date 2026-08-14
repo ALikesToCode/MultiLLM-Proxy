@@ -48,13 +48,16 @@ npx wrangler secret put KIMI_CODE_API_KEY
 npx wrangler secret put LINKAPI_KEY
 npx wrangler secret put OPENCODE_GO_API_KEY
 npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put NAVYAI_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
 ```
 
-Set only the providers you actually use. The Worker forwards these directly into the container. It also forwards numbered `GROQ_API_KEY_N` secrets automatically.
+Set only the providers you actually use. The Worker forwards these directly
+into the container. It also forwards numbered `GROQ_API_KEY_N`,
+`NANOGPT_API_KEY_N`, and compatibility `NANO_GPT_KEY_N` secrets automatically.
 
 ### Native roleplay sessions
 

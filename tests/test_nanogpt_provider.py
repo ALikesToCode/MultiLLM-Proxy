@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import requests
 
+from services.nanogpt_key_pool import NanoGPTKeyPool
+
 
 class NanoGPTProviderRouteTest(unittest.TestCase):
     def setUp(self):
@@ -20,6 +22,11 @@ class NanoGPTProviderRouteTest(unittest.TestCase):
                 "FLASK_SECRET_KEY": "flask-test-secret",
                 "JWT_SECRET": "jwt-test-secret",
                 "NANOGPT_API_KEY": "nanogpt-provider-key",
+                "NANOGPT_API_KEYS": "",
+                "NANOGPT_API_KEY_1": "",
+                "NANO_GPT_KEY": "",
+                "NANO_GPT_KEYS": "",
+                "NANO_GPT_KEY_1": "",
                 "ALLOWED_ORIGINS": "https://example.com",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(self.temp_dir.name, "limits.sqlite3"),
@@ -43,8 +50,10 @@ class NanoGPTProviderRouteTest(unittest.TestCase):
 
         self.app_module = importlib.import_module("app")
         self.client = self.app_module.create_app().test_client()
+        NanoGPTKeyPool.reset()
 
     def tearDown(self):
+        NanoGPTKeyPool.reset()
         self.temp_dir.cleanup()
         os.environ.clear()
         os.environ.update(self.original_env)
@@ -116,6 +125,85 @@ class NanoGPTProviderRouteTest(unittest.TestCase):
         self.assertEqual(request_kwargs["headers"]["memory_expiration_days"], "30")
         self.assertEqual(request_kwargs["headers"]["anthropic-beta"], "prompt-caching-2024-07-31")
         self.assertEqual(request_kwargs["headers"]["x-use-byok"], "true")
+
+    def test_nanogpt_chat_selects_and_caches_a_valid_configured_key(self):
+        with patch.dict(
+            os.environ,
+            {
+                "NANOGPT_API_KEY": "",
+                "NANO_GPT_KEY": "nanogpt-rejected-key",
+                "NANO_GPT_KEY_1": "nanogpt-working-key",
+            },
+            clear=False,
+        ), patch.object(
+            self.app_module.ProxyService,
+            "probe_nanogpt_key",
+            side_effect=lambda _base_url, key, _timeout: (
+                401 if key == "nanogpt-rejected-key" else 200
+            ),
+        ) as probe, patch(
+            "app.ProxyService.make_request",
+            side_effect=[self._chat_response("first"), self._chat_response("second")],
+        ) as make_request:
+            first = self.client.post(
+                "/nanogpt/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={"model": "gpt-4o-mini", "messages": []},
+            )
+            second = self.client.post(
+                "/nanogpt/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={"model": "gpt-4o-mini", "messages": []},
+            )
+
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(probe.call_count, 2)
+        for call in make_request.call_args_list:
+            self.assertEqual(
+                call.kwargs["headers"]["Authorization"],
+                "Bearer nanogpt-working-key",
+            )
+
+    def test_nanogpt_rejection_rotates_key_on_the_next_request_without_replay(self):
+        rejected = requests.Response()
+        rejected.status_code = 429
+        rejected._content = b'{"error":{"type":"rate_limit_error"}}'
+        rejected.headers["Content-Type"] = "application/json"
+
+        with patch.dict(
+            os.environ,
+            {"NANO_GPT_KEY_1": "nanogpt-second-key"},
+            clear=False,
+        ), patch.object(
+            self.app_module.ProxyService,
+            "probe_nanogpt_key",
+            return_value=200,
+        ) as probe, patch(
+            "app.ProxyService.make_request",
+            side_effect=[rejected, self._chat_response("recovered")],
+        ) as make_request:
+            first = self.client.post(
+                "/nanogpt/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={"model": "gpt-4o-mini", "messages": []},
+            )
+            second = self.client.post(
+                "/nanogpt/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={"model": "gpt-4o-mini", "messages": []},
+            )
+
+        self.assertEqual((first.status_code, second.status_code), (429, 200))
+        self.assertEqual(make_request.call_count, 2)
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(
+            make_request.call_args_list[0].kwargs["headers"]["Authorization"],
+            "Bearer nanogpt-provider-key",
+        )
+        self.assertEqual(
+            make_request.call_args_list[1].kwargs["headers"]["Authorization"],
+            "Bearer nanogpt-second-key",
+        )
 
     def test_nanogpt_models_route_passes_detailed_query_to_live_catalog(self):
         upstream_response = requests.Response()
@@ -225,6 +313,11 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
                 "FLASK_SECRET_KEY": "flask-test-secret",
                 "JWT_SECRET": "jwt-test-secret",
                 "NANOGPT_API_KEY": "nanogpt-provider-key",
+                "NANOGPT_API_KEYS": "",
+                "NANOGPT_API_KEY_1": "",
+                "NANO_GPT_KEY": "",
+                "NANO_GPT_KEYS": "",
+                "NANO_GPT_KEY_1": "",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(self.temp_dir.name, "limits.sqlite3"),
                 "MODEL_REGISTRY_DB_PATH": os.path.join(
@@ -250,8 +343,10 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
 
         self.app_module = importlib.import_module("app")
         self.client = self.app_module.create_app().test_client()
+        NanoGPTKeyPool.reset()
 
     def tearDown(self):
+        NanoGPTKeyPool.reset()
         self.temp_dir.cleanup()
         os.environ.clear()
         os.environ.update(self.original_env)
@@ -365,7 +460,14 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
         self.assertNotIn("X-Api-Key", request_headers)
 
     def test_caller_bearer_can_override_configured_nanogpt_key(self):
-        with patch(
+        with patch.dict(
+            os.environ,
+            {"NANO_GPT_KEY_1": "unused-configured-key"},
+            clear=False,
+        ), patch.object(
+            self.app_module.ProxyService,
+            "probe_nanogpt_key",
+        ) as probe, patch(
             "app.ProxyService.make_request",
             return_value=self._json_response(),
         ) as make_request:
@@ -385,6 +487,7 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
             "Bearer sk-nano-user-key",
         )
         self.assertNotIn("X-Api-Key", request_headers)
+        probe.assert_not_called()
 
     def test_oauth_token_exchange_uses_nanogpt_origin_without_provider_key(self):
         with patch(
@@ -416,6 +519,10 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
             self.app_module.AuthService,
             "get_api_key",
             return_value=None,
+        ), patch.object(
+            self.app_module.AuthService,
+            "get_api_keys",
+            return_value=[],
         ), patch(
             "app.ProxyService.make_request",
             return_value=self._json_response({"object": "list", "data": []}),

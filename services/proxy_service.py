@@ -150,6 +150,33 @@ class ProxyService:
             return session
 
     @classmethod
+    def probe_nanogpt_key(
+        cls,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: int,
+    ) -> int:
+        """Validate a configured key with NanoGPT's read-only model catalog."""
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "X-Api-Key": api_key,
+        }
+        with requests.Session() as session:
+            session.cookies.set_policy(_RejectAllCookiesPolicy())
+            response = session.get(
+                f"{base_url.rstrip('/')}/v1/models",
+                headers=headers,
+                params={"detailed": "false"},
+                timeout=(5, max(1, timeout_seconds)),
+                allow_redirects=False,
+            )
+            try:
+                return response.status_code
+            finally:
+                response.close()
+
+    @classmethod
     def _has_idempotency_key(cls, headers: Dict[str, str]) -> bool:
         return any(key.lower() == "idempotency-key" for key in headers)
 

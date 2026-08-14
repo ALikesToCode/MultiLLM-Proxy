@@ -120,6 +120,8 @@ MIMO_API_KEY=your-mimo-token-plan-api-key
 
 # NanoGPT
 NANOGPT_API_KEY=your-nanogpt-api-key
+NANOGPT_API_KEY_1=your-second-nanogpt-api-key
+# Compatibility aliases: NANO_GPT_KEY and NANO_GPT_KEY_N
 
 # NavyAI
 NAVYAI_API_KEY=your-navyai-api-key
@@ -402,8 +404,11 @@ $PROXY_BASE_URL/navyai
 ```
 
 Normal clients send the MultiLLM Proxy key in `Authorization: Bearer ...` or
-`X-Api-Key`; the server replaces it with `NANOGPT_API_KEY` or
-`NAVYAI_API_KEY`. To forward a caller-owned upstream bearer/API key, partner
+`X-Api-Key`; the server replaces it with a validated `NANOGPT_API_KEY[_N]` or
+`NAVYAI_API_KEY`. When multiple NanoGPT keys are configured, the proxy checks
+the read-only model catalog, caches the working key, and rotates after an auth
+or rate-limit rejection without replaying the rejected generation. To forward
+a caller-owned upstream bearer/API key, partner
 JWT, Navy OAuth token, or NanoGPT L402 credential, authenticate the proxy with
 `X-MultiLLM-Api-Key` and keep the provider credential in its native header.
 

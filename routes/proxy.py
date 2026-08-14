@@ -35,6 +35,7 @@ from route_helpers import (
     login_required,
     stream_upstream_response,
 )
+from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.redaction import redact_payload
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
@@ -226,14 +227,34 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             else:
                 auth_token = auth_service_cls.get_api_key(api_provider)
 
-            if (
-                api_provider == "nanogpt"
-                and (
+            configured_nanogpt_key = None
+            if api_provider == "nanogpt":
+                accountless_or_public = (
                     is_nanogpt_accountless_request(request.headers, path)
                     or is_nanogpt_public_request(path, request.method)
                 )
-            ):
-                auth_token = None
+                if accountless_or_public:
+                    auth_token = None
+                elif not nanogpt_has_caller_auth(request.headers):
+                    configured_keys = auth_service_cls.get_api_keys("nanogpt")
+                    try:
+                        auth_token = NanoGPTKeyPool.select_key(
+                            configured_keys,
+                            lambda api_key: proxy_service_cls.probe_nanogpt_key(
+                                base_url,
+                                api_key,
+                                app.config["NANOGPT_KEY_CHECK_TIMEOUT_SECONDS"],
+                            ),
+                            check_ttl_seconds=app.config[
+                                "NANOGPT_KEY_CHECK_TTL_SECONDS"
+                            ],
+                            rejected_cooldown_seconds=app.config[
+                                "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
+                            ],
+                        )
+                    except NanoGPTKeyPoolExhausted as error:
+                        raise APIError(str(error), status_code=503) from error
+                    configured_nanogpt_key = auth_token
             elif (
                 api_provider == "navyai"
                 and is_navyai_public_request(path, request.method)
@@ -314,6 +335,21 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 ),
                 force_raw_passthrough=raw_passthrough,
             )
+
+            if (
+                configured_nanogpt_key
+                and response.status_code in {401, 403, 429}
+            ):
+                NanoGPTKeyPool.invalidate(
+                    configured_nanogpt_key,
+                    response.status_code,
+                    check_ttl_seconds=app.config[
+                        "NANOGPT_KEY_CHECK_TTL_SECONDS"
+                    ],
+                    rejected_cooldown_seconds=app.config[
+                        "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
+                    ],
+                )
 
             response_time = (time.time() - start_time) * 1000
             metrics_service_cls.get_instance().track_request(

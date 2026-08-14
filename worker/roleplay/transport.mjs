@@ -227,8 +227,18 @@ export function recordModelResult(
     }
   }
 
+  const activeCredentials = { ...(state.activeCredentials ?? {}) };
+  if (success) {
+    activeCredentials[candidate.provider] = candidate.credentialId;
+  } else if (
+    activeCredentials[candidate.provider] === candidate.credentialId
+  ) {
+    delete activeCredentials[candidate.provider];
+  }
+
   return {
     ...state,
+    activeCredentials,
     stats: {
       ...state.stats,
       [candidate.key]: {

@@ -52,6 +52,12 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
             config_module.Config.NANOGPT_ORIGIN_URL,
             "https://cake.nano-gpt.com",
         )
+        self.assertEqual(config_module.Config.NANOGPT_KEY_CHECK_TIMEOUT_SECONDS, 5)
+        self.assertEqual(config_module.Config.NANOGPT_KEY_CHECK_TTL_SECONDS, 300)
+        self.assertEqual(
+            config_module.Config.NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS,
+            60,
+        )
         self.assertEqual(
             config_module.Config.API_BASE_URLS["navyai"],
             "https://navy.example.test",
@@ -70,6 +76,20 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
         self.assertIn("gemini-2.5-flash", Config.GEMINI_MODELS)
         self.assertNotIn("gemini-2.0-pro", Config.GEMINI_MODELS)
         self.assertNotIn("gemini-1.0-ultra", Config.GEMINI_MODELS)
+
+    def test_bounded_environment_integer_rejects_invalid_and_extreme_values(self):
+        from config import load_bounded_env_integer
+
+        with patch.dict(os.environ, {"TEST_BOUNDED_INTEGER": "invalid"}):
+            self.assertEqual(
+                load_bounded_env_integer("TEST_BOUNDED_INTEGER", 5, 1, 30),
+                5,
+            )
+        with patch.dict(os.environ, {"TEST_BOUNDED_INTEGER": "99"}):
+            self.assertEqual(
+                load_bounded_env_integer("TEST_BOUNDED_INTEGER", 5, 1, 30),
+                30,
+            )
 
 
 if __name__ == "__main__":

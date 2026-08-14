@@ -170,6 +170,7 @@ npx wrangler secret put CODEX_EASY_API_KEY
 npx wrangler secret put KIMI_CODE_API_KEY
 npx wrangler secret put LINKAPI_KEY
 npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put NAVYAI_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY_1

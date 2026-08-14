@@ -28,6 +28,8 @@ const PROVIDERS = {
   nanogpt: {
     defaultBaseUrl: "https://nano-gpt.com/api",
     keyNames: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
+    keyListNames: ["NANOGPT_API_KEYS", "NANO_GPT_KEYS"],
+    numberedKeyPrefixes: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
     baseUrlNames: ["NANOGPT_BASE_URL"],
     defaultPath: "/v1/chat/completions",
   },
@@ -54,6 +56,66 @@ function firstNonEmpty(env, names) {
     }
   }
   return "";
+}
+
+function listedProviderTokens(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((entry) => typeof entry === "string" && entry.trim())
+          .map((entry) => entry.trim());
+      }
+    } catch {
+      // Fall through to the comma/newline format.
+    }
+  }
+  return trimmed
+    .split(/[,\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function configuredProviderTokens(env, definition) {
+  const tokens = [];
+  for (const name of definition.keyNames) {
+    const value = env[name];
+    if (typeof value === "string" && value.trim()) {
+      tokens.push(value.trim());
+    }
+  }
+  for (const name of definition.keyListNames ?? []) {
+    tokens.push(...listedProviderTokens(env[name]));
+  }
+
+  const prefixes = definition.numberedKeyPrefixes ?? [];
+  const numbered = [];
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+    prefixes.forEach((prefix, prefixRank) => {
+      const match = name.match(new RegExp(`^${prefix}_(\\d+)$`));
+      if (match) {
+        numbered.push({
+          index: Number.parseInt(match[1], 10),
+          prefixRank,
+          token: value.trim(),
+        });
+      }
+    });
+  }
+  numbered.sort(
+    (left, right) =>
+      left.index - right.index || left.prefixRank - right.prefixRank,
+  );
+  tokens.push(...numbered.map((entry) => entry.token));
+  return [...new Set(tokens)];
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {
@@ -268,8 +330,8 @@ export function buildConfiguredCandidates(env, settings) {
 
   settings.providerOrder.forEach((provider, providerRank) => {
     const definition = PROVIDERS[provider];
-    const token = firstNonEmpty(env, definition.keyNames);
-    if (!token) {
+    const tokens = configuredProviderTokens(env, definition);
+    if (!tokens.length) {
       return;
     }
 
@@ -280,20 +342,25 @@ export function buildConfiguredCandidates(env, settings) {
     );
     const endpoint = appendEndpointPath(baseUrl, definition.defaultPath);
 
-    MODEL_FAMILIES.forEach((family, familyRank) => {
-      candidates.push({
-        provider,
-        providerRank,
-        family,
-        familyRank,
-        model: configuredModelFor(
-          env,
-          settings.providerModelOverrides,
+    tokens.forEach((token, credentialRank) => {
+      MODEL_FAMILIES.forEach((family, familyRank) => {
+        candidates.push({
           provider,
+          providerRank,
           family,
-        ),
-        endpoint: endpoint.toString(),
-        token,
+          familyRank,
+          model: configuredModelFor(
+            env,
+            settings.providerModelOverrides,
+            provider,
+            family,
+          ),
+          endpoint: endpoint.toString(),
+          token,
+          credentialId:
+            tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
+          credentialRank,
+        });
       });
     });
   });
@@ -333,6 +400,7 @@ export function rankRoleplayCandidates(
   modelStats,
   preference = "auto",
   now = Date.now(),
+  activeCredentials = {},
 ) {
   const normalizedPreference =
     typeof preference === "string" ? preference.toLowerCase() : "auto";
@@ -351,16 +419,23 @@ export function rankRoleplayCandidates(
     const tier = eligible
       .filter((candidate) => candidate.providerRank === providerRank)
       .map((candidate) => {
-        const key = `${candidate.provider}:${candidate.model}`;
+        const key =
+          candidate.credentialId === "primary"
+            ? `${candidate.provider}:${candidate.model}`
+            : `${candidate.provider}:${candidate.model}:${candidate.credentialId}`;
         return {
           ...candidate,
           key,
           score: candidateScore(candidate, modelStats[key], now),
+          activeCredential:
+            activeCredentials[candidate.provider] === candidate.credentialId,
         };
       })
       .sort(
         (left, right) =>
+          Number(right.activeCredential) - Number(left.activeCredential) ||
           left.score - right.score ||
+          left.credentialRank - right.credentialRank ||
           left.familyRank - right.familyRank ||
           left.model.localeCompare(right.model),
       );
@@ -372,12 +447,19 @@ export function rankRoleplayCandidates(
 }
 
 export function roleplayCatalog(env, settings) {
-  return buildConfiguredCandidates(env, settings).map((candidate) => ({
-    provider: candidate.provider,
-    provider_rank: candidate.providerRank,
-    family: candidate.family,
-    model: candidate.model,
-  }));
+  const catalog = new Map();
+  for (const candidate of buildConfiguredCandidates(env, settings)) {
+    const key = `${candidate.provider}:${candidate.family}:${candidate.model}`;
+    if (!catalog.has(key)) {
+      catalog.set(key, {
+        provider: candidate.provider,
+        provider_rank: candidate.providerRank,
+        family: candidate.family,
+        model: candidate.model,
+      });
+    }
+  }
+  return [...catalog.values()];
 }
 
 export function buildProviderHeaders(candidate, env, idempotencyKey = "") {

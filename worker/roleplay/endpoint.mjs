@@ -73,6 +73,7 @@ function initialState() {
     directives: [],
     profile: {},
     stats: {},
+    activeCredentials: {},
     turns: 0,
     compactions: 0,
     localCompactions: 0,
@@ -106,6 +107,10 @@ function normalizeState(value) {
     profile:
       value.profile && typeof value.profile === "object" ? value.profile : {},
     stats: value.stats && typeof value.stats === "object" ? value.stats : {},
+    activeCredentials:
+      value.activeCredentials && typeof value.activeCredentials === "object"
+        ? value.activeCredentials
+        : {},
     recentRequests: Array.isArray(value.recentRequests)
       ? value.recentRequests
       : [],
@@ -534,6 +539,8 @@ export class RoleplaySession extends DurableObject {
       buildConfiguredCandidates(this.env, settings),
       state.stats,
       parsed.modelPreference,
+      Date.now(),
+      state.activeCredentials,
     );
     if (!candidates.length) {
       state = markRequest(state, idempotencyKey, "no_provider");

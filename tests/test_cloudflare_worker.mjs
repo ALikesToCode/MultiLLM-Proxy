@@ -474,6 +474,9 @@ test("container envVars are derived from the live Durable Object env", () => {
       OPENCODE_GO_BASE_URL: "https://opencode.ai/zen/go/v1",
       MIMO_API_KEY: "mimo-live-key",
       NANOGPT_API_KEY: "nanogpt-live-key",
+      NANOGPT_API_KEY_1: "nanogpt-numbered-live-key",
+      NANO_GPT_KEY: "nanogpt-alias-live-key",
+      NANO_GPT_KEY_1: "nanogpt-alias-numbered-live-key",
       NANOGPT_BASE_URL: "https://cake.nano-gpt.com/api",
       NANOGPT_BATCH_BASE_URL: "https://api.nano-gpt.com/api/v1",
       NANOGPT_ORIGIN_URL: "https://cake.nano-gpt.com",
@@ -517,6 +520,15 @@ test("container envVars are derived from the live Durable Object env", () => {
   );
   assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
   assert.equal(container.envVars.NANOGPT_API_KEY, "nanogpt-live-key");
+  assert.equal(
+    container.envVars.NANOGPT_API_KEY_1,
+    "nanogpt-numbered-live-key",
+  );
+  assert.equal(container.envVars.NANO_GPT_KEY, "nanogpt-alias-live-key");
+  assert.equal(
+    container.envVars.NANO_GPT_KEY_1,
+    "nanogpt-alias-numbered-live-key",
+  );
   assert.equal(
     container.envVars.NANOGPT_BASE_URL,
     "https://cake.nano-gpt.com/api",

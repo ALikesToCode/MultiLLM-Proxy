@@ -15,16 +15,35 @@ the catalog endpoints instead of hard-coding model IDs.
 
 ```env
 NANOGPT_API_KEY=your-nanogpt-api-key
+NANOGPT_API_KEY_1=your-second-nanogpt-api-key
+# Continue with NANOGPT_API_KEY_2, NANOGPT_API_KEY_3, ...
+
+# Compatibility aliases are also accepted:
+# NANO_GPT_KEY=your-nanogpt-api-key
+# NANO_GPT_KEY_1=your-second-nanogpt-api-key
 
 # Optional overrides
 NANOGPT_BASE_URL=https://nano-gpt.com/api
 NANOGPT_BATCH_BASE_URL=https://api.nano-gpt.com/api/v1
 NANOGPT_ORIGIN_URL=https://nano-gpt.com
 NANOGPT_MAX_REQUEST_BYTES=16777216
+NANOGPT_KEY_CHECK_TIMEOUT_SECONDS=5
+NANOGPT_KEY_CHECK_TTL_SECONDS=300
+NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS=60
 ```
 
 The default request limit is 16 MiB. Increase it only when a documented media
 endpoint requires a larger body and the deployment can safely accept it.
+
+With multiple configured keys, the Container checks `GET /api/v1/models`
+before the first authenticated request. It caches the first 2xx key for five
+minutes by default. A `401`, `403`, or `429` from a later upstream request
+invalidates that selection so the next request checks another key. The failed
+generation is returned unchanged and is never replayed automatically, which
+preserves the raw gateway's single-attempt billing boundary. Cloudflare
+roleplay sessions track the successful numbered key in Durable Object state
+and try another configured key only after a definite auth or rate-limit
+rejection.
 
 ## URL mapping
 
@@ -55,7 +74,7 @@ credential-isolated transport deliberately does not proxy.
 
 For the common server-key flow, authenticate to MultiLLM Proxy with either an
 OpenAI-style bearer header or an Anthropic-style API-key header. The proxy
-replaces it with `NANOGPT_API_KEY` upstream.
+replaces it with the selected configured NanoGPT key upstream.
 
 ```bash
 # OpenAI-style client

@@ -722,3 +722,74 @@ test("roleplay allows a 20000-token reply budget", async () => {
 
   assert.deepEqual(budgets, [20_000, 20_000]);
 });
+
+test("roleplay selects and retains a working NanoGPT key per session", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "",
+    NANO_GPT_KEY: "nanogpt-rejected-key",
+    NANO_GPT_KEY_1: "nanogpt-working-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+  });
+  const authorizationAttempts = [];
+
+  const catalogResponse = await handleRoleplayEdgeRequest(
+    new Request("https://proxy.example/v1/roleplay/models", {
+      headers: { Authorization: "Bearer admin-roleplay-key" },
+    }),
+    fixture.env,
+  );
+  const catalog = await catalogResponse.json();
+  assert.deepEqual(
+    catalog.data.map(({ provider, family }) => ({ provider, family })),
+    [
+      { provider: "nanogpt", family: "kimi" },
+      { provider: "nanogpt", family: "glm" },
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(catalog), /nanogpt-(?:rejected|working)-key/);
+
+  const responses = await withGlobalFetch(async (_input, init) => {
+    const authorization = new Headers(init.headers).get("Authorization");
+    authorizationAttempts.push(authorization);
+    if (authorization === "Bearer nanogpt-rejected-key") {
+      return new Response(
+        JSON.stringify({ error: { message: "Invalid session" } }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+    assert.equal(authorization, "Bearer nanogpt-working-key");
+    const payload = JSON.parse(init.body);
+    return completionResponse(payload.model, "Mira keeps the same thread.");
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-key-pool",
+        input: "Continue.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-key-pool",
+        input: "Continue again.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    return [first, second];
+  });
+
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(authorizationAttempts, [
+    "Bearer nanogpt-rejected-key",
+    "Bearer nanogpt-working-key",
+    "Bearer nanogpt-working-key",
+  ]);
+});

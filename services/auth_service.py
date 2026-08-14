@@ -20,6 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import load_numbered_env_values
 from error_handlers import APIError
+from services.nanogpt_key_pool import configured_nanogpt_keys
 from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ PROVIDER_API_KEY_ENV_NAMES = {
     "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
     "codex-easy": ("CODEX_EASY_API_KEY", "CODEX_API_KEY"),
     "kimi-code": ("KIMI_CODE_API_KEY",),
+    "nanogpt": ("NANOGPT_API_KEY", "NANO_GPT_KEY"),
 }
 
 
@@ -578,6 +580,14 @@ class AuthService:
             if api_key:
                 return api_key
         return cls._api_keys.get(provider)
+
+    @classmethod
+    def get_api_keys(cls, provider: str) -> List[str]:
+        """Get every configured key for providers that support a key pool."""
+        if provider == "nanogpt":
+            return configured_nanogpt_keys()
+        api_key = cls.get_api_key(provider)
+        return [api_key] if api_key else []
 
     @staticmethod
     def _build_google_service_account_credentials():

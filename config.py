@@ -26,6 +26,19 @@ def load_numbered_env_values(base_name: str) -> list[str]:
     return values
 
 
+def load_bounded_env_integer(
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return min(maximum, max(minimum, value))
+
+
 class Config:
     PROJECT_ID = os.environ.get('PROJECT_ID')
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
@@ -38,6 +51,15 @@ class Config:
     NANOGPT_ORIGIN_URL = os.environ.get(
         'NANOGPT_ORIGIN_URL',
         'https://nano-gpt.com',
+    )
+    NANOGPT_KEY_CHECK_TIMEOUT_SECONDS = load_bounded_env_integer(
+        'NANOGPT_KEY_CHECK_TIMEOUT_SECONDS', 5, 1, 30
+    )
+    NANOGPT_KEY_CHECK_TTL_SECONDS = load_bounded_env_integer(
+        'NANOGPT_KEY_CHECK_TTL_SECONDS', 300, 1, 3600
+    )
+    NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS = load_bounded_env_integer(
+        'NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS', 60, 1, 3600
     )
     DEFAULT_PORT = 1400
     DEFAULT_HOST = '0.0.0.0'  # Listen on all interfaces

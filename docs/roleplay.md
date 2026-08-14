@@ -18,6 +18,11 @@ NavyAI is the second provider tier. Configured LinkAPI, NanoGPT, and OpenRouter
 keys form later tiers. The provider order is strict; latency and reliability
 choose Kimi or GLM within each tier.
 
+NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
+the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
+advances to the next key. The successful key identifier—not the secret—is kept
+in that Durable Object's session state and is preferred on later turns.
+
 ## Request
 
 Authenticate with the dedicated `ROLEPLAY_API_KEY`. The bootstrap
@@ -336,6 +341,7 @@ Add later tiers only when used:
 npx wrangler secret put NAVYAI_API_KEY
 npx wrangler secret put LINKAPI_KEY
 npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put OPENROUTER_API_KEY
 ```
 
