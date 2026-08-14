@@ -33,7 +33,7 @@ contracts differ across providers.
 
 GLM-5.2 defaults to maximum reasoning on every unified and automatic route.
 The proxy maps semantic `max` to the selected transport: OpenCode receives
-`max`, NanoGPT and NavyAI receive `xhigh`, LinkAPI receives `high`, and
+`max`, NanoGPT receives `max`, NavyAI receives `xhigh`, LinkAPI receives `high`, and
 OpenRouter receives nested `reasoning.effort: xhigh`. Send an explicit lower
 `reasoning_effort` to reduce it; values above a provider's ceiling are clamped
 to that ceiling.
@@ -56,6 +56,25 @@ automatically and no extra provider call is made.
 
 The analysis cache stores hashes and prompt-span offsets only. It never stores
 conversation text or model responses, and it is not shared between containers.
+
+## Provider prompt caching
+
+Eligible unified Chat and Responses requests automatically use the selected
+provider's supported prompt-cache mechanism. `PROMPT_CACHE_ENABLED=true` turns
+the policy on, and `PROMPT_CACHE_MIN_TOKENS=1024` controls its estimated-input
+threshold. NanoGPT Chat receives `caching: true`; known cache-key transports
+receive a stable SHA-256-derived affinity key; Grok Chat receives its
+conversation-affinity header. Providers such as NavyAI, OpenCode, and
+OpenRouter keep their native request schema and rely on automatic stable-prefix
+caching.
+
+Caller-supplied `caching`, `prompt_caching`, `prompt_cache_key`, nested
+`cache_control`, or `X-Grok-Conv-Id` values always win. Response headers report
+the attempted mode through `X-MultiLLM-Prompt-Cache`,
+`X-MultiLLM-Prompt-Cache-Mode`, and
+`X-MultiLLM-Prompt-Cache-Estimated-Tokens`. This is upstream prompt caching,
+not generated-response caching: MultiLLM never replays a stored completion and
+never adds cache fields to raw provider passthrough bodies.
 
 The authenticated `/docs` route presents the same combined catalog alongside
 copyable chat and image requests, runtime credential status, native provider

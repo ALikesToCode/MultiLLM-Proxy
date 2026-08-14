@@ -52,6 +52,7 @@ curl "$PROXY_BASE_URL/v1/roleplay" \
     ],
     "model_preference": "auto",
     "response_length": "balanced",
+    "prompt_cache": true,
     "memory": {"mode": "auto"},
     "stream": true
   }'
@@ -98,6 +99,15 @@ OpenRouter receives `reasoning.effort` set to
 `high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.2 receives `max`.
 OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
 does not expose a supported effort overlay for that model.
+
+Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
+input tokens by default). NanoGPT receives its documented `caching: true`
+routing hint; other roleplay providers keep an unchanged schema and can reuse
+stable prefixes through their automatic caching. Set `"prompt_cache": false`
+for one turn or `PROMPT_CACHE_ENABLED=false` for the deployment. The response
+reports `X-MultiLLM-Prompt-Cache`, `X-MultiLLM-Prompt-Cache-Mode`, and the
+estimated eligible token count. Only upstream prompt reuse is requested;
+roleplay outputs are never response-cached or replayed.
 
 `response_length` accepts `compact`, `balanced`, or `immersive`. It changes the
 automatic output budget and adds a matching pacing instruction. Every mode

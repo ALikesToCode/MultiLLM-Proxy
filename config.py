@@ -39,6 +39,13 @@ def load_bounded_env_integer(
     return min(maximum, max(minimum, value))
 
 
+def load_env_boolean(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Config:
     PROJECT_ID = os.environ.get('PROJECT_ID')
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
@@ -63,6 +70,10 @@ class Config:
     )
     NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS', 60, 1, 3600
+    )
+    PROMPT_CACHE_ENABLED = load_env_boolean('PROMPT_CACHE_ENABLED', True)
+    PROMPT_CACHE_MIN_TOKENS = load_bounded_env_integer(
+        'PROMPT_CACHE_MIN_TOKENS', 1024, 1, 1000000
     )
     DEFAULT_PORT = 1400
     DEFAULT_HOST = '0.0.0.0'  # Listen on all interfaces

@@ -41,6 +41,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/output-contract.mjs",
     import.meta.url,
   );
+  const promptCacheUrl = new URL(
+    "../../worker/roleplay/prompt-cache.mjs",
+    import.meta.url,
+  );
   const reasoningUrl = new URL(
     "../../worker/roleplay/reasoning.mjs",
     import.meta.url,
@@ -71,6 +75,7 @@ export async function roleplayModuleUrl() {
     fallbackMemorySource,
     memorySource,
     outputContractSource,
+    promptCacheSource,
     reasoningSource,
     validationSource,
     transportSource,
@@ -87,6 +92,7 @@ export async function roleplayModuleUrl() {
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
+      readFile(promptCacheUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
@@ -119,6 +125,7 @@ export async function roleplayModuleUrl() {
     ),
   );
   const outputContractDataUrl = dataModuleUrl(outputContractSource);
+  const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource);
   const validationDataUrl = dataModuleUrl(validationSource);
   const memoryDataUrl = dataModuleUrl(
@@ -179,6 +186,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./output-contract.mjs";',
       `from "${outputContractDataUrl}";`,
+    )
+    .replace(
+      'from "./prompt-cache.mjs";',
+      `from "${promptCacheDataUrl}";`,
     )
     .replace('from "./transport.mjs";', `from "${transportDataUrl}";`)
     .replace('from "./streaming.mjs";', `from "${streamingDataUrl}";`);

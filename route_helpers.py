@@ -38,6 +38,8 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
     "X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, "
     "X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Provider, "
+    "X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, "
+    "X-MultiLLM-Prompt-Cache-Estimated-Tokens, "
     "X-MultiLLM-Model, "
     "X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, "
     "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "

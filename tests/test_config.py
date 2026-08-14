@@ -62,6 +62,8 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
             config_module.Config.NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS,
             60,
         )
+        self.assertIs(config_module.Config.PROMPT_CACHE_ENABLED, True)
+        self.assertEqual(config_module.Config.PROMPT_CACHE_MIN_TOKENS, 1024)
         self.assertEqual(
             config_module.Config.API_BASE_URLS["navyai"],
             "https://navy.example.test",
@@ -94,6 +96,14 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
                 load_bounded_env_integer("TEST_BOUNDED_INTEGER", 5, 1, 30),
                 30,
             )
+
+    def test_environment_boolean_accepts_explicit_true_values_only(self):
+        from config import load_env_boolean
+
+        with patch.dict(os.environ, {"TEST_BOOLEAN": "yes"}):
+            self.assertIs(load_env_boolean("TEST_BOOLEAN", False), True)
+        with patch.dict(os.environ, {"TEST_BOOLEAN": "disabled"}):
+            self.assertIs(load_env_boolean("TEST_BOOLEAN", True), False)
 
 
 if __name__ == "__main__":

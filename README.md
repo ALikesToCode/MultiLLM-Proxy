@@ -342,6 +342,14 @@ Unified GLM-5.2 requests default to the strongest reasoning level supported by
 the selected provider. An explicit `reasoning_effort` still lowers the effort;
 `max` means the provider's real maximum rather than a literal unsupported value.
 
+Long unified and roleplay requests also select a provider-supported prompt-cache
+mode automatically. NanoGPT receives `caching: true`, known affinity-key
+transports receive a stable hashed key, and automatic-cache providers keep their
+native schema. Configure `PROMPT_CACHE_ENABLED` and
+`PROMPT_CACHE_MIN_TOKENS`; response headers report the selected mode. This does
+not cache or replay generated responses, and raw provider routes remain
+caller-controlled.
+
 Administrators can reorder candidates and create more virtual models from the
 Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)
 for the exact retry boundary, response headers, persistence behavior, and API.

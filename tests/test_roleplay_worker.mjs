@@ -695,6 +695,7 @@ test("roleplay validates provider options before upstream generation", async () 
     { stop: Array.from({ length: 9 }, () => "stop") },
     { response_format: { type: "xml" } },
     { seed: 1.5 },
+    { prompt_cache: "yes" },
   ];
 
   await withGlobalFetch(async () => {
@@ -904,6 +905,100 @@ test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(requestedModel, "zai-org/glm-5.2:thinking");
+});
+
+test("roleplay enables NanoGPT prompt caching for eligible context", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-working-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    PROMPT_CACHE_MIN_TOKENS: "1",
+  });
+  let upstreamPayload;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(upstreamPayload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-prompt-cache",
+        input: "Continue.",
+        model_preference: "glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamPayload.caching, true);
+  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "applied");
+  assert.equal(
+    response.headers.get("X-MultiLLM-Prompt-Cache-Mode"),
+    "nanogpt-routing",
+  );
+});
+
+test("roleplay leaves implicit-cache providers schema-clean", async () => {
+  const fixture = makeRoleplayEnv({ PROMPT_CACHE_MIN_TOKENS: "1" });
+  let upstreamPayload;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(upstreamPayload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-implicit-prompt-cache",
+        input: "Continue.",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal("caching" in upstreamPayload, false);
+  assert.equal("prompt_cache_key" in upstreamPayload, false);
+  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "implicit");
+  assert.equal(
+    response.headers.get("X-MultiLLM-Prompt-Cache-Mode"),
+    "implicit-prefix",
+  );
+});
+
+test("roleplay request can disable automatic prompt caching", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-working-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    PROMPT_CACHE_MIN_TOKENS: "1",
+  });
+  let upstreamPayload;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(upstreamPayload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-disabled-prompt-cache",
+        input: "Continue.",
+        prompt_cache: false,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal("caching" in upstreamPayload, false);
+  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "skipped");
+  assert.equal(
+    response.headers.get("X-MultiLLM-Prompt-Cache-Mode"),
+    "request-disabled",
+  );
 });
 
 test("roleplay revalidates the remembered NanoGPT key after the request interval", async () => {

@@ -1,6 +1,7 @@
 import json
 import time
 import uuid
+from collections.abc import Mapping
 
 import requests
 from flask import Response, jsonify, request
@@ -25,6 +26,10 @@ from services.context_optimizer import ContextOptimizationResult
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.provider_prompt_cache import (
+    PromptCacheDecision,
+    apply_prompt_cache_policy,
+)
 from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_52_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
@@ -148,6 +153,25 @@ def _add_adaptive_context_headers(
         result.analysis_cache_misses
     )
     return response
+
+
+def _add_prompt_cache_headers(
+    response: Response,
+    decision: PromptCacheDecision,
+) -> Response:
+    response.headers["X-MultiLLM-Prompt-Cache"] = decision.status
+    response.headers["X-MultiLLM-Prompt-Cache-Mode"] = decision.mode
+    response.headers["X-MultiLLM-Prompt-Cache-Estimated-Tokens"] = str(
+        decision.estimated_input_tokens
+    )
+    return response
+
+
+def _merge_request_headers(headers: dict, additions: Mapping[str, str]) -> None:
+    existing = {name.lower() for name in headers}
+    for name, value in additions.items():
+        if name.lower() not in existing:
+            headers[name] = value
 
 
 def _validate_direct_chat_target(
@@ -287,6 +311,16 @@ def _dispatch_unified_chat_candidate(
             provider,
             provider_model,
         )
+        cache_decision = apply_prompt_cache_policy(
+            upstream_payload,
+            provider=provider,
+            model=provider_model,
+            endpoint="chat",
+            request_headers=headers_source,
+            enabled=app.config["PROMPT_CACHE_ENABLED"],
+            minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+        )
+        upstream_payload = cache_decision.payload
         raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
         headers = proxy_service_cls.prepare_headers(
@@ -295,6 +329,7 @@ def _dispatch_unified_chat_candidate(
             token,
             upstream_path=upstream_path,
         )
+        _merge_request_headers(headers, cache_decision.request_headers)
         params = (
             proxy_service_cls.prepare_params(
                 args_source,
@@ -337,7 +372,10 @@ def _dispatch_unified_chat_candidate(
         )
 
         if isinstance(response, Response):
-            return _add_adaptive_context_headers(response, adaptive_result)
+            return _add_prompt_cache_headers(
+                _add_adaptive_context_headers(response, adaptive_result),
+                cache_decision,
+            )
         if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS or payload.get("stream"):
             downstream_response = stream_upstream_response(response)
         else:
@@ -347,9 +385,12 @@ def _dispatch_unified_chat_candidate(
                 content_type=response.headers.get("content-type", "application/json"),
                 headers=copy_raw_provider_response_headers(response.headers),
             )
-        return _add_adaptive_context_headers(
-            downstream_response,
-            adaptive_result,
+        return _add_prompt_cache_headers(
+            _add_adaptive_context_headers(
+                downstream_response,
+                adaptive_result,
+            ),
+            cache_decision,
         )
     except ValueError as error:
         raise APIError(str(error), status_code=400) from error
@@ -636,12 +677,23 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             if provider in NATIVE_RESPONSES_PROVIDERS:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
+                cache_decision = apply_prompt_cache_policy(
+                    upstream_payload,
+                    provider=provider,
+                    model=provider_model,
+                    endpoint="responses",
+                    request_headers=request.headers,
+                    enabled=app.config["PROMPT_CACHE_ENABLED"],
+                    minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+                )
+                upstream_payload = cache_decision.payload
                 headers = proxy_service_cls.prepare_headers(
                     request.headers,
                     provider,
                     token,
                     upstream_path=upstream_path,
                 )
+                _merge_request_headers(headers, cache_decision.request_headers)
                 response = proxy_service_cls.make_request(
                     method="POST",
                     url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
@@ -670,8 +722,11 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 )
 
                 if isinstance(response, Response):
-                    return response
-                return stream_upstream_response(response)
+                    return _add_prompt_cache_headers(response, cache_decision)
+                return _add_prompt_cache_headers(
+                    stream_upstream_response(response),
+                    cache_decision,
+                )
 
             if payload.get("stream"):
                 raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
@@ -690,8 +745,20 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 if source_key in payload:
                     chat_payload[target_key] = payload[source_key]
 
+            cache_decision = apply_prompt_cache_policy(
+                chat_payload,
+                provider=provider,
+                model=provider_model,
+                endpoint="chat",
+                request_headers=request.headers,
+                enabled=app.config["PROMPT_CACHE_ENABLED"],
+                minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+            )
+            chat_payload = cache_decision.payload
+
             raw_body = serialize_unified_chat_payload(chat_payload)
             headers = proxy_service_cls.prepare_headers(request.headers, provider, token)
+            _merge_request_headers(headers, cache_decision.request_headers)
             response = proxy_service_cls.make_request(
                 method="POST",
                 url=adapter.chat_completions_url(),
@@ -709,15 +776,23 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             )
 
             if isinstance(response, Response):
-                return response
+                return _add_prompt_cache_headers(response, cache_decision)
             if not isinstance(response, requests.Response):
                 raise APIError("Unsupported upstream response type", status_code=502)
             if response.status_code >= 400:
-                return _pass_through_response(response)
+                return _add_prompt_cache_headers(
+                    _pass_through_response(response),
+                    cache_decision,
+                )
 
             chat_response = _decode_upstream_json(response)
             responses_payload = _chat_response_to_responses_payload(chat_response, requested_model)
-            return jsonify(responses_payload), response.status_code
+            downstream_response = jsonify(responses_payload)
+            downstream_response.status_code = response.status_code
+            return _add_prompt_cache_headers(
+                downstream_response,
+                cache_decision,
+            )
         except ValueError as error:
             raise APIError(str(error), status_code=400) from error
         except Exception as error:

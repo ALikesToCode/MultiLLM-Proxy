@@ -198,6 +198,10 @@ test("worker treats optimized chat as a CORS-safe Container API route", async ()
     preflight.headers.get("Access-Control-Expose-Headers") ?? "",
     /X-MultiLLM-Optimization-Cache-Misses/,
   );
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-MultiLLM-Prompt-Cache/,
+  );
   assert.equal(stub.getCalls(), 0);
 
   const response = await worker.fetch(
@@ -518,6 +522,8 @@ test("container envVars are derived from the live Durable Object env", () => {
       CONTEXT_ANALYSIS_CACHE_ENABLED: "true",
       CONTEXT_ANALYSIS_CACHE_TTL_SECONDS: "240",
       CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES: "1024",
+      PROMPT_CACHE_ENABLED: "true",
+      PROMPT_CACHE_MIN_TOKENS: "2048",
       RATE_LIMIT_ENABLED: "true",
       GUNICORN_GRACEFUL_TIMEOUT: "45",
       GUNICORN_ACCESS_LOG: "-",
@@ -586,6 +592,8 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_ENABLED, "true");
   assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_TTL_SECONDS, "240");
   assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES, "1024");
+  assert.equal(container.envVars.PROMPT_CACHE_ENABLED, "true");
+  assert.equal(container.envVars.PROMPT_CACHE_MIN_TOKENS, "2048");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
   assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");

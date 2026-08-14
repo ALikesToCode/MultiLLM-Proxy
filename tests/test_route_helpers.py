@@ -322,6 +322,9 @@ class RouteHelperCorsTest(unittest.TestCase):
             "x-multillm-latency-ms",
             "x-multillm-estimated-cost-usd",
             "x-multillm-cost-basis",
+            "x-multillm-prompt-cache",
+            "x-multillm-prompt-cache-mode",
+            "x-multillm-prompt-cache-estimated-tokens",
         ):
             self.assertIn(header, exposed_headers)
 

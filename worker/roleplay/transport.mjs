@@ -177,6 +177,20 @@ export function decorateRoleplayHeaders(
     "X-MultiLLM-Messages-Summarized",
     String(messagesOptimized),
   );
+  if (optimization.promptCache) {
+    headers.set(
+      "X-MultiLLM-Prompt-Cache",
+      optimization.promptCache.status,
+    );
+    headers.set(
+      "X-MultiLLM-Prompt-Cache-Mode",
+      optimization.promptCache.mode,
+    );
+    headers.set(
+      "X-MultiLLM-Prompt-Cache-Estimated-Tokens",
+      String(optimization.promptCache.estimatedInputTokens),
+    );
+  }
   headers.set(
     "Server-Timing",
     [
@@ -481,10 +495,12 @@ export async function attemptRoleplayCandidates(
 
   for (const candidate of candidates) {
     let attempted;
+    let preparedPayload;
     try {
+      preparedPayload = await payloadFactory(candidate);
       attempted = await fetchCandidate(
         candidate,
-        payloadFactory(candidate),
+        preparedPayload?.payload ?? preparedPayload,
         env,
         settings,
         signal,
@@ -517,6 +533,7 @@ export async function attemptRoleplayCandidates(
         candidate,
         state: nextState,
         fallbackCount,
+        promptCache: preparedPayload?.promptCache,
       };
     }
 

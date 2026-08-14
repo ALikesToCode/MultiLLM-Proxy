@@ -404,6 +404,12 @@ export function parseRoleplayPayload(payload, settings) {
   ) {
     throw new RoleplayRequestError("stream must be a boolean");
   }
+  if (
+    payload.prompt_cache !== undefined &&
+    typeof payload.prompt_cache !== "boolean"
+  ) {
+    throw new RoleplayRequestError("prompt_cache must be a boolean");
+  }
 
   const preference = modelPreference(payload);
 
@@ -436,6 +442,7 @@ export function parseRoleplayPayload(payload, settings) {
     modelPreference: preference,
     responseLength,
     stream: payload.stream !== false,
+    promptCache: payload.prompt_cache !== false,
     maxTokens: 0,
     forwarded: sanitizeForwardedOptions(payload),
   };

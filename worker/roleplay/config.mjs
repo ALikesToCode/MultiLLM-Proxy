@@ -131,6 +131,15 @@ function boundedInteger(value, fallback, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, parsed));
 }
 
+function booleanSetting(value, fallback = true) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return fallback;
+  }
+  return ["1", "true", "yes", "on"].includes(
+    String(value).trim().toLowerCase(),
+  );
+}
+
 function parseProviderOrder(value) {
   if (typeof value !== "string" || !value.trim()) {
     return DEFAULT_PROVIDER_ORDER;
@@ -243,6 +252,13 @@ function configuredModelFor(env, overrides, provider, family) {
 
 export function getRoleplaySettings(env) {
   return {
+    promptCacheEnabled: booleanSetting(env.PROMPT_CACHE_ENABLED, true),
+    promptCacheMinTokens: boundedInteger(
+      env.PROMPT_CACHE_MIN_TOKENS,
+      1_024,
+      1,
+      1_000_000,
+    ),
     compactTriggerTokens: boundedInteger(
       env.ROLEPLAY_COMPACT_TRIGGER_TOKENS,
       8_000,

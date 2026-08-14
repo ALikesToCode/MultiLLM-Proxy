@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -76,6 +77,67 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual(upstream_payload["model"], "mimo-v2-pro")
+
+    def test_long_opencode_chat_reports_implicit_prefix_caching_without_new_fields(self):
+        upstream_response = self._chat_response("cached upstream")
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:glm-5.2",
+                    "messages": [
+                        {"role": "system", "content": "context " * 700},
+                        {"role": "user", "content": "Continue."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-MultiLLM-Prompt-Cache"], "implicit")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Prompt-Cache-Mode"],
+            "implicit-prefix",
+        )
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertNotIn("caching", upstream_payload)
+        self.assertNotIn("prompt_cache_key", upstream_payload)
+
+    def test_long_nanogpt_chat_enables_provider_cache_routing(self):
+        os.environ["NANOGPT_API_KEY"] = "nanogpt-provider-key"
+        upstream_response = self._chat_response("cached upstream")
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request, patch(
+            "routes.unified.NanoGPTKeyPool.select_key",
+            return_value="nanogpt-provider-key",
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:zai-org/glm-5.2:thinking",
+                    "messages": [
+                        {"role": "system", "content": "context " * 700},
+                        {"role": "user", "content": "Continue."},
+                    ],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-MultiLLM-Prompt-Cache"], "applied")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Prompt-Cache-Mode"],
+            "nanogpt-routing",
+        )
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertIs(upstream_payload["caching"], True)
 
     def test_live_catalog_model_is_listed_and_routable(self):
         ProviderCatalogService.replace_provider_models(

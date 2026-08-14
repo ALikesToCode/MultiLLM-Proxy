@@ -47,6 +47,7 @@ import {
   parseRoleplayPayload,
 } from "./memory.mjs";
 import { applyRoleplayOutputContract } from "./output-contract.mjs";
+import { applyRoleplayPromptCache } from "./prompt-cache.mjs";
 import {
   MAX_RESPONSE_BYTES,
   attemptRoleplayCandidates,
@@ -763,7 +764,13 @@ export class RoleplaySession extends DurableObject {
       state,
       candidates,
       (candidate) =>
-        buildUpstreamPayload(parsed, candidate, roleplayMessages),
+        applyRoleplayPromptCache(
+          buildUpstreamPayload(parsed, candidate, roleplayMessages),
+          candidate,
+          roleplayMessages,
+          settings,
+          parsed.promptCache,
+        ),
       this.env,
       settings,
       request.signal,
@@ -787,6 +794,7 @@ export class RoleplaySession extends DurableObject {
       fallbackCount,
       controller,
       cleanup,
+      promptCache,
     } = attempted;
     const selectionReason =
       (state.stats[candidate.key]?.successes ?? 0) < 2
@@ -809,6 +817,7 @@ export class RoleplaySession extends DurableObject {
         estimatedInputBefore,
         inputTokensSaved,
         messagesOptimized,
+        promptCache,
       },
     );
 
