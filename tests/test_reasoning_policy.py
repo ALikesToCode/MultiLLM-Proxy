@@ -7,7 +7,7 @@ class ReasoningPolicyTest(unittest.TestCase):
     def test_omitted_effort_maps_to_each_providers_maximum(self):
         cases = {
             "opencode": {"reasoning_effort": "max"},
-            "nanogpt": {"reasoning_effort": "xhigh"},
+            "nanogpt": {"reasoning_effort": "max"},
             "navyai": {"reasoning_effort": "xhigh"},
             "linkapi": {"reasoning_effort": "high"},
             "openrouter": {"reasoning": {"effort": "xhigh"}},
@@ -31,7 +31,7 @@ class ReasoningPolicyTest(unittest.TestCase):
                 "nanogpt",
                 "glm-5.2",
             )["reasoning_effort"],
-            "xhigh",
+            "max",
         )
         self.assertEqual(
             apply_glm_52_reasoning_policy(
@@ -41,6 +41,15 @@ class ReasoningPolicyTest(unittest.TestCase):
             )["reasoning_effort"],
             "high",
         )
+
+    def test_namespaced_thinking_suffix_still_receives_glm_policy(self):
+        result = apply_glm_52_reasoning_policy(
+            {"model": "zai-org/glm-5.2:thinking"},
+            "nanogpt",
+            "zai-org/glm-5.2:thinking",
+        )
+
+        self.assertEqual(result["reasoning_effort"], "max")
 
     def test_explicit_lower_effort_is_preserved_within_provider_ceiling(self):
         self.assertEqual(

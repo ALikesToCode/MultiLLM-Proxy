@@ -83,6 +83,7 @@ class NanoGPTKeyPool:
     _lock: ClassVar[threading.RLock] = threading.RLock()
     _active_key: ClassVar[str | None] = None
     _active_until: ClassVar[float] = 0.0
+    _active_requests: ClassVar[int] = 0
     _rejected_until: ClassVar[dict[str, float]] = {}
 
     @classmethod
@@ -92,25 +93,32 @@ class NanoGPTKeyPool:
         probe: Callable[[str], int],
         *,
         check_ttl_seconds: int = 300,
+        check_every_requests: int = 50,
         rejected_cooldown_seconds: int = 60,
         now: float | None = None,
     ) -> str | None:
         configured = list(dict.fromkeys(key.strip() for key in keys if key.strip()))
         if not configured:
             return None
-        if len(configured) == 1:
-            return configured[0]
 
         checked_at = time.monotonic() if now is None else now
         with cls._lock:
             cls._prune(configured, checked_at)
+            if len(configured) == 1 and cls._active_key is None:
+                cls._active_key = configured[0]
+                cls._active_until = checked_at + max(1, check_ttl_seconds)
+                cls._active_requests = 0
+                return configured[0]
             if (
                 cls._active_key in configured
                 and cls._active_until > checked_at
+                and cls._active_requests < max(1, check_every_requests)
                 and cls._rejected_until.get(cls._active_key, 0) <= checked_at
             ):
                 return cls._active_key
 
+            previous_active = cls._active_key
+            ambiguous_active = False
             ordered = list(configured)
             if cls._active_key in ordered:
                 ordered.remove(cls._active_key)
@@ -128,14 +136,20 @@ class NanoGPTKeyPool:
                         "NanoGPT key validation probe failed (%s)",
                         type(error).__name__,
                     )
+                    ambiguous_active = ambiguous_active or key == previous_active
                     continue
 
                 if 200 <= status < 300:
                     cls._active_key = key
                     cls._active_until = checked_at + max(1, check_ttl_seconds)
+                    cls._active_requests = 0
                     cls._rejected_until.pop(key, None)
                     return key
 
+                if status not in (
+                    _AUTH_REJECTION_STATUSES | _TEMPORARY_REJECTION_STATUSES
+                ):
+                    ambiguous_active = ambiguous_active or key == previous_active
                 cls._mark_rejected(
                     key,
                     status,
@@ -144,8 +158,22 @@ class NanoGPTKeyPool:
                     rejected_cooldown_seconds,
                 )
 
+            if (
+                ambiguous_active
+                and previous_active in configured
+                and cls._rejected_until.get(previous_active, 0) <= checked_at
+            ):
+                cls._active_key = previous_active
+                cls._active_until = checked_at + min(
+                    max(1, check_ttl_seconds),
+                    30,
+                )
+                cls._active_requests = 0
+                return previous_active
+
             cls._active_key = None
             cls._active_until = 0.0
+            cls._active_requests = 0
             if attempted == 0:
                 raise NanoGPTKeyPoolExhausted(
                     "All configured NanoGPT keys are cooling down",
@@ -153,6 +181,33 @@ class NanoGPTKeyPool:
             raise NanoGPTKeyPoolExhausted(
                 "No configured NanoGPT API key passed validation",
             )
+
+    @classmethod
+    def record_result(
+        cls,
+        key: str | None,
+        status: int,
+        *,
+        check_ttl_seconds: int = 300,
+        rejected_cooldown_seconds: int = 60,
+        now: float | None = None,
+    ) -> None:
+        """Record one upstream request and invalidate definite key failures."""
+        if not key:
+            return
+        if status in (_AUTH_REJECTION_STATUSES | _TEMPORARY_REJECTION_STATUSES):
+            cls.invalidate(
+                key,
+                status,
+                check_ttl_seconds=check_ttl_seconds,
+                rejected_cooldown_seconds=rejected_cooldown_seconds,
+                now=now,
+            )
+            return
+
+        with cls._lock:
+            if cls._active_key == key:
+                cls._active_requests += 1
 
     @classmethod
     def invalidate(
@@ -171,6 +226,7 @@ class NanoGPTKeyPool:
             if cls._active_key == key:
                 cls._active_key = None
                 cls._active_until = 0.0
+                cls._active_requests = 0
             cls._mark_rejected(
                 key,
                 status,
@@ -185,6 +241,7 @@ class NanoGPTKeyPool:
         with cls._lock:
             cls._active_key = None
             cls._active_until = 0.0
+            cls._active_requests = 0
             cls._rejected_until = {}
 
     @classmethod
@@ -198,6 +255,7 @@ class NanoGPTKeyPool:
         if cls._active_key not in configured_set:
             cls._active_key = None
             cls._active_until = 0.0
+            cls._active_requests = 0
 
     @classmethod
     def _mark_rejected(

@@ -17,6 +17,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/config.mjs",
     import.meta.url,
   );
+  const credentialHealthUrl = new URL(
+    "../../worker/roleplay/credential-health.mjs",
+    import.meta.url,
+  );
   const compactionPolicyUrl = new URL(
     "../../worker/roleplay/compaction-policy.mjs",
     import.meta.url,
@@ -61,6 +65,7 @@ export async function roleplayModuleUrl() {
     compatibilitySource,
     checkpointSource,
     configSource,
+    credentialHealthSource,
     compactionPolicySource,
     directivesSource,
     fallbackMemorySource,
@@ -76,6 +81,7 @@ export async function roleplayModuleUrl() {
       readFile(compatibilityUrl, "utf8"),
       readFile(checkpointUrl, "utf8"),
       readFile(configUrl, "utf8"),
+      readFile(credentialHealthUrl, "utf8"),
       readFile(compactionPolicyUrl, "utf8"),
       readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
@@ -89,6 +95,12 @@ export async function roleplayModuleUrl() {
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
   const configDataUrl = dataModuleUrl(configSource);
+  const credentialHealthDataUrl = dataModuleUrl(
+    credentialHealthSource.replace(
+      'from "./config.mjs";',
+      `from "${configDataUrl}";`,
+    ),
+  );
   const compactionPolicyDataUrl = dataModuleUrl(
     compactionPolicySource,
   );
@@ -145,6 +157,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./directives.mjs";',
       `from "${directivesDataUrl}";`,
+    )
+    .replace(
+      'from "./credential-health.mjs";',
+      `from "${credentialHealthDataUrl}";`,
     )
     .replace(
       'from "./compatibility.mjs";',

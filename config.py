@@ -58,6 +58,9 @@ class Config:
     NANOGPT_KEY_CHECK_TTL_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_CHECK_TTL_SECONDS', 300, 1, 3600
     )
+    NANOGPT_KEY_CHECK_EVERY_REQUESTS = load_bounded_env_integer(
+        'NANOGPT_KEY_CHECK_EVERY_REQUESTS', 50, 1, 100000
+    )
     NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS', 60, 1, 3600
     )

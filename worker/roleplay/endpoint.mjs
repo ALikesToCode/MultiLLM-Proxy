@@ -24,6 +24,7 @@ import {
   recordCompactionSuccess,
 } from "./compaction-policy.mjs";
 import { prepareProtectedContext } from "./directives.mjs";
+import { revalidateNanoCredential } from "./credential-health.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import {
   buildConfiguredCandidates,
@@ -76,6 +77,8 @@ function initialState() {
     profile: {},
     stats: {},
     activeCredentials: {},
+    credentialUses: {},
+    nanogptCredentialChecks: 0,
     turns: 0,
     compactions: 0,
     localCompactions: 0,
@@ -112,6 +115,10 @@ function normalizeState(value) {
     activeCredentials:
       value.activeCredentials && typeof value.activeCredentials === "object"
         ? value.activeCredentials
+        : {},
+    credentialUses:
+      value.credentialUses && typeof value.credentialUses === "object"
+        ? value.credentialUses
         : {},
     recentRequests: Array.isArray(value.recentRequests)
       ? value.recentRequests
@@ -434,6 +441,7 @@ export class RoleplaySession extends DurableObject {
           messages: state.messages,
         }),
         estimated_input_tokens_saved: state.inputTokensSaved ?? 0,
+        nanogpt_credential_checks: state.nanogptCredentialChecks ?? 0,
         models: metrics,
         updated_at: state.updatedAt || null,
       });
@@ -540,8 +548,23 @@ export class RoleplaySession extends DurableObject {
     state = markRequest(state, idempotencyKey, "started");
     await saveState(this.ctx.storage, state);
 
+    const configuredCandidates = buildConfiguredCandidates(
+      this.env,
+      settings,
+    );
+    const checkedState = await revalidateNanoCredential(
+      state,
+      configuredCandidates,
+      this.env,
+      settings,
+      request.signal,
+    );
+    if (checkedState !== state) {
+      state = checkedState;
+      await saveState(this.ctx.storage, state);
+    }
     const candidates = rankRoleplayCandidates(
-      buildConfiguredCandidates(this.env, settings),
+      configuredCandidates,
       state.stats,
       parsed.modelPreference,
       Date.now(),

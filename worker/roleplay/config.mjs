@@ -47,6 +47,11 @@ const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",
   glm: "glm-5.2",
 };
+const PROVIDER_DEFAULT_MODELS = {
+  nanogpt: {
+    glm: "zai-org/glm-5.2:thinking",
+  },
+};
 
 function firstNonEmpty(env, names) {
   for (const name of names) {
@@ -225,10 +230,14 @@ function appendEndpointPath(baseUrl, endpointPath) {
 function configuredModelFor(env, overrides, provider, family) {
   const globalName =
     family === "kimi" ? "ROLEPLAY_KIMI_MODEL" : "ROLEPLAY_GLM_MODEL";
+  const configuredGlobal =
+    typeof env[globalName] === "string" ? env[globalName].trim() : "";
+  const providerDefault =
+    PROVIDER_DEFAULT_MODELS[provider]?.[family] ?? DEFAULT_MODELS[family];
   const globalDefault =
-    typeof env[globalName] === "string" && env[globalName].trim()
-      ? env[globalName].trim()
-      : DEFAULT_MODELS[family];
+    configuredGlobal && configuredGlobal !== DEFAULT_MODELS[family]
+      ? configuredGlobal
+      : providerDefault;
   return overrides[provider]?.[family] ?? globalDefault;
 }
 
@@ -318,6 +327,19 @@ export function getRoleplaySettings(env) {
       3_600,
       31_536_000,
     ),
+    nanogptKeyCheckEveryRequests: boundedInteger(
+      env.NANOGPT_KEY_CHECK_EVERY_REQUESTS,
+      50,
+      1,
+      100_000,
+    ),
+    nanogptKeyCheckTimeoutMs:
+      boundedInteger(
+        env.NANOGPT_KEY_CHECK_TIMEOUT_SECONDS,
+        5,
+        1,
+        30,
+      ) * 1_000,
     providerOrder: parseProviderOrder(env.ROLEPLAY_PROVIDER_ORDER),
     providerModelOverrides: parseProviderModelOverrides(
       env.ROLEPLAY_PROVIDER_MODELS,
@@ -341,6 +363,7 @@ export function buildConfiguredCandidates(env, settings) {
       definition.defaultBaseUrl,
     );
     const endpoint = appendEndpointPath(baseUrl, definition.defaultPath);
+    const catalogEndpoint = appendEndpointPath(baseUrl, "/v1/models");
 
     tokens.forEach((token, credentialRank) => {
       MODEL_FAMILIES.forEach((family, familyRank) => {
@@ -356,6 +379,7 @@ export function buildConfiguredCandidates(env, settings) {
             family,
           ),
           endpoint: endpoint.toString(),
+          catalogEndpoint: catalogEndpoint.toString(),
           token,
           credentialId:
             tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",

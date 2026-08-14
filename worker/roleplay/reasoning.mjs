@@ -1,7 +1,6 @@
 const MAXIMUM_EFFORT_BY_PROVIDER = Object.freeze({
   navyai: "xhigh",
   linkapi: "high",
-  nanogpt: "xhigh",
 });
 const REASONING_EFFORT_ORDER = Object.freeze([
   "none",
@@ -45,6 +44,15 @@ export function maximumReasoningProfile(candidate) {
       mode: "max",
       effort,
       fields: { reasoning: { effort } },
+    };
+  }
+
+  if (provider === "nanogpt") {
+    const effort = family === "glm" ? "max" : "xhigh";
+    return {
+      mode: "max",
+      effort,
+      fields: { reasoning_effort: effort },
     };
   }
 

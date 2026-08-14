@@ -29,21 +29,23 @@ NANOGPT_ORIGIN_URL=https://nano-gpt.com
 NANOGPT_MAX_REQUEST_BYTES=16777216
 NANOGPT_KEY_CHECK_TIMEOUT_SECONDS=5
 NANOGPT_KEY_CHECK_TTL_SECONDS=300
+NANOGPT_KEY_CHECK_EVERY_REQUESTS=50
 NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS=60
 ```
 
 The default request limit is 16 MiB. Increase it only when a documented media
 endpoint requires a larger body and the deployment can safely accept it.
 
-With multiple configured keys, the Container checks `GET /api/v1/models`
-before the first authenticated request. It caches the first 2xx key for five
-minutes by default. A `401`, `403`, or `429` from a later upstream request
-invalidates that selection so the next request checks another key. The failed
-generation is returned unchanged and is never replayed automatically, which
-preserves the raw gateway's single-attempt billing boundary. Cloudflare
-roleplay sessions track the successful numbered key in Durable Object state
-and try another configured key only after a definite auth or rate-limit
-rejection.
+With multiple keys, the Container checks `GET /api/v1/models` before the first
+authenticated request and remembers the first 2xx key. A single configured key
+is used immediately. Both cases revalidate after 50 completed upstream
+requests or five minutes by default. A transient catalog error retains the last
+working key; a definite
+`401`, `403`, or `429` invalidates it so the next request checks another key.
+The failed generation is returned unchanged and is never replayed
+automatically, preserving the raw gateway's single-attempt billing boundary.
+Cloudflare roleplay sessions use the same request-count health policy while
+persisting only the successful key identifier, never the secret.
 
 ## URL mapping
 

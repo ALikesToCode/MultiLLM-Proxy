@@ -22,6 +22,8 @@ NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
 advances to the next key. The successful key identifier—not the secret—is kept
 in that Durable Object's session state and is preferred on later turns.
+NanoGPT GLM requests use the catalog's exact
+`zai-org/glm-5.2:thinking` ID and its documented `max` reasoning effort.
 
 ## Request
 
@@ -90,8 +92,9 @@ follows provider priority.
 Every roleplay generation defaults to the strongest provider-compatible
 reasoning mode. Callers can lower generation effort with `reasoning_effort`;
 semantic `max` maps to the selected provider's real ceiling. Model-backed
-memory compaction remains at maximum reasoning. NavyAI and NanoGPT receive
-`xhigh`; LinkAPI receives `high`; OpenRouter receives `reasoning.effort` set to
+memory compaction remains at maximum reasoning. NavyAI receives `xhigh`;
+NanoGPT receives `max` for GLM and `xhigh` for Kimi; LinkAPI receives `high`;
+OpenRouter receives `reasoning.effort` set to
 `high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.2 receives `max`.
 OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
 does not expose a supported effort overlay for that model.

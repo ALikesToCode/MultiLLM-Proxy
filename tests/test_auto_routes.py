@@ -224,6 +224,9 @@ class AutoRouteTest(UnifiedApiTestCase):
             [call.kwargs["api_provider"] for call in make_request.call_args_list],
             ["nanogpt", "opencode"],
         )
+        nano_payload = json.loads(make_request.call_args_list[0].kwargs["data"])
+        self.assertEqual(nano_payload["model"], "zai-org/glm-5.2:thinking")
+        self.assertEqual(nano_payload["reasoning_effort"], "max")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
         self.assertEqual(
             response.headers["X-MultiLLM-Auto-Selected-Model"],
@@ -325,8 +328,8 @@ class AutoRouteTest(UnifiedApiTestCase):
                 return_value="working-nano-key",
             ) as select_key,
             patch(
-                "routes.unified.NanoGPTKeyPool.invalidate",
-            ) as invalidate,
+                "routes.unified.NanoGPTKeyPool.record_result",
+            ) as record_result,
             patch(
                 "app.ProxyService.make_request",
                 return_value=rate_limited,
@@ -347,8 +350,11 @@ class AutoRouteTest(UnifiedApiTestCase):
             make_request.call_args.kwargs["headers"]["Authorization"],
             "Bearer working-nano-key",
         )
-        invalidate.assert_called_once()
-        self.assertEqual(invalidate.call_args.args[:2], ("working-nano-key", 429))
+        record_result.assert_called_once()
+        self.assertEqual(
+            record_result.call_args.args[:2],
+            ("working-nano-key", 429),
+        )
 
     def test_admin_can_create_and_reorder_auto_route(self):
         self._authenticate_admin()

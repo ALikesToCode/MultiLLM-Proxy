@@ -488,6 +488,7 @@ test("container envVars are derived from the live Durable Object env", () => {
       NANOGPT_BASE_URL: "https://cake.nano-gpt.com/api",
       NANOGPT_BATCH_BASE_URL: "https://api.nano-gpt.com/api/v1",
       NANOGPT_ORIGIN_URL: "https://cake.nano-gpt.com",
+      NANOGPT_KEY_CHECK_EVERY_REQUESTS: "75",
       NAVYAI_API_KEY: "navyai-live-key",
       NAVYAI_BASE_URL: "https://api.navy",
       LINKAPI_KEY: "linkapi-live-key",
@@ -555,6 +556,7 @@ test("container envVars are derived from the live Durable Object env", () => {
     container.envVars.NANOGPT_ORIGIN_URL,
     "https://cake.nano-gpt.com",
   );
+  assert.equal(container.envVars.NANOGPT_KEY_CHECK_EVERY_REQUESTS, "75");
   assert.equal(container.envVars.NAVYAI_API_KEY, "navyai-live-key");
   assert.equal(container.envVars.NAVYAI_BASE_URL, "https://api.navy");
   assert.equal(container.envVars.LINKAPI_KEY, "linkapi-live-key");

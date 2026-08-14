@@ -67,6 +67,63 @@ class NanoGPTKeyPoolTest(unittest.TestCase):
         self.assertEqual(cached, "working")
         self.assertEqual(probes, ["invalid", "working"])
 
+    def test_uses_a_single_key_without_an_initial_catalog_probe(self):
+        probes = []
+
+        selected = NanoGPTKeyPool.select_key(
+            ["only-key"],
+            lambda key: probes.append(key) or 200,
+            now=100,
+        )
+
+        self.assertEqual(selected, "only-key")
+        self.assertEqual(probes, [])
+
+    def test_revalidates_the_active_key_after_the_request_interval(self):
+        probes = []
+
+        selected = NanoGPTKeyPool.select_key(
+            ["working"],
+            lambda key: probes.append(key) or 200,
+            check_every_requests=2,
+            now=100,
+        )
+        NanoGPTKeyPool.record_result(selected, 200)
+        cached = NanoGPTKeyPool.select_key(
+            ["working"],
+            lambda key: probes.append(key) or 200,
+            check_every_requests=2,
+            now=101,
+        )
+        NanoGPTKeyPool.record_result(cached, 500)
+        revalidated = NanoGPTKeyPool.select_key(
+            ["working"],
+            lambda key: probes.append(key) or 200,
+            check_every_requests=2,
+            now=102,
+        )
+
+        self.assertEqual(revalidated, "working")
+        self.assertEqual(probes, ["working"])
+
+    def test_ambiguous_revalidation_keeps_the_last_working_key(self):
+        selected = NanoGPTKeyPool.select_key(
+            ["working"],
+            lambda _key: 200,
+            check_every_requests=1,
+            now=100,
+        )
+        NanoGPTKeyPool.record_result(selected, 200)
+
+        retained = NanoGPTKeyPool.select_key(
+            ["working"],
+            lambda _key: 503,
+            check_every_requests=1,
+            now=101,
+        )
+
+        self.assertEqual(retained, "working")
+
     def test_rate_limit_invalidates_active_key_and_selects_the_next_one(self):
         probes = []
 
@@ -79,7 +136,7 @@ class NanoGPTKeyPoolTest(unittest.TestCase):
             probe,
             now=100,
         )
-        NanoGPTKeyPool.invalidate(
+        NanoGPTKeyPool.record_result(
             selected,
             429,
             rejected_cooldown_seconds=60,

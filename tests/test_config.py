@@ -55,6 +55,10 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
         self.assertEqual(config_module.Config.NANOGPT_KEY_CHECK_TIMEOUT_SECONDS, 5)
         self.assertEqual(config_module.Config.NANOGPT_KEY_CHECK_TTL_SECONDS, 300)
         self.assertEqual(
+            config_module.Config.NANOGPT_KEY_CHECK_EVERY_REQUESTS,
+            50,
+        )
+        self.assertEqual(
             config_module.Config.NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS,
             60,
         )

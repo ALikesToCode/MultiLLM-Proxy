@@ -14,6 +14,13 @@ AUTO_ROUTE_PREFIX = "auto:"
 MAX_AUTO_ROUTE_CANDIDATES = 16
 DEFAULT_AUTO_ROUTES = {
     "auto:glm-5.2": (
+        "nanogpt:zai-org/glm-5.2:thinking",
+        "opencode:glm-5.2",
+        "navyai:glm-5.2",
+    ),
+}
+LEGACY_DEFAULT_AUTO_ROUTES = {
+    "auto:glm-5.2": (
         "nanogpt:glm-5.2",
         "opencode:glm-5.2",
         "navyai:glm-5.2",
@@ -90,6 +97,40 @@ class AutoRouteService:
                         for priority, model_id in enumerate(candidates)
                     ],
                 )
+                continue
+
+            current_candidates = tuple(
+                str(row["model_id"])
+                for row in connection.execute(
+                    """
+                    SELECT model_id
+                    FROM auto_route_candidates
+                    WHERE route_id = ?
+                    ORDER BY priority
+                    """,
+                    (route_id,),
+                ).fetchall()
+            )
+            if current_candidates != LEGACY_DEFAULT_AUTO_ROUTES.get(route_id):
+                continue
+            connection.execute(
+                "DELETE FROM auto_route_candidates WHERE route_id = ?",
+                (route_id,),
+            )
+            connection.executemany(
+                """
+                INSERT INTO auto_route_candidates (route_id, priority, model_id)
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (route_id, priority, model_id)
+                    for priority, model_id in enumerate(candidates)
+                ],
+            )
+            connection.execute(
+                "UPDATE auto_routes SET updated_at = ? WHERE route_id = ?",
+                (_utcnow_iso(), route_id),
+            )
 
     @staticmethod
     def is_auto_route(model_id: object) -> bool:

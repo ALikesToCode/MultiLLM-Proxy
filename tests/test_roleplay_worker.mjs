@@ -150,7 +150,7 @@ test("roleplay defaults to maximum reasoning for every provider and model family
     ["linkapi", "LINKAPI_KEY", "kimi", "high", undefined],
     ["linkapi", "LINKAPI_KEY", "glm", "high", undefined],
     ["nanogpt", "NANOGPT_API_KEY", "kimi", "xhigh", undefined],
-    ["nanogpt", "NANOGPT_API_KEY", "glm", "xhigh", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "glm", "max", undefined],
     ["openrouter", "OPENROUTER_API_KEY", "kimi", undefined, "high"],
     ["openrouter", "OPENROUTER_API_KEY", "glm", undefined, "xhigh"],
   ];
@@ -226,7 +226,7 @@ test("roleplay preserves an explicit GLM reasoning override for every provider",
     ["opencode", "OPENCODE_GO_API_KEY", "max", undefined],
     ["navyai", "NAVYAI_API_KEY", "xhigh", undefined],
     ["linkapi", "LINKAPI_KEY", "high", undefined],
-    ["nanogpt", "NANOGPT_API_KEY", "xhigh", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "max", undefined],
     ["openrouter", "OPENROUTER_API_KEY", undefined, "xhigh"],
   ];
 
@@ -794,6 +794,7 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
     ROLEPLAY_PROVIDER_ORDER: "nanogpt",
   });
   const authorizationAttempts = [];
+  const requestedModels = [];
 
   const catalogResponse = await handleRoleplayEdgeRequest(
     new Request("https://proxy.example/v1/roleplay/models", {
@@ -814,6 +815,20 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
   const responses = await withGlobalFetch(async (_input, init) => {
     const authorization = new Headers(init.headers).get("Authorization");
     authorizationAttempts.push(authorization);
+    if (init.method === "GET") {
+      if (authorization === "Bearer nanogpt-rejected-key") {
+        return new Response(
+          JSON.stringify({ error: { message: "Invalid session" } }),
+          {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      return new Response(JSON.stringify({ data: [{ id: "kimi-k2.6" }] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (authorization === "Bearer nanogpt-rejected-key") {
       return new Response(
         JSON.stringify({ error: { message: "Invalid session" } }),
@@ -825,6 +840,7 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
     }
     assert.equal(authorization, "Bearer nanogpt-working-key");
     const payload = JSON.parse(init.body);
+    requestedModels.push(payload.model);
     return completionResponse(payload.model, "Mira keeps the same thread.");
   }, async () => {
     const first = await handleRoleplayEdgeRequest(
@@ -853,5 +869,83 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
     "Bearer nanogpt-rejected-key",
     "Bearer nanogpt-working-key",
     "Bearer nanogpt-working-key",
+    "Bearer nanogpt-working-key",
   ]);
+  assert.deepEqual(requestedModels, [
+    "kimi-k2.6",
+    "kimi-k2.6",
+  ]);
+});
+
+test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-working-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+  });
+  let requestedModel;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    requestedModel = payload.model;
+    assert.equal(payload.reasoning_effort, "max");
+    return completionResponse(payload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-glm-thinking",
+        input: "Continue.",
+        model_preference: "glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(requestedModel, "zai-org/glm-5.2:thinking");
+});
+
+test("roleplay revalidates the remembered NanoGPT key after the request interval", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-working-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    NANOGPT_KEY_CHECK_EVERY_REQUESTS: "1",
+  });
+  const methods = [];
+
+  const responses = await withGlobalFetch(async (_input, init) => {
+    methods.push(init.method);
+    if (init.method === "GET") {
+      return new Response(JSON.stringify({ data: [{ id: "kimi-k2.6" }] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const payload = JSON.parse(init.body);
+    return completionResponse(payload.model);
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-key-recheck",
+        input: "Continue.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-key-recheck",
+        input: "Continue again.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    return [first, second];
+  });
+
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(methods, ["POST", "GET", "POST"]);
 });

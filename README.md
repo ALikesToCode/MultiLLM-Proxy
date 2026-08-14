@@ -332,7 +332,8 @@ For detailed usage examples with headers and request bodies, refer to the API En
 ### Automatic provider priorities
 
 `POST /v1/chat/completions` accepts dashboard-managed virtual models such as
-`auto:glm-5.2`. The seeded route tries NanoGPT, OpenCode, then NavyAI and moves
+`auto:glm-5.2`. The seeded route tries NanoGPT's exact
+`zai-org/glm-5.2:thinking` model, OpenCode, then NavyAI and moves
 forward only after a definite authentication, payment, model-availability,
 rate-limit, or local circuit rejection. Direct `provider:model` requests remain
 unchanged.

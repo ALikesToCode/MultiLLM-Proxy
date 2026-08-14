@@ -228,17 +228,27 @@ export function recordModelResult(
   }
 
   const activeCredentials = { ...(state.activeCredentials ?? {}) };
+  const credentialUses = {
+    ...(state.credentialUses ?? {}),
+    [candidate.provider]: {
+      ...(state.credentialUses?.[candidate.provider] ?? {}),
+    },
+  };
   if (success) {
     activeCredentials[candidate.provider] = candidate.credentialId;
+    credentialUses[candidate.provider][candidate.credentialId] =
+      (credentialUses[candidate.provider][candidate.credentialId] ?? 0) + 1;
   } else if (
     activeCredentials[candidate.provider] === candidate.credentialId
   ) {
     delete activeCredentials[candidate.provider];
+    credentialUses[candidate.provider][candidate.credentialId] = 0;
   }
 
   return {
     ...state,
     activeCredentials,
+    credentialUses,
     stats: {
       ...state.stats,
       [candidate.key]: {

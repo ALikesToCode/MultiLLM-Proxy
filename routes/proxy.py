@@ -248,6 +248,9 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                             check_ttl_seconds=app.config[
                                 "NANOGPT_KEY_CHECK_TTL_SECONDS"
                             ],
+                            check_every_requests=app.config[
+                                "NANOGPT_KEY_CHECK_EVERY_REQUESTS"
+                            ],
                             rejected_cooldown_seconds=app.config[
                                 "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
                             ],
@@ -336,11 +339,8 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 force_raw_passthrough=raw_passthrough,
             )
 
-            if (
-                configured_nanogpt_key
-                and response.status_code in {401, 403, 429}
-            ):
-                NanoGPTKeyPool.invalidate(
+            if configured_nanogpt_key:
+                NanoGPTKeyPool.record_result(
                     configured_nanogpt_key,
                     response.status_code,
                     check_ttl_seconds=app.config[

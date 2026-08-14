@@ -14,7 +14,7 @@ REASONING_EFFORT_ORDER = (
 )
 GLM_52_MAX_REASONING_EFFORTS = {
     "linkapi": "high",
-    "nanogpt": "xhigh",
+    "nanogpt": "max",
     "navyai": "xhigh",
     "opencode": "max",
     "openrouter": "xhigh",
@@ -22,7 +22,8 @@ GLM_52_MAX_REASONING_EFFORTS = {
 
 
 def is_glm_52_model(model: str) -> bool:
-    return model.strip().lower().rsplit("/", 1)[-1] == "glm-5.2"
+    model_name = model.strip().lower().rsplit("/", 1)[-1]
+    return model_name.split(":", 1)[0] == "glm-5.2"
 
 
 def _requested_effort(payload: Mapping[str, Any]) -> tuple[bool, str | None]:

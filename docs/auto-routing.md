@@ -7,7 +7,7 @@ without changing any direct provider route.
 
 The first startup seeds this route:
 
-1. `nanogpt:glm-5.2`
+1. `nanogpt:zai-org/glm-5.2:thinking`
 2. `opencode:glm-5.2`
 3. `navyai:glm-5.2`
 
@@ -86,7 +86,7 @@ body has this shape:
 {
   "route_id": "auto:glm-5.2",
   "candidates": [
-    "nanogpt:glm-5.2",
+    "nanogpt:zai-org/glm-5.2:thinking",
     "opencode:glm-5.2",
     "navyai:glm-5.2"
   ]

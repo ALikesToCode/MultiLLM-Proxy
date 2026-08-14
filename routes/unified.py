@@ -30,7 +30,6 @@ from services.reasoning_policy import apply_glm_52_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
-NANOGPT_KEY_REJECTION_STATUS_CODES = frozenset({401, 403, 429})
 NATIVE_RESPONSES_PROVIDERS = frozenset(
     {"codex-easy", "linkapi", "nanogpt", "navyai"}
 )
@@ -49,6 +48,9 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
                     app.config["NANOGPT_KEY_CHECK_TIMEOUT_SECONDS"],
                 ),
                 check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
+                check_every_requests=app.config[
+                    "NANOGPT_KEY_CHECK_EVERY_REQUESTS"
+                ],
                 rejected_cooldown_seconds=app.config[
                     "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
                 ],
@@ -62,13 +64,15 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
     return token
 
 
-def _invalidate_nanogpt_token(app, provider: str, token: str, status_code: int) -> None:
-    if (
-        provider != "nanogpt"
-        or status_code not in NANOGPT_KEY_REJECTION_STATUS_CODES
-    ):
+def _record_nanogpt_token_result(
+    app,
+    provider: str,
+    token: str,
+    status_code: int,
+) -> None:
+    if provider != "nanogpt":
         return
-    NanoGPTKeyPool.invalidate(
+    NanoGPTKeyPool.record_result(
         token,
         status_code,
         check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
@@ -322,7 +326,7 @@ def _dispatch_unified_chat_candidate(
         response = proxy_service_cls.make_request(
             **request_kwargs,
         )
-        _invalidate_nanogpt_token(app, provider, token, response.status_code)
+        _record_nanogpt_token_result(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
@@ -468,7 +472,7 @@ def dispatch_unified_image_generation(
             api_provider=provider,
             use_cache=False,
         )
-        _invalidate_nanogpt_token(app, provider, token, response.status_code)
+        _record_nanogpt_token_result(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
@@ -650,7 +654,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     api_provider=provider,
                     use_cache=False,
                 )
-                _invalidate_nanogpt_token(
+                _record_nanogpt_token_result(
                     app,
                     provider,
                     token,
