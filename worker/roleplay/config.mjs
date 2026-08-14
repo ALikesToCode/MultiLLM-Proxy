@@ -208,6 +208,12 @@ export function getRoleplaySettings(env) {
       128,
       32_768,
     ),
+    imagePromptMinOutputTokens: boundedInteger(
+      env.ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS,
+      2_048,
+      512,
+      8_192,
+    ),
     maxRequestBytes: boundedInteger(
       env.ROLEPLAY_MAX_REQUEST_BYTES,
       1_048_576,

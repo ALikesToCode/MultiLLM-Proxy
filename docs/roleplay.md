@@ -80,6 +80,14 @@ clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
 values are also accepted. A family-specific value pins the family but still
 follows provider priority.
 
+Every roleplay generation and model-backed memory compaction request enforces
+the strongest provider-compatible reasoning mode. Caller-supplied
+`reasoning_effort` values cannot lower or disable it. NavyAI and NanoGPT receive
+`xhigh`; LinkAPI receives `high`; OpenRouter receives `reasoning.effort` set to
+`high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.2 receives `max`.
+OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
+does not expose a supported effort overlay for that model.
+
 `response_length` accepts `compact`, `balanced`, or `immersive`. It changes the
 automatic output budget and adds a matching pacing instruction. Every mode
 discourages repeated recap and stagnant dialogue.
@@ -88,6 +96,13 @@ Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
 balanced and immersive replies receive the configured 20,000-token budget;
 compact replies use a smaller smart budget. Explicit values can request up to
 `ROLEPLAY_MAX_OUTPUT_TOKENS`.
+
+When a protected caller directive marks an `IMAGE PROMPT:` block as mandatory
+for story responses, the Worker adds a short final-output reminder immediately
+before dialogue and reserves at least
+`ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS` (2,048 by default). This does not
+rewrite provider output or make a second paid request. An explicit `no image`
+command or OOC-prefixed turn bypasses both the reminder and budget floor.
 
 During a quiet streaming interval, the Worker emits a valid SSE comment every
 10 seconds. These keepalives carry no model content and let clients distinguish
@@ -124,11 +139,14 @@ isolation.
 
 Caller-supplied `system` and `developer` messages are protected control
 directives. They are stored separately from dialogue and reinserted unchanged
-on later delta-only requests. In `auto` mode, a newly supplied directive set
-replaces the retained set; a request without directives reuses it. `append`
-adds new directives, `replace` uses exactly the supplied set (and therefore
-clears it when none are supplied), and `memory.mode: off` uses only directives
-present in that request.
+on later delta-only requests. When present, they lead the upstream message
+list and suppress the Worker's generic roleplay-writing prompt. Explicit
+structured `character` fields remain available as labelled context without
+being placed ahead of the caller's contract. In `auto` mode, a newly supplied
+directive set replaces the retained set; a request without directives reuses
+it. `append` adds new directives, `replace` uses exactly the supplied set (and
+therefore clears it when none are supplied), and `memory.mode: off` uses only
+directives present in that request.
 
 ## Adaptive selection and fallback
 
@@ -165,9 +183,11 @@ remain raw.
 
 Only `user`, `assistant`, and `tool` dialogue can enter model compaction, local
 extractive compaction, or a compaction checkpoint. `system` and `developer`
-directives never enter those paths. If protected directives alone exceed the
-safe input limit, the request is rejected with `413` instead of weakening or
-summarizing them.
+directives never enter those paths and do not count toward the normal dialogue
+compaction trigger. The total context, including protected directives, still
+controls mandatory compaction and the hard limit. If protected directives and
+the retained recent context cannot fit, the request is rejected with `413`
+instead of weakening or summarizing the directives.
 
 Storage pressure always makes compaction mandatory. The raw recent-message
 window automatically shrinks below `ROLEPLAY_KEEP_RECENT_MESSAGES` until the
@@ -331,6 +351,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_KEEP_RECENT_MESSAGES` | `8` | Maximum raw recent history retained; shrinks under storage pressure |
 | `ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS` | `20000` | Smart output-budget baseline |
 | `ROLEPLAY_MAX_OUTPUT_TOKENS` | `20000` | Per-turn output ceiling |
+| `ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS` | `2048` | Minimum story budget when protected directives require a final image-prompt block |
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |

@@ -43,6 +43,7 @@ import {
   mergeSessionMessages,
   parseRoleplayPayload,
 } from "./memory.mjs";
+import { applyRoleplayOutputContract } from "./output-contract.mjs";
 import {
   MAX_RESPONSE_BYTES,
   attemptRoleplayCandidates,
@@ -496,6 +497,11 @@ export class RoleplaySession extends DurableObject {
       parsedWithProfile,
       memoryEnabled,
     );
+    const parsedWithOutputContract = applyRoleplayOutputContract(
+      protectedContext.parsed,
+      protectedContext.activeDirectives,
+      settings,
+    );
     state = protectedContext.state;
     if (
       estimateTokens(protectedContext.activeDirectives) >
@@ -509,11 +515,11 @@ export class RoleplaySession extends DurableObject {
     const checkpoint = memoryEnabled
       ? await reuseCompactionCheckpoint(
           state,
-          protectedContext.parsed,
+          parsedWithOutputContract,
         )
       : {
-          parsed: protectedContext.parsed,
-          sourceMessages: protectedContext.parsed.messages,
+          parsed: parsedWithOutputContract,
+          sourceMessages: parsedWithOutputContract.messages,
           matched: false,
         };
     const parsed = checkpoint.parsed;

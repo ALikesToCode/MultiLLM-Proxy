@@ -33,6 +33,14 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/memory.mjs",
     import.meta.url,
   );
+  const outputContractUrl = new URL(
+    "../../worker/roleplay/output-contract.mjs",
+    import.meta.url,
+  );
+  const reasoningUrl = new URL(
+    "../../worker/roleplay/reasoning.mjs",
+    import.meta.url,
+  );
   const endpointUrl = new URL(
     "../../worker/roleplay/endpoint.mjs",
     import.meta.url,
@@ -53,6 +61,8 @@ export async function roleplayModuleUrl() {
     directivesSource,
     fallbackMemorySource,
     memorySource,
+    outputContractSource,
+    reasoningSource,
     transportSource,
     streamingSource,
     endpointSource,
@@ -65,6 +75,8 @@ export async function roleplayModuleUrl() {
       readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
+      readFile(outputContractUrl, "utf8"),
+      readFile(reasoningUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
@@ -88,11 +100,22 @@ export async function roleplayModuleUrl() {
       `from "${directivesDataUrl}";`,
     ),
   );
+  const outputContractDataUrl = dataModuleUrl(outputContractSource);
+  const reasoningDataUrl = dataModuleUrl(reasoningSource);
   const memoryDataUrl = dataModuleUrl(
-    memorySource.replace(
-      'from "./directives.mjs";',
-      `from "${directivesDataUrl}";`,
-    ),
+    memorySource
+      .replace(
+        'from "./directives.mjs";',
+        `from "${directivesDataUrl}";`,
+      )
+      .replace(
+        'from "./output-contract.mjs";',
+        `from "${outputContractDataUrl}";`,
+      )
+      .replace(
+        'from "./reasoning.mjs";',
+        `from "${reasoningDataUrl}";`,
+      ),
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
@@ -126,6 +149,10 @@ export async function roleplayModuleUrl() {
     )
     .replace('from "./config.mjs";', `from "${configDataUrl}";`)
     .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+    .replace(
+      'from "./output-contract.mjs";',
+      `from "${outputContractDataUrl}";`,
+    )
     .replace('from "./transport.mjs";', `from "${transportDataUrl}";`)
     .replace('from "./streaming.mjs";', `from "${streamingDataUrl}";`);
   return dataModuleUrl(patchedEndpoint);

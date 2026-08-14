@@ -235,6 +235,99 @@ test("Janitor full-history requests recover the same durable session", async () 
   assert.equal((await metrics.json()).turns, 2);
 });
 
+test("caller contract leads full-history payloads without triggering premature compaction", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
+  });
+  const globalContract = [
+    "GLOBAL ROLEPLAY CONTRACT",
+    "The caller controls the user character. Preserve continuity and follow this contract exactly.",
+    "Concrete scene and formatting requirements remain authoritative.",
+    "x".repeat(34_000),
+  ].join("\n");
+  const opening = [
+    { role: "system", content: globalContract },
+    { role: "assistant", content: "Mira closes the library door." },
+    { role: "user", content: "Ask who followed us." },
+    { role: "assistant", content: "A shoe scrapes beyond the west wall." },
+    { role: "user", content: "Keep listening." },
+    { role: "assistant", content: "The hidden latch clicks once." },
+    { role: "user", content: "Remember that sound." },
+    { role: "assistant", content: "Mira marks the shelf with chalk." },
+    { role: "user", content: "Wait beside the marked shelf." },
+  ];
+  const upstreamPayloads = [];
+
+  const responses = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    assert.equal(isCompactionPayload(payload), false);
+    upstreamPayloads.push(payload);
+    return completionResponse(payload.model, `Reply ${upstreamPayloads.length}`);
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          model: "roleplay:auto",
+          messages: opening,
+          stream: false,
+        },
+        janitorHeaders(),
+        JANITOR_PATH,
+      ),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          model: "roleplay:auto",
+          messages: [
+            ...opening,
+            { role: "assistant", content: "Reply 1" },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: false,
+        },
+        janitorHeaders(),
+        JANITOR_PATH,
+      ),
+      fixture.env,
+    );
+    return [first, second];
+  });
+
+  assert.equal(responses[0].status, 200);
+  assert.equal(responses[1].status, 200);
+  assert.equal(
+    responses[1].headers.get("X-Roleplay-Session-ID"),
+    responses[0].headers.get("X-Roleplay-Session-ID"),
+  );
+  assert.equal(upstreamPayloads.length, 2);
+  for (const payload of upstreamPayloads) {
+    assert.deepEqual(payload.messages[0], {
+      role: "system",
+      content: globalContract,
+    });
+    assert.equal(
+      payload.messages.some((message) =>
+        message.content.includes("Perform immersive roleplay"),
+      ),
+      false,
+    );
+  }
+  assert.equal(
+    upstreamPayloads[1].messages.some(
+      (message) => message.content === "A shoe scrapes beyond the west wall.",
+    ),
+    true,
+  );
+  assert.equal(
+    upstreamPayloads[1].messages.some(
+      (message) => message.content === "Open the marked shelf.",
+    ),
+    true,
+  );
+});
+
 test("Janitor derived sessions retain compacted continuity on later turns", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_KEEP_RECENT_MESSAGES: "4",

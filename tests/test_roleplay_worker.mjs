@@ -132,6 +132,87 @@ test("roleplay endpoint stores continuity and explores Kimi then GLM", async () 
   assert.equal(metricPayload.models["opencode:glm-5.2"].successes, 1);
 });
 
+test("roleplay enforces maximum reasoning for every provider and model family", async () => {
+  const disabledProviderKeys = {
+    OPENCODE_GO_API_KEY: "",
+    OPENCODE_API_KEY: "",
+    NAVYAI_API_KEY: "",
+    LINKAPI_KEY: "",
+    LINKAPI_API_KEY: "",
+    NANOGPT_API_KEY: "",
+    OPENROUTER_API_KEY: "",
+  };
+  const cases = [
+    ["opencode", "OPENCODE_GO_API_KEY", "kimi", "native", undefined],
+    ["opencode", "OPENCODE_GO_API_KEY", "glm", "max", undefined],
+    ["navyai", "NAVYAI_API_KEY", "kimi", "xhigh", undefined],
+    ["navyai", "NAVYAI_API_KEY", "glm", "xhigh", undefined],
+    ["linkapi", "LINKAPI_KEY", "kimi", "high", undefined],
+    ["linkapi", "LINKAPI_KEY", "glm", "high", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "kimi", "xhigh", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "glm", "xhigh", undefined],
+    ["openrouter", "OPENROUTER_API_KEY", "kimi", undefined, "high"],
+    ["openrouter", "OPENROUTER_API_KEY", "glm", undefined, "xhigh"],
+  ];
+
+  for (const [provider, keyName, family, effort, nestedEffort] of cases) {
+    const fixture = makeRoleplayEnv({
+      ...disabledProviderKeys,
+      [keyName]: `${provider}-reasoning-key`,
+      ROLEPLAY_PROVIDER_ORDER: provider,
+    });
+    let upstreamPayload;
+    const response = await withGlobalFetch(async (_input, init) => {
+      upstreamPayload = JSON.parse(init.body);
+      return completionResponse(upstreamPayload.model);
+    }, () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest({
+          session_id: `session-reasoning-${provider}-${family}`,
+          input: "Continue.",
+          model_preference: family,
+          reasoning_effort: "none",
+          stream: false,
+        }),
+        fixture.env,
+      ),
+    );
+
+    assert.equal(response.status, 200, `${provider}:${family}`);
+    if (effort === "native") {
+      assert.equal(
+        "reasoning_effort" in upstreamPayload,
+        false,
+        `${provider}:${family}`,
+      );
+    } else {
+      assert.equal(
+        upstreamPayload.reasoning_effort,
+        effort,
+        `${provider}:${family}`,
+      );
+    }
+    if (nestedEffort) {
+      assert.deepEqual(
+        upstreamPayload.reasoning,
+        { effort: nestedEffort },
+        `${provider}:${family}`,
+      );
+      assert.equal(
+        "reasoning_effort" in upstreamPayload,
+        false,
+        `${provider}:${family}`,
+      );
+    } else {
+      assert.equal(
+        "reasoning" in upstreamPayload,
+        false,
+        `${provider}:${family}`,
+      );
+    }
+  }
+});
+
 test("roleplay fallback advances only after a clear provider rejection", async () => {
   const fixture = makeRoleplayEnv({ NAVYAI_API_KEY: "navy-key" });
   const calls = [];
