@@ -143,6 +143,15 @@ class ProviderCatalogServiceTest(unittest.TestCase):
             ("glm-5.2", "provider/model-v1"),
         )
 
+    def test_has_model_reads_the_last_successful_catalog(self):
+        ProviderCatalogService.replace_provider_models(
+            "opencode",
+            ("glm-5.2",),
+        )
+
+        self.assertTrue(ProviderCatalogService.has_model("opencode", "glm-5.2"))
+        self.assertFalse(ProviderCatalogService.has_model("opencode", "missing"))
+
 
 if __name__ == "__main__":
     unittest.main()

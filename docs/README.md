@@ -1,5 +1,9 @@
 # Documentation
 
+- Live setup guide: sign in to a running proxy and open `/docs` for
+  credential status, chat/image examples, provider-native routes, saved
+  automatic priorities, and the combined runtime model catalog. `/docs.json`
+  returns the same credential-safe data for an authenticated dashboard session.
 - [Cloudflare Containers deployment](cloudflare-containers.md)
 - [Gemini setup](gemini_setup.md)
 - [Gemini and Gemma integration notes](gemini_integration_instructions.md)

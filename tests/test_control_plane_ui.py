@@ -37,6 +37,7 @@ class ControlPlaneUiTest(unittest.TestCase):
             "static/design-tokens.json",
             "static/css/shell.css",
             "static/css/auto-routes.css",
+            "static/css/documentation.css",
             "static/css/operations.css",
             "static/css/surfaces.css",
         ):
@@ -50,9 +51,11 @@ class ControlPlaneUiTest(unittest.TestCase):
             "static/js/auto-route-catalog.js",
             "static/js/auto-routes.js",
             "static/js/dashboard.js",
+            "static/js/documentation.js",
             "static/js/openrouter.js",
             "static/js/users.js",
             "templates/base.html",
+            "templates/documentation.html",
             "templates/login.html",
             "templates/openrouter.html",
             "templates/operations.html",
@@ -69,20 +72,37 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v7", worker)
+        self.assertIn("multillm-proxy-v8", worker)
         for asset in (
             "/static/css/shell.css",
             "/static/css/auto-routes.css?v=7",
+            "/static/css/documentation.css?v=8",
             "/static/css/operations.css",
             "/static/css/surfaces.css",
             "/static/js/auto-route-catalog.js?v=7",
             "/static/js/auto-routes.js?v=7",
             "/static/js/dashboard.js",
+            "/static/js/documentation.js?v=8",
             "/static/js/openrouter.js",
             "/static/js/users.js",
         ):
             self.assertIn(asset, worker)
         self.assertNotIn("/static/css/openrouter.css", worker)
+
+    def test_live_documentation_is_linked_and_uses_safe_external_rendering(self):
+        base = self.read("templates/base.html")
+        documentation = self.read("templates/documentation.html")
+        script = self.read("static/js/documentation.js")
+
+        self.assertIn("url_for('proxy_documentation')", base)
+        self.assertIn('id="proxy-documentation-state"', documentation)
+        self.assertIn("/v1/chat/completions", documentation)
+        self.assertIn("/v1/images/generations", documentation)
+        self.assertIn("provider:image-model", documentation)
+        self.assertIn("js/documentation.js", documentation)
+        self.assertNotIn("onclick=", documentation)
+        self.assertNotIn("innerHTML", script)
+        self.assertIn("replaceChildren", script)
 
     def test_provider_matrix_distinguishes_passthrough_from_managed_circuits(self):
         dashboard = self.read("static/js/dashboard.js")

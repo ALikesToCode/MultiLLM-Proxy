@@ -6,6 +6,7 @@ from unittest.mock import patch
 import requests
 from flask import Response
 
+from services.provider_catalog_service import ProviderCatalogService
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 
@@ -72,6 +73,38 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual(upstream_payload["model"], "mimo-v2-pro")
+
+    def test_live_catalog_model_is_listed_and_routable(self):
+        ProviderCatalogService.replace_provider_models(
+            "opencode",
+            ("new-live-model",),
+        )
+        models_response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(models_response.status_code, 200)
+        model_ids = {model["id"] for model in models_response.get_json()["data"]}
+        self.assertIn("opencode:new-live-model", model_ids)
+
+        upstream_response = self._chat_response("live model selected")
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:new-live-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual(upstream_payload["model"], "new-live-model")
 
     def test_v1_image_generations_routes_linkapi_model_and_preserves_response(self):
         native_body = (

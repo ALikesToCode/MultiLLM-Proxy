@@ -37,6 +37,9 @@
                 <a href="{{ url_for('status_page') }}" class="primary-nav__link {% if request.endpoint == 'status_page' %}is-active{% endif %}">
                     Operations
                 </a>
+                <a href="{{ url_for('proxy_documentation') }}" class="primary-nav__link {% if request.endpoint == 'proxy_documentation' %}is-active{% endif %}">
+                    Setup guide
+                </a>
                 <a href="{{ url_for('manage_users') }}" class="primary-nav__link {% if request.endpoint == 'manage_users' %}is-active{% endif %}">
                     Access
                 </a>
@@ -70,6 +73,7 @@
 
         <nav class="mobile-nav" id="mobile-menu" aria-label="Mobile" hidden>
             <a href="{{ url_for('status_page') }}" class="{% if request.endpoint == 'status_page' %}is-active{% endif %}">Operations</a>
+            <a href="{{ url_for('proxy_documentation') }}" class="{% if request.endpoint == 'proxy_documentation' %}is-active{% endif %}">Setup guide</a>
             <a href="{{ url_for('manage_users') }}" class="{% if request.endpoint == 'manage_users' %}is-active{% endif %}">Access</a>
             <a href="{{ url_for('openrouter_dashboard') }}" class="{% if request.endpoint == 'openrouter_dashboard' %}is-active{% endif %}">OpenRouter lab</a>
         </nav>

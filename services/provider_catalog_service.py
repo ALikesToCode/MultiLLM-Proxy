@@ -96,6 +96,23 @@ class ProviderCatalogService:
         ]
 
     @classmethod
+    def has_model(cls, provider: str, model_id: str) -> bool:
+        """Return whether a model appears in the last successful live catalog."""
+        with closing(cls._connect()) as connection:
+            cls._ensure_storage(connection)
+            connection.commit()
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM provider_model_catalog
+                WHERE provider = ? AND model_id = ?
+                LIMIT 1
+                """,
+                (provider, model_id),
+            ).fetchone()
+        return row is not None
+
+    @classmethod
     def replace_provider_models(
         cls,
         provider: str,

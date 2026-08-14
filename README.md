@@ -192,6 +192,12 @@ The proxy uses a secure authentication system with:
 
 ### API Endpoints
 
+After signing in, open `/docs` on the running proxy for the live setup guide.
+It combines runtime credential status, provider capabilities, native endpoint
+paths, saved `auto:` priorities, copyable chat/image requests, and every model
+known from built-in configuration, the last successful provider catalog refresh,
+or a saved route. Use `/docs.json` for the same credential-safe catalog as JSON.
+
 Each provider is accessible through their respective endpoints:
 
 ```bash

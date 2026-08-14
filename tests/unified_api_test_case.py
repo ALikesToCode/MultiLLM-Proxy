@@ -42,7 +42,9 @@ class UnifiedApiTestCase(unittest.TestCase):
             "app",
             "route_helpers",
             "services.auth_service",
+            "services.model_catalog_service",
             "services.model_registry",
+            "services.proxy_documentation_service",
             "services.rate_limit_service",
         ):
             sys.modules.pop(module_name, None)

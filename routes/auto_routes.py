@@ -6,6 +6,7 @@ from flask import Response, g, has_request_context, jsonify, request
 from error_handlers import APIError
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute, AutoRouteService
+from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
     PROVIDER_CATALOG_SPECS,
@@ -142,40 +143,19 @@ def _provider_is_configured(auth_service_cls, provider: str) -> bool:
     return bool(auth_service_cls.get_api_key(provider))
 
 
-def _add_model_source(
-    model_sources: dict[str, dict[str, set[str]]],
-    provider: str,
-    model_id: str,
-    source: str,
-) -> None:
-    model_sources.setdefault(provider, {}).setdefault(model_id, set()).add(source)
-
-
 def _admin_payload(app, auth_service_cls) -> dict:
     stored_routes = AutoRouteService.list_routes()
-    model_sources: dict[str, dict[str, set[str]]] = {}
     catalog_updated_at: dict[str, str] = {}
-    for model in ModelRegistry.list_models(app.config["API_BASE_URLS"]):
-        if model.status == "disabled":
-            continue
-        _add_model_source(
-            model_sources,
-            model.provider,
-            model.display_name,
-            "built-in",
-        )
-
     for model in ProviderCatalogService.list_models():
-        _add_model_source(model_sources, model.provider, model.model_id, "live")
         catalog_updated_at[model.provider] = max(
             catalog_updated_at.get(model.provider, ""),
             model.discovered_at,
         )
 
-    for route in stored_routes:
-        for model_id in route.candidates:
-            provider, provider_model = ModelRegistry.parse_model_id(model_id)
-            _add_model_source(model_sources, provider, provider_model, "route")
+    model_catalog = build_model_catalog(
+        app.config["API_BASE_URLS"],
+        stored_routes,
+    )
 
     provider_ids = sorted(get_registry(app.config["API_BASE_URLS"]))
     configured_by_provider = {
@@ -190,7 +170,11 @@ def _admin_payload(app, auth_service_cls) -> dict:
             "credential_env": list(
                 auth_service_cls.provider_credential_env_names(provider)
             ),
-            "models": sorted(model_sources.get(provider, {})),
+            "models": [
+                model["model"]
+                for model in model_catalog
+                if model["provider"] == provider
+            ],
             "catalog_path": (
                 PROVIDER_CATALOG_SPECS[provider].proxy_path
                 if provider in PROVIDER_CATALOG_SPECS
@@ -201,25 +185,14 @@ def _admin_payload(app, auth_service_cls) -> dict:
         for provider in provider_ids
     ]
 
-    catalog_model_ids = [
-        f"{provider}:{provider_model}"
-        for provider in provider_ids
-        for provider_model in model_sources.get(provider, {})
-    ]
-    statuses = ModelRegistry.get_model_statuses(catalog_model_ids)
-
     model_catalog = [
         {
-            "id": f"{provider}:{provider_model}",
-            "provider": provider,
-            "model": provider_model,
-            "configured": configured_by_provider[provider],
-            "status": statuses[f"{provider}:{provider_model}"],
-            "sources": sorted(sources),
+            **model,
+            "configured": configured_by_provider[model["provider"]],
         }
-        for provider in provider_ids
-        for provider_model, sources in sorted(model_sources.get(provider, {}).items())
+        for model in model_catalog
     ]
+    model_catalog_by_id = {model["id"]: model for model in model_catalog}
 
     routes = []
     for route in stored_routes:
@@ -233,7 +206,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
                     "model": provider_model,
                     "priority": priority,
                     "configured": configured_by_provider[provider],
-                    "status": statuses.get(model_id, "available"),
+                    "status": model_catalog_by_id[model_id]["status"],
                 }
             )
         routes.append(

@@ -25,10 +25,16 @@ curl "$PROXY_BASE_URL/v1/chat/completions" \
 ```
 
 `GET /v1/models` includes every saved virtual model with
-`owned_by: multillm-auto`. Automatic models also work through
+`owned_by: multillm-auto`, built-in provider models, and IDs retained from the
+last successful live provider-catalog refresh. Automatic models also work through
 `POST /optimize/v1/chat/completions`. Images and the Responses API still
 require an explicit `provider:model` because their request and stream
 contracts differ across providers.
+
+The authenticated `/docs` route presents the same combined catalog alongside
+copyable chat and image requests, runtime credential status, native provider
+paths, and the currently saved automatic priorities. `/docs.json` exposes the
+credential-safe guide data to an authenticated dashboard session.
 
 ## Edit priorities in the dashboard
 

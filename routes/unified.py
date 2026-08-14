@@ -20,10 +20,10 @@ from routes.auto_routes import (
 )
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
+from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
-
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 NANOGPT_KEY_REJECTION_STATUS_CODES = frozenset({401, 403, 429})
@@ -464,9 +464,18 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @api_auth_required
     def list_unified_models():
         models = [
-            ModelRegistry.to_openai_model_dict(model)
-            for model in ModelRegistry.list_models(app.config["API_BASE_URLS"])
-            if model.status != "disabled"
+            {
+                "id": model["id"],
+                "object": "model",
+                "created": 0,
+                "owned_by": model["provider"],
+                "status": model["status"],
+            }
+            for model in build_model_catalog(
+                app.config["API_BASE_URLS"],
+                AutoRouteService.list_routes(),
+            )
+            if model["status"] != "disabled"
         ]
         models.extend(openai_auto_route_models())
         return jsonify({"object": "list", "data": models})

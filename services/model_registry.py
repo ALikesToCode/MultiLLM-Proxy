@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, Optional
 from config import Config
 from providers.base import ModelInfo
 from providers.registry import get_registry
+from services.provider_catalog_service import ProviderCatalogService
 from services.sqlite_store import connect, storage_path
-
 
 STATIC_PROVIDER_MODELS = {
     "groq": "GROQ_MODELS",
@@ -162,7 +162,12 @@ class ModelRegistry:
         if not adapter:
             return None
 
-        if provider not in DYNAMIC_PROVIDER_MODELS and provider_model_id not in set(cls._provider_models(provider)):
+        is_known_model = (
+            provider in DYNAMIC_PROVIDER_MODELS
+            or provider_model_id in set(cls._provider_models(provider))
+            or ProviderCatalogService.has_model(provider, provider_model_id)
+        )
+        if not is_known_model:
             return None
 
         capabilities = adapter.capabilities()
