@@ -54,7 +54,7 @@ def test_openrouter_non_streaming(host, model, prompt, api_key):
     
     start_time = time.time()
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=(5, 120))
         response.raise_for_status()
         data = response.json()
         
@@ -108,7 +108,13 @@ def test_openrouter_streaming(host, model, prompt, api_key):
     start_time = time.time()
     try:
         # First make the POST request to initialize the stream
-        response = requests.post(url, headers=headers, json=payload, stream=True)
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            stream=True,
+            timeout=(5, 300),
+        )
         response.raise_for_status()
         
         # Then use SSEClient to process the stream
@@ -155,7 +161,7 @@ def test_openrouter_credits(host, api_key):
     }
     
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=(5, 30))
         response.raise_for_status()
         data = response.json()
         
