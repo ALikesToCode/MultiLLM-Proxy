@@ -4,6 +4,7 @@ from typing import Optional
 
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config, DevelopmentConfig, ProductionConfig
 from env_loader import load_runtime_env
@@ -35,6 +36,10 @@ _LOG_LEVELS = {
     "ERROR": logging.ERROR,
     "CRITICAL": logging.CRITICAL,
 }
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _configure_logging(level_name: Optional[str] = None) -> int:
@@ -69,6 +74,10 @@ def create_app() -> Flask:
         static_url_path="/static",
         template_folder="templates",
     )
+    if _env_flag("MULTILLM_TRUST_PROXY_HEADERS"):
+        # The Cloudflare Worker overwrites these headers before its single
+        # container hop, so public URLs retain their external scheme and host.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
     app.secret_key = runtime_secrets["FLASK_SECRET_KEY"]
     app.config["JWT_SECRET"] = runtime_secrets["JWT_SECRET"]
 

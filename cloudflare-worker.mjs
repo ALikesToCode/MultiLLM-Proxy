@@ -245,6 +245,7 @@ function collectContainerEnv(source = {}) {
     FLASK_ENV: source.FLASK_ENV ?? "production",
     GUNICORN_WORKERS: source.GUNICORN_WORKERS ?? "1",
     HOME: "/tmp",
+    MULTILLM_TRUST_PROXY_HEADERS: "true",
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
     PYTHONUNBUFFERED: "1",
@@ -1883,6 +1884,10 @@ export class MultiLLMProxyContainer extends Container {
 export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
+    if (requestUrl.protocol === "http:") {
+      requestUrl.protocol = "https:";
+      return Response.redirect(requestUrl, 308);
+    }
     const apiPath = isApiRequestPath(requestUrl.pathname);
     const rootPath = requestUrl.pathname === "/";
     const healthPath = isDirectHealthPath(requestUrl.pathname);
@@ -2033,6 +2038,8 @@ export default {
       const headers = new Headers(request.headers);
       headers.delete("content-length");
       headers.delete("host");
+      headers.set("x-forwarded-proto", requestUrl.protocol.slice(0, -1));
+      headers.set("x-forwarded-host", requestUrl.host);
       const containerUrl = new URL(requestUrl);
       if (readyPath) {
         containerUrl.pathname = "/healthz";

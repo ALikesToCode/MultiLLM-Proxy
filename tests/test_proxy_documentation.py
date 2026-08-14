@@ -70,6 +70,74 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertIn("auto:glm-5.2", models)
         self.assertEqual(payload["auto_routes"][0]["id"], "auto:glm-5.2")
 
+    def test_trusted_worker_headers_preserve_public_https_origin(self):
+        os.environ["MULTILLM_TRUST_PROXY_HEADERS"] = "true"
+        trusted_app = self.app_module.create_app()
+        trusted_app.config["WTF_CSRF_ENABLED"] = False
+        trusted_app.config["SESSION_COOKIE_SECURE"] = False
+        client = trusted_app.test_client()
+        forwarded_headers = {
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "multillm-proxy.cserules.workers.dev",
+        }
+
+        login_redirect = client.get(
+            "/docs",
+            base_url="http://container.internal:8080",
+            headers=forwarded_headers,
+            follow_redirects=False,
+        )
+        self.assertEqual(login_redirect.status_code, 302)
+        self.assertIn(
+            "next=https://multillm-proxy.cserules.workers.dev/docs",
+            login_redirect.headers["Location"],
+        )
+
+        with client.session_transaction(
+            base_url="http://container.internal:8080",
+        ) as session:
+            session["authenticated"] = True
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key_prefix": "mllm_live_admin",
+                "scopes": ["admin"],
+            }
+
+        response = client.get(
+            "/docs.json",
+            base_url="http://container.internal:8080",
+            headers=forwarded_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["base_url"],
+            "https://multillm-proxy.cserules.workers.dev",
+        )
+
+    def test_forwarded_origin_is_ignored_without_trusted_proxy_mode(self):
+        os.environ.pop("MULTILLM_TRUST_PROXY_HEADERS", None)
+        direct_app = self.app_module.create_app()
+        client = direct_app.test_client()
+
+        response = client.get(
+            "/docs",
+            base_url="http://container.internal:8080",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "spoofed.example",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            "next=http://container.internal:8080/docs",
+            response.headers["Location"],
+        )
+        self.assertNotIn("spoofed.example", response.headers["Location"])
+
 
 if __name__ == "__main__":
     import unittest

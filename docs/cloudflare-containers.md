@@ -37,6 +37,13 @@ Wrangler `vars` in `wrangler.jsonc` already set:
 - `SERVER_PORT=8080`
 - `APP_NAME=MultiLLM Proxy`
 
+Public HTTP requests receive a `308` redirect to the same HTTPS URL before any
+route or container work. For Container requests, the Worker overwrites
+`X-Forwarded-Proto` and `X-Forwarded-Host` and enables
+`MULTILLM_TRUST_PROXY_HEADERS` inside the Container. Flask therefore generates
+public HTTPS dashboard, documentation, and login URLs without trusting
+caller-supplied forwarding headers in direct local deployments.
+
 Set secrets for anything sensitive:
 
 ```bash

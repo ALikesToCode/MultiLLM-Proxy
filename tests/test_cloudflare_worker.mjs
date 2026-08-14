@@ -572,6 +572,7 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.MODEL_REGISTRY_DB_PATH, "/tmp/model_registry.sqlite3");
   assert.equal(container.envVars.GUNICORN_WORKERS, "1");
   assert.equal(container.envVars.HOME, "/tmp");
+  assert.equal(container.envVars.MULTILLM_TRUST_PROXY_HEADERS, "true");
   assert.equal(container.envVars.SERVER_PORT, "8080");
 });
 
@@ -2370,7 +2371,14 @@ test("worker checks application readiness through the container health endpoint"
 });
 
 test("worker relies on container.fetch for startup and readiness", async () => {
-  const stub = makeEnv(async () => new Response("container ready", { status: 200 }));
+  const stub = makeEnv(async (request) => {
+    assert.equal(request.headers.get("x-forwarded-proto"), "https");
+    assert.equal(
+      request.headers.get("x-forwarded-host"),
+      "multillm-proxy.cserules.workers.dev",
+    );
+    return new Response("container ready", { status: 200 });
+  });
 
   const response = await worker.fetch(
     new Request("https://multillm-proxy.cserules.workers.dev/dashboard"),
@@ -2381,6 +2389,28 @@ test("worker relies on container.fetch for startup and readiness", async () => {
   assert.equal(await response.text(), "container ready");
   assert.equal(stub.getCalls(), 1);
   assert.equal(stub.getStartCalls(), 0);
+});
+
+test("worker redirects public HTTP requests to HTTPS before routing", async () => {
+  const stub = makeEnv(async () => {
+    throw new Error("HTTP request must not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("http://multillm-proxy.cserules.workers.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "auto:glm-5.2", messages: [] }),
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 308);
+  assert.equal(
+    response.headers.get("Location"),
+    "https://multillm-proxy.cserules.workers.dev/v1/chat/completions",
+  );
+  assert.equal(stub.getCalls(), 0);
 });
 
 test("worker streams ordinary request bodies into the container without buffering", async () => {
