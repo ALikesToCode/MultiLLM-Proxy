@@ -3,6 +3,7 @@ import { loadRoleplayModule } from "./load_cloudflare_worker.mjs";
 const {
   RoleplaySession,
   handleRoleplayEdgeRequest,
+  scopePublicRoleplaySessionId,
 } = await loadRoleplayModule();
 
 class FakeStorage {
@@ -124,4 +125,4 @@ export function completionResponse(model, content = "In character.") {
   );
 }
 
-export { handleRoleplayEdgeRequest };
+export { handleRoleplayEdgeRequest, scopePublicRoleplaySessionId };

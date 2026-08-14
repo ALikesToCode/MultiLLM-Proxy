@@ -6,6 +6,7 @@ import {
   handleRoleplayEdgeRequest,
   makeRoleplayEnv,
   roleplayRequest,
+  scopePublicRoleplaySessionId,
   withGlobalFetch,
 } from "./helpers/roleplay_fixture.mjs";
 
@@ -492,9 +493,11 @@ test("roleplay persists protected directives outside dialogue and clears them on
     assert.equal(first.status, 200);
     assert.equal(second.status, 200);
 
-    const storage = fixture.storageBySession.get(
+    const storageSessionId = await scopePublicRoleplaySessionId(
       "session-protected-directives",
-    ).storage;
+      "admin-roleplay-key",
+    );
+    const storage = fixture.storageBySession.get(storageSessionId).storage;
     assert.deepEqual(
       await storage.get("roleplay-directives"),
       directives,
@@ -549,8 +552,12 @@ test("roleplay migrates protected directives out of legacy stored history", asyn
     role: "system",
     content: "Legacy Mira instructions remain authoritative.",
   };
-  fixture.env.ROLEPLAY_SESSION.getByName(sessionId);
-  const storage = fixture.storageBySession.get(sessionId).storage;
+  const storageSessionId = await scopePublicRoleplaySessionId(
+    sessionId,
+    "admin-roleplay-key",
+  );
+  fixture.env.ROLEPLAY_SESSION.getByName(storageSessionId);
+  const storage = fixture.storageBySession.get(storageSessionId).storage;
   await storage.put("roleplay-session", { version: 1 });
   await storage.put("roleplay-messages", [
     legacyDirective,

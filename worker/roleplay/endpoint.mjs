@@ -60,7 +60,7 @@ import {
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
 
-export { isRoleplayPath };
+export { isRoleplayPath, scopePublicRoleplaySessionId };
 
 const STATE_KEY = "roleplay-session";
 const MESSAGES_KEY = "roleplay-messages";
