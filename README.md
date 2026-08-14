@@ -11,7 +11,8 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - OpenAI (GPT models)
   - Groq (ultra-fast inference)
   - Together AI
-  - Google AI (Gemini models)
+  - Google AI on Vertex AI
+  - Google Gemini API and hosted Gemma models
   - Cerebras
   - X.AI (formerly Twitter)
   - Azure AI
@@ -28,6 +29,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - LinkAPI
   - PaLM API
   - Nineteen AI
+  - Chutes AI
 - 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
 - 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
@@ -145,6 +147,12 @@ PALM_API_KEY=your-palm-api-key
 
 # Nineteen AI
 NINETEEN_API_KEY=your-nineteen-api-key
+
+# Chutes AI
+CHUTES_API_TOKEN=your-chutes-api-token
+
+# Gemini API and hosted Gemma models
+GEMINI_API_KEY=your-gemini-api-key
 ```
 
 ### Resilience and operational telemetry
@@ -249,6 +257,12 @@ http://localhost:1400/together/v1/chat/completions
 # Google AI (Gemini)
 http://localhost:1400/googleai/predict
 
+# Gemini API and hosted Gemma models
+http://localhost:1400/gemini/chat/completions
+http://localhost:1400/gemini/v1beta/models/{model}:generateContent
+http://localhost:1400/gemma/chat/completions
+http://localhost:1400/gemma/v1beta/models/{model}:generateContent
+
 # Cerebras
 http://localhost:1400/cerebras/v1/chat/completions
 
@@ -271,6 +285,9 @@ http://localhost:1400/sambanova/completions
 # OpenRouter
 http://localhost:1400/openrouter/chat/completions
 http://localhost:1400/openrouter/models
+
+# Chutes AI
+http://localhost:1400/chutes/v1/completions
 
 # Xiaomi MiMo Token Plan
 http://localhost:1400/mimo/chat/completions
@@ -359,10 +376,15 @@ for the exact retry boundary, response headers, persistence behavior, and API.
 - **OpenAI**: Full support for chat completions, embeddings, and function calling
 - **Groq**: Ultra-fast inference with token-based rate limiting
 - **Google AI**: Support for Gemini models and multimodal tasks
+- **Gemini API / Gemma**: OpenAI-compatible chat plus native
+  `generateContent`, streaming, multimodal input, tools, thought signatures,
+  token-count preflight, and Google Search grounding
 - **Together AI**: Access to various open-source models
 - **Cerebras**: Text generation and chat capabilities
 - **X.AI**: Access to X-1 and other models
 - **Azure AI**: Support for Azure-hosted models
+- **Scaleway**: OpenAI-compatible text and chat inference
+- **Hyperbolic**: OpenAI-compatible hosted model inference
 - **SambaNova**: Text generation with streaming support
 - **OpenRouter**: Gateway to multiple AI providers
 - **OpenCode Go**: Protocol-native OpenAI Chat Completions, Anthropic Messages, streaming, and live model discovery under `/opencode/v1/*`
@@ -374,6 +396,7 @@ for the exact retry boundary, response headers, persistence behavior, and API.
 - **LinkAPI**: Native Claude Messages, Gemini `generateContent`, OpenAI Responses, OpenAI-compatible chat, model discovery, and image generation/editing under `/linkapi/*`; JSON generation is also available through unified `/v1/images/generations` with a `linkapi:<model>` ID
 - **PaLM API**: Google's PaLM language models
 - **Nineteen AI**: High-performance inference for open-source models with streaming support
+- **Chutes AI**: DeepSeek and other hosted models with streaming completions
 
 ### Cloudflare-native roleplay
 
@@ -596,21 +619,23 @@ Additional setup and deployment notes are organized under [`docs/`](docs/README.
 
 ## Testing
 
-Python tests live in `tests/` and can be run with:
+Python tests live in `tests/` and can be run with the project test runner:
 
 ```bash
-python -m unittest discover -s tests -p 'test_*.py'
+npm test
 ```
 
-The Cloudflare Worker test suite uses Node's built-in runner:
+The Cloudflare Worker and dashboard JavaScript suites use Node's built-in
+runner through the complete project script:
 
 ```bash
-node --test tests/test_cloudflare_worker.mjs
+npm run test:worker
 ```
 
 ## Security
 
-- All API keys are securely handled and never exposed
+- Provider keys are replaced at the proxy boundary and redacted from supported
+  logs and error payloads
 - Request validation and sanitization
 - Rate limiting and quota management
 - Secure session handling

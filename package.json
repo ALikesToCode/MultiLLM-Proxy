@@ -19,7 +19,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@cloudflare/containers": "^0.3.2",
     "autoprefixer": "^10.4.14",
