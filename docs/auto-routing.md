@@ -38,6 +38,25 @@ OpenRouter receives nested `reasoning.effort: xhigh`. Send an explicit lower
 `reasoning_effort` to reduce it; values above a provider's ceiling are clamped
 to that ceiling.
 
+Long GLM-5.2 chat contexts also receive safe adaptive preprocessing on the
+normal unified route. Above 8,000 estimated input tokens, older
+high-confidence `IMAGE PROMPT` blocks can be replaced while surrounding story
+text, the newest full prompt, system/developer directives, recent turns, media,
+tools, and reasoning data remain intact. Ordinary history is never summarized
+automatically and no extra provider call is made.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `GLM_AUTO_OPTIMIZE` | `true` | Enable safe GLM-only preprocessing |
+| `GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS` | `8000` | Estimated input threshold |
+| `GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS` | `8` | Full recent user turns to retain |
+| `CONTEXT_ANALYSIS_CACHE_ENABLED` | `true` | Cache prompt classification by SHA-256 |
+| `CONTEXT_ANALYSIS_CACHE_TTL_SECONDS` | `300` | Process-local analysis lifetime |
+| `CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES` | `2048` | Bounded metadata entry count |
+
+The analysis cache stores hashes and prompt-span offsets only. It never stores
+conversation text or model responses, and it is not shared between containers.
+
 The authenticated `/docs` route presents the same combined catalog alongside
 copyable chat and image requests, runtime credential status, native provider
 paths, and the currently saved automatic priorities. `/docs.json` exposes the

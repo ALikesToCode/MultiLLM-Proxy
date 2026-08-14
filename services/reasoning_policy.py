@@ -21,7 +21,7 @@ GLM_52_MAX_REASONING_EFFORTS = {
 }
 
 
-def _is_glm_52(model: str) -> bool:
+def is_glm_52_model(model: str) -> bool:
     return model.strip().lower().rsplit("/", 1)[-1] == "glm-5.2"
 
 
@@ -55,7 +55,7 @@ def apply_glm_52_reasoning_policy(
 ) -> dict[str, Any]:
     """Default GLM-5.2 to max and map effort onto the provider contract."""
     normalized = dict(payload)
-    if not _is_glm_52(model):
+    if not is_glm_52_model(model):
         return normalized
 
     provider_name = provider.lower()

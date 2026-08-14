@@ -26,7 +26,6 @@ from services.context_optimizer import (
 from services.model_registry import ModelRegistry
 from services.rate_limit_service import RateLimitService
 
-
 logger = logging.getLogger(__name__)
 
 SUMMARY_RAW_PROVIDERS = frozenset({"codex-easy", "kimi-code", "linkapi"})
@@ -160,6 +159,7 @@ def _request_summary_digest(
             request_headers={},
             request_args=[],
             request_timeout=_summary_request_timeout(),
+            adaptive_context=False,
         )
         return _summary_digest_from_response(summary_response)
     finally:
@@ -193,6 +193,12 @@ def _add_optimization_headers(
         "true" if result.target_met else "false"
     )
     response.headers["X-MultiLLM-Summary"] = summary_status
+    response.headers["X-MultiLLM-Optimization-Cache-Hits"] = str(
+        result.analysis_cache_hits
+    )
+    response.headers["X-MultiLLM-Optimization-Cache-Misses"] = str(
+        result.analysis_cache_misses
+    )
     return response
 
 
@@ -355,6 +361,7 @@ def register_optimized_routes(
                 metrics_service_cls,
                 proxy_service_cls,
                 result.payload,
+                adaptive_context=False,
             )
             return _add_optimization_headers(response, result, summary_status)
         except ContextOptimizationError as error:

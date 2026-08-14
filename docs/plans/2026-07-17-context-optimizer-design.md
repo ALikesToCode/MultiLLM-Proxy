@@ -1,5 +1,9 @@
 # Opt-in context optimizer design
 
+> Historical design note: GLM-5.2 unified chat later gained a narrow automatic
+> deterministic path for old high-confidence image-prompt blocks. Paid semantic
+> summarization and all general-purpose context editing remain opt-in here.
+
 ## Goal
 
 Add an explicit OpenAI-compatible chat route that can reduce stale context before

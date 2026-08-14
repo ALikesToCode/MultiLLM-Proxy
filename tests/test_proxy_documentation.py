@@ -44,6 +44,8 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertIn("NANOGPT_API_KEY_1", body)
         self.assertIn("<code>402</code>", body)
         self.assertIn("semantic <code>max</code>", body)
+        self.assertIn("GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS", body)
+        self.assertIn("prompt-span offsets only", body)
         self.assertIn("Images deliberately do not use", body)
         self.assertNotIn("opencode-provider-key", body)
         self.assertNotIn("nano-secret-never-render", body)

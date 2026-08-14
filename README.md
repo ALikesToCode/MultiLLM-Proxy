@@ -506,9 +506,13 @@ curl "$PROXY_BASE_URL/kimi-code/v1/chat/completions" \
 
 The direct path validates `ADMIN_API_KEY`, replaces it with `KIMI_CODE_API_KEY`, and preserves the OpenAI-compatible request and response stream. Generation requests are single-attempt to avoid duplicated work and billing.
 
-### Opt-in context optimization
+### Adaptive and explicit context optimization
 
-`POST /optimize/v1/chat/completions` is an opt-in, Container-backed wrapper around the unified Chat Completions route. Existing `/v1/chat/completions`, `/v1/responses`, and provider-specific routes are unchanged and never optimize context automatically.
+Unified GLM-5.2 chat requests automatically run the deterministic optimizer once their estimated input exceeds `GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS` (8,000 by default). It can remove only older high-confidence image-prompt blocks while retaining the surrounding assistant story, newest full image prompt, global system/developer instructions, recent turns, media, tools, and reasoning structures. It never summarizes or drops ordinary text and never makes another provider call. Set `GLM_AUTO_OPTIMIZE=false` to disable it.
+
+Prompt detection uses a bounded, process-local SHA-256 analysis cache. Cache entries contain only content hashes and prompt-span offsets—never conversation text, credentials, or generated replies. Configure it with `CONTEXT_ANALYSIS_CACHE_ENABLED`, `CONTEXT_ANALYSIS_CACHE_TTL_SECONDS` (300), and `CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES` (2,048). Exact content changes automatically miss the cache.
+
+`POST /optimize/v1/chat/completions` remains the explicit Container-backed wrapper for every unified Chat Completions model. `/v1/responses` and provider-specific routes remain unchanged.
 
 The default `deterministic` mode makes no extra model call. After `trigger_input_tokens` is exceeded, it can replace high-confidence older detailed image-generation prompts with a stable marker while retaining the newest detailed image prompt, recent turns, system/developer instructions, multimodal exchanges, tool chains, and reasoning/thinking structures. Set `image_prompt_history` to `all` to disable image-prompt compaction, and use `preserve_message_indices` for messages that must remain byte-for-byte present.
 
@@ -536,7 +540,7 @@ By default, the summary model must use the same provider as the final model. The
 
 The optimizer accepts at most `OPTIMIZER_MAX_REQUEST_BYTES` (16 MiB by default) before parsing. The transformed final request must still satisfy the selected provider's `MAX_REQUEST_BYTES`, prompt, output, RPM, TPM, and daily limits. The final provider's model, key, output cap, and an RPM/daily slot are validated before any paid summary call.
 
-Optimization metadata is returned in headers without changing the upstream JSON or SSE body: `X-MultiLLM-Optimization`, `X-MultiLLM-Optimization-Mode`, `X-MultiLLM-Estimated-Input-Before`, `X-MultiLLM-Estimated-Input-After`, `X-MultiLLM-Image-Prompts-Compacted`, `X-MultiLLM-Messages-Summarized`, `X-MultiLLM-Optimization-Target-Met`, and `X-MultiLLM-Summary`. Token values are provider-neutral byte-based estimates, not tokenizer-exact usage or billing counts.
+Optimization metadata is returned in headers without changing the upstream JSON or SSE body: `X-MultiLLM-Optimization`, `X-MultiLLM-Optimization-Mode`, `X-MultiLLM-Estimated-Input-Before`, `X-MultiLLM-Estimated-Input-After`, `X-MultiLLM-Image-Prompts-Compacted`, `X-MultiLLM-Messages-Summarized`, `X-MultiLLM-Optimization-Target-Met`, `X-MultiLLM-Summary`, `X-MultiLLM-Optimization-Cache-Hits`, and `X-MultiLLM-Optimization-Cache-Misses`. Token values are provider-neutral byte-based estimates, not tokenizer-exact usage or billing counts.
 
 ### LinkAPI native fast path
 

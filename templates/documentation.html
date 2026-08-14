@@ -225,6 +225,7 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
         <div class="docs-empty"><strong>No automatic routes are saved.</strong><p>Create one in Operations, then return here for the live priority list.</p></div>
         {% endif %}
         <p class="docs-fine-print">Failover advances only after <code>401</code>, <code>402</code>, <code>403</code>, <code>404</code>, <code>429</code>, or a local open/half-open circuit response. Ambiguous timeouts and generic upstream <code>5xx</code> responses are not replayed. GLM-5.2 defaults to maximum reasoning; semantic <code>max</code> maps to each provider's supported ceiling, while an explicit lower effort is preserved.</p>
+        <p class="docs-fine-print">Long GLM-5.2 contexts use safe adaptive preprocessing by default. Configure <code>GLM_AUTO_OPTIMIZE</code>, <code>GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS</code> (default <code>8000</code>), and <code>GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS</code> (default <code>8</code>). The bounded process-local analysis cache uses SHA-256 keys plus prompt-span offsets only; it never stores conversation text or generated replies. Configure its lifetime with <code>CONTEXT_ANALYSIS_CACHE_TTL_SECONDS</code> (default <code>300</code>) and size with <code>CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES</code> (default <code>2048</code>).</p>
     </section>
 
     <section class="docs-section" id="model-directory" aria-labelledby="model-directory-title">

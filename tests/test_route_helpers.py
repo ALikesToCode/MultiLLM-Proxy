@@ -301,6 +301,8 @@ class RouteHelperCorsTest(unittest.TestCase):
         )
         self.assertIn("x-multillm-optimization", exposed_headers)
         self.assertIn("x-multillm-estimated-input-after", exposed_headers)
+        self.assertIn("x-multillm-optimization-cache-hits", exposed_headers)
+        self.assertIn("x-multillm-optimization-cache-misses", exposed_headers)
         self.assertIn("x-multillm-summary", exposed_headers)
 
     def test_cors_exposes_route_observability_headers(self):

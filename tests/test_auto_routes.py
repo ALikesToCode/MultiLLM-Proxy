@@ -4,11 +4,17 @@ from unittest.mock import patch
 
 import requests
 
+from services.context_analysis_cache import ContextAnalysisCache
 from services.provider_catalog_service import ProviderCatalogService
+from tests.test_context_optimizer import roleplay_response
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 
 class AutoRouteTest(UnifiedApiTestCase):
+    def setUp(self):
+        super().setUp()
+        ContextAnalysisCache.clear()
+
     def _authenticate_admin(self):
         with self.client.session_transaction() as session:
             session["authenticated"] = True
@@ -112,6 +118,77 @@ class AutoRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual(upstream_payload["reasoning_effort"], "low")
+
+    def test_auto_glm_adaptively_compacts_old_roleplay_prompt_blocks(self):
+        older_response = roleplay_response(
+            "Celia closes the first scene beside the window.",
+            "Celia in the older scene",
+        )
+        latest_response = roleplay_response(
+            "Celia opens the next scene beside the same window.",
+            "Celia in the latest scene",
+        )
+        payload = {
+            "model": "auto:glm-5.2",
+            "messages": [
+                {"role": "system", "content": "Keep every directive."},
+                {"role": "user", "content": "Begin."},
+                {"role": "assistant", "content": older_response},
+                {"role": "user", "content": "Advance."},
+                {"role": "assistant", "content": latest_response},
+                {"role": "user", "content": "Continue."},
+            ],
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS": "0",
+                    "GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS": "1",
+                },
+            ),
+            patch(
+                "app.ProxyService.make_request",
+                side_effect=[self._chat_response(), self._chat_response()],
+            ) as make_request,
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=[],
+            ),
+        ):
+            first = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json=payload,
+            )
+            second = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json=payload,
+            )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.headers["X-MultiLLM-Optimization"], "applied")
+        self.assertEqual(
+            first.headers["X-MultiLLM-Optimization-Mode"],
+            "adaptive-deterministic",
+        )
+        self.assertEqual(first.headers["X-MultiLLM-Optimization-Cache-Hits"], "0")
+        self.assertEqual(first.headers["X-MultiLLM-Optimization-Cache-Misses"], "2")
+        self.assertEqual(second.headers["X-MultiLLM-Optimization-Cache-Hits"], "2")
+        self.assertEqual(second.headers["X-MultiLLM-Optimization-Cache-Misses"], "0")
+
+        upstream_payload = json.loads(make_request.call_args_list[0].kwargs["data"])
+        self.assertEqual(upstream_payload["reasoning_effort"], "max")
+        self.assertEqual(upstream_payload["messages"][0], payload["messages"][0])
+        self.assertIn("Celia closes the first scene", upstream_payload["messages"][2]["content"])
+        self.assertIn(
+            "Earlier image-generation prompt omitted",
+            upstream_payload["messages"][2]["content"],
+        )
+        self.assertEqual(upstream_payload["messages"][4]["content"], latest_response)
 
     def test_auto_chat_advances_after_provider_rate_limit(self):
         os.environ["NANOGPT_API_KEY"] = "nano-provider-key"

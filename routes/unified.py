@@ -18,11 +18,14 @@ from routes.auto_routes import (
     openai_auto_route_models,
     register_auto_route_admin_routes,
 )
+from services.adaptive_context_service import apply_adaptive_glm_context
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
+from services.context_optimizer import ContextOptimizationResult
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_52_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
@@ -110,6 +113,37 @@ def serialize_unified_chat_payload(payload: dict) -> bytes:
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def _add_adaptive_context_headers(
+    response: Response,
+    result: ContextOptimizationResult | None,
+) -> Response:
+    if result is None:
+        return response
+    response.headers["X-MultiLLM-Optimization"] = result.status
+    response.headers["X-MultiLLM-Optimization-Mode"] = "adaptive-deterministic"
+    response.headers["X-MultiLLM-Estimated-Input-Before"] = str(
+        result.estimated_input_before
+    )
+    response.headers["X-MultiLLM-Estimated-Input-After"] = str(
+        result.estimated_input_after
+    )
+    response.headers["X-MultiLLM-Image-Prompts-Compacted"] = str(
+        result.image_prompts_compacted
+    )
+    response.headers["X-MultiLLM-Messages-Summarized"] = "0"
+    response.headers["X-MultiLLM-Optimization-Target-Met"] = (
+        "true" if result.target_met else "false"
+    )
+    response.headers["X-MultiLLM-Summary"] = "not-requested"
+    response.headers["X-MultiLLM-Optimization-Cache-Hits"] = str(
+        result.analysis_cache_hits
+    )
+    response.headers["X-MultiLLM-Optimization-Cache-Misses"] = str(
+        result.analysis_cache_misses
+    )
+    return response
 
 
 def _validate_direct_chat_target(
@@ -216,6 +250,7 @@ def _dispatch_unified_chat_candidate(
     request_timeout=None,
     metrics_model=None,
     route_decision=None,
+    adaptive_context=True,
 ):
     """Dispatch one explicit provider:model Chat Completions candidate."""
     start_time = time.time()
@@ -228,8 +263,23 @@ def _dispatch_unified_chat_candidate(
             payload.get("model"),
         )
         token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+        candidate_payload = _copy_request_payload(payload, provider_model)
+        adaptive_result = None
+        if adaptive_context:
+            prompt_limit = RateLimitService._provider_limit(
+                provider,
+                "MAX_PROMPT_TOKENS",
+                128_000,
+            )
+            adaptive_result = apply_adaptive_glm_context(
+                candidate_payload,
+                model=provider_model,
+                default_target_tokens=max(64, prompt_limit * 3 // 4),
+            )
+            if adaptive_result is not None:
+                candidate_payload = adaptive_result.payload
         upstream_payload = apply_glm_52_reasoning_policy(
-            _copy_request_payload(payload, provider_model),
+            candidate_payload,
             provider,
             provider_model,
         )
@@ -283,14 +333,19 @@ def _dispatch_unified_chat_candidate(
         )
 
         if isinstance(response, Response):
-            return response
+            return _add_adaptive_context_headers(response, adaptive_result)
         if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS or payload.get("stream"):
-            return stream_upstream_response(response)
-        return Response(
-            response.content,
-            status=response.status_code,
-            content_type=response.headers.get("content-type", "application/json"),
-            headers=copy_raw_provider_response_headers(response.headers),
+            downstream_response = stream_upstream_response(response)
+        else:
+            downstream_response = Response(
+                response.content,
+                status=response.status_code,
+                content_type=response.headers.get("content-type", "application/json"),
+                headers=copy_raw_provider_response_headers(response.headers),
+            )
+        return _add_adaptive_context_headers(
+            downstream_response,
+            adaptive_result,
         )
     except ValueError as error:
         raise APIError(str(error), status_code=400) from error
@@ -316,6 +371,7 @@ def dispatch_unified_chat_completion(
     request_headers=None,
     request_args=None,
     request_timeout=None,
+    adaptive_context=True,
 ):
     """Dispatch an explicit or dashboard-configured unified chat model."""
     if AutoRouteService.is_auto_route(payload.get("model")):
@@ -343,6 +399,7 @@ def dispatch_unified_chat_completion(
                 request_timeout=request_timeout,
                 metrics_model=candidate,
                 route_decision=route_decision,
+                adaptive_context=adaptive_context,
             )
 
         return dispatch_auto_route_chat_completion(
@@ -359,6 +416,7 @@ def dispatch_unified_chat_completion(
         request_headers=request_headers,
         request_args=request_args,
         request_timeout=request_timeout,
+        adaptive_context=adaptive_context,
     )
 
 

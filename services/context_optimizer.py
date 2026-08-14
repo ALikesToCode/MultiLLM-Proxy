@@ -3,9 +3,11 @@ from __future__ import annotations
 import copy
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
+from services.context_analysis_cache import ContextAnalysisCache, ImagePromptSpan
 
 EARLIER_IMAGE_PROMPT_PLACEHOLDER = (
     "[Earlier image-generation prompt omitted by MultiLLM context optimizer; "
@@ -20,6 +22,9 @@ _IMAGE_DIRECTIVE_PATTERN = re.compile(
     r"\b(?:create|generate|draw|render|make|produce)\b[\s\S]{0,80}"
     r"\b(?:image|illustration|artwork|anime|photo|picture|portrait)\b",
     re.IGNORECASE,
+)
+_IMAGE_PROMPT_HEADER_PATTERN = re.compile(
+    r"(?im)^\s*IMAGE PROMPT:\s*(?:\n|$)",
 )
 _VISUAL_LABEL_PATTERNS = (
     re.compile(r"(?:^|[\n.!?])\s*background(?:/setting)?\s*:", re.IGNORECASE),
@@ -102,7 +107,7 @@ class OptimizationOptions:
     media_history: str
     preserve_message_indices: tuple[int, ...]
     require_target: bool
-    summary_model: Optional[str]
+    summary_model: str | None
     summary_max_tokens: int
     allow_cross_provider_summary: bool
 
@@ -120,6 +125,8 @@ class ContextOptimizationResult:
     needs_summary: bool
     target_met: bool
     reasons: tuple[str, ...]
+    analysis_cache_hits: int
+    analysis_cache_misses: int
 
 
 def estimate_payload_tokens(payload: Mapping[str, Any]) -> int:
@@ -262,16 +269,51 @@ def parse_optimization_options(
     )
 
 
-def _is_high_confidence_image_prompt(message: Any) -> bool:
-    if not isinstance(message, dict) or message.get("role") != "user":
-        return False
-    content = message.get("content")
-    if not isinstance(content, str) or len(content) < 800:
-        return False
+def _is_high_confidence_image_text(content: str) -> bool:
     if not _IMAGE_DIRECTIVE_PATTERN.search(content):
         return False
     label_count = sum(bool(pattern.search(content)) for pattern in _VISUAL_LABEL_PATTERNS)
     return label_count >= 3
+
+
+def _uncached_image_prompt_span(role: str, content: str) -> ImagePromptSpan:
+    header_matches = list(_IMAGE_PROMPT_HEADER_PATTERN.finditer(content))
+    for match in reversed(header_matches):
+        candidate = content[match.start() :]
+        if len(candidate) >= 800 and _is_high_confidence_image_text(candidate):
+            return match.start(), len(content)
+
+    if role == "user" and _is_high_confidence_image_text(content):
+        return 0, len(content)
+    return None
+
+
+def _image_prompt_span(message: Any) -> tuple[ImagePromptSpan, str]:
+    if not isinstance(message, dict) or message.get("role") not in {
+        "user",
+        "assistant",
+    }:
+        return None, "bypass"
+    role = message["role"]
+    content = message.get("content")
+    if not isinstance(content, str) or len(content) < 800:
+        return None, "bypass"
+    return ContextAnalysisCache.image_prompt_span(
+        role,
+        content,
+        lambda: _uncached_image_prompt_span(role, content),
+    )
+
+
+def _compact_image_prompt_block(content: str, span: tuple[int, int]) -> str:
+    start, end = span
+    prompt_text = content[start:end]
+    replacement = EARLIER_IMAGE_PROMPT_PLACEHOLDER
+    if _IMAGE_PROMPT_HEADER_PATTERN.match(prompt_text):
+        replacement = f"IMAGE PROMPT:\n{replacement}"
+    prefix = content[:start].rstrip()
+    suffix = content[end:].lstrip()
+    return "\n\n".join(part for part in (prefix, replacement, suffix) if part)
 
 
 def _contains_protected_structure(value: Any) -> bool:
@@ -328,8 +370,8 @@ def _tool_chain_protected_indices(messages: list[Any]) -> set[int]:
     if not message_count:
         return set()
 
-    previous_user_indices: list[Optional[int]] = []
-    previous_user_index: Optional[int] = None
+    previous_user_indices: list[int | None] = []
+    previous_user_index: int | None = None
     for index, message in enumerate(messages):
         if isinstance(message, dict) and message.get("role") == "user":
             previous_user_index = index
@@ -434,7 +476,7 @@ def optimize_chat_payload(
     payload: Mapping[str, Any],
     *,
     default_target_tokens: int,
-    summary_digest: Optional[Mapping[str, list[str]]] = None,
+    summary_digest: Mapping[str, list[str]] | None = None,
     defer_required_target: bool = False,
 ) -> ContextOptimizationResult:
     if not isinstance(payload, Mapping):
@@ -455,6 +497,8 @@ def optimize_chat_payload(
     reasons: list[str] = []
     image_prompts_compacted = 0
     messages_summarized = 0
+    analysis_cache_hits = 0
+    analysis_cache_misses = 0
 
     cutoff = _recent_turn_cutoff(messages, options.keep_recent_turns)
     protected_indices = set(options.preserve_message_indices)
@@ -472,24 +516,39 @@ def optimize_chat_payload(
         if not isinstance(message, dict) or not isinstance(message.get("content"), str)
     )
 
-    image_prompt_indices = [
-        index
-        for index, message in enumerate(messages)
-        if _is_high_confidence_image_prompt(message)
-    ]
-    if image_prompt_indices:
-        protected_indices.add(image_prompt_indices[-1])
+    image_prompt_spans: dict[int, tuple[int, int]] = {}
+    if triggered and (
+        options.image_prompt_history == "latest" or options.mode == "summarize"
+    ):
+        for index, message in enumerate(messages):
+            span, cache_status = _image_prompt_span(message)
+            if cache_status == "hit":
+                analysis_cache_hits += 1
+            elif cache_status == "miss":
+                analysis_cache_misses += 1
+            if span is not None:
+                image_prompt_spans[index] = span
+    if image_prompt_spans:
+        protected_indices.add(max(image_prompt_spans))
 
-    referenced_image_history = _recent_text_references_image_history(messages, cutoff)
+    referenced_image_history = bool(
+        triggered and _recent_text_references_image_history(messages, cutoff)
+    )
     if triggered and options.image_prompt_history == "latest":
         if referenced_image_history:
             reasons.append("referenced_image_history")
         else:
-            for index in image_prompt_indices[:-1]:
+            newest_prompt_index = max(image_prompt_spans, default=-1)
+            for index, span in image_prompt_spans.items():
+                if index == newest_prompt_index:
+                    continue
                 if index in protected_indices:
                     continue
                 updated_message = dict(messages[index])
-                updated_message["content"] = EARLIER_IMAGE_PROMPT_PLACEHOLDER
+                updated_message["content"] = _compact_image_prompt_block(
+                    updated_message["content"],
+                    span,
+                )
                 messages[index] = updated_message
                 image_prompts_compacted += 1
     elif not triggered:
@@ -505,7 +564,7 @@ def optimize_chat_payload(
                 and index < cutoff
                 and _plain_text_message(message)
                 and message.get("content") != EARLIER_IMAGE_PROMPT_PLACEHOLDER
-                and not _is_high_confidence_image_prompt(message)
+                and index not in image_prompt_spans
             )
             if is_candidate:
                 current_run.append(index)
@@ -584,4 +643,6 @@ def optimize_chat_payload(
         needs_summary=needs_summary,
         target_met=target_met,
         reasons=tuple(dict.fromkeys(reasons)),
+        analysis_cache_hits=analysis_cache_hits,
+        analysis_cache_misses=analysis_cache_misses,
     )

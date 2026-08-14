@@ -503,6 +503,12 @@ test("container envVars are derived from the live Durable Object env", () => {
       KIMI_CODE_RATE_LIMIT_RPM: "90",
       OPTIMIZER_MAX_REQUEST_BYTES: "8388608",
       OPTIMIZER_SUMMARY_TIMEOUT_SECONDS: "30",
+      GLM_AUTO_OPTIMIZE: "true",
+      GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS: "12000",
+      GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS: "6",
+      CONTEXT_ANALYSIS_CACHE_ENABLED: "true",
+      CONTEXT_ANALYSIS_CACHE_TTL_SECONDS: "240",
+      CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES: "1024",
       RATE_LIMIT_ENABLED: "true",
       GUNICORN_GRACEFUL_TIMEOUT: "45",
       GUNICORN_ACCESS_LOG: "-",
@@ -564,6 +570,12 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.KIMI_CODE_RATE_LIMIT_RPM, "90");
   assert.equal(container.envVars.OPTIMIZER_MAX_REQUEST_BYTES, "8388608");
   assert.equal(container.envVars.OPTIMIZER_SUMMARY_TIMEOUT_SECONDS, "30");
+  assert.equal(container.envVars.GLM_AUTO_OPTIMIZE, "true");
+  assert.equal(container.envVars.GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS, "12000");
+  assert.equal(container.envVars.GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS, "6");
+  assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_ENABLED, "true");
+  assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_TTL_SECONDS, "240");
+  assert.equal(container.envVars.CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES, "1024");
   assert.equal(container.envVars.RATE_LIMIT_ENABLED, "true");
   assert.equal(container.envVars.GUNICORN_GRACEFUL_TIMEOUT, "45");
   assert.equal(container.envVars.GUNICORN_ACCESS_LOG, "-");

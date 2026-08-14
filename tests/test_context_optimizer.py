@@ -1,5 +1,6 @@
 import unittest
 
+from services.context_analysis_cache import ContextAnalysisCache
 from services.context_optimizer import (
     EARLIER_IMAGE_PROMPT_PLACEHOLDER,
     ContextOptimizationError,
@@ -36,7 +37,58 @@ def image_prompt(subject: str) -> str:
     return sections + " Detailed texture continuity." * 12
 
 
+def roleplay_response(story: str, subject: str) -> str:
+    return f"{story}\n\nIMAGE PROMPT:\n{image_prompt(subject)}"
+
+
 class ContextOptimizerTest(unittest.TestCase):
+    def setUp(self):
+        ContextAnalysisCache.clear()
+
+    def test_compacts_only_old_assistant_image_block_and_caches_its_analysis(self):
+        global_prompt = (
+            "Always preserve the latest Human message and append one IMAGE PROMPT."
+        )
+        older_response = roleplay_response(
+            "The first scene ends with Celia beside the rain-streaked window.",
+            "Celia in the first scene",
+        )
+        newest_response = roleplay_response(
+            "The next scene keeps Celia beside the same rain-streaked window.",
+            "Celia in the newest scene",
+        )
+        payload = {
+            "model": "opencode:glm-5.2",
+            "messages": [
+                {"role": "system", "content": global_prompt},
+                {"role": "user", "content": "Begin the first scene."},
+                {"role": "assistant", "content": older_response},
+                {"role": "user", "content": "Advance to the next scene."},
+                {"role": "assistant", "content": newest_response},
+                {"role": "user", "content": "Continue from exactly there."},
+            ],
+            "optimization": {
+                "trigger_input_tokens": 0,
+                "target_input_tokens": 100_000,
+                "keep_recent_turns": 1,
+            },
+        }
+
+        first = optimize_chat_payload(payload, default_target_tokens=96_000)
+        second = optimize_chat_payload(payload, default_target_tokens=96_000)
+
+        optimized_older = first.payload["messages"][2]["content"]
+        self.assertIn("The first scene ends", optimized_older)
+        self.assertIn("IMAGE PROMPT:", optimized_older)
+        self.assertIn(EARLIER_IMAGE_PROMPT_PLACEHOLDER, optimized_older)
+        self.assertEqual(first.payload["messages"][4]["content"], newest_response)
+        self.assertEqual(first.payload["messages"][0]["content"], global_prompt)
+        self.assertEqual(first.image_prompts_compacted, 1)
+        self.assertEqual(first.analysis_cache_hits, 0)
+        self.assertEqual(first.analysis_cache_misses, 2)
+        self.assertEqual(second.analysis_cache_hits, 2)
+        self.assertEqual(second.analysis_cache_misses, 0)
+
     def test_compacts_single_line_labeled_prompt_from_real_client_shape(self):
         older_prompt = image_prompt("Inspector Voss in the first scene").replace("\n", ".")
         newest_prompt = image_prompt("Inspector Voss in the revised scene").replace("\n", ".")

@@ -10,12 +10,14 @@ from unittest.mock import patch
 import requests
 
 from services.auto_route_service import AutoRouteService
+from services.context_analysis_cache import ContextAnalysisCache
 from services.rate_limit_service import LimitDecision
 from tests.test_context_optimizer import image_prompt
 
 
 class OptimizedChatRouteTest(unittest.TestCase):
     def setUp(self):
+        ContextAnalysisCache.clear()
         self.original_env = os.environ.copy()
         self.temp_dir = tempfile.TemporaryDirectory()
         os.environ.update(
@@ -122,10 +124,15 @@ class OptimizedChatRouteTest(unittest.TestCase):
         )
 
         reserve_patch, finalize_patch = self._rate_patches()
-        with patch(
-            "app.ProxyService.make_request",
-            return_value=upstream_response,
-        ) as make_request, reserve_patch as reserve_request, finalize_patch:
+        with (
+            patch(
+                "app.ProxyService.make_request",
+                return_value=upstream_response,
+            ) as make_request,
+            patch("routes.unified.apply_adaptive_glm_context") as adaptive_context,
+            reserve_patch as reserve_request,
+            finalize_patch,
+        ):
             response = self.client.post(
                 "/optimize/v1/chat/completions",
                 headers={"Authorization": "Bearer admin-test-key"},
@@ -139,6 +146,7 @@ class OptimizedChatRouteTest(unittest.TestCase):
         self.assertEqual(make_request.call_args.kwargs["api_provider"], "opencode")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Route"], "auto:glm-5.2")
         self.assertEqual(reserve_request.call_args.kwargs["provider"], "auto")
+        adaptive_context.assert_not_called()
 
     def test_deterministic_route_strips_options_and_accounts_transformed_payload_once(self):
         older_prompt = image_prompt("the old image")
@@ -193,6 +201,8 @@ class OptimizedChatRouteTest(unittest.TestCase):
         self.assertEqual(response.headers["X-MultiLLM-Optimization"], "applied")
         self.assertEqual(response.headers["X-MultiLLM-Optimization-Mode"], "deterministic")
         self.assertEqual(response.headers["X-MultiLLM-Image-Prompts-Compacted"], "1")
+        self.assertEqual(response.headers["X-MultiLLM-Optimization-Cache-Hits"], "0")
+        self.assertEqual(response.headers["X-MultiLLM-Optimization-Cache-Misses"], "2")
         self.assertEqual(response.headers["X-Request-ID"], "req_optimized_k3")
         self.assertNotIn("Set-Cookie", response.headers)
         self.assertNotIn("Location", response.headers)
