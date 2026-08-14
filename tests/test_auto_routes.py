@@ -5,6 +5,10 @@ from unittest.mock import patch
 import requests
 
 from services.context_analysis_cache import ContextAnalysisCache
+from services.nanogpt_key_pool import (
+    NanoGPTKeyPoolExhausted,
+    NanoGPTUnifiedKeyPool,
+)
 from services.provider_catalog_service import (
     ProviderCatalogModel,
     ProviderCatalogService,
@@ -285,6 +289,93 @@ class AutoRouteTest(UnifiedApiTestCase):
             response.get_json()["choices"][0]["message"]["content"],
             "open code balance fallback",
         )
+
+    def test_auto_chat_skips_single_nanogpt_key_during_balance_cooldown(self):
+        os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
+        NanoGPTUnifiedKeyPool.reset()
+        selected = NanoGPTUnifiedKeyPool.select_key(
+            ["nano-provider-key"],
+            lambda _key: 200,
+        )
+        NanoGPTUnifiedKeyPool.record_result(
+            selected,
+            402,
+            check_ttl_seconds=300,
+        )
+        success = self._chat_response("open code cooldown fallback")
+
+        try:
+            with (
+                patch.object(
+                    self.app_module.AuthService,
+                    "get_api_keys",
+                    return_value=["nano-provider-key"],
+                ),
+                patch(
+                    "app.ProxyService.make_request",
+                    return_value=success,
+                ) as make_request,
+            ):
+                response = self.client.post(
+                    "/v1/chat/completions",
+                    headers={"Authorization": "Bearer admin-test-key"},
+                    json={
+                        "model": "auto:glm-5.2",
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                )
+        finally:
+            NanoGPTUnifiedKeyPool.reset()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_count, 1)
+        self.assertEqual(make_request.call_args.kwargs["api_provider"], "opencode")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Auto-Selected-Model"],
+            "opencode:glm-5.2",
+        )
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
+
+    def test_auto_chat_advances_when_nanogpt_key_exhausts_after_validation(self):
+        success = self._chat_response("open code credential-race fallback")
+
+        with (
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=["nano-provider-key"],
+            ),
+            patch(
+                "routes.unified.NanoGPTKeyPool.select_key",
+                side_effect=[
+                    "nano-provider-key",
+                    NanoGPTKeyPoolExhausted(
+                        "All configured NanoGPT keys are cooling down",
+                    ),
+                ],
+            ),
+            patch(
+                "app.ProxyService.make_request",
+                return_value=success,
+            ) as make_request,
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "auto:glm-5.2",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_count, 1)
+        self.assertEqual(make_request.call_args.kwargs["api_provider"], "opencode")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Auto-Selected-Model"],
+            "opencode:glm-5.2",
+        )
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
 
     def test_auto_chat_does_not_replay_ambiguous_server_failure(self):
         os.environ["NANOGPT_API_KEY"] = "nano-provider-key"

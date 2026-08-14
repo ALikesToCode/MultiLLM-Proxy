@@ -109,7 +109,11 @@ class NanoGPTKeyPool:
         checked_at = time.monotonic() if now is None else now
         with cls._lock:
             cls._prune(configured, checked_at)
-            if len(configured) == 1 and cls._active_key is None:
+            if (
+                len(configured) == 1
+                and cls._active_key is None
+                and cls._rejected_until.get(configured[0], 0) <= checked_at
+            ):
                 cls._active_key = configured[0]
                 cls._active_until = checked_at + max(1, check_ttl_seconds)
                 cls._active_requests = 0

@@ -20,6 +20,13 @@ AUTO_ROUTE_FALLBACK_STATUS_CODES = frozenset({401, 402, 403, 404, 429})
 logger = logging.getLogger(__name__)
 
 
+class AutoRouteCandidateUnavailable(APIError):
+    """Signal a pre-generation candidate failure that is safe to fail over."""
+
+    def __init__(self, message: str):
+        super().__init__(message, status_code=503)
+
+
 def _is_fallback_response(response: Response) -> bool:
     if response.status_code in AUTO_ROUTE_FALLBACK_STATUS_CODES:
         return True
@@ -89,11 +96,19 @@ def dispatch_auto_route_chat_completion(
         candidate_payload = dict(payload)
         candidate_payload["model"] = candidate
         route_decision = "auto-primary" if priority == 0 else "auto-failover"
-        response = dispatch_candidate(
-            candidate_payload,
-            candidate,
-            route_decision,
-        )
+        try:
+            response = dispatch_candidate(
+                candidate_payload,
+                candidate,
+                route_decision,
+            )
+        except AutoRouteCandidateUnavailable as error:
+            logger.info(
+                "Skipping auto route candidate %s before generation (%s)",
+                candidate,
+                type(error).__name__,
+            )
+            continue
         if not _is_fallback_response(response):
             if last_failure is not None:
                 last_failure.close()

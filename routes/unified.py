@@ -20,6 +20,7 @@ from route_helpers import (
     stream_upstream_response,
 )
 from routes.auto_routes import (
+    AutoRouteCandidateUnavailable,
     dispatch_auto_route_chat_completion,
     openai_auto_route_models,
     register_auto_route_admin_routes,
@@ -32,9 +33,9 @@ from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import (
     NanoGPTKeyPoolExhausted,
-    NanoGPTUnifiedKeyPool as NanoGPTKeyPool,
     is_nanogpt_credential_rejection,
 )
+from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool as NanoGPTKeyPool
 from services.provider_prompt_cache import (
     PromptCacheDecision,
     apply_prompt_cache_policy,
@@ -70,11 +71,13 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
                 ],
             )
         except NanoGPTKeyPoolExhausted as error:
-            raise APIError(str(error), status_code=503) from error
+            raise AutoRouteCandidateUnavailable(str(error)) from error
     else:
         token = auth_service_cls.get_api_key(provider)
     if not token:
-        raise APIError(f"API key not configured for {provider}", status_code=503)
+        raise AutoRouteCandidateUnavailable(
+            f"API key not configured for {provider}",
+        )
     return token
 
 

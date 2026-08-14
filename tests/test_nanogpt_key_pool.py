@@ -185,6 +185,31 @@ class NanoGPTKeyPoolTest(unittest.TestCase):
         self.assertEqual(replacement, "funded")
         self.assertEqual(probes, ["empty", "funded"])
 
+    def test_single_rejected_key_remains_in_cooldown(self):
+        selected = NanoGPTUnifiedKeyPool.select_key(
+            ["subscription-key"],
+            lambda _key: 200,
+            check_ttl_seconds=300,
+            now=100,
+        )
+        NanoGPTUnifiedKeyPool.record_result(
+            selected,
+            402,
+            check_ttl_seconds=300,
+            now=101,
+        )
+
+        with self.assertRaisesRegex(
+            NanoGPTKeyPoolExhausted,
+            "All configured NanoGPT keys are cooling down",
+        ):
+            NanoGPTUnifiedKeyPool.select_key(
+                ["subscription-key"],
+                lambda _key: 200,
+                check_ttl_seconds=300,
+                now=102,
+            )
+
     def test_raises_without_exposing_keys_when_every_probe_fails(self):
         with self.assertRaisesRegex(
             NanoGPTKeyPoolExhausted,
