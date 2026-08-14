@@ -317,6 +317,7 @@ class RouteHelperCorsTest(unittest.TestCase):
         for header in (
             "x-multillm-provider",
             "x-multillm-model",
+            "x-multillm-credential-attempts",
             "x-multillm-route-decision",
             "x-multillm-circuit-state",
             "x-multillm-latency-ms",

@@ -20,7 +20,8 @@ choose Kimi or GLM within each tier.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
-advances to the next key. The successful key identifier—not the secret—is kept
+advances to the next key. A `402` insufficient-balance rejection does the same.
+The successful key identifier—not the secret—is kept
 in that Durable Object's session state and is preferred on later turns.
 NanoGPT GLM requests use the catalog's exact
 `zai-org/glm-5.2:thinking` ID and its documented `max` reasoning effort.
@@ -179,7 +180,7 @@ avoids a global Durable Object bottleneck and keeps regional behavior local to
 the conversation.
 
 Automatic fallback occurs only after a response that clearly rejected work:
-`401`, `403`, `404`, or `429`. Transport errors and `5xx` responses are
+`401`, `402`, `403`, `404`, or `429`. Transport errors and `5xx` responses are
 ambiguous because a provider might have started billable generation. The
 Worker stops instead of risking a duplicate paid request.
 

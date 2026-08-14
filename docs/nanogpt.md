@@ -41,11 +41,14 @@ authenticated request and remembers the first 2xx key. A single configured key
 is used immediately. Both cases revalidate after 50 completed upstream
 requests or five minutes by default. A transient catalog error retains the last
 working key; a definite
-`401`, `403`, or `429` invalidates it so the next request checks another key.
-The failed generation is returned unchanged and is never replayed
-automatically, preserving the raw gateway's single-attempt billing boundary.
-Cloudflare roleplay sessions use the same request-count health policy while
-persisting only the successful key identifier, never the secret.
+`401`, `402`, `403`, or `429` invalidates it. Direct `/nanogpt/*` calls return
+that rejection unchanged and use another key on a later request, preserving
+the raw gateway's single-attempt boundary. Unified Chat, Responses, and image
+calls may immediately try another configured key after only those definite
+pre-generation rejections; their response includes
+`X-MultiLLM-Credential-Attempts`. Ambiguous transport and `5xx` outcomes are
+never replayed. Cloudflare roleplay sessions follow the same safe-retry policy
+while persisting only the successful key identifier, never the secret.
 
 ## URL mapping
 

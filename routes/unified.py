@@ -25,7 +25,11 @@ from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
-from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.nanogpt_key_pool import (
+    NanoGPTKeyPool,
+    NanoGPTKeyPoolExhausted,
+    is_nanogpt_credential_rejection,
+)
 from services.provider_prompt_cache import (
     PromptCacheDecision,
     apply_prompt_cache_policy,
@@ -85,6 +89,70 @@ def _record_nanogpt_token_result(
             "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
         ],
     )
+
+
+def _request_with_provider_token_rotation(
+    app,
+    auth_service_cls,
+    proxy_service_cls,
+    provider: str,
+    send_request,
+):
+    """Send once per usable NanoGPT key after definite pre-generation failures."""
+    attempt_limit = 1
+    if provider == "nanogpt":
+        attempt_limit = max(1, len(auth_service_cls.get_api_keys(provider)))
+
+    attempted_tokens: set[str] = set()
+    response = None
+    attempts = 0
+    for _ in range(attempt_limit):
+        try:
+            token = _provider_token(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                provider,
+            )
+        except APIError:
+            if response is not None:
+                break
+            raise
+
+        if token in attempted_tokens:
+            break
+        attempted_tokens.add(token)
+        if response is not None and (
+            not isinstance(response, requests.Response) or response.raw is not None
+        ):
+            response.close()
+
+        response = send_request(token)
+        attempts += 1
+        _record_nanogpt_token_result(
+            app,
+            provider,
+            token,
+            response.status_code,
+        )
+        if provider != "nanogpt" or not is_nanogpt_credential_rejection(
+            response.status_code
+        ):
+            break
+
+    if response is None:
+        raise APIError(f"API key not configured for {provider}", status_code=503)
+    return response, attempts
+
+
+def _add_credential_attempt_headers(
+    response: Response,
+    provider: str,
+    attempts: int,
+) -> Response:
+    if provider == "nanogpt":
+        response.headers["X-MultiLLM-Credential-Attempts"] = str(attempts)
+    return response
 
 
 def _resolve_enabled_model(app, model_id: str):
@@ -290,7 +358,6 @@ def _dispatch_unified_chat_candidate(
             app,
             payload.get("model"),
         )
-        token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
         candidate_payload = _copy_request_payload(payload, provider_model)
         adaptive_result = None
         if adaptive_context:
@@ -323,45 +390,50 @@ def _dispatch_unified_chat_candidate(
         upstream_payload = cache_decision.payload
         raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
-        headers = proxy_service_cls.prepare_headers(
-            headers_source,
-            provider,
-            token,
-            upstream_path=upstream_path,
-        )
-        _merge_request_headers(headers, cache_decision.request_headers)
-        params = (
-            proxy_service_cls.prepare_params(
-                args_source,
-                provider,
-                token,
-                upstream_path=upstream_path,
-            )
-            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
-            else args_source
-        )
-
         request_data = (
             raw_body
             if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
             else proxy_service_cls.filter_request_data(provider, raw_body)
         )
 
-        request_kwargs = {
-            "method": "POST",
-            "url": adapter.chat_completions_url(),
-            "headers": headers,
-            "params": params,
-            "data": request_data,
-            "api_provider": provider,
-            "use_cache": False,
-        }
-        if request_timeout is not None:
-            request_kwargs["timeout_override"] = request_timeout
-        response = proxy_service_cls.make_request(
-            **request_kwargs,
+        def send_request(token: str):
+            headers = proxy_service_cls.prepare_headers(
+                headers_source,
+                provider,
+                token,
+                upstream_path=upstream_path,
+            )
+            _merge_request_headers(headers, cache_decision.request_headers)
+            params = (
+                proxy_service_cls.prepare_params(
+                    args_source,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                )
+                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
+                else args_source
+            )
+            request_kwargs = {
+                "method": "POST",
+                "url": adapter.chat_completions_url(),
+                "headers": headers,
+                "params": params,
+                "data": request_data,
+                "api_provider": provider,
+                "use_cache": False,
+            }
+            if request_timeout is not None:
+                request_kwargs["timeout_override"] = request_timeout
+            return proxy_service_cls.make_request(**request_kwargs)
+
+        response, credential_attempts = _request_with_provider_token_rotation(
+            app,
+            auth_service_cls,
+            proxy_service_cls,
+            provider,
+            send_request,
         )
-        _record_nanogpt_token_result(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
@@ -372,9 +444,13 @@ def _dispatch_unified_chat_candidate(
         )
 
         if isinstance(response, Response):
-            return _add_prompt_cache_headers(
-                _add_adaptive_context_headers(response, adaptive_result),
-                cache_decision,
+            return _add_credential_attempt_headers(
+                _add_prompt_cache_headers(
+                    _add_adaptive_context_headers(response, adaptive_result),
+                    cache_decision,
+                ),
+                provider,
+                credential_attempts,
             )
         if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS or payload.get("stream"):
             downstream_response = stream_upstream_response(response)
@@ -385,12 +461,16 @@ def _dispatch_unified_chat_candidate(
                 content_type=response.headers.get("content-type", "application/json"),
                 headers=copy_raw_provider_response_headers(response.headers),
             )
-        return _add_prompt_cache_headers(
-            _add_adaptive_context_headers(
-                downstream_response,
-                adaptive_result,
+        return _add_credential_attempt_headers(
+            _add_prompt_cache_headers(
+                _add_adaptive_context_headers(
+                    downstream_response,
+                    adaptive_result,
+                ),
+                cache_decision,
             ),
-            cache_decision,
+            provider,
+            credential_attempts,
         )
     except ValueError as error:
         raise APIError(str(error), status_code=400) from error
@@ -491,29 +571,38 @@ def dispatch_unified_image_generation(
                 status_code=400,
             )
 
-        token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
         upstream_path = "v1/images/generations"
         upstream_payload = _copy_request_payload(payload, provider_model)
-        response = proxy_service_cls.make_request(
-            method="POST",
-            url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
-            headers=proxy_service_cls.prepare_headers(
-                headers_source,
-                provider,
-                token,
-                upstream_path=upstream_path,
-            ),
-            params=proxy_service_cls.prepare_params(
-                args_source,
-                provider,
-                token,
-                upstream_path=upstream_path,
-            ),
-            data=serialize_unified_chat_payload(upstream_payload),
-            api_provider=provider,
-            use_cache=False,
+        raw_body = serialize_unified_chat_payload(upstream_payload)
+
+        def send_request(token: str):
+            return proxy_service_cls.make_request(
+                method="POST",
+                url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+                headers=proxy_service_cls.prepare_headers(
+                    headers_source,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                ),
+                params=proxy_service_cls.prepare_params(
+                    args_source,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                ),
+                data=raw_body,
+                api_provider=provider,
+                use_cache=False,
+            )
+
+        response, credential_attempts = _request_with_provider_token_rotation(
+            app,
+            auth_service_cls,
+            proxy_service_cls,
+            provider,
+            send_request,
         )
-        _record_nanogpt_token_result(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
@@ -522,8 +611,14 @@ def dispatch_unified_image_generation(
         )
 
         if isinstance(response, Response):
-            return response
-        return stream_upstream_response(response)
+            downstream_response = response
+        else:
+            downstream_response = stream_upstream_response(response)
+        return _add_credential_attempt_headers(
+            downstream_response,
+            provider,
+            credential_attempts,
+        )
     except ValueError as error:
         raise APIError(str(error), status_code=400) from error
     except Exception as error:
@@ -668,12 +763,6 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     status_code=400,
                 )
 
-            token = _provider_token(
-                app,
-                auth_service_cls,
-                proxy_service_cls,
-                provider,
-            )
             if provider in NATIVE_RESPONSES_PROVIDERS:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
@@ -687,32 +776,37 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
                 )
                 upstream_payload = cache_decision.payload
-                headers = proxy_service_cls.prepare_headers(
-                    request.headers,
-                    provider,
-                    token,
-                    upstream_path=upstream_path,
-                )
-                _merge_request_headers(headers, cache_decision.request_headers)
-                response = proxy_service_cls.make_request(
-                    method="POST",
-                    url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
-                    headers=headers,
-                    params=proxy_service_cls.prepare_params(
-                        request.args,
+                raw_body = json.dumps(upstream_payload).encode("utf-8")
+
+                def send_request(token: str):
+                    headers = proxy_service_cls.prepare_headers(
+                        request.headers,
                         provider,
                         token,
                         upstream_path=upstream_path,
-                    ),
-                    data=json.dumps(upstream_payload).encode("utf-8"),
-                    api_provider=provider,
-                    use_cache=False,
-                )
-                _record_nanogpt_token_result(
+                    )
+                    _merge_request_headers(headers, cache_decision.request_headers)
+                    return proxy_service_cls.make_request(
+                        method="POST",
+                        url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+                        headers=headers,
+                        params=proxy_service_cls.prepare_params(
+                            request.args,
+                            provider,
+                            token,
+                            upstream_path=upstream_path,
+                        ),
+                        data=raw_body,
+                        api_provider=provider,
+                        use_cache=False,
+                    )
+
+                response, credential_attempts = _request_with_provider_token_rotation(
                     app,
+                    auth_service_cls,
+                    proxy_service_cls,
                     provider,
-                    token,
-                    response.status_code,
+                    send_request,
                 )
 
                 metrics_service_cls.get_instance().track_request(
@@ -722,12 +816,24 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 )
 
                 if isinstance(response, Response):
-                    return _add_prompt_cache_headers(response, cache_decision)
-                return _add_prompt_cache_headers(
-                    stream_upstream_response(response),
-                    cache_decision,
+                    downstream_response = response
+                else:
+                    downstream_response = stream_upstream_response(response)
+                return _add_credential_attempt_headers(
+                    _add_prompt_cache_headers(
+                        downstream_response,
+                        cache_decision,
+                    ),
+                    provider,
+                    credential_attempts,
                 )
 
+            token = _provider_token(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                provider,
+            )
             if payload.get("stream"):
                 raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
 

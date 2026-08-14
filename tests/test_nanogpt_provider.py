@@ -584,6 +584,92 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
             "provider/model:thinking",
         )
 
+    def test_unified_responses_rotates_after_nanogpt_balance_rejection(self):
+        insufficient_balance = self._json_response(
+            {"error": "Insufficient balance", "code": "insufficient_balance"},
+            status=402,
+        )
+        success = self._json_response(
+            {"id": "resp_native", "object": "response", "output": []}
+        )
+
+        with (
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=["empty-key", "funded-key"],
+            ),
+            patch(
+                "routes.unified.NanoGPTKeyPool.select_key",
+                side_effect=["empty-key", "funded-key"],
+            ),
+            patch(
+                "app.ProxyService.make_request",
+                side_effect=[insufficient_balance, success],
+            ) as make_request,
+        ):
+            response = self.client.post(
+                "/v1/responses",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:provider/model:thinking",
+                    "input": "Hello",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "2")
+        self.assertEqual(
+            [
+                call.kwargs["headers"]["Authorization"]
+                for call in make_request.call_args_list
+            ],
+            ["Bearer empty-key", "Bearer funded-key"],
+        )
+
+    def test_unified_images_rotates_after_nanogpt_balance_rejection(self):
+        insufficient_balance = self._json_response(
+            {"error": "Insufficient balance", "code": "insufficient_balance"},
+            status=402,
+        )
+        success = self._json_response(
+            {"created": 1, "data": [{"url": "https://images.example/result.png"}]}
+        )
+
+        with (
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=["empty-key", "funded-key"],
+            ),
+            patch(
+                "routes.unified.NanoGPTKeyPool.select_key",
+                side_effect=["empty-key", "funded-key"],
+            ),
+            patch(
+                "app.ProxyService.make_request",
+                side_effect=[insufficient_balance, success],
+            ) as make_request,
+        ):
+            response = self.client.post(
+                "/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:image/model",
+                    "prompt": "A lighthouse at dusk",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "2")
+        self.assertEqual(
+            [
+                call.kwargs["headers"]["Authorization"]
+                for call in make_request.call_args_list
+            ],
+            ["Bearer empty-key", "Bearer funded-key"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 import { buildProviderHeaders } from "./config.mjs";
 
-const DEFINITE_KEY_FAILURES = new Set([401, 403, 429]);
+const DEFINITE_KEY_FAILURES = new Set([401, 402, 403, 429]);
 
 function uniqueNanoCredentials(candidates) {
   const seen = new Set();

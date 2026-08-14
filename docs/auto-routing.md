@@ -173,13 +173,17 @@ whether it was the primary route or a failover.
 Unified NanoGPT Chat, Responses, and image requests use the same configured
 key pool as direct `/nanogpt/*` routes. The process checks the read-only model
 catalog when more than one key is configured and retains the first working key
-for the configured TTL. A `401`, `403`, or `429` invalidates that key for a
-later request.
+for the configured TTL. A `401`, `402`, `403`, or `429` invalidates that key.
 
-An automatic request does not replay the same paid generation against another
-NanoGPT key. After a NanoGPT rejection it advances to the next provider in the
-virtual model. A `402` insufficient-balance response also advances without
-replaying NanoGPT. A later request can select another working NanoGPT key.
+Because those statuses reject the request before generation, unified Chat,
+Responses, and image requests may immediately try the next configured NanoGPT
+key. `X-MultiLLM-Credential-Attempts` reports how many keys were tried. An auto
+route advances to the next provider only after NanoGPT's usable keys are
+exhausted. Ambiguous transport and `5xx` failures are never replayed.
+
+Direct `/nanogpt/*` routes preserve the raw gateway's single-attempt contract.
+They invalidate a rejected configured key for the next request but return the
+current upstream rejection unchanged.
 
 Provider catalogs change over time. Query `/nanogpt/v1/models`,
 `/opencode/v1/models`, and `/navyai/v1/models`, then enter the exact returned

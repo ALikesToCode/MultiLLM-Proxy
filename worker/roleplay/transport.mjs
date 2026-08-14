@@ -235,7 +235,7 @@ export function recordModelResult(
   if (!success) {
     if (status === 429) {
       cooldownUntil = now + 60_000;
-    } else if ([401, 403, 404].includes(status)) {
+    } else if ([401, 402, 403, 404].includes(status)) {
       cooldownUntil = now + 300_000;
     } else if (consecutiveFailures >= 2) {
       cooldownUntil = now + 120_000;

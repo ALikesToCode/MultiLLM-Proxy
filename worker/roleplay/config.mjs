@@ -46,7 +46,7 @@ const PROVIDERS = {
   },
 };
 
-const SAFE_FALLBACK_STATUSES = new Set([401, 403, 404, 429]);
+const SAFE_FALLBACK_STATUSES = new Set([401, 402, 403, 404, 429]);
 const MODEL_FAMILIES = ["kimi", "glm"];
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",

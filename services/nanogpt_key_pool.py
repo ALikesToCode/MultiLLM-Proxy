@@ -14,13 +14,18 @@ _LIST_KEY_NAMES = ("NANOGPT_API_KEYS", "NANO_GPT_KEYS")
 _NUMBERED_KEY_PATTERN = re.compile(
     r"^(NANOGPT_API_KEY|NANO_GPT_KEY)_(\d+)$",
 )
-_AUTH_REJECTION_STATUSES = frozenset({401, 403})
+_AUTH_REJECTION_STATUSES = frozenset({401, 402, 403})
 _TEMPORARY_REJECTION_STATUSES = frozenset({429})
 logger = logging.getLogger(__name__)
 
 
 class NanoGPTKeyPoolExhausted(RuntimeError):
     """Raised when none of the configured NanoGPT keys pass validation."""
+
+
+def is_nanogpt_credential_rejection(status: int) -> bool:
+    """Return whether a response definitively rejected the selected key."""
+    return status in (_AUTH_REJECTION_STATUSES | _TEMPORARY_REJECTION_STATUSES)
 
 
 def _listed_keys(value: str | None) -> list[str]:
@@ -146,9 +151,7 @@ class NanoGPTKeyPool:
                     cls._rejected_until.pop(key, None)
                     return key
 
-                if status not in (
-                    _AUTH_REJECTION_STATUSES | _TEMPORARY_REJECTION_STATUSES
-                ):
+                if not is_nanogpt_credential_rejection(status):
                     ambiguous_active = ambiguous_active or key == previous_active
                 cls._mark_rejected(
                     key,
@@ -195,7 +198,7 @@ class NanoGPTKeyPool:
         """Record one upstream request and invalidate definite key failures."""
         if not key:
             return
-        if status in (_AUTH_REJECTION_STATUSES | _TEMPORARY_REJECTION_STATUSES):
+        if is_nanogpt_credential_rejection(status):
             cls.invalidate(
                 key,
                 status,

@@ -317,25 +317,31 @@ class AutoRouteTest(UnifiedApiTestCase):
         self.assertEqual(make_request.call_args.kwargs["api_provider"], "nanogpt")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
 
-    def test_unified_nanogpt_uses_key_pool_and_invalidates_rate_limited_key(self):
-        os.environ["NANOGPT_API_KEY"] = "first-nano-key"
-        os.environ["NANOGPT_API_KEY_1"] = "working-nano-key"
-        rate_limited = requests.Response()
-        rate_limited.status_code = 429
-        rate_limited._content = b'{"error":{"message":"rate limited"}}'
-        rate_limited.headers["Content-Type"] = "application/json"
+    def test_unified_nanogpt_rotates_after_insufficient_balance(self):
+        insufficient_balance = requests.Response()
+        insufficient_balance.status_code = 402
+        insufficient_balance._content = (
+            b'{"error":"Insufficient balance","code":"insufficient_balance"}'
+        )
+        insufficient_balance.headers["Content-Type"] = "application/json"
+        success = self._chat_response("second NanoGPT key selected")
 
         with (
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=["empty-nano-key", "working-nano-key"],
+            ),
             patch(
                 "routes.unified.NanoGPTKeyPool.select_key",
-                return_value="working-nano-key",
+                side_effect=["empty-nano-key", "working-nano-key"],
             ) as select_key,
             patch(
                 "routes.unified.NanoGPTKeyPool.record_result",
             ) as record_result,
             patch(
                 "app.ProxyService.make_request",
-                return_value=rate_limited,
+                side_effect=[insufficient_balance, success],
             ) as make_request,
         ):
             response = self.client.post(
@@ -347,17 +353,56 @@ class AutoRouteTest(UnifiedApiTestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(select_key.call_count, 2)
+        self.assertEqual(make_request.call_count, 2)
+        self.assertEqual(
+            [
+                call.kwargs["headers"]["Authorization"]
+                for call in make_request.call_args_list
+            ],
+            ["Bearer empty-nano-key", "Bearer working-nano-key"],
+        )
+        self.assertEqual(
+            [call.args[:2] for call in record_result.call_args_list],
+            [("empty-nano-key", 402), ("working-nano-key", 200)],
+        )
+        self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "2")
+
+    def test_unified_nanogpt_does_not_rotate_after_ambiguous_failure(self):
+        server_failure = requests.Response()
+        server_failure.status_code = 503
+        server_failure._content = b'{"error":{"message":"upstream unavailable"}}'
+        server_failure.headers["Content-Type"] = "application/json"
+
+        with (
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                return_value=["first-nano-key", "second-nano-key"],
+            ),
+            patch(
+                "routes.unified.NanoGPTKeyPool.select_key",
+                return_value="first-nano-key",
+            ) as select_key,
+            patch(
+                "app.ProxyService.make_request",
+                return_value=server_failure,
+            ) as make_request,
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:glm-5.2",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
         select_key.assert_called_once()
-        self.assertEqual(
-            make_request.call_args.kwargs["headers"]["Authorization"],
-            "Bearer working-nano-key",
-        )
-        record_result.assert_called_once()
-        self.assertEqual(
-            record_result.call_args.args[:2],
-            ("working-nano-key", 429),
-        )
+        make_request.assert_called_once()
+        self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "1")
 
     def test_admin_can_create_and_reorder_auto_route(self):
         self._authenticate_admin()

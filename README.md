@@ -442,8 +442,10 @@ Normal clients send the MultiLLM Proxy key in `Authorization: Bearer ...` or
 `X-Api-Key`; the server replaces it with a validated `NANOGPT_API_KEY[_N]` or
 `NAVYAI_API_KEY`. When multiple NanoGPT keys are configured, the proxy checks
 the read-only model catalog, caches the working key, and rotates after an auth
-or rate-limit rejection without replaying the rejected generation. To forward
-a caller-owned upstream bearer/API key, partner
+or rate-limit rejection. Unified chat, Responses, image, and roleplay requests
+can try the next key only after a definite `401`, `402`, `403`, or `429`; raw
+NanoGPT routes keep their single-attempt transport contract. To forward a
+caller-owned upstream bearer/API key, partner
 JWT, Navy OAuth token, or NanoGPT L402 credential, authenticate the proxy with
 `X-MultiLLM-Api-Key` and keep the provider credential in its native header.
 

@@ -152,6 +152,36 @@ class NanoGPTKeyPoolTest(unittest.TestCase):
         self.assertEqual(replacement, "second")
         self.assertEqual(probes, ["first", "second"])
 
+    def test_insufficient_balance_invalidates_key_for_the_catalog_ttl(self):
+        probes = []
+
+        def probe(key):
+            probes.append(key)
+            return 200
+
+        selected = NanoGPTKeyPool.select_key(
+            ["empty", "funded"],
+            probe,
+            check_ttl_seconds=300,
+            now=100,
+        )
+        NanoGPTKeyPool.record_result(
+            selected,
+            402,
+            check_ttl_seconds=300,
+            now=101,
+        )
+        replacement = NanoGPTKeyPool.select_key(
+            ["empty", "funded"],
+            probe,
+            check_ttl_seconds=300,
+            now=102,
+        )
+
+        self.assertEqual(selected, "empty")
+        self.assertEqual(replacement, "funded")
+        self.assertEqual(probes, ["empty", "funded"])
+
     def test_raises_without_exposing_keys_when_every_probe_fails(self):
         with self.assertRaisesRegex(
             NanoGPTKeyPoolExhausted,

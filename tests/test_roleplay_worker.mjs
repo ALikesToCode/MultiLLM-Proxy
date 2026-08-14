@@ -916,6 +916,70 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
   ]);
 });
 
+test("roleplay advances to the next NanoGPT key after insufficient balance", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-empty-key",
+    NANOGPT_API_KEY_1: "nanogpt-funded-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+  });
+  const authorizationAttempts = [];
+
+  const responses = await withGlobalFetch(async (_input, init) => {
+    const authorization = new Headers(init.headers).get("Authorization");
+    authorizationAttempts.push(authorization);
+    if (init.method === "GET") {
+      return new Response(JSON.stringify({ data: [{ id: "kimi-k2.6" }] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (authorization === "Bearer nanogpt-empty-key") {
+      return new Response(
+        JSON.stringify({
+          error: "Insufficient balance",
+          code: "insufficient_balance",
+        }),
+        {
+          status: 402,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+    assert.equal(authorization, "Bearer nanogpt-funded-key");
+    const payload = JSON.parse(init.body);
+    return completionResponse(payload.model, "Mira continues without resetting.");
+  }, async () => {
+    const first = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-balance-rotation",
+        input: "Continue.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const second = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-balance-rotation",
+        input: "Continue again.",
+        model_preference: "kimi",
+        stream: false,
+      }),
+      fixture.env,
+    );
+    return [first, second];
+  });
+
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.equal(responses[0].headers.get("X-Roleplay-Fallback-Count"), "1");
+  assert.deepEqual(authorizationAttempts, [
+    "Bearer nanogpt-empty-key",
+    "Bearer nanogpt-empty-key",
+    "Bearer nanogpt-funded-key",
+    "Bearer nanogpt-funded-key",
+  ]);
+});
+
 test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
   const fixture = makeRoleplayEnv({
     OPENCODE_GO_API_KEY: "",
