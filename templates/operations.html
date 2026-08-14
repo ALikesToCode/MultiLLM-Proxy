@@ -4,6 +4,7 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -11,6 +12,7 @@
     id="operations-dashboard"
     data-status-stream="{{ url_for('status_updates') }}"
     data-request-log="{{ url_for('admin_request_metrics') }}"
+    data-auto-routes="{{ url_for('admin_auto_routes') }}"
     data-admin="{{ 'true' if user and user.is_admin else 'false' }}"
 >
     <script id="dashboard-initial-state" type="application/json">
@@ -150,6 +152,64 @@
         </aside>
     </div>
 
+    {% if user and user.is_admin %}
+    <div class="operator-grid">
+        <article class="panel span-12" id="auto-route-panel">
+            <header class="panel__header">
+                <div>
+                    <h2>Automatic model priorities</h2>
+                    <p>Each <code>auto:&lt;name&gt;</code> model tries this explicit order after a definite authentication, model-availability, or rate-limit rejection.</p>
+                </div>
+                <span class="panel-tag">Chat only</span>
+            </header>
+            <div class="panel__body auto-route-editor">
+                <div class="auto-route-editor__sidebar">
+                    <label class="field-label" for="auto-route-select">Virtual model</label>
+                    <select id="auto-route-select" class="field-select"></select>
+                    <button id="new-auto-route" class="button button--secondary" type="button">New virtual model</button>
+                    <p class="field-help">The seeded <code>auto:glm-5.2</code> route starts with NanoGPT, OpenCode, then NavyAI. Saving changes updates SQLite immediately.</p>
+                </div>
+
+                <div class="auto-route-editor__main">
+                    <label class="field-label" for="auto-route-name">Model ID</label>
+                    <div class="auto-route-name-field">
+                        <span>auto:</span>
+                        <input id="auto-route-name" class="field" type="text" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="auto-route-name-help">
+                    </div>
+                    <p class="field-help" id="auto-route-name-help">Existing IDs stay fixed; create a new route to add another logical model.</p>
+
+                    <div class="auto-route-candidate-heading">
+                        <div>
+                            <h3>Provider candidates</h3>
+                            <p>Top row is tried first. Disabled or unconfigured candidates are skipped before transport.</p>
+                        </div>
+                        <span id="auto-route-count" class="panel-tag">0 candidates</span>
+                    </div>
+                    <ol id="auto-route-candidates" class="auto-route-candidates"></ol>
+                    <div id="auto-route-empty" class="empty-state auto-route-empty">
+                        <strong>No candidates yet</strong>
+                        <p>Add at least one provider and model before saving.</p>
+                    </div>
+
+                    <div class="auto-route-add-row">
+                        <label class="sr-only" for="auto-route-provider">Provider</label>
+                        <select id="auto-route-provider" class="field-select"></select>
+                        <label class="sr-only" for="auto-route-model">Provider model ID</label>
+                        <input id="auto-route-model" class="field" type="text" list="auto-route-model-options" placeholder="glm-5.2" autocomplete="off" spellcheck="false">
+                        <datalist id="auto-route-model-options"></datalist>
+                        <button id="add-auto-route-candidate" class="button button--secondary" type="button">Add candidate</button>
+                    </div>
+
+                    <div class="auto-route-actions">
+                        <p id="auto-route-status" class="field-help" role="status" aria-live="polite">Loading priorities…</p>
+                        <button id="save-auto-route" class="button button--primary" type="button">Save priority order</button>
+                    </div>
+                </div>
+            </div>
+        </article>
+    </div>
+    {% endif %}
+
     <div class="operator-grid">
         <article class="panel span-12">
             <header class="panel__header">
@@ -286,4 +346,7 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% if user and user.is_admin %}
+<script src="{{ url_for('static', filename='js/auto-routes.js') }}"></script>
+{% endif %}
 {% endblock %}

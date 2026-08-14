@@ -29,6 +29,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - PaLM API
   - Nineteen AI
 - 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
+- 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
 - 📊 Request, latency, response-class, and configured cost telemetry
 - 🚀 Streaming support for compatible providers
@@ -321,6 +322,17 @@ http://localhost:1400/nineteen/v1/completions
 ```
 
 For detailed usage examples with headers and request bodies, refer to the API Endpoints section above.
+
+### Automatic provider priorities
+
+`POST /v1/chat/completions` accepts dashboard-managed virtual models such as
+`auto:glm-5.2`. The seeded route tries NanoGPT, OpenCode, then NavyAI and moves
+forward only after a definite authentication, model-availability, rate-limit,
+or local circuit rejection. Direct `provider:model` requests remain unchanged.
+
+Administrators can reorder candidates and create more virtual models from the
+Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)
+for the exact retry boundary, response headers, persistence behavior, and API.
 
 ### Provider-Specific Features
 

@@ -1,0 +1,231 @@
+.auto-route-editor {
+    display: grid;
+    grid-template-columns: minmax(12rem, 0.34fr) minmax(0, 1fr);
+    gap: 1.5rem;
+}
+
+.auto-route-editor__sidebar,
+.auto-route-editor__main {
+    min-width: 0;
+}
+
+.auto-route-editor__sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding-right: 1.5rem;
+    border-right: 1px solid var(--ink-100);
+}
+
+.auto-route-editor .field-label {
+    color: var(--ink-800);
+    font-size: 0.7rem;
+    font-weight: 760;
+    letter-spacing: 0.02em;
+}
+
+.auto-route-editor .field-help {
+    margin: 0.45rem 0 0;
+    color: var(--ink-500);
+    font-size: 0.68rem;
+    line-height: 1.5;
+}
+
+.auto-route-name-field {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    margin-top: 0.4rem;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    background: var(--surface, #fff);
+    overflow: hidden;
+}
+
+.auto-route-name-field > span {
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    padding: 0 0.75rem;
+    border-right: 1px solid var(--ink-200);
+    background: var(--ink-50);
+    color: var(--ink-600);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+}
+
+.auto-route-name-field .field {
+    border: 0;
+    border-radius: 0;
+}
+
+.auto-route-name-field .field:disabled {
+    color: var(--ink-500);
+    background: var(--ink-50);
+}
+
+.auto-route-candidate-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1.3rem;
+}
+
+.auto-route-candidate-heading h3,
+.auto-route-candidate-heading p {
+    margin: 0;
+}
+
+.auto-route-candidate-heading h3 {
+    color: var(--ink-900);
+    font-size: 0.86rem;
+}
+
+.auto-route-candidate-heading p {
+    margin-top: 0.25rem;
+    color: var(--ink-500);
+    font-size: 0.68rem;
+}
+
+.auto-route-candidates {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0.8rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.auto-route-candidate {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.65rem;
+    border: 1px solid var(--ink-100);
+    border-radius: var(--radius-sm);
+    background: var(--ink-50);
+}
+
+.auto-route-candidate__priority {
+    display: grid;
+    width: 1.8rem;
+    height: 1.8rem;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink-900);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 780;
+}
+
+.auto-route-candidate__identity {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.auto-route-candidate__identity strong {
+    overflow: hidden;
+    color: var(--ink-800);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-route-candidate__identity small {
+    font-size: 0.62rem;
+}
+
+.auto-route-candidate__controls {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.auto-route-candidate__button {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--ink-200);
+    border-radius: 0.4rem;
+    background: #fff;
+    color: var(--ink-700);
+    font-size: 0.62rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.auto-route-candidate__button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.auto-route-add-row {
+    display: grid;
+    grid-template-columns: minmax(10rem, 0.35fr) minmax(12rem, 1fr) auto;
+    gap: 0.55rem;
+    margin-top: 0.8rem;
+}
+
+.auto-route-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.auto-route-actions .field-help {
+    margin: 0;
+}
+
+.auto-route-empty {
+    padding: 1.25rem;
+    border: 1px dashed var(--ink-200);
+    border-radius: var(--radius-sm);
+}
+
+.auto-route-editor .tone-positive-text {
+    color: var(--emerald-700, #08775b);
+}
+
+.auto-route-editor .tone-warning-text {
+    color: var(--amber-700, #9a5b00);
+}
+
+.auto-route-editor .tone-danger-text {
+    color: var(--red-700, #b42318);
+}
+
+@media (max-width: 70rem) {
+    .auto-route-editor {
+        grid-template-columns: 1fr;
+    }
+
+    .auto-route-editor__sidebar {
+        padding-right: 0;
+        padding-bottom: 1rem;
+        border-right: 0;
+        border-bottom: 1px solid var(--ink-100);
+    }
+}
+
+@media (max-width: 48rem) {
+    .auto-route-add-row {
+        grid-template-columns: 1fr;
+    }
+
+    .auto-route-candidate {
+        grid-template-columns: 2rem minmax(0, 1fr);
+    }
+
+    .auto-route-candidate__controls {
+        grid-column: 2;
+        flex-wrap: wrap;
+    }
+
+    .auto-route-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+}

@@ -229,6 +229,7 @@ def register_optimized_routes(
                 app,
                 auth_service_cls,
                 payload.get("model"),
+                proxy_service_cls,
             )
             target_reservation = RateLimitService.reserve_request_slot(
                 provider=provider,
@@ -276,6 +277,7 @@ def register_optimized_routes(
                     app,
                     auth_service_cls,
                     result.options.summary_model,
+                    proxy_service_cls,
                 )
 
                 summary_payload = _build_summary_payload(result)

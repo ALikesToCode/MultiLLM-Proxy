@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import requests
 
+from services.auto_route_service import AutoRouteService
 from services.rate_limit_service import LimitDecision
 from tests.test_context_optimizer import image_prompt
 
@@ -108,6 +109,36 @@ class OptimizedChatRouteTest(unittest.TestCase):
             ],
             "optimization": optimization,
         }
+
+    def test_deterministic_route_accepts_saved_auto_model(self):
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-provider-key"
+        AutoRouteService.save_route(
+            "auto:glm-5.2",
+            ["opencode:glm-5.2"],
+            self.app.config["API_BASE_URLS"],
+        )
+        upstream_response = self._raw_response(
+            b'{"id":"chatcmpl_auto","object":"chat.completion","choices":[]}'
+        )
+
+        reserve_patch, finalize_patch = self._rate_patches()
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request, reserve_patch as reserve_request, finalize_patch:
+            response = self.client.post(
+                "/optimize/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "auto:glm-5.2",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_args.kwargs["api_provider"], "opencode")
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Route"], "auto:glm-5.2")
+        self.assertEqual(reserve_request.call_args.kwargs["provider"], "auto")
 
     def test_deterministic_route_strips_options_and_accounts_transformed_payload_once(self):
         older_prompt = image_prompt("the old image")

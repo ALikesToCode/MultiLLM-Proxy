@@ -13,22 +13,65 @@ from route_helpers import (
     login_required,
     stream_upstream_response,
 )
+from routes.auto_routes import (
+    dispatch_auto_route_chat_completion,
+    openai_auto_route_models,
+    register_auto_route_admin_routes,
+)
 from services.auth_service import AuthService
+from services.auto_route_service import AutoRouteService
 from services.model_registry import ModelRegistry
+from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
+NANOGPT_KEY_REJECTION_STATUS_CODES = frozenset({401, 403, 429})
 NATIVE_RESPONSES_PROVIDERS = frozenset(
     {"codex-easy", "linkapi", "nanogpt", "navyai"}
 )
 
 
-def _provider_token(auth_service_cls, provider: str) -> str:
-    token = auth_service_cls.get_google_token() if provider == "googleai" else auth_service_cls.get_api_key(provider)
+def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> str:
+    if provider == "googleai":
+        token = auth_service_cls.get_google_token()
+    elif provider == "nanogpt":
+        try:
+            token = NanoGPTKeyPool.select_key(
+                auth_service_cls.get_api_keys("nanogpt"),
+                lambda api_key: proxy_service_cls.probe_nanogpt_key(
+                    app.config["API_BASE_URLS"]["nanogpt"],
+                    api_key,
+                    app.config["NANOGPT_KEY_CHECK_TIMEOUT_SECONDS"],
+                ),
+                check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
+                rejected_cooldown_seconds=app.config[
+                    "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
+                ],
+            )
+        except NanoGPTKeyPoolExhausted as error:
+            raise APIError(str(error), status_code=503) from error
+    else:
+        token = auth_service_cls.get_api_key(provider)
     if not token:
         raise APIError(f"API key not configured for {provider}", status_code=503)
     return token
+
+
+def _invalidate_nanogpt_token(app, provider: str, token: str, status_code: int) -> None:
+    if (
+        provider != "nanogpt"
+        or status_code not in NANOGPT_KEY_REJECTION_STATUS_CODES
+    ):
+        return
+    NanoGPTKeyPool.invalidate(
+        token,
+        status_code,
+        check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
+        rejected_cooldown_seconds=app.config[
+            "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
+        ],
+    )
 
 
 def _resolve_enabled_model(app, model_id: str):
@@ -68,11 +111,55 @@ def serialize_unified_chat_payload(payload: dict) -> bytes:
     ).encode("utf-8")
 
 
-def validate_unified_chat_target(app, auth_service_cls, model_id: str) -> str:
-    """Validate model availability and credentials without dispatching upstream."""
+def _validate_direct_chat_target(
+    app,
+    auth_service_cls,
+    proxy_service_cls,
+    model_id: str,
+) -> str:
     provider, _, _ = _resolve_enabled_model(app, model_id)
-    _provider_token(auth_service_cls, provider)
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
     return provider
+
+
+def validate_unified_chat_target(
+    app,
+    auth_service_cls,
+    model_id: str,
+    proxy_service_cls=None,
+) -> str:
+    """Validate model availability and credentials without dispatching upstream."""
+    if proxy_service_cls is None:
+        from services.proxy_service import ProxyService
+
+        proxy_service_cls = ProxyService
+
+    if not AutoRouteService.is_auto_route(model_id):
+        return _validate_direct_chat_target(
+            app,
+            auth_service_cls,
+            proxy_service_cls,
+            model_id,
+        )
+
+    route = AutoRouteService.get_route(model_id)
+    if route is None:
+        raise APIError(f"Auto route not found: {model_id}", status_code=404)
+    for candidate in route.candidates:
+        try:
+            _validate_direct_chat_target(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                candidate,
+            )
+            return "auto"
+        except (APIError, ValueError):
+            continue
+    raise APIError(
+        f"No configured provider is available for auto route: {route.id}",
+        status_code=503,
+    )
 
 
 def _pass_through_response(response: requests.Response) -> Response:
@@ -116,7 +203,7 @@ def _chat_response_to_responses_payload(chat_payload: dict, requested_model: str
     }
 
 
-def dispatch_unified_chat_completion(
+def _dispatch_unified_chat_candidate(
     app,
     auth_service_cls,
     metrics_service_cls,
@@ -126,8 +213,10 @@ def dispatch_unified_chat_completion(
     request_headers=None,
     request_args=None,
     request_timeout=None,
+    metrics_model=None,
+    route_decision=None,
 ):
-    """Dispatch a validated unified Chat Completions payload."""
+    """Dispatch one explicit provider:model Chat Completions candidate."""
     start_time = time.time()
     provider = "unknown"
     headers_source = request.headers if request_headers is None else request_headers
@@ -137,7 +226,7 @@ def dispatch_unified_chat_completion(
             app,
             payload.get("model"),
         )
-        token = _provider_token(auth_service_cls, provider)
+        token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
         upstream_payload = _copy_request_payload(payload, provider_model)
         raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
@@ -178,11 +267,14 @@ def dispatch_unified_chat_completion(
         response = proxy_service_cls.make_request(
             **request_kwargs,
         )
+        _invalidate_nanogpt_token(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
             status_code=response.status_code,
             response_time=(time.time() - start_time) * 1000,
+            model=metrics_model,
+            route_decision=route_decision,
         )
 
         if isinstance(response, Response):
@@ -203,8 +295,66 @@ def dispatch_unified_chat_completion(
             provider=provider,
             status_code=status_code,
             response_time=(time.time() - start_time) * 1000,
+            model=metrics_model,
+            route_decision=route_decision,
         )
         raise
+
+
+def dispatch_unified_chat_completion(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    *,
+    request_headers=None,
+    request_args=None,
+    request_timeout=None,
+):
+    """Dispatch an explicit or dashboard-configured unified chat model."""
+    if AutoRouteService.is_auto_route(payload.get("model")):
+        def validate_candidate(candidate: str) -> None:
+            _validate_direct_chat_target(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                candidate,
+            )
+
+        def dispatch_candidate(
+            candidate_payload: dict,
+            candidate: str,
+            route_decision: str,
+        ) -> Response:
+            return _dispatch_unified_chat_candidate(
+                app,
+                auth_service_cls,
+                metrics_service_cls,
+                proxy_service_cls,
+                candidate_payload,
+                request_headers=request_headers,
+                request_args=request_args,
+                request_timeout=request_timeout,
+                metrics_model=candidate,
+                route_decision=route_decision,
+            )
+
+        return dispatch_auto_route_chat_completion(
+            payload,
+            validate_candidate=validate_candidate,
+            dispatch_candidate=dispatch_candidate,
+        )
+    return _dispatch_unified_chat_candidate(
+        app,
+        auth_service_cls,
+        metrics_service_cls,
+        proxy_service_cls,
+        payload,
+        request_headers=request_headers,
+        request_args=request_args,
+        request_timeout=request_timeout,
+    )
 
 
 def dispatch_unified_image_generation(
@@ -233,7 +383,7 @@ def dispatch_unified_image_generation(
                 status_code=400,
             )
 
-        token = _provider_token(auth_service_cls, provider)
+        token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
         upstream_path = "v1/images/generations"
         upstream_payload = _copy_request_payload(payload, provider_model)
         response = proxy_service_cls.make_request(
@@ -255,6 +405,7 @@ def dispatch_unified_image_generation(
             api_provider=provider,
             use_cache=False,
         )
+        _invalidate_nanogpt_token(app, provider, token, response.status_code)
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
@@ -301,6 +452,8 @@ def _responses_input_to_messages(payload: dict) -> list[dict]:
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
+    register_auto_route_admin_routes(app, login_required, auth_service_cls)
+
     @app.route("/v1/models", methods=["GET", "OPTIONS"])
     @csrf.exempt
     @api_auth_required
@@ -310,6 +463,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             for model in ModelRegistry.list_models(app.config["API_BASE_URLS"])
             if model.status != "disabled"
         ]
+        models.extend(openai_auto_route_models())
         return jsonify({"object": "list", "data": models})
 
     @app.route("/admin/models", methods=["GET"])
@@ -376,6 +530,12 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
         try:
             payload = request.get_json(silent=True) or {}
             requested_model = payload.get("model")
+            if AutoRouteService.is_auto_route(requested_model):
+                raise APIError(
+                    "Auto routes currently support /v1/chat/completions and "
+                    "/optimize/v1/chat/completions only",
+                    status_code=400,
+                )
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
 
             if provider == "kimi-code":
@@ -384,7 +544,12 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     status_code=400,
                 )
 
-            token = _provider_token(auth_service_cls, provider)
+            token = _provider_token(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                provider,
+            )
             if provider in NATIVE_RESPONSES_PROVIDERS:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
@@ -407,6 +572,12 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     data=json.dumps(upstream_payload).encode("utf-8"),
                     api_provider=provider,
                     use_cache=False,
+                )
+                _invalidate_nanogpt_token(
+                    app,
+                    provider,
+                    token,
+                    response.status_code,
                 )
 
                 metrics_service_cls.get_instance().track_request(

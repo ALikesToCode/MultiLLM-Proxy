@@ -36,6 +36,7 @@ class ControlPlaneUiTest(unittest.TestCase):
             "docs/design-preview.html",
             "static/design-tokens.json",
             "static/css/shell.css",
+            "static/css/auto-routes.css",
             "static/css/operations.css",
             "static/css/surfaces.css",
         ):
@@ -46,6 +47,7 @@ class ControlPlaneUiTest(unittest.TestCase):
             "static/css/shell.css",
             "static/css/operations.css",
             "static/css/surfaces.css",
+            "static/js/auto-routes.js",
             "static/js/dashboard.js",
             "static/js/openrouter.js",
             "static/js/users.js",
@@ -66,11 +68,13 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v3", worker)
+        self.assertIn("multillm-proxy-v5", worker)
         for asset in (
             "/static/css/shell.css",
+            "/static/css/auto-routes.css",
             "/static/css/operations.css",
             "/static/css/surfaces.css",
+            "/static/js/auto-routes.js",
             "/static/js/dashboard.js",
             "/static/js/openrouter.js",
             "/static/js/users.js",
@@ -83,6 +87,16 @@ class ControlPlaneUiTest(unittest.TestCase):
 
         self.assertIn("circuit.mode === 'bypassed'", dashboard)
         self.assertIn("'passthrough'", dashboard)
+
+    def test_auto_route_editor_uses_authenticated_external_script(self):
+        operations = self.read("templates/operations.html")
+        editor = self.read("static/js/auto-routes.js")
+
+        self.assertIn('id="auto-route-panel"', operations)
+        self.assertIn('data-auto-routes="{{ url_for(\'admin_auto_routes\') }}"', operations)
+        self.assertIn("js/auto-routes.js", operations)
+        self.assertIn("X-CSRFToken", editor)
+        self.assertNotIn("innerHTML", editor)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,8 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
     "X-MultiLLM-Summary, X-MultiLLM-Provider, X-MultiLLM-Model, "
     "X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, "
+    "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "
+    "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
@@ -313,8 +315,13 @@ def apply_operational_headers(response: Response) -> Response:
         # Response decoration must not re-read a rejected request body and
         # replace the route's original error response.
         payload = None
-    provider = provider_from_request_path(request.path, payload)
-    model = payload.get("model") if isinstance(payload, dict) else None
+    provider = getattr(g, "multillm_provider", None) or provider_from_request_path(
+        request.path,
+        payload,
+    )
+    model = getattr(g, "multillm_model", None) or (
+        payload.get("model") if isinstance(payload, dict) else None
+    )
     safe_provider = _safe_metadata_header(provider)
     safe_model = _safe_metadata_header(model)
 
@@ -328,8 +335,10 @@ def apply_operational_headers(response: Response) -> Response:
     if safe_model:
         response.headers["X-MultiLLM-Model"] = safe_model
 
-    response.headers["X-MultiLLM-Route-Decision"] = (
-        "unresolved" if provider in {"unified", "optimize"} else "explicit"
+    response.headers["X-MultiLLM-Route-Decision"] = getattr(
+        g,
+        "multillm_route_decision",
+        "unresolved" if provider in {"unified", "optimize"} else "explicit",
     )
 
     started_at = getattr(g, "request_started_at", None)
