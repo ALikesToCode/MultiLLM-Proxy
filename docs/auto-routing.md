@@ -97,6 +97,7 @@ MultiLLM advances to the next locally available candidate only when the
 current attempt returns a definite pre-generation availability rejection:
 
 - `401` or `403`: provider credential rejected;
+- `402`: provider balance or payment requirement prevents generation;
 - `404`: provider/model unavailable;
 - `429`: provider rate limit reached; or
 - a local `503` marked with `X-MultiLLM-Circuit-State: open` or `half_open`,
@@ -130,7 +131,8 @@ later request.
 
 An automatic request does not replay the same paid generation against another
 NanoGPT key. After a NanoGPT rejection it advances to the next provider in the
-virtual model. A later request can select another working NanoGPT key.
+virtual model. A `402` insufficient-balance response also advances without
+replaying NanoGPT. A later request can select another working NanoGPT key.
 
 Provider catalogs change over time. Query `/nanogpt/v1/models`,
 `/opencode/v1/models`, and `/navyai/v1/models`, then enter the exact returned

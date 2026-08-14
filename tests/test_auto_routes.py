@@ -106,6 +106,52 @@ class AutoRouteTest(UnifiedApiTestCase):
             "open code fallback",
         )
 
+    def test_auto_chat_advances_after_provider_insufficient_balance(self):
+        os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
+        insufficient_balance = requests.Response()
+        insufficient_balance.status_code = 402
+        insufficient_balance._content = (
+            b'{"error":"Insufficient balance","code":"insufficient_balance",'
+            b'"availableBalance":0,"requiredBalance":0.01054176}'
+        )
+        insufficient_balance.headers["Content-Type"] = "application/json"
+        success = self._chat_response("open code balance fallback")
+
+        with (
+            patch(
+                "routes.unified.NanoGPTKeyPool.select_key",
+                return_value="nano-provider-key",
+            ),
+            patch(
+                "app.ProxyService.make_request",
+                side_effect=[insufficient_balance, success],
+            ) as make_request,
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "auto:glm-5.2",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [call.kwargs["api_provider"] for call in make_request.call_args_list],
+            ["nanogpt", "opencode"],
+        )
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Auto-Selected-Model"],
+            "opencode:glm-5.2",
+        )
+        self.assertEqual(
+            response.get_json()["choices"][0]["message"]["content"],
+            "open code balance fallback",
+        )
+
     def test_auto_chat_does_not_replay_ambiguous_server_failure(self):
         os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
         server_failure = requests.Response()

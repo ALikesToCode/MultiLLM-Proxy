@@ -333,8 +333,9 @@ For detailed usage examples with headers and request bodies, refer to the API En
 
 `POST /v1/chat/completions` accepts dashboard-managed virtual models such as
 `auto:glm-5.2`. The seeded route tries NanoGPT, OpenCode, then NavyAI and moves
-forward only after a definite authentication, model-availability, rate-limit,
-or local circuit rejection. Direct `provider:model` requests remain unchanged.
+forward only after a definite authentication, payment, model-availability,
+rate-limit, or local circuit rejection. Direct `provider:model` requests remain
+unchanged.
 
 Administrators can reorder candidates and create more virtual models from the
 Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)

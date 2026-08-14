@@ -13,7 +13,10 @@ from services.provider_catalog_service import (
     ProviderCatalogService,
 )
 
-AUTO_ROUTE_FALLBACK_STATUS_CODES = frozenset({401, 403, 404, 429})
+# Payment-required responses mean this candidate cannot serve the request with
+# its current credentials. Explicit auto routes may safely try the next
+# provider because the rejected candidate did not perform a generation.
+AUTO_ROUTE_FALLBACK_STATUS_CODES = frozenset({401, 402, 403, 404, 429})
 logger = logging.getLogger(__name__)
 
 

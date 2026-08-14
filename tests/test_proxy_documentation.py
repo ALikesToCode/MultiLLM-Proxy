@@ -42,6 +42,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertIn("opencode:live-only-model", body)
         self.assertIn("OPENCODE_GO_API_KEY", body)
         self.assertIn("NANOGPT_API_KEY_1", body)
+        self.assertIn("<code>402</code>", body)
         self.assertIn("Images deliberately do not use", body)
         self.assertNotIn("opencode-provider-key", body)
         self.assertNotIn("nano-secret-never-render", body)
