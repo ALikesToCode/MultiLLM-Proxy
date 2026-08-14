@@ -149,8 +149,11 @@ def build_proxy_documentation(
     base_urls: Mapping[str, str],
     auth_service_cls,
     base_url: str,
+    *,
+    runtime_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the credential-safe, runtime-backed setup guide payload."""
+    runtime = runtime_config or {}
     routes = AutoRouteService.list_routes()
     models = build_model_catalog(base_urls, routes)
     adapters = get_registry(base_urls)
@@ -238,6 +241,9 @@ def build_proxy_documentation(
 
     models.sort(key=lambda model: model["id"])
     auto_model = auto_routes[0]["id"] if auto_routes else "auto:glm-5.2"
+    nanogpt_billing_mode = str(
+        runtime.get("NANOGPT_BILLING_MODE") or "subscription"
+    ).lower()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "base_url": base_url,
@@ -258,4 +264,19 @@ def build_proxy_documentation(
         "models": models,
         "auto_routes": auto_routes,
         "examples": _examples(base_url, auto_model),
+        "nanogpt": {
+            "billing_mode": nanogpt_billing_mode,
+            "subscription_only": nanogpt_billing_mode == "subscription",
+            "text_base_url": base_urls.get("nanogpt"),
+            "model_catalog_path": "/v1/models",
+        },
+        "client_integrations": {
+            "janitor_ai": {
+                "proxy_url": f"{base_url}/roleplay/v1/chat/completions",
+                "api_key_env": "ROLEPLAY_API_KEY",
+                "model": "roleplay:auto",
+                "append_chat_completions": False,
+                "direct_navy_url": "https://api.navy/v1/chat/completions",
+            }
+        },
     }

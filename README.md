@@ -360,9 +360,10 @@ the selected provider. An explicit `reasoning_effort` still lowers the effort;
 `max` means the provider's real maximum rather than a literal unsupported value.
 
 Long unified and roleplay requests also select a provider-supported prompt-cache
-mode automatically. NanoGPT receives `caching: true`, known affinity-key
-transports receive a stable hashed key, and automatic-cache providers keep their
-native schema. Configure `PROMPT_CACHE_ENABLED` and
+mode automatically. NanoGPT standard/PAYG mode receives `caching: true`, while
+subscription-only mode deliberately omits that flag because NanoGPT routes it
+through PAYG provider selection. Known affinity-key transports receive a stable
+hashed key, and automatic-cache providers keep their native schema. Configure `PROMPT_CACHE_ENABLED` and
 `PROMPT_CACHE_MIN_TOKENS`; response headers report the selected mode. This does
 not cache or replay generated responses, and raw provider routes remain
 caller-controlled.
@@ -471,6 +472,15 @@ NanoGPT routes keep their single-attempt transport contract. To forward a
 caller-owned upstream bearer/API key, partner
 JWT, Navy OAuth token, or NanoGPT L402 credential, authenticate the proxy with
 `X-MultiLLM-Api-Key` and keep the provider credential in its native header.
+
+NanoGPT unified text routing defaults to `NANOGPT_BILLING_MODE=subscription`
+and uses `https://nano-gpt.com/api/subscription`. Key checks and live model
+discovery use that same subscription catalog, and `/v1/responses` is bridged to
+subscription Chat Completions because NanoGPT's subscription Responses path is
+not available. Set `NANOGPT_BILLING_MODE=standard` only for an account that
+intentionally permits PAYG. Raw `/nanogpt/*` and NanoGPT media routes retain the
+standard provider contract and remain subject to the account's own billing
+guard.
 
 NanoGPT batch routes are automatically sent to its dedicated batch host.
 Browser-based NanoGPT and NavyAI authorization pages remain direct because the

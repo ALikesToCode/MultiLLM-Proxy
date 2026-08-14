@@ -23,6 +23,8 @@ NANOGPT_API_KEY_1=your-second-nanogpt-api-key
 # NANO_GPT_KEY_1=your-second-nanogpt-api-key
 
 # Optional overrides
+NANOGPT_BILLING_MODE=subscription
+NANOGPT_SUBSCRIPTION_BASE_URL=https://nano-gpt.com/api/subscription
 NANOGPT_BASE_URL=https://nano-gpt.com/api
 NANOGPT_BATCH_BASE_URL=https://api.nano-gpt.com/api/v1
 NANOGPT_ORIGIN_URL=https://nano-gpt.com
@@ -36,9 +38,11 @@ NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS=60
 The default request limit is 16 MiB. Increase it only when a documented media
 endpoint requires a larger body and the deployment can safely accept it.
 
-With multiple keys, the Container checks `GET /api/v1/models` before the first
-authenticated request and remembers the first 2xx key. A single configured key
-is used immediately. Both cases revalidate after 50 completed upstream
+With multiple keys, the Container checks the read-only model catalog for the
+selected traffic class before the first authenticated request and remembers the
+first 2xx key. Raw traffic and unified/subscription traffic keep independent
+working-key health so a standard-catalog result cannot override a subscription
+selection. A single configured key is used immediately. Both cases revalidate after 50 completed upstream
 requests or five minutes by default. A transient catalog error retains the last
 working key; a definite
 `401`, `402`, `403`, or `429` invalidates it. Direct `/nanogpt/*` calls return
@@ -49,6 +53,35 @@ pre-generation rejections; their response includes
 `X-MultiLLM-Credential-Attempts`. Ambiguous transport and `5xx` outcomes are
 never replayed. Cloudflare roleplay sessions follow the same safe-retry policy
 while persisting only the successful key identifier, never the secret.
+
+## Subscription-only text mode
+
+`NANOGPT_BILLING_MODE=subscription` is the default for unified Chat, the
+Responses compatibility bridge, roleplay, model discovery, and key checks.
+Those requests use `https://nano-gpt.com/api/subscription`. The deployed
+default does not add `X-Billing-Mode: paygo`, provider-selection headers, or a
+body `provider` field. It also removes `caching: true`: live validation showed
+that flag opts the request into NanoGPT's PAYG provider path, while the same
+GLM-5.2 Thinking request succeeds on the subscription endpoint without it.
+
+Use the unified endpoint for a subscription model:
+
+```bash
+curl "$PROXY_BASE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"nanogpt:zai-org/glm-5.2:thinking",
+    "messages":[{"role":"user","content":"Continue."}]
+  }'
+```
+
+NanoGPT's subscription `/v1/responses` path currently returns `404`, so
+MultiLLM translates unified Responses input to subscription Chat Completions
+and converts the successful result back to the Responses shape. Raw
+`/nanogpt/*` and NanoGPT media paths retain the standard provider contract;
+the NanoGPT account's disabled-PAYG setting remains the final billing guard.
+Set `NANOGPT_BILLING_MODE=standard` only when PAYG is intentional.
 
 ## URL mapping
 

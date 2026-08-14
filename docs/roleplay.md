@@ -102,8 +102,9 @@ OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
 does not expose a supported effort overlay for that model.
 
 Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
-input tokens by default). NanoGPT receives its documented `caching: true`
-routing hint; other roleplay providers keep an unchanged schema and can reuse
+input tokens by default). NanoGPT receives its `caching: true` routing hint only
+in `NANOGPT_BILLING_MODE=standard`; subscription mode omits that PAYG-triggering
+field and reports `nanogpt-subscription-only`. Other roleplay providers keep an unchanged schema and can reuse
 stable prefixes through their automatic caching. Set `"prompt_cache": false`
 for one turn or `PROMPT_CACHE_ENABLED=false` for the deployment. The response
 reports `X-MultiLLM-Prompt-Cache`, `X-MultiLLM-Prompt-Cache-Mode`, and the
@@ -151,6 +152,13 @@ Create a proxy configuration with:
 The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
+
+If JanitorAI's browser console reports a `connect-src` Content Security Policy
+block for the Worker origin, the request never reaches MultiLLM. A Worker CORS
+header cannot override JanitorAI's CSP; JanitorAI must allowlist the origin, or
+the client must use an endpoint already allowed by that policy. Direct
+`https://api.navy/v1/chat/completions` is an alternative when JanitorAI permits
+`api.navy`, but it bypasses MultiLLM failover and Durable Object memory.
 
 JanitorAI normally sends OpenAI-style message history. Repeated requests with
 the same opening land on the same Durable Object, so compacted continuity

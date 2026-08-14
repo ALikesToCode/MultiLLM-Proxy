@@ -39,6 +39,7 @@
 
     <nav class="docs-jump-nav" aria-label="Guide sections">
         <a href="#quick-start">Quick start</a>
+        <a href="#janitor-ai">Janitor AI</a>
         <a href="#route-contracts">Route contracts</a>
         <a href="#provider-setup">Provider setup</a>
         <a href="#automatic-routes">Automatic routes</a>
@@ -79,6 +80,44 @@
             </div>
             <pre><code>{{ documentation.examples.models }}</code></pre>
         </article>
+    </section>
+
+    <section class="docs-section" id="janitor-ai" aria-labelledby="janitor-ai-title">
+        <header class="docs-section__header">
+            <div>
+                <p class="eyebrow">Roleplay client</p>
+                <h2 id="janitor-ai-title">Janitor AI configuration</h2>
+                <p>Use the Worker-native compatibility endpoint for durable roleplay memory, complete system-prompt continuity, and automatic Kimi/GLM provider selection.</p>
+            </div>
+        </header>
+
+        {% set janitor = documentation.client_integrations.janitor_ai %}
+        <div class="secret-guide">
+            <div>
+                <strong>Custom proxy fields</strong>
+                <pre><code>Name=MultiLLM Roleplay
+Proxy URL={{ janitor.proxy_url }}
+API key=&lt;value of {{ janitor.api_key_env }}&gt;
+Model={{ janitor.model }}</code></pre>
+            </div>
+            <div>
+                <strong>Janitor switches</strong>
+                <pre><code>Add /chat/completions=Disabled
+Custom prompt=None
+Protocol=OpenAI-compatible
+Transport=HTTPS</code></pre>
+            </div>
+        </div>
+        <p class="docs-fine-print">The proxy URL is already the complete Chat Completions endpoint. Save it, hard-refresh Janitor AI, then select <code>MultiLLM Roleplay</code>. Use the Worker-facing <code>{{ janitor.api_key_env }}</code>, never a NanoGPT, NavyAI, or other upstream provider key.</p>
+
+        <aside class="docs-callout docs-callout--warning">
+            <strong>A Janitor <code>connect-src</code> CSP error is controlled by Janitor AI.</strong>
+            <p>If the browser console says it blocked <code>{{ janitor.proxy_url }}</code>, MultiLLM never received the request. CORS headers on this Worker cannot override another site's Content Security Policy. Janitor must allowlist this Worker origin, or the request must come from a client that permits custom origins.</p>
+        </aside>
+        <aside class="docs-callout">
+            <strong>Direct NavyAI is the browser-compatible fallback when Janitor allows <code>api.navy</code>.</strong>
+            <p>Use <code>{{ janitor.direct_navy_url }}</code>, your NavyAI subscription key, and an exact model from NavyAI's catalog. That bypasses MultiLLM, so automatic cross-provider failover and Worker roleplay memory are not available.</p>
+        </aside>
     </section>
 
     <section class="docs-section" id="route-contracts" aria-labelledby="route-contracts-title">
@@ -160,6 +199,10 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
             </div>
         </div>
         <p class="docs-fine-print">Restart local/container services after environment changes. Editing a repository <code>.env</code> file does not rotate secrets in an already deployed Worker.</p>
+        <aside class="docs-callout">
+            <strong>NanoGPT text billing mode: <code>{{ documentation.nanogpt.billing_mode }}</code>.</strong>
+            <p>{% if documentation.nanogpt.subscription_only %}Unified NanoGPT chat, Responses compatibility, key checks, and model discovery use the subscription endpoint. MultiLLM removes <code>caching: true</code> and caller provider/billing overrides because NanoGPT treats those as PAYG selection; no PAYG override is added automatically. Provider-native media routes retain NanoGPT's standard media contract and remain protected by the account's own disabled-PAYG setting.{% else %}NanoGPT text requests use the standard endpoint and may use caller-selected provider or cache routing according to NanoGPT's account settings.{% endif %}</p>
+        </aside>
 
         <div class="provider-grid">
             {% for provider in documentation.providers %}

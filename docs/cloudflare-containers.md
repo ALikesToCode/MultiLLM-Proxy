@@ -67,6 +67,11 @@ npx wrangler secret put OPENROUTER_API_KEY
 Set only the providers you actually use. The Worker forwards these directly
 into the container. It also forwards numbered `GROQ_API_KEY_N`,
 `NANOGPT_API_KEY_N`, and compatibility `NANO_GPT_KEY_N` secrets automatically.
+The committed Worker variables set `NANOGPT_BILLING_MODE=subscription` and
+`NANOGPT_SUBSCRIPTION_BASE_URL=https://nano-gpt.com/api/subscription`. These are
+non-secret routing settings; keep the API keys in Wrangler secrets. Do not add
+an `X-Billing-Mode: paygo` override when the NanoGPT account is subscription
+only.
 
 ### Native roleplay sessions
 

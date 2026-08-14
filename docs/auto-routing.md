@@ -62,14 +62,18 @@ conversation text or model responses, and it is not shared between containers.
 Eligible unified Chat and Responses requests automatically use the selected
 provider's supported prompt-cache mechanism. `PROMPT_CACHE_ENABLED=true` turns
 the policy on, and `PROMPT_CACHE_MIN_TOKENS=1024` controls its estimated-input
-threshold. NanoGPT Chat receives `caching: true`; known cache-key transports
-receive a stable SHA-256-derived affinity key; Grok Chat receives its
+threshold. NanoGPT standard mode receives `caching: true`; subscription-only
+mode omits it because NanoGPT treats that flag as PAYG provider selection.
+Known cache-key transports receive a stable SHA-256-derived affinity key; Grok Chat receives its
 conversation-affinity header. Providers such as NavyAI, OpenCode, and
 OpenRouter keep their native request schema and rely on automatic stable-prefix
 caching.
 
 Caller-supplied `caching`, `prompt_caching`, `prompt_cache_key`, nested
-`cache_control`, or `X-Grok-Conv-Id` values always win. Response headers report
+`cache_control`, or `X-Grok-Conv-Id` values normally win. NanoGPT subscription
+mode is the exception: MultiLLM removes PAYG provider/billing overrides and the
+top-level `caching` flag so a subscription request cannot silently become a
+paid route. Response headers report
 the attempted mode through `X-MultiLLM-Prompt-Cache`,
 `X-MultiLLM-Prompt-Cache-Mode`, and
 `X-MultiLLM-Prompt-Cache-Estimated-Tokens`. This is upstream prompt caching,

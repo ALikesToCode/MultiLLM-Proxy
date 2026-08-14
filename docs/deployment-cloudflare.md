@@ -191,6 +191,9 @@ npx wrangler secret put GOOGLE_ENDPOINT
 ```
 
 Do not place API keys in `wrangler.jsonc` `vars`. Use Worker secrets.
+NanoGPT's non-secret deployment default is subscription-only text routing via
+`NANOGPT_BILLING_MODE=subscription`; `wrangler.jsonc` supplies the corresponding
+subscription base URL to both the Worker roleplay path and the Container.
 
 ## Deploy Steps
 

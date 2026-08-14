@@ -10,6 +10,7 @@ def register_documentation_routes(app, auth_service_cls) -> None:
             app.config["API_BASE_URLS"],
             auth_service_cls,
             request.url_root.rstrip("/"),
+            runtime_config=app.config,
         )
 
     @app.route("/docs")

@@ -38,6 +38,12 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("One proxy. Explicit contracts.", body)
+        self.assertIn("Janitor AI configuration", body)
+        self.assertIn("/roleplay/v1/chat/completions", body)
+        self.assertIn("roleplay:auto", body)
+        self.assertIn("connect-src", body)
+        self.assertIn("NanoGPT text billing mode", body)
+        self.assertIn("subscription endpoint", body)
         self.assertIn('href="/docs"', body)
         self.assertIn("/v1/chat/completions", body)
         self.assertIn("/v1/images/generations", body)
@@ -91,6 +97,12 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         )
         self.assertIn("auto:glm-5.2", models)
         self.assertEqual(payload["auto_routes"][0]["id"], "auto:glm-5.2")
+        self.assertEqual(payload["nanogpt"]["billing_mode"], "subscription")
+        self.assertTrue(payload["nanogpt"]["subscription_only"])
+        self.assertEqual(
+            payload["client_integrations"]["janitor_ai"]["proxy_url"],
+            "http://localhost/roleplay/v1/chat/completions",
+        )
 
     def test_trusted_worker_headers_preserve_public_https_origin(self):
         os.environ["MULTILLM_TRUST_PROXY_HEADERS"] = "true"
