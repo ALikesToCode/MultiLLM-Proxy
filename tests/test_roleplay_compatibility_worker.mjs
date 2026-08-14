@@ -56,18 +56,29 @@ function isCompactionPayload(payload) {
   );
 }
 
-test("Janitor Chat Completions stays native and exposes session metadata", async () => {
+test("Janitor Chat Completions keeps edge sessions and uses OpenCode Container egress", async () => {
   const fixture = makeRoleplayEnv();
+  let containerCalls = 0;
   fixture.env.MULTILLM_PROXY_CONTAINER = {
-    getByName() {
-      assert.fail("Janitor roleplay must not wake the container");
+    getByName(name) {
+      assert.equal(name, "primary");
+      return {
+        async fetch(request) {
+          containerCalls += 1;
+          assert.equal(
+            new URL(request.url).pathname,
+            "/opencode/v1/chat/completions",
+          );
+          const payload = await request.json();
+          return completionResponse(payload.model, "Mira listens.");
+        },
+      };
     },
   };
 
   const response = await withGlobalFetch(
-    async (_input, init) => {
-      const payload = JSON.parse(init.body);
-      return completionResponse(payload.model, "Mira listens.");
+    async () => {
+      assert.fail("Janitor OpenCode traffic must not use Worker-origin fetch");
     },
     () =>
       worker.fetch(
@@ -97,6 +108,7 @@ test("Janitor Chat Completions stays native and exposes session metadata", async
     response.headers.get("Access-Control-Expose-Headers") ?? "",
     /X-Roleplay-Session-Source/,
   );
+  assert.equal(containerCalls, 1);
 });
 
 test("both roleplay Chat Completions aliases reject invalid input at the edge", async () => {

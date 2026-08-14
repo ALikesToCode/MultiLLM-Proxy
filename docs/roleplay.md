@@ -3,9 +3,11 @@
 `POST /v1/roleplay` is a native Cloudflare Worker route for long-running,
 streaming roleplay. OpenAI-compatible clients can use
 `POST /roleplay/v1/chat/completions` or
-`POST /v1/roleplay/chat/completions`. These routes do not wake the Flask
-Container. Each session maps to one SQLite-backed Durable Object, so turns for
-that session stay ordered while different sessions scale independently.
+`POST /v1/roleplay/chat/completions`. Session state and orchestration stay in
+the Worker. Each session maps to one SQLite-backed Durable Object, so turns for
+that session stay ordered while different sessions scale independently. When
+an OpenCode model is selected, only the provider request uses Container egress
+to avoid OpenCode's Worker-signature block.
 
 The default model policy uses OpenCode Go first and learns between:
 

@@ -20,6 +20,7 @@ function makeEnv(fetchImpl, envOverrides = {}) {
       return startCalls;
     },
     env: {
+      OPENCODE_EDGE_FETCH: "true",
       MULTILLM_PROXY_CONTAINER: {
         getByName(name) {
           assert.equal(name, "primary");
@@ -2751,6 +2752,110 @@ test("worker authenticates OpenCode callers before revealing provider configurat
 
   assert.equal(timingSafeCalls, 2);
   assert.equal(stub.getCalls(), 0);
+});
+
+test("worker routes OpenCode through the Container by default", async () => {
+  const requestBody = JSON.stringify({
+    model: "kimi-k3",
+    messages: [{ role: "user", content: "ping" }],
+    stream: false,
+  });
+  const rawResponse = JSON.stringify({
+    choices: [{ message: { content: "pong" } }],
+  });
+  const stub = makeEnv(
+    async (request) => {
+      assert.equal(
+        request.url,
+        "https://multillm-proxy.cserules.workers.dev/opencode/v1/chat/completions",
+      );
+      assert.equal(request.method, "POST");
+      assert.equal(
+        request.headers.get("Authorization"),
+        "Bearer admin-live-key",
+      );
+      assert.equal(await request.text(), requestBody);
+      return new Response(rawResponse, {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_GO_API_KEY: "go-live-key",
+      OPENCODE_EDGE_FETCH: "false",
+    },
+  );
+
+  await withGlobalFetch(async () => {
+    assert.fail("OpenCode must not use Worker-origin fetch by default");
+  }, async () => {
+    const response = await worker.fetch(
+      new Request(
+        "https://multillm-proxy.cserules.workers.dev/opencode/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer admin-live-key",
+            "Content-Type": "application/json",
+          },
+          body: requestBody,
+        },
+      ),
+      stub.env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), rawResponse);
+  });
+
+  assert.equal(stub.getCalls(), 1);
+});
+
+test("worker routes the OpenCode model catalog through the Container by default", async () => {
+  const rawResponse = JSON.stringify({
+    object: "list",
+    data: [{ id: "kimi-k2.6", object: "model" }],
+  });
+  const stub = makeEnv(
+    async (request) => {
+      assert.equal(
+        request.url,
+        "https://multillm-proxy.cserules.workers.dev/opencode/v1/models",
+      );
+      assert.equal(request.method, "GET");
+      assert.equal(
+        request.headers.get("Authorization"),
+        "Bearer admin-live-key",
+      );
+      return new Response(rawResponse, {
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_GO_API_KEY: "go-live-key",
+      OPENCODE_EDGE_FETCH: "false",
+    },
+  );
+
+  await withGlobalFetch(async () => {
+    assert.fail("OpenCode models must not use Worker-origin fetch by default");
+  }, async () => {
+    const response = await worker.fetch(
+      new Request(
+        "https://multillm-proxy.cserules.workers.dev/opencode/v1/models",
+        {
+          headers: { Authorization: "Bearer admin-live-key" },
+        },
+      ),
+      stub.env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), rawResponse);
+  });
+
+  assert.equal(stub.getCalls(), 1);
 });
 
 test("worker exposes protocol-native OpenCode Go chat and model routes", async () => {

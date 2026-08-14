@@ -1,6 +1,6 @@
 # Deploying MultiLLM-Proxy to Cloudflare Containers
 
-This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, native roleplay sessions, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and the Kimi Code model catalog directly. Kimi Code chat and the remaining Flask routes run through a Container.
+This repo uses a hybrid Cloudflare Worker plus Container deployment. The Worker serves health checks, roleplay session orchestration, native LinkAPI traffic, Codex Everywhere OpenAI traffic, and the Kimi Code model catalog directly. OpenCode provider traffic, Kimi Code chat, and the remaining Flask routes run through a Container.
 
 ## Why Containers, not Python Workers
 
@@ -11,7 +11,7 @@ Cloudflare's Python Workers runtime runs on Pyodide. Cloudflare's docs note that
 - threaded execution and SSE streaming
 - service-account JSON support for the `googleai` provider
 
-That makes Cloudflare Containers the safer target for the Python application. `/v1/roleplay`, `/linkapi/*`, and `/codex-easy/*` are Worker-native paths. The roleplay route uses one SQLite-backed Durable Object per session. The Worker serves `/kimi-code/v1/models` locally and rejects unauthorized or invalid Kimi requests without waking the Container; valid Kimi chat streams through Flask because Kimi's edge rejects Worker-origin egress.
+That makes Cloudflare Containers the safer target for the Python application. `/v1/roleplay`, `/linkapi/*`, and `/codex-easy/*` keep their orchestration in the Worker. The roleplay route uses one SQLite-backed Durable Object per session and sends only selected OpenCode provider calls through Container egress. The Worker serves `/kimi-code/v1/models` locally and rejects unauthorized or invalid Kimi requests without waking the Container; valid Kimi chat streams through Flask because Kimi's edge rejects Worker-origin egress.
 
 ## Prerequisites
 

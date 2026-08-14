@@ -245,6 +245,54 @@ test("roleplay fallback advances only after a clear provider rejection", async (
   assert.ok(calls.every((call) => call.url.includes("opencode.ai")));
 });
 
+test("roleplay sends OpenCode requests through Container egress", async () => {
+  let containerCalls = 0;
+  const fixture = makeRoleplayEnv({
+    MULTILLM_PROXY_CONTAINER: {
+      getByName(name) {
+        assert.equal(name, "primary");
+        return {
+          async fetch(request) {
+            containerCalls += 1;
+            assert.equal(
+              request.url,
+              "https://roleplay.internal/opencode/v1/chat/completions",
+            );
+            assert.equal(
+              request.headers.get("X-MultiLLM-Api-Key"),
+              "admin-roleplay-key",
+            );
+            assert.equal(
+              request.headers.get("Authorization"),
+              "Bearer opencode-roleplay-key",
+            );
+            const payload = await request.json();
+            assert.equal(payload.model, "kimi-k2.6");
+            assert.equal("reasoning_effort" in payload, false);
+            return completionResponse(payload.model, "Mira stays in character.");
+          },
+        };
+      },
+    },
+  });
+
+  const response = await withGlobalFetch(async () => {
+    assert.fail("OpenCode roleplay must not use Worker-origin fetch");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-container-egress",
+        input: "Continue the scene.",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(containerCalls, 1);
+});
+
 test("roleplay stops fallback on ambiguous upstream failure", async () => {
   const fixture = makeRoleplayEnv({ NAVYAI_API_KEY: "navy-key" });
   let calls = 0;

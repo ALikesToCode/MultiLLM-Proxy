@@ -1664,6 +1664,35 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
   );
 }
 
+async function authorizeContainerOpencodeRequest(request, env, requestUrl) {
+  const providedToken = extractOpencodeCallerToken(request);
+  if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
+    return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
+  }
+
+  const upstreamPath = getOpencodeUpstreamPath(requestUrl.pathname);
+  if (!upstreamPath) {
+    return applyCorsHeaders(
+      request,
+      jsonResponse(
+        {
+          error: "Unsupported path",
+          message: "The requested OpenCode Go path is not supported.",
+        },
+        { status: 404 },
+      ),
+      env,
+    );
+  }
+
+  const callerAuth = opencodeCallerUpstreamAuth(request);
+  const upstreamToken = env.OPENCODE_GO_API_KEY || env.OPENCODE_API_KEY;
+  if (!upstreamToken && !callerAuth.authorization && !callerAuth.apiKey) {
+    return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
+  }
+  return null;
+}
+
 async function handleDirectLinkApiRequest(request, env, requestUrl) {
   const providedToken = extractLinkApiCallerToken(request, requestUrl);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
@@ -1966,15 +1995,25 @@ export default {
 
     if (opencodePath) {
       try {
-        return await handleDirectOpencodeRequest(request, env, requestUrl);
+        if (env.OPENCODE_EDGE_FETCH === "true") {
+          return await handleDirectOpencodeRequest(request, env, requestUrl);
+        }
+        const rejected = await authorizeContainerOpencodeRequest(
+          request,
+          env,
+          requestUrl,
+        );
+        if (rejected) {
+          return rejected;
+        }
       } catch (error) {
-        logStructuredError("direct_opencode_fetch_failed", error);
+        logStructuredError("opencode_edge_auth_failed", error);
         return applyCorsHeaders(
           request,
           jsonResponse(
             {
               error: "Proxy unavailable",
-              message: "The direct opencode worker fallback could not handle the request.",
+              message: "The OpenCode route could not be authorized.",
             },
             { status: 502 },
           ),

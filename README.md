@@ -343,11 +343,12 @@ For detailed usage examples with headers and request bodies, refer to the API En
 
 ### Cloudflare-native roleplay
 
-`POST /v1/roleplay` runs entirely in the Cloudflare Worker and a
-session-scoped Durable Object. JanitorAI and other OpenAI-compatible clients
-can use the full `/roleplay/v1/chat/completions` alias. It streams responses
-without waking the Flask Container, keeps turns ordered, stores bounded
-continuity memory, and records per-model latency and reliability.
+`POST /v1/roleplay` keeps orchestration and state in the Cloudflare Worker and
+a session-scoped Durable Object. JanitorAI and other OpenAI-compatible clients
+can use the full `/roleplay/v1/chat/completions` alias. It keeps turns ordered,
+stores bounded continuity memory, and records per-model latency and
+reliability. OpenCode generations use Container egress because OpenCode rejects
+Worker-origin HTTP signatures.
 
 The default policy explores and then selects between OpenCode Go
 `kimi-k2.6` and `glm-5.2`. OpenCode Go is the first provider tier, NavyAI is

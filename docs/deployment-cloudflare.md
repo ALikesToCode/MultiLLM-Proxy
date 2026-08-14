@@ -14,15 +14,24 @@ The supported Cloudflare target is a hybrid Worker plus Container deployment. Mo
 - Roleplay Durable Object: `RoleplaySession`, one instance per session
 - Observability: enabled
 
+OpenCode routes are authenticated at the Worker edge and then forwarded
+through the Container. OpenCode's edge rejects Worker-origin HTTP signatures
+with Cloudflare error `1010`, while the Container's normal HTTP client is
+accepted. Roleplay sessions use the same Container egress path whenever an
+OpenCode model is selected; other configured roleplay providers remain direct
+Worker fetches.
+
 ## Cloudflare-native roleplay
 
 `POST /v1/roleplay` and its OpenAI-compatible
-`/roleplay/v1/chat/completions` alias do not wake the Container. The Worker
-authenticates the caller with `ROLEPLAY_API_KEY` or the bootstrap
-`ADMIN_API_KEY`, validates a bounded JSON request, and sends it to the
-session's `ROLEPLAY_SESSION` Durable Object. Each session stores recent
-dialogue, a compact continuity digest, idempotency keys, and per-model EWMA
-latency/reliability statistics.
+`/roleplay/v1/chat/completions` alias keep authentication, validation, session
+state, memory, and adaptive selection in the Worker. The Worker authenticates
+the caller with `ROLEPLAY_API_KEY` or the bootstrap `ADMIN_API_KEY`, validates
+a bounded JSON request, and sends it to the session's `ROLEPLAY_SESSION`
+Durable Object. An OpenCode generation wakes the Container only for accepted
+upstream egress; other providers remain direct Worker fetches. Each session
+stores recent dialogue, a compact continuity digest, idempotency keys, and
+per-model EWMA latency/reliability statistics.
 
 Default routing uses OpenCode Go first and adapts between `kimi-k2.6` and
 `glm-5.2`. NavyAI is the second provider tier. Configured LinkAPI, NanoGPT, and

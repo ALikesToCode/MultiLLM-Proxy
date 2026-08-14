@@ -267,13 +267,31 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(candidate.endpoint, {
+    const headers = buildProviderHeaders(candidate, env, key);
+    const containerNamespace = env.MULTILLM_PROXY_CONTAINER;
+    const useOpenCodeContainer =
+      candidate.provider === "opencode" &&
+      env.ADMIN_API_KEY &&
+      containerNamespace &&
+      typeof containerNamespace.getByName === "function";
+    if (useOpenCodeContainer) {
+      headers.set("X-MultiLLM-Api-Key", env.ADMIN_API_KEY);
+    }
+    const requestInit = {
       method: "POST",
-      headers: buildProviderHeaders(candidate, env, key),
+      headers,
       body: JSON.stringify(payload),
       redirect: "manual",
       signal: controller.signal,
-    });
+    };
+    const response = useOpenCodeContainer
+      ? await containerNamespace.getByName("primary").fetch(
+          new Request(
+            "https://roleplay.internal/opencode/v1/chat/completions",
+            requestInit,
+          ),
+        )
+      : await fetch(candidate.endpoint, requestInit);
     clearTimeout(timeout);
     return {
       response,

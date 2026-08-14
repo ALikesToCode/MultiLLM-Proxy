@@ -9,6 +9,12 @@ bodies, streaming events, JSON bytes, status codes, repeated query parameters,
 and safe rate-limit/request headers. The proxy does not translate one protocol
 into the other.
 
+On Cloudflare, the Worker validates the proxy credential before waking the
+Container, then the Container performs the upstream request. This is required
+because OpenCode currently rejects Worker-origin HTTP signatures with
+Cloudflare error `1010`. The split-auth headers and provider credential stay
+inside the trusted Worker-to-Container request.
+
 ## Configuration
 
 ```env
