@@ -10,7 +10,7 @@ certifi==2026.4.22
 cffi==2.0.0
 charset-normalizer==3.4.7
 click==8.3.3
-cryptography==48.0.1
+cryptography==50.0.0
 google-auth==2.49.2
 gunicorn==25.3.0
 idna==3.15
