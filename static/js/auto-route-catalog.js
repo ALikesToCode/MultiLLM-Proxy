@@ -1,8 +1,7 @@
 (function registerAutoRouteCatalogView() {
     const MAX_VISIBLE_MODELS = 200;
-    window.MultiLLM = window.MultiLLM || {};
 
-    window.MultiLLM.createAutoRouteCatalog = function createAutoRouteCatalog({
+    function createAutoRouteCatalog({
         getState,
         onAddModel,
         onRefresh
@@ -159,5 +158,7 @@
         });
 
         return { render, renderModels, setRefreshing, setStatus };
-    };
+    }
+
+    window.MultiLLMAutoRoutes = Object.freeze({ createAutoRouteCatalog });
 }());

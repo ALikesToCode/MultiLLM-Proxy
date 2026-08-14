@@ -4,7 +4,7 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css', v='7') }}">
 {% endblock %}
 
 {% block content %}
@@ -409,7 +409,7 @@ NAVYAI_API_KEY=your-key</code></pre>
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% if user and user.is_admin %}
-<script src="{{ url_for('static', filename='js/auto-route-catalog.js') }}"></script>
-<script src="{{ url_for('static', filename='js/auto-routes.js') }}"></script>
+<script src="{{ url_for('static', filename='js/auto-route-catalog.js', v='7') }}"></script>
+<script src="{{ url_for('static', filename='js/auto-routes.js', v='7') }}"></script>
 {% endif %}
 {% endblock %}

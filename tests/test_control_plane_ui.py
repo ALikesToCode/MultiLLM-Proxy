@@ -69,14 +69,14 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v6", worker)
+        self.assertIn("multillm-proxy-v7", worker)
         for asset in (
             "/static/css/shell.css",
-            "/static/css/auto-routes.css",
+            "/static/css/auto-routes.css?v=7",
             "/static/css/operations.css",
             "/static/css/surfaces.css",
-            "/static/js/auto-route-catalog.js",
-            "/static/js/auto-routes.js",
+            "/static/js/auto-route-catalog.js?v=7",
+            "/static/js/auto-routes.js?v=7",
             "/static/js/dashboard.js",
             "/static/js/openrouter.js",
             "/static/js/users.js",
@@ -108,10 +108,18 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertIn("NANOGPT_API_KEY_1=your-second-key", operations)
         self.assertIn("js/auto-route-catalog.js", operations)
         self.assertIn("js/auto-routes.js", operations)
+        self.assertIn("filename='js/auto-route-catalog.js', v='7'", operations)
+        self.assertIn("filename='js/auto-routes.js', v='7'", operations)
         self.assertIn("X-CSRFToken", editor)
         self.assertIn("refreshCatalog", editor)
+        self.assertIn("window.MultiLLMAutoRoutes?.createAutoRouteCatalog", editor)
         self.assertIn("createAutoRouteCatalog", catalog)
         self.assertIn("onAddModel", catalog)
+        self.assertIn(
+            "window.MultiLLMAutoRoutes = Object.freeze({ createAutoRouteCatalog })",
+            catalog,
+        )
+        self.assertNotIn("window.MultiLLM.createAutoRouteCatalog", catalog)
         self.assertNotIn("innerHTML", editor)
         self.assertNotIn("innerHTML", catalog)
 

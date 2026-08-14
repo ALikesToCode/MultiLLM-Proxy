@@ -5,6 +5,17 @@
         return;
     }
 
+    const createAutoRouteCatalog = window.MultiLLMAutoRoutes?.createAutoRouteCatalog;
+    if (typeof createAutoRouteCatalog !== 'function') {
+        console.error('Automatic route catalog assets are unavailable or out of date.');
+        const status = document.getElementById('auto-route-status');
+        if (status) {
+            status.textContent = 'Dashboard assets are out of date. Reload the page to update them.';
+            status.classList.add('tone-danger-text');
+        }
+        return;
+    }
+
     const elements = {
         routeSelect: document.getElementById('auto-route-select'),
         routeName: document.getElementById('auto-route-name'),
@@ -28,7 +39,7 @@
         candidates: [],
         creating: false
     };
-    const catalogView = window.MultiLLM.createAutoRouteCatalog({
+    const catalogView = createAutoRouteCatalog({
         getState: () => state,
         onAddModel: addCatalogModel,
         onRefresh: refreshCatalog
