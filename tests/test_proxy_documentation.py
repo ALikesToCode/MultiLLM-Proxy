@@ -141,6 +141,31 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         )
         self.assertNotIn("spoofed.example", response.headers["Location"])
 
+    def test_worker_origin_header_wins_after_container_header_normalization(self):
+        os.environ["MULTILLM_TRUST_PROXY_HEADERS"] = "true"
+        trusted_app = self.app_module.create_app()
+        trusted_app.config["WTF_CSRF_ENABLED"] = False
+        client = trusted_app.test_client()
+
+        response = client.get(
+            "/docs",
+            base_url="http://container.internal:8080",
+            headers={
+                "X-Forwarded-Proto": "http",
+                "X-Forwarded-Host": "container.internal:8080",
+                "X-MultiLLM-External-Origin": (
+                    "https://multillm-proxy.cserules.workers.dev"
+                ),
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(
+            "next=https://multillm-proxy.cserules.workers.dev/docs",
+            response.headers["Location"],
+        )
+
 
 if __name__ == "__main__":
     import unittest

@@ -9,6 +9,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config, DevelopmentConfig, ProductionConfig
 from env_loader import load_runtime_env
 from error_handlers import init_error_handlers
+from middleware.external_origin import TrustedExternalOriginMiddleware
 from route_helpers import (
     api_auth_required,
     apply_cors_headers,
@@ -75,8 +76,10 @@ def create_app() -> Flask:
         template_folder="templates",
     )
     if _env_flag("MULTILLM_TRUST_PROXY_HEADERS"):
-        # The Cloudflare Worker overwrites these headers before its single
-        # container hop, so public URLs retain their external scheme and host.
+        # The Worker overwrites both standard forwarding headers and its
+        # private origin header. The latter survives Container runtime header
+        # normalization and wins when Flask constructs public URLs.
+        app.wsgi_app = TrustedExternalOriginMiddleware(app.wsgi_app)
         app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
     app.secret_key = runtime_secrets["FLASK_SECRET_KEY"]
     app.config["JWT_SECRET"] = runtime_secrets["JWT_SECRET"]

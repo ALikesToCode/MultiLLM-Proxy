@@ -39,10 +39,12 @@ Wrangler `vars` in `wrangler.jsonc` already set:
 
 Public HTTP requests receive a `308` redirect to the same HTTPS URL before any
 route or container work. For Container requests, the Worker overwrites
-`X-Forwarded-Proto` and `X-Forwarded-Host` and enables
-`MULTILLM_TRUST_PROXY_HEADERS` inside the Container. Flask therefore generates
-public HTTPS dashboard, documentation, and login URLs without trusting
-caller-supplied forwarding headers in direct local deployments.
+`X-Forwarded-Proto`, `X-Forwarded-Host`, and the internal
+`X-MultiLLM-External-Origin` header, then enables
+`MULTILLM_TRUST_PROXY_HEADERS` inside the Container. The internal origin header
+survives Container runtime header normalization, so Flask generates public
+HTTPS dashboard, documentation, and login URLs without trusting caller-supplied
+forwarding headers in direct local deployments.
 
 Set secrets for anything sensitive:
 

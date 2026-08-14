@@ -190,6 +190,14 @@ test("worker treats optimized chat as a CORS-safe Container API route", async ()
     preflight.headers.get("Access-Control-Expose-Headers") ?? "",
     /X-MultiLLM-Optimization/,
   );
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-MultiLLM-Optimization-Cache-Hits/,
+  );
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-MultiLLM-Optimization-Cache-Misses/,
+  );
   assert.equal(stub.getCalls(), 0);
 
   const response = await worker.fetch(
@@ -2388,6 +2396,10 @@ test("worker relies on container.fetch for startup and readiness", async () => {
     assert.equal(
       request.headers.get("x-forwarded-host"),
       "multillm-proxy.cserules.workers.dev",
+    );
+    assert.equal(
+      request.headers.get("x-multillm-external-origin"),
+      "https://multillm-proxy.cserules.workers.dev",
     );
     return new Response("container ready", { status: 200 });
   });
