@@ -1,5 +1,8 @@
 #!/bin/bash
 
+set -euo pipefail
+umask 077
+
 # Colors for better output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,14 +19,15 @@ echo -e "${YELLOW}Step 3:${NC} Click on \"Get API key\" in the left-hand menu"
 echo -e "${YELLOW}Step 4:${NC} Create a new API key (it will start with \"AIza...\")"
 echo -e "${YELLOW}Step 5:${NC} Copy your API key"
 
-read -p "$(echo -e "\n${BOLD}Would you like to add your Gemini API key to .env file now?${NC} (y/n): ")" choice
+read -r -p "$(echo -e "\n${BOLD}Would you like to add your Gemini API key to .env file now?${NC} (y/n): ")" choice
 
 if [[ "$choice" =~ ^[Yy]$ ]]; then
-    read -p "$(echo -e "Enter your Gemini API key: ")" gemini_key
+    read -r -s -p "$(echo -e "Enter your Gemini API key: ")" gemini_key
+    echo
     
-    if [[ ! "$gemini_key" =~ ^AIza ]]; then
-        echo -e "\n${RED}Error: The key you entered doesn't start with 'AIza'.${NC}"
-        echo -e "Gemini API keys should start with 'AIza'. Please check your key and try again."
+    if [[ ! "$gemini_key" =~ ^AIza[A-Za-z0-9_-]{20,}$ ]]; then
+        echo -e "\n${RED}Error: The key format is invalid.${NC}"
+        echo -e "Gemini API keys should start with 'AIza' and contain only key-safe characters."
         exit 1
     fi
     
@@ -33,23 +37,43 @@ if [[ "$choice" =~ ^[Yy]$ ]]; then
         exit 1
     fi
     
-    # Update the .env file
-    if grep -q "GEMINI_API_KEY=" .env; then
-        # Replace existing key
-        sed -i "s|GEMINI_API_KEY=.*|GEMINI_API_KEY=$gemini_key|" .env
-    else
-        # Add new key
-        echo "GEMINI_API_KEY=$gemini_key" >> .env
+    env_temp="$(mktemp .env.tmp.XXXXXX)"
+    cleanup_env_temp() {
+        if [[ -n "${env_temp:-}" && -f "$env_temp" ]]; then
+            rm -f -- "$env_temp"
+        fi
+    }
+    trap cleanup_env_temp EXIT
+
+    found_gemini=false
+    found_gemma=false
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            GEMINI_API_KEY=*)
+                printf 'GEMINI_API_KEY=%s\n' "$gemini_key" >> "$env_temp"
+                found_gemini=true
+                ;;
+            GEMMA_API_KEY=*)
+                printf 'GEMMA_API_KEY=%s\n' "$gemini_key" >> "$env_temp"
+                found_gemma=true
+                ;;
+            *)
+                printf '%s\n' "$line" >> "$env_temp"
+                ;;
+        esac
+    done < .env
+
+    if [[ "$found_gemini" == false ]]; then
+        printf 'GEMINI_API_KEY=%s\n' "$gemini_key" >> "$env_temp"
     fi
-    
-    # Also update GEMMA_API_KEY to use the same key
-    if grep -q "GEMMA_API_KEY=" .env; then
-        # Replace existing key
-        sed -i "s|GEMMA_API_KEY=.*|GEMMA_API_KEY=$gemini_key|" .env
-    else
-        # Add new key
-        echo "GEMMA_API_KEY=$gemini_key" >> .env
+    if [[ "$found_gemma" == false ]]; then
+        printf 'GEMMA_API_KEY=%s\n' "$gemini_key" >> "$env_temp"
     fi
+
+    chmod 600 "$env_temp"
+    mv -- "$env_temp" .env
+    env_temp=""
+    trap - EXIT
     
     echo -e "\n${GREEN}Success!${NC} Your Gemini API key has been added to the .env file."
     echo -e "\nYou can now test your Gemini API setup with: ${YELLOW}./tests/test_gemini.sh${NC}"

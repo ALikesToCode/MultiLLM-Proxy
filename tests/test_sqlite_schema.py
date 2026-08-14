@@ -1,6 +1,7 @@
 import importlib
 import os
 import sqlite3
+import stat
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,6 +68,16 @@ class SQLiteSchemaTest(unittest.TestCase):
             status = model_module.ModelRegistry.get_model_status("opencode:kimi-k2.6")
 
         self.assertEqual(status, "disabled")
+
+    def test_new_sqlite_files_are_owner_only(self):
+        sqlite_module = importlib.import_module("services.sqlite_store")
+        database_path = sqlite_module.Path(self.temp_dir.name) / "private" / "data.sqlite3"
+
+        connection = sqlite_module.connect(database_path)
+        connection.close()
+
+        self.assertEqual(stat.S_IMODE(database_path.parent.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(database_path.stat().st_mode), 0o600)
 
 
 if __name__ == "__main__":

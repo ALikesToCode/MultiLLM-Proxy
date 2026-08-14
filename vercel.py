@@ -1,12 +1,22 @@
 import os
+import tempfile
+from pathlib import Path
 
 from env_loader import load_runtime_env
 
-EPHEMERAL_SQLITE_DEFAULTS = {
-    "AUTH_DB_PATH": "/tmp/multillm-auth.sqlite3",
-    "RATE_LIMIT_DB_PATH": "/tmp/multillm-rate-limits.sqlite3",
-    "MODEL_REGISTRY_DB_PATH": "/tmp/multillm-model-registry.sqlite3",
+EPHEMERAL_SQLITE_FILENAMES = {
+    "AUTH_DB_PATH": "auth.sqlite3",
+    "RATE_LIMIT_DB_PATH": "rate-limits.sqlite3",
+    "MODEL_REGISTRY_DB_PATH": "model-registry.sqlite3",
 }
+
+
+def _ephemeral_sqlite_defaults() -> dict[str, str]:
+    runtime_directory = Path(tempfile.mkdtemp(prefix="multillm-"))
+    return {
+        name: str(runtime_directory / filename)
+        for name, filename in EPHEMERAL_SQLITE_FILENAMES.items()
+    }
 
 
 def init_vercel():
@@ -22,6 +32,12 @@ def init_vercel():
         os.environ['ADMIN_API_KEY'] = os.environ['VERCEL_ADMIN_API_KEY']
 
     if os.environ.get("VERCEL"):
-        for name, path in EPHEMERAL_SQLITE_DEFAULTS.items():
+        missing_names = [
+            name
+            for name in EPHEMERAL_SQLITE_FILENAMES
+            if not os.environ.get(name)
+        ]
+        defaults = _ephemeral_sqlite_defaults() if missing_names else {}
+        for name in missing_names:
             if not os.environ.get(name):
-                os.environ[name] = path
+                os.environ[name] = defaults[name]

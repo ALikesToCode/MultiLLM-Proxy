@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install Python dependencies
-pip install -r requirements.txt
+pip install -r requirements.lock
 
 # Create necessary directories
 mkdir -p static/css
@@ -18,4 +18,4 @@ img.save('static/favicon.ico', format='ICO')
 EOF
 
 # Set permissions
-chmod -R 755 static 
+chmod -R 755 static

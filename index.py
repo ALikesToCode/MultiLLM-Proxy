@@ -1,4 +1,10 @@
+import json
+import logging
+import secrets
+
 from vercel import init_vercel
+
+logger = logging.getLogger(__name__)
 
 # Initialize Vercel environment
 init_vercel()
@@ -33,10 +39,24 @@ def handler(request):
                 'headers': dict(response.headers),
                 'body': response.get_data(as_text=True)
             }
-    except Exception as e:
-        # Return error response
+    except Exception as error:
+        request_id = f"req_{secrets.token_urlsafe(12)}"
+        logger.error(
+            "Vercel request handling failed request_id=%s type=%s",
+            request_id,
+            type(error).__name__,
+        )
         return {
             'statusCode': 500,
-            'body': str(e),
-            'headers': {'Content-Type': 'text/plain'}
+            'body': json.dumps(
+                {
+                    'error': 'internal_error',
+                    'message': 'An unexpected error occurred.',
+                    'request_id': request_id,
+                }
+            ),
+            'headers': {
+                'Content-Type': 'application/json',
+                'X-Request-ID': request_id,
+            }
         }

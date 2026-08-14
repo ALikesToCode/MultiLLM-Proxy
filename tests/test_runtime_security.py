@@ -1,5 +1,7 @@
 import importlib
+import json
 import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -109,7 +111,7 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
             vercel_module.init_vercel()
             self.assertNotEqual(os.environ.get("ADMIN_API_KEY"), "default-key")
 
-    def test_vercel_init_defaults_sqlite_paths_to_tmp_on_vercel(self):
+    def test_vercel_init_defaults_sqlite_paths_to_private_tmp_directory(self):
         with patch.dict(
             os.environ,
             {
@@ -125,9 +127,18 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
 
             vercel_module.init_vercel()
 
-            self.assertEqual(os.environ["AUTH_DB_PATH"], "/tmp/multillm-auth.sqlite3")
-            self.assertEqual(os.environ["RATE_LIMIT_DB_PATH"], "/tmp/multillm-rate-limits.sqlite3")
-            self.assertEqual(os.environ["MODEL_REGISTRY_DB_PATH"], "/tmp/multillm-model-registry.sqlite3")
+            paths = [
+                Path(os.environ["AUTH_DB_PATH"]),
+                Path(os.environ["RATE_LIMIT_DB_PATH"]),
+                Path(os.environ["MODEL_REGISTRY_DB_PATH"]),
+            ]
+            self.assertEqual({path.parent for path in paths}, {paths[0].parent})
+            self.assertEqual(
+                {path.name for path in paths},
+                {"auth.sqlite3", "rate-limits.sqlite3", "model-registry.sqlite3"},
+            )
+            self.assertEqual(stat.S_IMODE(paths[0].parent.stat().st_mode), 0o700)
+            self.assertNotEqual(paths[0].parent, Path("/tmp"))
 
     def test_service_worker_does_not_cache_login_or_authenticated_navigation(self):
         service_worker = Path(__file__).resolve().parents[1] / "static" / "service-worker.js"
@@ -185,6 +196,35 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
 
                 self.assertEqual(os.environ["ADMIN_API_KEY"], "vercel-admin-key")
                 self.assertIsNotNone(index_module.app)
+
+    def test_index_handler_does_not_reflect_internal_exception_details(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "ADMIN_API_KEY": "admin-live-key",
+                    "FLASK_SECRET_KEY": "flask-live-secret",
+                    "JWT_SECRET": "jwt-live-secret",
+                    "AUTH_DB_PATH": os.path.join(tempdir, "auth.sqlite3"),
+                },
+                clear=False,
+            ):
+                for module_name in ("index", "app"):
+                    sys.modules.pop(module_name, None)
+                index_module = importlib.import_module("index")
+
+                with patch.object(
+                    index_module.app,
+                    "test_client",
+                    side_effect=RuntimeError("provider secret sk-live-abc123 leaked"),
+                ):
+                    response = index_module.handler({"path": "/"})
+
+        payload = json.loads(response["body"])
+        self.assertEqual(response["statusCode"], 500)
+        self.assertEqual(payload["error"], "internal_error")
+        self.assertNotIn("sk-live", response["body"])
+        self.assertEqual(response["headers"]["X-Request-ID"], payload["request_id"])
 
 
 if __name__ == "__main__":

@@ -25,11 +25,17 @@ def storage_path(env_name: str, default_filename: str) -> Path:
 
 
 def connect(path: Path, *, wal: bool = True) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    parent_existed = path.parent.exists()
+    database_existed = path.exists()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not parent_existed:
+        path.parent.chmod(0o700)
     connection = sqlite3.connect(
         path,
         timeout=_env_int("SQLITE_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS),
     )
+    if not database_existed:
+        path.chmod(0o600)
     connection.row_factory = sqlite3.Row
     busy_timeout_ms = max(0, _env_int("SQLITE_BUSY_TIMEOUT_MS", DEFAULT_BUSY_TIMEOUT_MS))
     connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")  # nosec B608
