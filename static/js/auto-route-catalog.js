@@ -1,6 +1,14 @@
 (function registerAutoRouteCatalogView() {
     const MAX_VISIBLE_MODELS = 200;
 
+    function formatLimit(value, label) {
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+            return '';
+        }
+        return `${parsed.toLocaleString()} ${label}`;
+    }
+
     function createAutoRouteCatalog({
         getState,
         onAddModel,
@@ -103,13 +111,19 @@
                     (candidate) => candidate.model_id === model.id
                 );
                 const isDisabled = model.status === 'disabled';
+                const limits = [
+                    formatLimit(model.context_window, 'context'),
+                    formatLimit(model.max_output_tokens, 'output'),
+                ].filter(Boolean);
 
                 item.className = 'auto-route-model-item';
                 identity.className = 'auto-route-model-item__identity';
                 modelId.textContent = model.id;
-                metadata.textContent = `${model.configured ? 'configured' : 'key missing'} · ${
-                    (model.sources || []).join(' + ') || 'catalog'
-                }`;
+                metadata.textContent = [
+                    model.configured ? 'configured' : 'key missing',
+                    (model.sources || []).join(' + ') || 'catalog',
+                    ...limits,
+                ].join(' · ');
                 identity.append(modelId, metadata);
                 addButton.type = 'button';
                 addButton.className = 'button button--secondary';

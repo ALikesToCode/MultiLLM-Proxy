@@ -1,12 +1,16 @@
 import json
 import os
+import sqlite3
 import tempfile
 import unittest
 from typing import ClassVar
 
 import requests
 
-from services.provider_catalog_service import ProviderCatalogService
+from services.provider_catalog_service import (
+    ProviderCatalogModel,
+    ProviderCatalogService,
+)
 
 
 class _FakeAuthService:
@@ -29,7 +33,10 @@ class _FakeProxyService:
 
     @classmethod
     def prepare_headers(cls, request_headers, provider, token, upstream_path=""):
-        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     @classmethod
     def make_request(cls, **kwargs):
@@ -42,7 +49,11 @@ class _FakeProxyService:
             {
                 "object": "list",
                 "data": [
-                    {"id": "glm-5.2"},
+                    {
+                        "id": "glm-5.2",
+                        "context_window": 1_048_576,
+                        "max_output_tokens": 131_072,
+                    },
                     {"id": "kimi-k3"},
                     {"id": "invalid model with spaces"},
                 ],
@@ -92,6 +103,9 @@ class ProviderCatalogServiceTest(unittest.TestCase):
             [model.model_id for model in ProviderCatalogService.list_models()],
             ["glm-5.2", "kimi-k3"],
         )
+        glm = ProviderCatalogService.list_models()[0]
+        self.assertEqual(glm.context_window, 1_048_576)
+        self.assertEqual(glm.max_output_tokens, 131_072)
 
     def test_failed_refresh_preserves_last_good_catalog(self):
         ProviderCatalogService.replace_provider_models(
@@ -128,6 +142,16 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         )
         self.assertNotIn("nano-key", str(results))
 
+    def test_navyai_public_catalog_refresh_does_not_require_or_send_a_key(self):
+        results = ProviderCatalogService.refresh_configured(
+            {"navyai": "https://api.navy"},
+            _FakeAuthService,
+            _FakeProxyService,
+        )
+
+        self.assertEqual(results[0]["status"], "updated")
+        self.assertEqual(_FakeProxyService.authorizations, [None])
+
     def test_extract_model_ids_accepts_standard_catalog_shapes(self):
         self.assertEqual(
             ProviderCatalogService.extract_model_ids(
@@ -142,6 +166,77 @@ class ProviderCatalogServiceTest(unittest.TestCase):
             ),
             ("glm-5.2", "provider/model-v1"),
         )
+
+    def test_extract_models_uses_the_effective_gateway_limits(self):
+        models = ProviderCatalogService.extract_models(
+            "openrouter",
+            {
+                "data": [
+                    {
+                        "id": "zai-org/glm-5.2",
+                        "context_length": 1_048_576,
+                        "max_output_tokens": 131_072,
+                        "top_provider": {
+                            "context_length": 262_144,
+                            "max_completion_tokens": 65_536,
+                        },
+                    }
+                ]
+            },
+            discovered_at="2026-08-14T10:00:00+00:00",
+        )
+
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].context_window, 262_144)
+        self.assertEqual(models[0].max_output_tokens, 65_536)
+
+    def test_existing_catalog_schema_is_migrated_without_losing_models(self):
+        database_path = os.environ["MODEL_REGISTRY_DB_PATH"]
+        with sqlite3.connect(database_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE provider_model_catalog (
+                    provider TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    discovered_at TEXT NOT NULL,
+                    PRIMARY KEY (provider, model_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO provider_model_catalog
+                    (provider, model_id, discovered_at)
+                VALUES (?, ?, ?)
+                """,
+                ("navyai", "glm-5.2", "2026-08-14T10:00:00+00:00"),
+            )
+
+        models = ProviderCatalogService.list_models()
+
+        self.assertEqual(models[0].model_id, "glm-5.2")
+        self.assertIsNone(models[0].context_window)
+        self.assertIsNone(models[0].max_output_tokens)
+
+    def test_replace_provider_models_persists_reported_limits(self):
+        ProviderCatalogService.replace_provider_models(
+            "navyai",
+            (
+                ProviderCatalogModel(
+                    provider="navyai",
+                    model_id="glm-5.2",
+                    discovered_at="ignored-on-write",
+                    context_window=1_048_576,
+                    max_output_tokens=131_072,
+                ),
+            ),
+            discovered_at="2026-08-14T10:00:00+00:00",
+        )
+
+        model = ProviderCatalogService.list_models()[0]
+        self.assertEqual(model.discovered_at, "2026-08-14T10:00:00+00:00")
+        self.assertEqual(model.context_window, 1_048_576)
+        self.assertEqual(model.max_output_tokens, 131_072)
 
     def test_has_model_reads_the_last_successful_catalog(self):
         ProviderCatalogService.replace_provider_models(

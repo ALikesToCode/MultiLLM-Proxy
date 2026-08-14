@@ -233,7 +233,7 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
             <div>
                 <p class="eyebrow">Runtime catalog</p>
                 <h2 id="model-directory-title">All models known to this proxy</h2>
-                <p>Built-in IDs, the last successful provider catalogs, saved route references, and virtual <code>auto:</code> models are combined without exposing credentials.</p>
+                <p>Built-in IDs, the last successful provider catalogs, saved route references, and virtual <code>auto:</code> models are combined without exposing credentials. Live context and output limits stay attached to each provider entry because gateways may expose different limits for the same model name.</p>
             </div>
             <span class="generated-at">Generated <time datetime="{{ documentation.generated_at }}">{{ documentation.generated_at }}</time></span>
         </header>
@@ -247,7 +247,7 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
         <p id="model-result-summary" class="model-result-summary" role="status" aria-live="polite">Loading model catalog…</p>
         <div class="model-table-shell">
             <table class="model-table">
-                <thead><tr><th scope="col">Model ID</th><th scope="col">Provider</th><th scope="col">Capabilities</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Copy</span></th></tr></thead>
+                <thead><tr><th scope="col">Model ID</th><th scope="col">Provider</th><th scope="col">Capabilities</th><th scope="col">Limits</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Copy</span></th></tr></thead>
                 <tbody id="model-table-body"></tbody>
             </table>
         </div>
@@ -262,5 +262,5 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/documentation.js', v='8') }}"></script>
+<script src="{{ url_for('static', filename='js/documentation.js', v='9') }}"></script>
 {% endblock %}

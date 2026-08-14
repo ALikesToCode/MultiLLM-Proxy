@@ -6,7 +6,10 @@ from unittest.mock import patch
 import requests
 from flask import Response
 
-from services.provider_catalog_service import ProviderCatalogService
+from services.provider_catalog_service import (
+    ProviderCatalogModel,
+    ProviderCatalogService,
+)
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 
@@ -77,7 +80,15 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
     def test_live_catalog_model_is_listed_and_routable(self):
         ProviderCatalogService.replace_provider_models(
             "opencode",
-            ("new-live-model",),
+            (
+                ProviderCatalogModel(
+                    provider="opencode",
+                    model_id="new-live-model",
+                    discovered_at="ignored-on-write",
+                    context_window=262_144,
+                    max_output_tokens=65_536,
+                ),
+            ),
         )
         models_response = self.client.get(
             "/v1/models",
@@ -85,8 +96,17 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         )
 
         self.assertEqual(models_response.status_code, 200)
-        model_ids = {model["id"] for model in models_response.get_json()["data"]}
-        self.assertIn("opencode:new-live-model", model_ids)
+        models = {
+            model["id"]: model for model in models_response.get_json()["data"]
+        }
+        self.assertEqual(
+            models["opencode:new-live-model"]["context_window"],
+            262_144,
+        )
+        self.assertEqual(
+            models["opencode:new-live-model"]["max_output_tokens"],
+            65_536,
+        )
 
         upstream_response = self._chat_response("live model selected")
         with patch(

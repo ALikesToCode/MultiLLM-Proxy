@@ -90,6 +90,20 @@
         return cell;
     }
 
+    function limitsCell(model) {
+        const limits = [];
+        for (const [value, label] of [
+            [model.context_window, 'context'],
+            [model.max_output_tokens, 'output'],
+        ]) {
+            const parsed = Number(value);
+            if (Number.isSafeInteger(parsed) && parsed > 0) {
+                limits.push(`${parsed.toLocaleString()} ${label}`);
+            }
+        }
+        return textCell(limits.length ? limits.join(' · ') : 'Not reported');
+    }
+
     function modelCell(model) {
         const cell = document.createElement('th');
         cell.scope = 'row';
@@ -134,6 +148,7 @@
             modelCell(model),
             textCell(model.provider),
             capabilitiesCell(model),
+            limitsCell(model),
             textCell((model.sources || []).join(', ')),
             textCell(
                 model.status === 'disabled'

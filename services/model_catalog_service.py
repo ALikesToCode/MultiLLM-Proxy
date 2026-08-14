@@ -15,6 +15,9 @@ def _add_source(
     provider: str,
     provider_model: str,
     source: str,
+    *,
+    context_window: int | None = None,
+    max_output_tokens: int | None = None,
 ) -> None:
     model_id = f"{provider}:{provider_model}"
     entry = entries.setdefault(
@@ -24,9 +27,19 @@ def _add_source(
             "provider": provider,
             "model": provider_model,
             "sources": set(),
+            "context_window": None,
+            "max_output_tokens": None,
         },
     )
     entry["sources"].add(source)
+    for field, value in (
+        ("context_window", context_window),
+        ("max_output_tokens", max_output_tokens),
+    ):
+        if value is None:
+            continue
+        current = entry[field]
+        entry[field] = min(current, value) if current is not None else value
 
 
 def build_model_catalog(
@@ -39,7 +52,14 @@ def build_model_catalog(
         _add_source(entries, model.provider, model.display_name, "built-in")
 
     for model in ProviderCatalogService.list_models():
-        _add_source(entries, model.provider, model.model_id, "live")
+        _add_source(
+            entries,
+            model.provider,
+            model.model_id,
+            "live",
+            context_window=model.context_window,
+            max_output_tokens=model.max_output_tokens,
+        )
 
     for route in routes:
         for model_id in route.candidates:

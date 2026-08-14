@@ -5,7 +5,10 @@ from unittest.mock import patch
 import requests
 
 from services.context_analysis_cache import ContextAnalysisCache
-from services.provider_catalog_service import ProviderCatalogService
+from services.provider_catalog_service import (
+    ProviderCatalogModel,
+    ProviderCatalogService,
+)
 from tests.test_context_optimizer import roleplay_response
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -389,7 +392,15 @@ class AutoRouteTest(UnifiedApiTestCase):
         self._authenticate_admin()
         ProviderCatalogService.replace_provider_models(
             "opencode",
-            ("live-only-model",),
+            (
+                ProviderCatalogModel(
+                    provider="opencode",
+                    model_id="live-only-model",
+                    discovered_at="ignored-on-write",
+                    context_window=262_144,
+                    max_output_tokens=65_536,
+                ),
+            ),
             discovered_at="2026-08-14T10:00:00+00:00",
         )
 
@@ -400,6 +411,14 @@ class AutoRouteTest(UnifiedApiTestCase):
         models = {model["id"]: model for model in payload["model_catalog"]}
         providers = {provider["id"]: provider for provider in payload["providers"]}
         self.assertEqual(models["opencode:live-only-model"]["sources"], ["live"])
+        self.assertEqual(
+            models["opencode:live-only-model"]["context_window"],
+            262_144,
+        )
+        self.assertEqual(
+            models["opencode:live-only-model"]["max_output_tokens"],
+            65_536,
+        )
         self.assertIn("OPENCODE_GO_API_KEY", providers["opencode"]["credential_env"])
         self.assertEqual(
             providers["nanogpt"]["credential_env"][:3],

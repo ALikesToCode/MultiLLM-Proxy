@@ -111,11 +111,13 @@ the same values in their runtime secret store; changing a repository `.env`
 file does not update an already deployed Worker or container.
 
 **Refresh live models** calls `POST /admin/auto-routes/catalog`. It performs
-read-only model-list requests only for configured providers, caches successful
-model IDs in `MODEL_REGISTRY_DB_PATH`, and preserves the last good catalog when
-a provider is unavailable. The searchable dashboard catalog combines those live
-IDs with built-in IDs and models already referenced by saved routes. Provider
-keys and upstream error bodies are never returned to the browser.
+read-only model-list requests for configured providers and public NavyAI or
+OpenRouter catalogs, caches successful model metadata in
+`MODEL_REGISTRY_DB_PATH`, and preserves the last good catalog when a provider is
+unavailable. The searchable dashboard combines live IDs and provider-specific
+context/output limits with built-in IDs and models already referenced by saved
+routes. A shared model name never inherits limits from another gateway.
+Provider keys and upstream error bodies are never returned to the browser.
 
 ## Failover boundary
 

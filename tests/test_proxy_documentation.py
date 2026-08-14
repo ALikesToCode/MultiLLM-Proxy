@@ -1,6 +1,9 @@
 import os
 
-from services.provider_catalog_service import ProviderCatalogService
+from services.provider_catalog_service import (
+    ProviderCatalogModel,
+    ProviderCatalogService,
+)
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 
@@ -53,7 +56,15 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
     def test_live_json_lists_capabilities_models_and_saved_routes(self):
         ProviderCatalogService.replace_provider_models(
             "opencode",
-            ("live-only-model",),
+            (
+                ProviderCatalogModel(
+                    provider="opencode",
+                    model_id="live-only-model",
+                    discovered_at="ignored-on-write",
+                    context_window=262_144,
+                    max_output_tokens=65_536,
+                ),
+            ),
         )
         self._authenticate()
 
@@ -67,6 +78,14 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertTrue(providers["linkapi"]["unified_images"])
         self.assertFalse(providers["opencode"]["unified_images"])
         self.assertEqual(models["opencode:live-only-model"]["sources"], ["live"])
+        self.assertEqual(
+            models["opencode:live-only-model"]["context_window"],
+            262_144,
+        )
+        self.assertEqual(
+            models["opencode:live-only-model"]["max_output_tokens"],
+            65_536,
+        )
         self.assertTrue(
             models["opencode:live-only-model"]["capabilities"]["supports_chat"]
         )

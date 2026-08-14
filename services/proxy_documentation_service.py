@@ -226,6 +226,8 @@ def build_proxy_documentation(
                 "configured": any(candidate["configured"] for candidate in candidates),
                 "status": "available",
                 "sources": ["auto-route"],
+                "context_window": None,
+                "max_output_tokens": None,
                 "capabilities": {
                     "supports_chat": True,
                     "supports_streaming": True,

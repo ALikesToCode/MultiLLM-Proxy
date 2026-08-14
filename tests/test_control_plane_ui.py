@@ -72,17 +72,17 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v8", worker)
+        self.assertIn("multillm-proxy-v9", worker)
         for asset in (
             "/static/css/shell.css",
             "/static/css/auto-routes.css?v=7",
             "/static/css/documentation.css?v=8",
             "/static/css/operations.css",
             "/static/css/surfaces.css",
-            "/static/js/auto-route-catalog.js?v=7",
+            "/static/js/auto-route-catalog.js?v=8",
             "/static/js/auto-routes.js?v=7",
             "/static/js/dashboard.js",
-            "/static/js/documentation.js?v=8",
+            "/static/js/documentation.js?v=9",
             "/static/js/openrouter.js",
             "/static/js/users.js",
         ):
@@ -103,6 +103,8 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertNotIn("onclick=", documentation)
         self.assertNotIn("innerHTML", script)
         self.assertIn("replaceChildren", script)
+        self.assertIn("context_window", script)
+        self.assertIn("max_output_tokens", script)
 
     def test_provider_matrix_distinguishes_passthrough_from_managed_circuits(self):
         dashboard = self.read("static/js/dashboard.js")
@@ -128,13 +130,15 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertIn("NANOGPT_API_KEY_1=your-second-key", operations)
         self.assertIn("js/auto-route-catalog.js", operations)
         self.assertIn("js/auto-routes.js", operations)
-        self.assertIn("filename='js/auto-route-catalog.js', v='7'", operations)
+        self.assertIn("filename='js/auto-route-catalog.js', v='8'", operations)
         self.assertIn("filename='js/auto-routes.js', v='7'", operations)
         self.assertIn("X-CSRFToken", editor)
         self.assertIn("refreshCatalog", editor)
         self.assertIn("window.MultiLLMAutoRoutes?.createAutoRouteCatalog", editor)
         self.assertIn("createAutoRouteCatalog", catalog)
         self.assertIn("onAddModel", catalog)
+        self.assertIn("context_window", catalog)
+        self.assertIn("max_output_tokens", catalog)
         self.assertIn(
             "window.MultiLLMAutoRoutes = Object.freeze({ createAutoRouteCatalog })",
             catalog,

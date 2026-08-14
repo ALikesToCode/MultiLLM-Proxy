@@ -537,6 +537,8 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 "created": 0,
                 "owned_by": model["provider"],
                 "status": model["status"],
+                "context_window": model["context_window"],
+                "max_output_tokens": model["max_output_tokens"],
             }
             for model in build_model_catalog(
                 app.config["API_BASE_URLS"],

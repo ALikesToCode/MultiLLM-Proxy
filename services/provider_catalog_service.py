@@ -13,6 +13,7 @@ from services.sqlite_store import connect, storage_path
 logger = logging.getLogger(__name__)
 MAX_MODELS_PER_PROVIDER = 5000
 _MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$")
+PUBLIC_CATALOG_PROVIDERS = frozenset({"navyai", "openrouter"})
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class ProviderCatalogModel:
     provider: str
     model_id: str
     discovered_at: str
+    context_window: int | None = None
+    max_output_tokens: int | None = None
 
 
 PROVIDER_CATALOG_SPECS = {
@@ -63,10 +66,26 @@ class ProviderCatalogService:
                 provider TEXT NOT NULL,
                 model_id TEXT NOT NULL,
                 discovered_at TEXT NOT NULL,
+                context_window INTEGER,
+                max_output_tokens INTEGER,
                 PRIMARY KEY (provider, model_id)
             )
             """
         )
+        columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(provider_model_catalog)"
+            ).fetchall()
+        }
+        if "context_window" not in columns:
+            connection.execute(
+                "ALTER TABLE provider_model_catalog ADD COLUMN context_window INTEGER"
+            )
+        if "max_output_tokens" not in columns:
+            connection.execute(
+                "ALTER TABLE provider_model_catalog ADD COLUMN max_output_tokens INTEGER"
+            )
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_provider_model_catalog_provider
@@ -81,7 +100,8 @@ class ProviderCatalogService:
             connection.commit()
             rows = connection.execute(
                 """
-                SELECT provider, model_id, discovered_at
+                SELECT provider, model_id, discovered_at,
+                       context_window, max_output_tokens
                 FROM provider_model_catalog
                 ORDER BY provider, model_id
                 """
@@ -91,6 +111,16 @@ class ProviderCatalogService:
                 provider=str(row["provider"]),
                 model_id=str(row["model_id"]),
                 discovered_at=str(row["discovered_at"]),
+                context_window=(
+                    int(row["context_window"])
+                    if row["context_window"] is not None
+                    else None
+                ),
+                max_output_tokens=(
+                    int(row["max_output_tokens"])
+                    if row["max_output_tokens"] is not None
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -116,11 +146,25 @@ class ProviderCatalogService:
     def replace_provider_models(
         cls,
         provider: str,
-        model_ids: tuple[str, ...],
+        models: tuple[str | ProviderCatalogModel, ...],
         *,
         discovered_at: str | None = None,
     ) -> None:
         timestamp = discovered_at or _utcnow_iso()
+        records = [
+            (
+                provider,
+                model.model_id if isinstance(model, ProviderCatalogModel) else model,
+                timestamp,
+                model.context_window
+                if isinstance(model, ProviderCatalogModel)
+                else None,
+                model.max_output_tokens
+                if isinstance(model, ProviderCatalogModel)
+                else None,
+            )
+            for model in models
+        ]
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -131,10 +175,16 @@ class ProviderCatalogService:
             )
             connection.executemany(
                 """
-                INSERT INTO provider_model_catalog (provider, model_id, discovered_at)
-                VALUES (?, ?, ?)
+                INSERT INTO provider_model_catalog (
+                    provider,
+                    model_id,
+                    discovered_at,
+                    context_window,
+                    max_output_tokens
+                )
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                [(provider, model_id, timestamp) for model_id in model_ids],
+                records,
             )
             connection.commit()
 
@@ -152,36 +202,129 @@ class ProviderCatalogService:
                 return list(collection.values())
         return []
 
-    @classmethod
-    def extract_model_ids(cls, provider: str, payload: Any) -> tuple[str, ...]:
-        normalized: set[str] = set()
-        for item in cls._model_collection(payload):
-            candidate: str | None
-            if isinstance(item, str):
-                candidate = item
-            elif isinstance(item, dict):
-                candidate = next(
-                    (
-                        item[key]
-                        for key in ("id", "model", "model_id", "name")
-                        if isinstance(item.get(key), str)
-                    ),
-                    None,
-                )
-            else:
-                candidate = None
-            if not candidate:
-                continue
-            candidate = candidate.strip()
-            provider_prefix = f"{provider}:"
-            if candidate.lower().startswith(provider_prefix.lower()):
-                candidate = candidate[len(provider_prefix) :]
-            if _MODEL_ID_PATTERN.fullmatch(candidate):
-                normalized.add(candidate)
-        return tuple(sorted(normalized))
+    @staticmethod
+    def _normalize_model_id(provider: str, item: Any) -> str | None:
+        candidate: str | None
+        if isinstance(item, str):
+            candidate = item
+        elif isinstance(item, dict):
+            candidate = next(
+                (
+                    item[key]
+                    for key in ("id", "model", "model_id", "name")
+                    if isinstance(item.get(key), str)
+                ),
+                None,
+            )
+        else:
+            candidate = None
+        if not candidate:
+            return None
+        candidate = candidate.strip()
+        provider_prefix = f"{provider}:"
+        if candidate.lower().startswith(provider_prefix.lower()):
+            candidate = candidate[len(provider_prefix) :]
+        return candidate if _MODEL_ID_PATTERN.fullmatch(candidate) else None
 
     @staticmethod
-    def _credential_candidates(auth_service_cls, provider: str) -> tuple[str, ...]:
+    def _positive_integer(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return parsed if parsed > 0 else None
+
+    @staticmethod
+    def _minimum_limit(*values: int | None) -> int | None:
+        present = [value for value in values if value is not None]
+        return min(present) if present else None
+
+    @classmethod
+    def _extract_limit(
+        cls,
+        item: Any,
+        keys: tuple[str, ...],
+    ) -> int | None:
+        if not isinstance(item, dict):
+            return None
+        containers = [item]
+        containers.extend(
+            item[key]
+            for key in ("top_provider", "limits", "metadata", "capabilities")
+            if isinstance(item.get(key), dict)
+        )
+        values = [
+            parsed
+            for container in containers
+            for key in keys
+            if (parsed := cls._positive_integer(container.get(key))) is not None
+        ]
+        return min(values) if values else None
+
+    @classmethod
+    def extract_models(
+        cls,
+        provider: str,
+        payload: Any,
+        *,
+        discovered_at: str | None = None,
+    ) -> tuple[ProviderCatalogModel, ...]:
+        timestamp = discovered_at or _utcnow_iso()
+        normalized: dict[str, ProviderCatalogModel] = {}
+        for item in cls._model_collection(payload):
+            model_id = cls._normalize_model_id(provider, item)
+            if not model_id:
+                continue
+            context_window = cls._extract_limit(
+                item,
+                (
+                    "context_window",
+                    "context_length",
+                    "max_context_length",
+                    "max_input_tokens",
+                    "input_token_limit",
+                ),
+            )
+            max_output_tokens = cls._extract_limit(
+                item,
+                (
+                    "max_output_tokens",
+                    "max_completion_tokens",
+                    "output_token_limit",
+                ),
+            )
+            existing = normalized.get(model_id)
+            if existing:
+                context_window = cls._minimum_limit(
+                    existing.context_window,
+                    context_window,
+                )
+                max_output_tokens = cls._minimum_limit(
+                    existing.max_output_tokens,
+                    max_output_tokens,
+                )
+            normalized[model_id] = ProviderCatalogModel(
+                provider=provider,
+                model_id=model_id,
+                discovered_at=timestamp,
+                context_window=context_window,
+                max_output_tokens=max_output_tokens,
+            )
+        return tuple(normalized[model_id] for model_id in sorted(normalized))
+
+    @classmethod
+    def extract_model_ids(cls, provider: str, payload: Any) -> tuple[str, ...]:
+        return tuple(model.model_id for model in cls.extract_models(provider, payload))
+
+    @staticmethod
+    def _credential_candidates(
+        auth_service_cls,
+        provider: str,
+    ) -> tuple[str | None, ...]:
+        if provider in PUBLIC_CATALOG_PROVIDERS:
+            return (None,)
         if provider == "nanogpt":
             return tuple(auth_service_cls.get_api_keys(provider))
         api_key = auth_service_cls.get_api_key(provider)
@@ -193,7 +336,7 @@ class ProviderCatalogService:
         provider: str,
         spec: ProviderCatalogSpec,
         base_url: str,
-        credentials: tuple[str, ...],
+        credentials: tuple[str | None, ...],
         proxy_service_cls,
     ) -> dict[str, Any]:
         last_status: int | None = None
@@ -219,13 +362,13 @@ class ProviderCatalogService:
                 )
                 last_status = int(response.status_code)
                 if 200 <= last_status < 300:
-                    model_ids = cls.extract_model_ids(provider, response.json())
-                    if model_ids:
-                        truncated = len(model_ids) > MAX_MODELS_PER_PROVIDER
+                    models = cls.extract_models(provider, response.json())
+                    if models:
+                        truncated = len(models) > MAX_MODELS_PER_PROVIDER
                         return {
                             "provider": provider,
                             "status": "updated",
-                            "models": model_ids[:MAX_MODELS_PER_PROVIDER],
+                            "models": models[:MAX_MODELS_PER_PROVIDER],
                             "truncated": truncated,
                         }
                     return {
@@ -306,9 +449,9 @@ class ProviderCatalogService:
                             "message": "Catalog request failed",
                         }
                     if result["status"] == "updated":
-                        model_ids = tuple(result.pop("models"))
-                        cls.replace_provider_models(result["provider"], model_ids)
-                        result["model_count"] = len(model_ids)
+                        models = tuple(result.pop("models"))
+                        cls.replace_provider_models(result["provider"], models)
+                        result["model_count"] = len(models)
                     results.append(result)
 
         return sorted(results, key=lambda result: result["provider"])
