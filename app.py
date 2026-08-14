@@ -20,7 +20,7 @@ from routes.core import register_core_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.unified import register_unified_routes
-from security_config import validate_runtime_secrets
+from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
 from services.metrics_service import MetricsService
@@ -86,6 +86,7 @@ def create_app() -> Flask:
     else:
         app.config.from_object(ProductionConfig)
 
+    app.config["MAX_CONTENT_LENGTH"] = load_max_content_length()
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = flask_env != "development"

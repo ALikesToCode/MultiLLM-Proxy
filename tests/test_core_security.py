@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from flask import request
+
 
 class LoginRedirectSecurityTest(unittest.TestCase):
     def setUp(self):
@@ -17,6 +19,10 @@ class LoginRedirectSecurityTest(unittest.TestCase):
                 "FLASK_SECRET_KEY": "flask-test-secret",
                 "JWT_SECRET": "jwt-test-secret",
                 "AUTH_DB_PATH": os.path.join(self.tempdir.name, "auth.sqlite3"),
+                "RATE_LIMIT_DB_PATH": os.path.join(self.tempdir.name, "limits.sqlite3"),
+                "LOGIN_MAX_ATTEMPTS": "3",
+                "LOGIN_ATTEMPT_WINDOW_SECONDS": "60",
+                "LOGIN_LOCKOUT_SECONDS": "120",
             },
             clear=False,
         )
@@ -41,6 +47,10 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         @self.flask_app.route("/test/server-api-error")
         def server_api_error():
             raise self.error_handlers_module.APIError("provider secret sk-live-abc123 leaked", status_code=500)
+
+        @self.flask_app.route("/test/read-body", methods=["POST"])
+        def read_body():
+            return {"size": len(request.get_data())}
 
         self.client = self.flask_app.test_client()
 
@@ -91,6 +101,55 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertIn("HttpOnly", cookie_header)
         self.assertIn("Secure", cookie_header)
         self.assertIn("SameSite=Lax", cookie_header)
+
+    def test_login_is_throttled_after_repeated_failures(self):
+        for _ in range(2):
+            response = self.client.post(
+                "/login",
+                data={"username": "admin", "api_key": "wrong-key"},
+                environ_base={"REMOTE_ADDR": "192.0.2.40"},
+            )
+            self.assertEqual(response.status_code, 401)
+
+        response = self.client.post(
+            "/login",
+            data={"username": "admin", "api_key": "wrong-key"},
+            environ_base={"REMOTE_ADDR": "192.0.2.40"},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertGreaterEqual(int(response.headers["Retry-After"]), 1)
+        self.assertNotIn("wrong-key", response.get_data(as_text=True))
+
+    def test_logout_requires_post(self):
+        self._set_admin_session()
+        self.assertEqual(self.client.get("/logout").status_code, 405)
+
+        response = self.client.post("/logout", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/login")
+
+    def test_request_body_limit_rejects_before_route_parsing(self):
+        self._set_admin_session()
+        self.flask_app.config["MAX_CONTENT_LENGTH"] = 32
+
+        response = self.client.post(
+            "/test/read-body",
+            data=b"x" * 33,
+            headers={"Accept": "application/json", "Content-Type": "application/octet-stream"},
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.get_json()["error"], "request_too_large")
+
+    def test_responses_include_baseline_security_headers(self):
+        response = self.client.get("/health")
+
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
 
     def test_health_endpoints_are_public_and_not_cached(self):
         for path in ("/health", "/healthz"):

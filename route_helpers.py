@@ -400,15 +400,12 @@ def login_required(func: Callable) -> Callable:
 def _authenticate_api_request():
     """Authenticate the proxy caller and return an error response on failure."""
     auth_header = request.headers.get("Authorization")
-    logger.debug("Authorization header: %s", mask_authorization_header(auth_header))
+    logger.debug("Authorization header present=%s", bool(auth_header))
 
     api_key = request_api_key()
     if not api_key:
         if auth_header:
-            logger.error(
-                "Invalid Authorization header: %s",
-                mask_authorization_header(auth_header),
-            )
+            logger.error("Invalid Authorization header scheme")
             return jsonify(
                 {
                     "error": "Invalid Authorization header",
@@ -438,10 +435,10 @@ def _authenticate_api_request():
             }
         ), 401
 
-    logger.debug("Extracted API key: %s", mask_secret(api_key))
+    logger.debug("Proxy API credential extracted")
     authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
     if not authenticated_user:
-        logger.error("Invalid API key provided: %s", mask_secret(api_key))
+        logger.error("Invalid proxy API credential")
         return jsonify(
             {
                 "error": "Invalid API key",
@@ -450,8 +447,7 @@ def _authenticate_api_request():
         ), 401
 
     logger.info(
-        "Request authenticated with API key prefix %s for %s",
-        authenticated_user.get("api_key_prefix"),
+        "Request authenticated for %s",
         authenticated_user.get("username"),
     )
     g.authenticated_user = authenticated_user
@@ -575,11 +571,15 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
             "status": "ok",
         }
     except Exception as error:
-        logger.error("Error checking provider %s: %s", provider, error)
+        logger.error(
+            "Error checking provider %s type=%s",
+            provider,
+            type(error).__name__,
+        )
         return {
             **base_payload,
             "active": False,
             "is_configured": False,
             "status": "error",
-            "error": str(error),
+            "error": "Provider status unavailable",
         }

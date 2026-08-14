@@ -59,6 +59,41 @@ class RuntimeSecurityConfigTest(unittest.TestCase):
         self.assertEqual(flask_app.config["SESSION_COOKIE_SAMESITE"], "Lax")
         self.assertFalse(flask_app.config["SESSION_COOKIE_SECURE"])
 
+    def test_create_app_applies_configured_request_body_ceiling(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with patch.dict(
+                os.environ,
+                {
+                    "ADMIN_API_KEY": "admin-live-key",
+                    "FLASK_SECRET_KEY": "flask-live-secret",
+                    "JWT_SECRET": "jwt-live-secret",
+                    "AUTH_DB_PATH": os.path.join(tempdir, "auth.sqlite3"),
+                    "MAX_CONTENT_LENGTH": "4096",
+                },
+                clear=False,
+            ):
+                sys.modules.pop("app", None)
+                app_module = importlib.import_module("app")
+
+                flask_app = app_module.create_app()
+
+        self.assertEqual(flask_app.config["MAX_CONTENT_LENGTH"], 4096)
+
+    def test_create_app_rejects_invalid_request_body_ceiling(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ADMIN_API_KEY": "admin-live-key",
+                "FLASK_SECRET_KEY": "flask-live-secret",
+                "JWT_SECRET": "jwt-live-secret",
+                "MAX_CONTENT_LENGTH": "unbounded",
+            },
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "MAX_CONTENT_LENGTH"):
+                sys.modules.pop("app", None)
+                importlib.import_module("app")
+
     def test_vercel_init_does_not_invent_default_admin_key(self):
         with patch.dict(
             os.environ,

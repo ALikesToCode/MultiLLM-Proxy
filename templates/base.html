@@ -57,7 +57,10 @@
                     </span>
                 </span>
                 {% endif %}
-                <a href="{{ url_for('logout') }}" class="button button--quiet">Sign out</a>
+                <form action="{{ url_for('logout') }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button button--quiet">Sign out</button>
+                </form>
                 <button id="mobile-menu-button" class="mobile-menu-button" type="button" aria-expanded="false" aria-controls="mobile-menu">
                     <span class="sr-only">Toggle navigation</span>
                     <span></span><span></span><span></span>

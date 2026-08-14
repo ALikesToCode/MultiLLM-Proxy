@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import psutil
-from flask import Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Response, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -22,8 +22,10 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.auth_service import AuthService
+from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
+from services.redaction import redact_text
 from services.resilience_service import ResilienceService
 from services.transport_policy import provider_circuit_mode
 
@@ -178,9 +180,15 @@ def register_core_routes(app) -> None:
         """
         Handle CSRF errors, returning JSON if it's an AJAX/JSON request.
         """
-        error_msg = f"CSRF token missing or invalid: {str(error)}"
+        error_msg = "CSRF token missing or invalid."
         if request.is_json or "application/json" in request.headers.get("Accept", ""):
-            return jsonify({"error": "CSRF token missing or invalid", "message": error_msg}), 400
+            return jsonify(
+                {
+                    "error": "csrf_failed",
+                    "message": error_msg,
+                    "request_id": get_request_id(),
+                }
+            ), 400
         return render_template("error.html", error=error_msg), 400
 
     @app.route("/login", methods=["GET", "POST"])
@@ -189,42 +197,60 @@ def register_core_routes(app) -> None:
         Handle user login. On POST, authenticate with username+api_key.
         On GET, render the login template.
         """
-        try:
-            if request.method == "POST":
-                username = request.form.get("username")
-                api_key = request.form.get("api_key")
-                if AuthService.authenticate_user(username, api_key):
-                    next_page = request.args.get("next")
-                    if is_safe_redirect_target(next_page):
-                        return redirect(next_page)
-                    return redirect(url_for("status_page"))
-                return render_template("login.html", error="Invalid username or API key")
+        if request.method == "POST":
+            username = (request.form.get("username") or "").strip()
+            api_key = request.form.get("api_key") or ""
+            decision = LoginAttemptService.check(request.remote_addr, username)
+            if not decision.allowed:
+                response = make_response(
+                    render_template(
+                        "login.html",
+                        error="Too many login attempts. Try again later.",
+                    ),
+                    429,
+                )
+                response.headers["Retry-After"] = str(decision.retry_after or 1)
+                return response
 
-            logger.info("Rendering login template")
-            return render_template(
-                "login.html",
-                error=None,
-                config={
-                    "server_url": Config.SERVER_BASE_URL,
-                    "providers": list(Config.API_BASE_URLS.keys()),
-                },
+            if username and api_key and AuthService.authenticate_user(username, api_key):
+                LoginAttemptService.record_success(request.remote_addr, username)
+                next_page = request.args.get("next")
+                if is_safe_redirect_target(next_page):
+                    return redirect(next_page)
+                return redirect(url_for("status_page"))
+
+            decision = LoginAttemptService.record_failure(request.remote_addr, username)
+            status_code = 429 if not decision.allowed else 401
+            error_message = (
+                "Too many login attempts. Try again later."
+                if status_code == 429
+                else "Invalid username or API key"
             )
-        except Exception as error:
-            logger.exception("Error in login route")
-            error_msg = f"Login error: {str(error)}"
-            if request.method == "GET":
-                try:
-                    return render_template("login.html", error=error_msg)
-                except Exception as inner_error:
-                    logger.exception("Error rendering basic login template")
-                    return f"Critical error: {str(inner_error)}", 500
-            return jsonify({"error": error_msg}), 500
+            response = make_response(
+                render_template("login.html", error=error_message),
+                status_code,
+            )
+            if decision.retry_after:
+                response.headers["Retry-After"] = str(decision.retry_after)
+            return response
 
-    @app.route("/logout")
+        logger.info("Rendering login template")
+        return render_template(
+            "login.html",
+            error=None,
+            config={
+                "server_url": Config.SERVER_BASE_URL,
+                "providers": list(Config.API_BASE_URLS.keys()),
+            },
+        )
+
+    @app.route("/logout", methods=["GET", "POST"])
     def logout():
         """
-        Handle user logout.
+        Handle user logout without allowing navigation requests to mutate state.
         """
+        if request.method != "POST":
+            return Response(status=405, headers={"Allow": "POST"})
         AuthService.logout()
         return redirect(url_for("login"))
 
@@ -277,10 +303,14 @@ def register_core_routes(app) -> None:
             return render_template("error.html", error=error.client_message), status_code
 
         except Exception as error:
-            logger.error("Error in user management: %s", error)
+            logger.error("Error in user management: %s", redact_text(error))
             if "application/json" in request.headers.get("Accept", ""):
-                return jsonify({"status": "error", "message": str(error)}), 500
-            return render_template("500.html", error=str(error)), 500
+                return jsonify(internal_error_payload()), 500
+            return render_template(
+                "500.html",
+                error=INTERNAL_ERROR_MESSAGE,
+                request_id=get_request_id(),
+            ), 500
 
     @app.route("/users/<username>", methods=["DELETE"])
     @login_required
@@ -292,7 +322,7 @@ def register_core_routes(app) -> None:
             AuthService.delete_user(username)
             return jsonify({"message": f"User {username} deleted successfully"})
         except APIError as error:
-            return jsonify({"error": str(error)}), error.status_code
+            return jsonify({"error": error.client_message}), error.status_code
 
     @app.route("/users/<username>/rotate-key", methods=["POST"])
     @login_required
@@ -304,7 +334,7 @@ def register_core_routes(app) -> None:
             result = AuthService.rotate_api_key(username)
             return jsonify(result)
         except APIError as error:
-            return jsonify({"error": str(error)}), error.status_code
+            return jsonify({"error": error.client_message}), error.status_code
 
     @app.route("/favicon.ico")
     def favicon():
@@ -439,8 +469,8 @@ def register_core_routes(app) -> None:
             response.headers["Cache-Control"] = "no-store"
             return response, 200
         except Exception as error:
-            logger.error("Health check failed: %s", error)
-            return jsonify({"status": "error", "message": str(error)}), 500
+            logger.error("Health check failed: %s", redact_text(error))
+            return jsonify(internal_error_payload()), 500
 
     @app.route("/")
     @login_required
@@ -466,14 +496,14 @@ def register_core_routes(app) -> None:
                 try:
                     providers[provider] = check_provider(provider, details, app.config)
                 except Exception as error:
-                    logger.error("Failed to check %s: %s", provider, error)
-                    errors.append(f"Failed to check {provider}: {str(error)}")
+                    logger.error("Failed to check %s: %s", provider, redact_text(error))
+                    errors.append(f"Failed to check {provider}")
                     providers[provider] = {
                         "name": provider.upper(),
                         "active": False,
                         "is_configured": False,
                         "status": "error",
-                        "error": str(error),
+                        "error": "Provider status unavailable",
                         "requests_24h": 0,
                         "success_rate": 0,
                         "error_rate": 0,
@@ -512,10 +542,14 @@ def register_core_routes(app) -> None:
                 user=AuthService.get_current_user(),
             )
         except Exception as error:
-            logger.error("Status page error: %s", error)
+            logger.error("Status page error: %s", redact_text(error))
             if "application/json" in request.headers.get("Accept", ""):
-                return jsonify({"status": "error", "message": str(error)}), 500
-            return render_template("500.html", error=str(error)), 500
+                return jsonify(internal_error_payload()), 500
+            return render_template(
+                "500.html",
+                error=INTERNAL_ERROR_MESSAGE,
+                request_id=get_request_id(),
+            ), 500
 
     @app.route("/openrouter")
     @login_required
@@ -526,10 +560,14 @@ def register_core_routes(app) -> None:
         try:
             return render_template("openrouter.html", user=AuthService.get_current_user())
         except Exception as error:
-            logger.error("OpenRouter dashboard error: %s", error)
+            logger.error("OpenRouter dashboard error: %s", redact_text(error))
             if "application/json" in request.headers.get("Accept", ""):
-                return jsonify({"status": "error", "message": str(error)}), 500
-            return render_template("500.html", error=str(error)), 500
+                return jsonify(internal_error_payload()), 500
+            return render_template(
+                "500.html",
+                error=INTERNAL_ERROR_MESSAGE,
+                request_id=get_request_id(),
+            ), 500
 
     @app.route("/admin/metrics/requests")
     @login_required
@@ -654,7 +692,12 @@ def register_core_routes(app) -> None:
         Handle 500 errors.
         """
         request_id = get_request_id()
-        logger.exception("Internal server error request_id=%s", request_id)
+        logger.error(
+            "Internal server error request_id=%s type=%s message=%s",
+            request_id,
+            type(error).__name__,
+            redact_text(error),
+        )
         if request.is_json or "application/json" in request.headers.get("Accept", ""):
             return jsonify(internal_error_payload()), 500
         return render_template(
@@ -695,12 +738,16 @@ def register_core_routes(app) -> None:
                             try:
                                 providers_info[provider] = check_provider(provider, details, app.config)
                             except Exception as error:
-                                logger.error("Error checking provider %s: %s", provider, error)
+                                logger.error(
+                                    "Error checking provider %s: %s",
+                                    provider,
+                                    redact_text(error),
+                                )
                                 providers_info[provider] = {
                                     "active": False,
                                     "is_configured": False,
                                     "status": "error",
-                                    "error": str(error),
+                                    "error": "Provider status unavailable",
                                     "requests_24h": 0,
                                     "success_rate": 0,
                                     "error_rate": 0,
@@ -722,8 +769,11 @@ def register_core_routes(app) -> None:
                 except GeneratorExit:
                     break
                 except Exception as error:
-                    logger.error("Error generating status updates: %s", error)
-                    yield f"event: error\ndata: {json.dumps({'error': str(error)})}\n\n"
+                    logger.error("Error generating status updates: %s", redact_text(error))
+                    yield (
+                        "event: error\ndata: "
+                        f"{json.dumps({'error': INTERNAL_ERROR_MESSAGE})}\n\n"
+                    )
                     time.sleep(5)
 
         return Response(

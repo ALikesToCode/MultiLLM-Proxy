@@ -4,6 +4,9 @@ import secrets
 import time
 
 from flask import g, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
+
+from services.redaction import redact_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +85,13 @@ def init_error_handlers(app):
     @app.after_request
     def add_request_id_header(response):
         response.headers["X-Request-ID"] = get_request_id()
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        )
         return response
 
     @app.errorhandler(APIError)
@@ -93,15 +103,14 @@ def init_error_handlers(app):
                 "API Error request_id=%s status=%s message=%s",
                 request_id,
                 error.status_code,
-                error.message,
-                exc_info=True,
+                redact_text(error.message),
             )
         else:
             logger.warning(
                 "API Error request_id=%s status=%s message=%s",
                 request_id,
                 error.status_code,
-                error.message,
+                redact_text(error.message),
             )
         if _wants_json_response():
             response = jsonify(error.to_dict())
@@ -117,7 +126,12 @@ def init_error_handlers(app):
     def handle_generic_error(error):
         """Handle unexpected errors without full traceback"""
         request_id = get_request_id()
-        logger.exception("Unexpected error request_id=%s", request_id)
+        logger.error(
+            "Unexpected error request_id=%s type=%s message=%s",
+            request_id,
+            type(error).__name__,
+            redact_text(error),
+        )
         
         if _wants_json_response():
             return jsonify(internal_error_payload()), 500
@@ -126,6 +140,22 @@ def init_error_handlers(app):
             error=INTERNAL_ERROR_MESSAGE,
             request_id=request_id,
         ), 500
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_entity_too_large(error):
+        """Reject oversized bodies without parsing or reflecting their contents."""
+        payload = {
+            "error": "request_too_large",
+            "message": "Request body exceeds the configured size limit.",
+            "request_id": get_request_id(),
+        }
+        if _wants_json_response():
+            return jsonify(payload), 413
+        return render_template(
+            "error.html",
+            error=payload["message"],
+            request_id=payload["request_id"],
+        ), 413
 
     @app.errorhandler(404)
     def not_found_error(error):
@@ -145,7 +175,12 @@ def init_error_handlers(app):
     def internal_server_error(error):
         """Handle 500 errors without recursion"""
         request_id = get_request_id()
-        logger.exception("Internal server error request_id=%s", request_id)
+        logger.error(
+            "Internal server error request_id=%s type=%s message=%s",
+            request_id,
+            type(error).__name__,
+            redact_text(error),
+        )
         
         if _wants_json_response():
             return jsonify(internal_error_payload()), 500
