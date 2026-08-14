@@ -2227,6 +2227,17 @@ class ProxyService:
         return native_tools
 
     @classmethod
+    def _gemini_rejects_legacy_sampling_parameters(cls, model: Any) -> bool:
+        """Return whether generateContent rejects legacy sampling controls."""
+        model_name = str(model or "").strip().lower().rsplit("/", 1)[-1]
+        version_match = re.match(r"^gemini-(\d+)\.(\d+)(?:-|$)", model_name)
+        if version_match:
+            major, minor = (int(part) for part in version_match.groups())
+            if major > 3 or (major == 3 and minor >= 6):
+                return True
+        return model_name.startswith("gemini-3.5-flash-lite")
+
+    @classmethod
     def _openai_messages_to_gemini_request(cls, request_data: Dict[str, Any]) -> Dict[str, Any]:
         messages = request_data.get("messages", [])
         contents: List[Dict[str, Any]] = []
@@ -2259,6 +2270,12 @@ class ProxyService:
             new_request_data["system_instruction"] = {"parts": system_parts}
 
         generation_config = dict(request_data.get("generationConfig") or {})
+        rejects_legacy_sampling = cls._gemini_rejects_legacy_sampling_parameters(
+            request_data.get("model")
+        )
+        if rejects_legacy_sampling:
+            for field in ("temperature", "topP", "topK"):
+                generation_config.pop(field, None)
         parameter_map = {
             "temperature": "temperature",
             "max_tokens": "maxOutputTokens",
@@ -2268,6 +2285,12 @@ class ProxyService:
             "stop": "stopSequences",
         }
         for openai_key, gemini_key in parameter_map.items():
+            if rejects_legacy_sampling and openai_key in {
+                "temperature",
+                "top_p",
+                "top_k",
+            }:
+                continue
             if openai_key in request_data:
                 generation_config[gemini_key] = request_data[openai_key]
         if generation_config:
@@ -2495,7 +2518,11 @@ class ProxyService:
                 parsed_url = url.split('/v1beta/')[0] if '/v1beta/' in url else url.split('/v1/')[0]
                 
                 # Default model to use for each provider
-                default_model = 'gemini-2.0-flash' if api_provider == 'gemini' else 'gemma-2-9b'
+                default_model = (
+                    Config.GEMINI_MODELS[0]
+                    if api_provider == 'gemini'
+                    else Config.GEMMA_MODELS[0]
+                )
                 
                 # Get model from request data or use default
                 model = request_data.get('model', default_model)

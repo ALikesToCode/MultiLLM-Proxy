@@ -76,12 +76,24 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
     def test_gemini_static_model_list_prefers_current_public_models(self):
         from config import Config
 
+        self.assertEqual(Config.GEMINI_MODELS[0], "gemini-3.6-flash")
+        self.assertIn("gemini-3.5-flash", Config.GEMINI_MODELS)
+        self.assertIn("gemini-3.5-flash-lite", Config.GEMINI_MODELS)
         self.assertIn("gemini-3.1-pro-preview", Config.GEMINI_MODELS)
         self.assertIn("gemini-3-flash-preview", Config.GEMINI_MODELS)
         self.assertIn("gemini-2.5-pro", Config.GEMINI_MODELS)
         self.assertIn("gemini-2.5-flash", Config.GEMINI_MODELS)
+        self.assertNotIn("gemini-3.1-flash-lite-preview", Config.GEMINI_MODELS)
         self.assertNotIn("gemini-2.0-pro", Config.GEMINI_MODELS)
         self.assertNotIn("gemini-1.0-ultra", Config.GEMINI_MODELS)
+
+    def test_gemma_static_model_list_matches_hosted_gemma_4_models(self):
+        from config import Config
+
+        self.assertEqual(
+            Config.GEMMA_MODELS,
+            ["gemma-4-26b-a4b-it", "gemma-4-31b-it"],
+        )
 
     def test_bounded_environment_integer_rejects_invalid_and_extreme_values(self):
         from config import load_bounded_env_integer

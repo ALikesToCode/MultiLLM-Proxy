@@ -33,10 +33,10 @@ Or use curl directly:
 curl -X POST "http://localhost:1400/gemini/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
-  -d '{"model": "gemini-2.5-flash", "messages": [{"role": "user", "content": "Hello"}], "stream": true}'
+  -d '{"model": "gemini-3.6-flash", "messages": [{"role": "user", "content": "Hello"}], "stream": true}'
 
 # Direct Gemini API endpoint
-curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.5-flash:generateContent" \
+curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-3.6-flash:generateContent" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
   -d '{"contents": [{"parts": [{"text": "Hello"}]}], "stream": true}'
@@ -46,14 +46,17 @@ curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.5-flash:genera
 
 The MultiLLM-Proxy model registry includes current Gemini text models, including:
 
+- `gemini-3.6-flash` - Latest stable model for agentic and multimodal tasks
+- `gemini-3.5-flash` - Stable model for agentic and coding workloads
+- `gemini-3.5-flash-lite` - Stable high-throughput, cost-efficient model
 - `gemini-3.1-pro-preview` - Advanced preview reasoning and coding model
-- `gemini-3-flash-preview` - Frontier preview model optimized for speed and scale
-- `gemini-3.1-flash-lite-preview` - Cost-efficient preview model for high-volume tasks
+- `gemini-3.1-flash-lite` - Stable high-volume model
+- `gemini-3-flash-preview` - Previous-generation preview model
 - `gemini-2.5-pro` - Stable advanced reasoning model
 - `gemini-2.5-flash` - Stable price-performance model
 - `gemini-2.5-flash-lite` - Stable low-latency, cost-efficient model
-- `gemma-2-9b` - Open model from Google
-- `gemma-3-27b` - Open model from Google
+- `gemma-4-26b-a4b-it` - Hosted Gemma 4 mixture-of-experts model
+- `gemma-4-31b-it` - Hosted Gemma 4 dense model
 
 Check the official Gemini model documentation for newly released, preview, or deprecated model IDs:
 https://ai.google.dev/gemini-api/docs/models
@@ -82,3 +85,7 @@ Make sure:
 - Gemini API keys must start with "AIza" - this is different from the MultiLLM-Proxy admin key
 - The admin API key is used for authenticating with the proxy service, but a separate Gemini API key is needed for the actual Gemini API calls
 - For Gemma models, use the same API key from Google AI Studio
+- Gemini 3.6 Flash and Gemini 3.5 Flash-Lite reject the legacy
+  `temperature`, `top_p`, and `top_k` controls. The OpenAI-compatible route
+  removes those fields for these models while preserving supported generation
+  controls.

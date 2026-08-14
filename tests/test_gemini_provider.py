@@ -147,6 +147,83 @@ class GeminiProviderRequestTest(unittest.TestCase):
         self.assertEqual(payload["choices"][0]["message"]["content"], "Hello from Gemini")
         self.assertEqual(payload["usage"]["total_tokens"], 7)
 
+    def test_openai_style_default_uses_current_gemini_model(self):
+        upstream = requests.Response()
+        upstream.status_code = 200
+        upstream._content = json.dumps(
+            {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}
+        ).encode("utf-8")
+        upstream.headers["Content-Type"] = "application/json"
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=upstream,
+        ) as base_request:
+            response = self.proxy_module.ProxyService.make_request(
+                method="POST",
+                url="https://generativelanguage.googleapis.com/v1beta/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                params={},
+                data=json.dumps(
+                    {"messages": [{"role": "user", "content": "Hello"}]}
+                ).encode("utf-8"),
+                api_provider="gemini",
+                use_cache=False,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            base_request.call_args.kwargs["url"],
+            (
+                "https://generativelanguage.googleapis.com/v1beta/"
+                "models/gemini-3.6-flash:generateContent"
+            ),
+        )
+
+    def test_latest_models_drop_rejected_sampling_parameters(self):
+        request_data = {
+            "model": "gemini-3.6-flash",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "top_k": 32,
+            "max_tokens": 128,
+            "generationConfig": {
+                "temperature": 0.6,
+                "topP": 0.8,
+                "topK": 16,
+                "stopSequences": ["done"],
+            },
+        }
+
+        converted = self.proxy_module.ProxyService._openai_messages_to_gemini_request(
+            request_data
+        )
+
+        generation_config = converted["generationConfig"]
+        self.assertNotIn("temperature", generation_config)
+        self.assertNotIn("topP", generation_config)
+        self.assertNotIn("topK", generation_config)
+        self.assertEqual(generation_config["maxOutputTokens"], 128)
+        self.assertEqual(generation_config["stopSequences"], ["done"])
+
+    def test_gemini_25_keeps_supported_sampling_parameters(self):
+        converted = self.proxy_module.ProxyService._openai_messages_to_gemini_request(
+            {
+                "model": "gemini-2.5-flash",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 32,
+            }
+        )
+
+        self.assertEqual(
+            converted["generationConfig"],
+            {"temperature": 0.7, "topP": 0.9, "topK": 32},
+        )
+
     def test_system_and_developer_messages_map_to_system_instruction(self):
         upstream = requests.Response()
         upstream.status_code = 200

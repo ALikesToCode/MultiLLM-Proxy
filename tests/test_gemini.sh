@@ -22,20 +22,20 @@ echo -e "\n${YELLOW}Testing OpenAI-compatible endpoint (/chat/completions)${NC}"
 echo -e "${GREEN}curl -X POST \"http://localhost:1400/gemini/chat/completions\" \
     -H \"Content-Type: application/json\" \
     -H \"Authorization: Bearer $ADMIN_API_KEY\" \
-    -d '{\"model\": \"gemini-2.0-flash\", \"messages\": [{\"role\": \"user\", \"content\": \"Write a short poem about code\"}], \"stream\": true}'${NC}"
+    -d '{\"model\": \"gemini-3.6-flash\", \"messages\": [{\"role\": \"user\", \"content\": \"Write a short poem about code\"}], \"stream\": true}'${NC}"
 
 curl -X POST "http://localhost:1400/gemini/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_API_KEY" \
-    -d '{"model": "gemini-2.0-flash", "messages": [{"role": "user", "content": "Write a short poem about code"}], "stream": true}'
+    -d '{"model": "gemini-3.6-flash", "messages": [{"role": "user", "content": "Write a short poem about code"}], "stream": true}'
 
 echo -e "\n\n${YELLOW}Testing direct Gemini API endpoint${NC}"
-echo -e "${GREEN}curl -X POST \"http://localhost:1400/gemini/v1beta/models/gemini-2.0-flash:generateContent\" \
+echo -e "${GREEN}curl -X POST \"http://localhost:1400/gemini/v1beta/models/gemini-3.6-flash:generateContent\" \
     -H \"Content-Type: application/json\" \
     -H \"Authorization: Bearer $ADMIN_API_KEY\" \
     -d '{\"contents\": [{\"parts\": [{\"text\": \"Write a short poem about AI\"}]}], \"stream\": true}'${NC}"
 
-curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-2.0-flash:generateContent" \
+curl -X POST "http://localhost:1400/gemini/v1beta/models/gemini-3.6-flash:generateContent" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_API_KEY" \
     -d '{"contents": [{"parts": [{"text": "Write a short poem about AI"}]}], "stream": true}'
