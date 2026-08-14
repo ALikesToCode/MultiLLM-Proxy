@@ -452,7 +452,12 @@ def _responses_input_to_messages(payload: dict) -> list[dict]:
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
-    register_auto_route_admin_routes(app, login_required, auth_service_cls)
+    register_auto_route_admin_routes(
+        app,
+        login_required,
+        auth_service_cls,
+        proxy_service_cls,
+    )
 
     @app.route("/v1/models", methods=["GET", "OPTIONS"])
     @csrf.exempt

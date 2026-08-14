@@ -582,6 +582,29 @@ class AuthService:
         return cls._api_keys.get(provider)
 
     @classmethod
+    def provider_credential_env_names(cls, provider: str) -> tuple[str, ...]:
+        """Return safe environment-variable names for dashboard setup guidance."""
+        if provider in {"gemini", "gemma"}:
+            return ("GEMINI_API_KEY",)
+        if provider == "chutes":
+            return ("CHUTES_API_TOKEN",)
+        if provider == "googleai":
+            return (
+                "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+            )
+        if provider == "groq":
+            return ("GROQ_API_KEY", "GROQ_API_KEY_1", "GROQ_API_KEY_2")
+        if provider == "nanogpt":
+            return (
+                "NANOGPT_API_KEY",
+                "NANOGPT_API_KEY_1",
+                "NANOGPT_API_KEY_2",
+                "NANO_GPT_KEY",
+            )
+        return _provider_api_key_env_names(provider)
+
+    @classmethod
     def get_api_keys(cls, provider: str) -> List[str]:
         """Get every configured key for providers that support a key pool."""
         if provider == "nanogpt":

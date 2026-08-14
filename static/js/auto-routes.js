@@ -23,10 +23,16 @@
     const state = {
         routes: [],
         providers: [],
+        modelCatalog: [],
         activeRouteId: null,
         candidates: [],
         creating: false
     };
+    const catalogView = window.MultiLLM.createAutoRouteCatalog({
+        getState: () => state,
+        onAddModel: addCatalogModel,
+        onRefresh: refreshCatalog
+    });
 
     function setStatus(message, tone) {
         elements.status.textContent = message;
@@ -38,8 +44,20 @@
         return state.providers.find((provider) => provider.id === providerId) || {
             id: providerId,
             configured: false,
-            models: []
+            models: [],
+            credential_env: [],
+            catalog_path: null,
+            catalog_updated_at: null
         };
+    }
+
+    function updateCatalogState(payload) {
+        state.routes = payload.routes || [];
+        state.providers = payload.providers || [];
+        state.modelCatalog = payload.model_catalog || [];
+        populateProviders();
+        catalogView.render();
+        catalogView.setStatus(`Showing ${state.modelCatalog.length} cached and built-in model IDs. Refresh to query configured providers.`);
     }
 
     function splitModelId(modelId) {
@@ -132,6 +150,7 @@
         elements.count.textContent = `${state.candidates.length} ${
             state.candidates.length === 1 ? 'candidate' : 'candidates'
         }`;
+        catalogView.renderModels();
     }
 
     function loadRoute(routeId) {
@@ -187,6 +206,16 @@
         });
     }
 
+    function addCatalogModel(modelId) {
+        if (state.candidates.some((candidate) => candidate.model_id === modelId)) {
+            setStatus(`${modelId} is already in this route.`, 'error');
+            return;
+        }
+        state.candidates.push(candidateFromId(modelId));
+        renderCandidates();
+        setStatus(`${modelId} added locally. Save to apply it.`);
+    }
+
     function moveCandidate(index, offset) {
         const target = index + offset;
         if (target < 0 || target >= state.candidates.length) {
@@ -236,6 +265,55 @@
         }
     }
 
+    function authenticatedHeaders(includeContentType) {
+        const headers = new Headers({ Accept: 'application/json' });
+        if (includeContentType) {
+            headers.set('Content-Type', 'application/json');
+        }
+        if (csrfToken) {
+            headers.set('X-CSRFToken', csrfToken);
+        }
+        return headers;
+    }
+
+    async function refreshCatalog() {
+        catalogView.setRefreshing(true);
+        try {
+            const response = await fetch(root.dataset.modelCatalog, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: authenticatedHeaders(false)
+            });
+            if (!response.ok) {
+                throw new Error(await responseMessage(response));
+            }
+            const payload = await response.json();
+            updateCatalogState(payload);
+            state.candidates = state.candidates.map((candidate) =>
+                candidateFromId(candidate.model_id)
+            );
+            renderCandidates();
+
+            const results = payload.catalog_refresh || [];
+            const updated = results.filter((result) => result.status === 'updated');
+            const failed = results.filter((result) => result.status === 'failed');
+            const modelCount = updated.reduce(
+                (total, result) => total + (result.model_count || 0),
+                0
+            );
+            catalogView.setStatus(`${updated.length} provider catalogs refreshed with ${modelCount} models${
+                failed.length ? `; ${failed.length} failed and kept their last good catalog` : ''
+            }.`);
+            window.MultiLLM?.showToast('Provider model catalog refreshed', 'success');
+        } catch (error) {
+            console.error('Model catalog refresh failed:', error);
+            catalogView.setStatus(`Refresh failed: ${error.message}`);
+            window.MultiLLM?.showToast('Model catalog refresh failed', 'error');
+        } finally {
+            catalogView.setRefreshing(false);
+        }
+    }
+
     async function saveRoute() {
         const routeName = elements.routeName.value.trim();
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(routeName)) {
@@ -252,17 +330,10 @@
         elements.save.disabled = true;
         setStatus(`Saving ${routeId}…`);
         try {
-            const headers = new Headers({
-                Accept: 'application/json',
-                'Content-Type': 'application/json'
-            });
-            if (csrfToken) {
-                headers.set('X-CSRFToken', csrfToken);
-            }
             const response = await fetch(root.dataset.autoRoutes, {
                 method: 'PUT',
                 credentials: 'same-origin',
-                headers,
+                headers: authenticatedHeaders(true),
                 body: JSON.stringify({
                     route_id: routeId,
                     candidates: state.candidates.map((candidate) => candidate.model_id)
@@ -272,9 +343,7 @@
                 throw new Error(await responseMessage(response));
             }
             const payload = await response.json();
-            state.routes = payload.routes || [];
-            state.providers = payload.providers || [];
-            populateProviders();
+            updateCatalogState(payload);
             loadRoute(routeId);
             setStatus(`${routeId} is active for new chat requests.`, 'success');
             window.MultiLLM?.showToast(`${routeId} priority saved`, 'success');
@@ -298,9 +367,7 @@
                 throw new Error(await responseMessage(response));
             }
             const payload = await response.json();
-            state.routes = payload.routes || [];
-            state.providers = payload.providers || [];
-            populateProviders();
+            updateCatalogState(payload);
             if (state.routes.length) {
                 loadRoute(state.routes[0].id);
             } else {
@@ -346,6 +413,5 @@
         }
     });
     elements.save.addEventListener('click', saveRoute);
-
     loadRoutes();
 }());

@@ -189,6 +189,14 @@ class ModelRegistry:
         return row["status"] if row else "available"
 
     @classmethod
+    def get_model_statuses(cls, model_ids: Iterable[str]) -> Dict[str, str]:
+        """Resolve a model collection without opening one database connection per ID."""
+        overrides = cls._status_overrides()
+        return {
+            model_id: overrides.get(model_id, "available") for model_id in model_ids
+        }
+
+    @classmethod
     def disable_model(cls, model_id: str) -> None:
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)

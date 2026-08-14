@@ -64,6 +64,27 @@ body has this shape:
 The browser sends the normal session cookie and CSRF token. The API returns
 configuration state only and never returns provider keys.
 
+The dashboard includes the exact environment-variable names for every provider.
+For the default priority route, a local setup can use:
+
+```dotenv
+OPENCODE_GO_API_KEY=your-key
+NANOGPT_API_KEY=your-first-key
+NANOGPT_API_KEY_1=your-second-key
+NAVYAI_API_KEY=your-key
+```
+
+Restart the proxy after changing its environment. Hosted deployments require
+the same values in their runtime secret store; changing a repository `.env`
+file does not update an already deployed Worker or container.
+
+**Refresh live models** calls `POST /admin/auto-routes/catalog`. It performs
+read-only model-list requests only for configured providers, caches successful
+model IDs in `MODEL_REGISTRY_DB_PATH`, and preserves the last good catalog when
+a provider is unavailable. The searchable dashboard catalog combines those live
+IDs with built-in IDs and models already referenced by saved routes. Provider
+keys and upstream error bodies are never returned to the browser.
+
 ## Failover boundary
 
 MultiLLM advances to the next locally available candidate only when the

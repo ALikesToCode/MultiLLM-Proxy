@@ -7,7 +7,10 @@ from error_handlers import APIError
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.model_registry import ModelRegistry
-
+from services.provider_catalog_service import (
+    PROVIDER_CATALOG_SPECS,
+    ProviderCatalogService,
+)
 
 AUTO_ROUTE_FALLBACK_STATUS_CODES = frozenset({401, 403, 404, 429})
 logger = logging.getLogger(__name__)
@@ -139,24 +142,87 @@ def _provider_is_configured(auth_service_cls, provider: str) -> bool:
     return bool(auth_service_cls.get_api_key(provider))
 
 
+def _add_model_source(
+    model_sources: dict[str, dict[str, set[str]]],
+    provider: str,
+    model_id: str,
+    source: str,
+) -> None:
+    model_sources.setdefault(provider, {}).setdefault(model_id, set()).add(source)
+
+
 def _admin_payload(app, auth_service_cls) -> dict:
-    known_models: dict[str, list[str]] = {}
+    stored_routes = AutoRouteService.list_routes()
+    model_sources: dict[str, dict[str, set[str]]] = {}
+    catalog_updated_at: dict[str, str] = {}
     for model in ModelRegistry.list_models(app.config["API_BASE_URLS"]):
         if model.status == "disabled":
             continue
-        known_models.setdefault(model.provider, []).append(model.display_name)
+        _add_model_source(
+            model_sources,
+            model.provider,
+            model.display_name,
+            "built-in",
+        )
+
+    for model in ProviderCatalogService.list_models():
+        _add_model_source(model_sources, model.provider, model.model_id, "live")
+        catalog_updated_at[model.provider] = max(
+            catalog_updated_at.get(model.provider, ""),
+            model.discovered_at,
+        )
+
+    for route in stored_routes:
+        for model_id in route.candidates:
+            provider, provider_model = ModelRegistry.parse_model_id(model_id)
+            _add_model_source(model_sources, provider, provider_model, "route")
+
+    provider_ids = sorted(get_registry(app.config["API_BASE_URLS"]))
+    configured_by_provider = {
+        provider: _provider_is_configured(auth_service_cls, provider)
+        for provider in provider_ids
+    }
 
     providers = [
         {
             "id": provider,
-            "configured": _provider_is_configured(auth_service_cls, provider),
-            "models": sorted(set(known_models.get(provider, []))),
+            "configured": configured_by_provider[provider],
+            "credential_env": list(
+                auth_service_cls.provider_credential_env_names(provider)
+            ),
+            "models": sorted(model_sources.get(provider, {})),
+            "catalog_path": (
+                PROVIDER_CATALOG_SPECS[provider].proxy_path
+                if provider in PROVIDER_CATALOG_SPECS
+                else None
+            ),
+            "catalog_updated_at": catalog_updated_at.get(provider),
         }
-        for provider in sorted(get_registry(app.config["API_BASE_URLS"]))
+        for provider in provider_ids
+    ]
+
+    catalog_model_ids = [
+        f"{provider}:{provider_model}"
+        for provider in provider_ids
+        for provider_model in model_sources.get(provider, {})
+    ]
+    statuses = ModelRegistry.get_model_statuses(catalog_model_ids)
+
+    model_catalog = [
+        {
+            "id": f"{provider}:{provider_model}",
+            "provider": provider,
+            "model": provider_model,
+            "configured": configured_by_provider[provider],
+            "status": statuses[f"{provider}:{provider_model}"],
+            "sources": sorted(sources),
+        }
+        for provider in provider_ids
+        for provider_model, sources in sorted(model_sources.get(provider, {}).items())
     ]
 
     routes = []
-    for route in AutoRouteService.list_routes():
+    for route in stored_routes:
         candidates = []
         for priority, model_id in enumerate(route.candidates, start=1):
             provider, provider_model = ModelRegistry.parse_model_id(model_id)
@@ -166,11 +232,8 @@ def _admin_payload(app, auth_service_cls) -> dict:
                     "provider": provider,
                     "model": provider_model,
                     "priority": priority,
-                    "configured": _provider_is_configured(
-                        auth_service_cls,
-                        provider,
-                    ),
-                    "status": ModelRegistry.get_model_status(model_id),
+                    "configured": configured_by_provider[provider],
+                    "status": statuses.get(model_id, "available"),
                 }
             )
         routes.append(
@@ -183,24 +246,30 @@ def _admin_payload(app, auth_service_cls) -> dict:
     return {
         "routes": routes,
         "providers": providers,
+        "model_catalog": model_catalog,
         "fallback_statuses": sorted(AUTO_ROUTE_FALLBACK_STATUS_CODES),
     }
+
+
+def _require_admin(auth_service_cls) -> None:
+    current_user = auth_service_cls.get_current_user()
+    if not current_user or not current_user.get("is_admin"):
+        raise APIError(
+            "Only admin users can manage auto routes",
+            status_code=403,
+        )
 
 
 def register_auto_route_admin_routes(
     app,
     login_required,
     auth_service_cls,
+    proxy_service_cls,
 ) -> None:
     @app.route("/admin/auto-routes", methods=["GET", "PUT"])
     @login_required
     def admin_auto_routes():
-        current_user = auth_service_cls.get_current_user()
-        if not current_user or not current_user.get("is_admin"):
-            raise APIError(
-                "Only admin users can manage auto routes",
-                status_code=403,
-            )
+        _require_admin(auth_service_cls)
         if request.method == "PUT":
             payload = request.get_json(silent=True)
             if not isinstance(payload, dict):
@@ -217,3 +286,16 @@ def register_auto_route_admin_routes(
             except ValueError as error:
                 raise APIError(str(error), status_code=400) from error
         return jsonify(_admin_payload(app, auth_service_cls))
+
+    @app.route("/admin/auto-routes/catalog", methods=["POST"])
+    @login_required
+    def admin_auto_route_catalog():
+        _require_admin(auth_service_cls)
+        refresh_results = ProviderCatalogService.refresh_configured(
+            app.config["API_BASE_URLS"],
+            auth_service_cls,
+            proxy_service_cls,
+        )
+        payload = _admin_payload(app, auth_service_cls)
+        payload["catalog_refresh"] = refresh_results
+        return jsonify(payload)

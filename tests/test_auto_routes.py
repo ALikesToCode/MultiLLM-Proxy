@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import requests
 
+from services.provider_catalog_service import ProviderCatalogService
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 
@@ -203,6 +204,56 @@ class AutoRouteTest(UnifiedApiTestCase):
         )
         model_ids = {model["id"] for model in models_response.get_json()["data"]}
         self.assertIn("auto:kimi-k3", model_ids)
+
+    def test_admin_payload_combines_live_models_and_setup_metadata(self):
+        self._authenticate_admin()
+        ProviderCatalogService.replace_provider_models(
+            "opencode",
+            ("live-only-model",),
+            discovered_at="2026-08-14T10:00:00+00:00",
+        )
+
+        response = self.client.get("/admin/auto-routes")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        models = {model["id"]: model for model in payload["model_catalog"]}
+        providers = {provider["id"]: provider for provider in payload["providers"]}
+        self.assertEqual(models["opencode:live-only-model"]["sources"], ["live"])
+        self.assertIn("OPENCODE_GO_API_KEY", providers["opencode"]["credential_env"])
+        self.assertEqual(
+            providers["nanogpt"]["credential_env"][:3],
+            ["NANOGPT_API_KEY", "NANOGPT_API_KEY_1", "NANOGPT_API_KEY_2"],
+        )
+        self.assertEqual(providers["opencode"]["catalog_path"], "/opencode/v1/models")
+        self.assertEqual(
+            providers["opencode"]["catalog_updated_at"],
+            "2026-08-14T10:00:00+00:00",
+        )
+
+    def test_admin_can_refresh_configured_provider_catalogs(self):
+        self._authenticate_admin()
+        refresh_result = {
+            "provider": "opencode",
+            "status": "updated",
+            "truncated": False,
+            "model_count": 2,
+        }
+
+        with patch.object(
+            ProviderCatalogService,
+            "refresh_configured",
+            return_value=[refresh_result],
+        ) as refresh:
+            response = self.client.post("/admin/auto-routes/catalog")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["catalog_refresh"], [refresh_result])
+        refresh.assert_called_once_with(
+            self.app.config["API_BASE_URLS"],
+            self.app_module.AuthService,
+            self.app_module.ProxyService,
+        )
 
     def test_admin_auto_route_rejects_nested_or_duplicate_candidates(self):
         self._authenticate_admin()

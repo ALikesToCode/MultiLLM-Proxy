@@ -13,6 +13,7 @@
     data-status-stream="{{ url_for('status_updates') }}"
     data-request-log="{{ url_for('admin_request_metrics') }}"
     data-auto-routes="{{ url_for('admin_auto_routes') }}"
+    data-model-catalog="{{ url_for('admin_auto_route_catalog') }}"
     data-admin="{{ 'true' if user and user.is_admin else 'false' }}"
 >
     <script id="dashboard-initial-state" type="application/json">
@@ -206,6 +207,67 @@
                     </div>
                 </div>
             </div>
+
+            <div class="panel__body auto-route-support">
+                <section class="auto-route-setup" aria-labelledby="auto-route-setup-title">
+                    <div class="auto-route-section-heading">
+                        <div>
+                            <h3 id="auto-route-setup-title">Configure automatic routing</h3>
+                            <p>Provider secrets stay on the server. The dashboard shows names and status, never key values.</p>
+                        </div>
+                        <span class="panel-tag">4 steps</span>
+                    </div>
+
+                    <ol class="auto-route-setup-steps">
+                        <li><span>1</span><div><strong>Add provider keys</strong><p>For local or container use, add keys to <code>.env.local</code> or export them in the service environment.</p></div></li>
+                        <li><span>2</span><div><strong>Restart the service</strong><p>Reloading the page is not enough. Restart the running proxy so it reads the new environment.</p></div></li>
+                        <li><span>3</span><div><strong>Refresh live models</strong><p>Use the catalog refresh below. It makes read-only model-list requests only for configured providers.</p></div></li>
+                        <li><span>4</span><div><strong>Save and call the route</strong><p>Order provider candidates, save, then send <code>auto:&lt;name&gt;</code> to <code>/v1/chat/completions</code>.</p></div></li>
+                    </ol>
+
+                    <pre class="auto-route-env-example" aria-label="Example provider environment variables"><code>OPENCODE_GO_API_KEY=your-key
+NANOGPT_API_KEY=your-first-key
+NANOGPT_API_KEY_1=your-second-key
+NAVYAI_API_KEY=your-key</code></pre>
+                    <p class="field-help">For Cloudflare or another hosted runtime, configure deployment secrets there. Editing the repository <code>.env</code> does not update an already deployed service.</p>
+                </section>
+
+                <section class="auto-route-provider-setup" aria-labelledby="auto-route-provider-setup-title">
+                    <div class="auto-route-section-heading">
+                        <div>
+                            <h3 id="auto-route-provider-setup-title">Provider credentials</h3>
+                            <p>Set a listed variable. Numbered NanoGPT and Groq names add keys to their pools.</p>
+                        </div>
+                        <span id="auto-route-provider-count" class="panel-tag">0 configured</span>
+                    </div>
+                    <ul id="auto-route-provider-list" class="auto-route-provider-list"></ul>
+                </section>
+            </div>
+
+            <div class="panel__body auto-route-catalog" aria-labelledby="auto-route-catalog-title">
+                <div class="auto-route-section-heading">
+                    <div>
+                        <h3 id="auto-route-catalog-title">Available provider models</h3>
+                        <p>Built-in IDs, saved-route IDs, and the latest successful live catalog are combined here.</p>
+                    </div>
+                    <span id="auto-route-catalog-count" class="panel-tag">0 models</span>
+                </div>
+                <div class="auto-route-catalog-toolbar">
+                    <label class="sr-only" for="auto-route-catalog-search">Search available models</label>
+                    <input id="auto-route-catalog-search" class="field" type="search" placeholder="Search model or provider…" autocomplete="off">
+                    <label class="sr-only" for="auto-route-catalog-provider">Filter available models by provider</label>
+                    <select id="auto-route-catalog-provider" class="field-select">
+                        <option value="">All providers</option>
+                    </select>
+                    <button id="refresh-auto-route-catalog" class="button button--secondary" type="button">Refresh live models</button>
+                </div>
+                <p id="auto-route-catalog-status" class="field-help" role="status" aria-live="polite">Loading saved model catalog…</p>
+                <ul id="auto-route-model-catalog" class="auto-route-model-catalog"></ul>
+                <div id="auto-route-catalog-empty" class="empty-state auto-route-empty" hidden>
+                    <strong>No matching models</strong>
+                    <p>Change the filters or configure a provider and refresh its live catalog.</p>
+                </div>
+            </div>
         </article>
     </div>
     {% endif %}
@@ -347,6 +409,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% if user and user.is_admin %}
+<script src="{{ url_for('static', filename='js/auto-route-catalog.js') }}"></script>
 <script src="{{ url_for('static', filename='js/auto-routes.js') }}"></script>
 {% endif %}
 {% endblock %}

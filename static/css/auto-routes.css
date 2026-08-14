@@ -197,6 +197,207 @@
     color: var(--red-700, #b42318);
 }
 
+.auto-route-support,
+.auto-route-catalog {
+    border-top: 1px solid var(--ink-100);
+}
+
+.auto-route-support {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.85fr);
+    gap: 1.5rem;
+}
+
+.auto-route-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.auto-route-section-heading h3,
+.auto-route-section-heading p {
+    margin: 0;
+}
+
+.auto-route-section-heading h3 {
+    color: var(--ink-900);
+    font-size: 0.9rem;
+}
+
+.auto-route-section-heading p,
+.auto-route-support .field-help,
+.auto-route-catalog .field-help {
+    margin-top: 0.3rem;
+    color: var(--ink-500);
+    font-size: 0.68rem;
+    line-height: 1.5;
+}
+
+.auto-route-setup-steps {
+    display: grid;
+    gap: 0.65rem;
+    margin: 1rem 0;
+    padding: 0;
+    list-style: none;
+}
+
+.auto-route-setup-steps li {
+    display: grid;
+    grid-template-columns: 1.7rem minmax(0, 1fr);
+    gap: 0.65rem;
+}
+
+.auto-route-setup-steps li > span {
+    display: grid;
+    width: 1.55rem;
+    height: 1.55rem;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink-900);
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 780;
+}
+
+.auto-route-setup-steps strong {
+    color: var(--ink-800);
+    font-size: 0.72rem;
+}
+
+.auto-route-setup-steps p {
+    margin: 0.15rem 0 0;
+    color: var(--ink-500);
+    font-size: 0.66rem;
+    line-height: 1.45;
+}
+
+.auto-route-env-example {
+    margin: 0;
+    padding: 0.85rem;
+    overflow-x: auto;
+    border: 1px solid var(--ink-100);
+    border-radius: var(--radius-sm);
+    background: var(--ink-900);
+    color: #d7f7eb;
+    font-size: 0.66rem;
+    line-height: 1.6;
+}
+
+.auto-route-provider-list,
+.auto-route-model-catalog {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.auto-route-provider-list {
+    display: grid;
+    gap: 0.45rem;
+    max-height: 23rem;
+    margin-top: 1rem;
+    overflow-y: auto;
+}
+
+.auto-route-provider-item {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.65rem;
+    border: 1px solid var(--ink-100);
+    border-radius: var(--radius-sm);
+    background: var(--ink-50);
+}
+
+.auto-route-provider-item__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.auto-route-provider-item strong,
+.auto-route-provider-item code {
+    font-size: 0.67rem;
+}
+
+.auto-route-provider-item code {
+    color: var(--ink-600);
+    overflow-wrap: anywhere;
+}
+
+.auto-route-provider-item small {
+    color: var(--ink-500);
+    font-size: 0.61rem;
+}
+
+.auto-route-configuration-state {
+    border-radius: 999px;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.58rem;
+    font-weight: 760;
+}
+
+.auto-route-configuration-state--ready {
+    background: #daf5e9;
+    color: var(--emerald-700, #08775b);
+}
+
+.auto-route-configuration-state--missing {
+    background: #fff0d5;
+    color: var(--amber-700, #9a5b00);
+}
+
+.auto-route-catalog-toolbar {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) minmax(11rem, 0.35fr) auto;
+    gap: 0.55rem;
+    margin-top: 1rem;
+}
+
+.auto-route-model-catalog {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+}
+
+.auto-route-model-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.65rem;
+    border: 1px solid var(--ink-100);
+    border-radius: var(--radius-sm);
+    background: var(--ink-50);
+}
+
+.auto-route-model-item__identity {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.18rem;
+}
+
+.auto-route-model-item__identity strong {
+    overflow: hidden;
+    color: var(--ink-800);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-route-model-item__identity small {
+    color: var(--ink-500);
+    font-size: 0.6rem;
+}
+
+.auto-route-model-item .button {
+    padding: 0.38rem 0.55rem;
+    font-size: 0.62rem;
+}
+
 @media (max-width: 70rem) {
     .auto-route-editor {
         grid-template-columns: 1fr;
@@ -207,6 +408,10 @@
         padding-bottom: 1rem;
         border-right: 0;
         border-bottom: 1px solid var(--ink-100);
+    }
+
+    .auto-route-support {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -227,5 +432,10 @@
     .auto-route-actions {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .auto-route-catalog-toolbar,
+    .auto-route-model-catalog {
+        grid-template-columns: 1fr;
     }
 }
