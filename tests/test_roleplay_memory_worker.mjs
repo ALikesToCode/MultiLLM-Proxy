@@ -158,19 +158,25 @@ test("roleplay shrinks the recent window and compacts storage overflow", async (
   assert.equal(response.headers.get("X-Roleplay-Memory"), "model_compacted");
   assert.equal(
     response.headers.get("X-MultiLLM-Optimization"),
-    "applied",
+    "skipped",
   );
-  assert.ok(
-    Number(response.headers.get("X-MultiLLM-Estimated-Input-Before")) >
-      Number(response.headers.get("X-MultiLLM-Estimated-Input-After")),
+  assert.equal(
+    response.headers.get("X-MultiLLM-Estimated-Input-Before"),
+    response.headers.get("X-MultiLLM-Estimated-Input-After"),
   );
-  assert.ok(
-    Number(response.headers.get("X-MultiLLM-Messages-Summarized")) > 0,
-  );
+  assert.equal(response.headers.get("X-MultiLLM-Messages-Summarized"), "0");
   assert.equal(requests.length, 2);
   const compactedInput = JSON.parse(requests[0].messages[1].content);
   assert.ok(compactedInput.older_dialogue.length > 0);
   assert.ok(compactedInput.older_dialogue.length < 7);
+  for (let index = 0; index < 7; index += 1) {
+    assert.equal(
+      requests[1].messages.some((message) =>
+        message.content.startsWith(`Event ${index}:`),
+      ),
+      true,
+    );
+  }
 
   const metrics = await handleRoleplayEdgeRequest(
     new Request(
@@ -179,7 +185,7 @@ test("roleplay shrinks the recent window and compacts storage overflow", async (
     ),
     fixture.env,
   );
-  assert.ok((await metrics.json()).estimated_input_tokens_saved > 0);
+  assert.equal((await metrics.json()).estimated_input_tokens_saved, 0);
 });
 
 test("roleplay compacts one oversized latest turn but sends it raw to generation", async () => {
@@ -254,11 +260,10 @@ test("roleplay uses local memory when required model compaction is declined", as
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("X-Roleplay-Memory"), "local_compacted");
   assert.equal(requests.length, 2);
-  const localMemory = requests[1].messages.find((message) =>
-    message.content.includes("Archived dialogue excerpts"),
+  assert.equal(
+    requests[1].messages.some((message) => message.content === "x".repeat(15000)),
+    true,
   );
-  assert.ok(localMemory);
-  assert.match(localMemory.content, /x{20}/);
 
   const metrics = await handleRoleplayEdgeRequest(
     new Request(

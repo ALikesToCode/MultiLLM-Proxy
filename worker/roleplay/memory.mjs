@@ -298,44 +298,16 @@ function sanitizeForwardedOptions(payload) {
   return forwarded;
 }
 
-function smartOutputBudget(
-  payload,
-  settings,
-  messages,
-  responseLength,
-) {
-  if (payload.max_tokens !== undefined) {
-    if (
-      !Number.isInteger(payload.max_tokens) ||
-      payload.max_tokens < 1 ||
-      payload.max_tokens > settings.maxOutputTokens
-    ) {
-      throw new RoleplayRequestError(
-        `max_tokens must be between 1 and ${settings.maxOutputTokens}`,
-      );
-    }
-    return payload.max_tokens;
+function requestedOutputTokens(payload) {
+  if (payload.max_tokens === undefined) {
+    return null;
   }
-
-  const latestUser = [...messages]
-    .reverse()
-    .find((message) => message.role === "user");
-  const latestTokens = estimateTokens(latestUser?.content ?? "");
-  const multiplier =
-    responseLength === "compact"
-      ? 0.6
-      : responseLength === "immersive"
-        ? 1.5
-        : 1;
-  return Math.min(
-    settings.maxOutputTokens,
-    Math.max(
-      responseLength === "compact" ? 192 : 384,
-      Math.round(
-        (settings.defaultMaxOutputTokens + latestTokens * 0.75) * multiplier,
-      ),
-    ),
-  );
+  if (!Number.isSafeInteger(payload.max_tokens) || payload.max_tokens < 1) {
+    throw new RoleplayRequestError(
+      "max_tokens must be a positive safe integer",
+    );
+  }
+  return payload.max_tokens;
 }
 
 function modelPreference(payload) {
@@ -380,7 +352,7 @@ function modelPreference(payload) {
   return "auto";
 }
 
-export function parseRoleplayPayload(payload, settings) {
+export function parseRoleplayPayload(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new RoleplayRequestError("Request body must be a JSON object");
   }
@@ -443,15 +415,9 @@ export function parseRoleplayPayload(payload, settings) {
     responseLength,
     stream: payload.stream !== false,
     promptCache: payload.prompt_cache !== false,
-    maxTokens: 0,
+    maxTokens: requestedOutputTokens(payload),
     forwarded: sanitizeForwardedOptions(payload),
   };
-  parsed.maxTokens = smartOutputBudget(
-    payload,
-    settings,
-    messages,
-    responseLength,
-  );
 
   if (parsed.forwarded.temperature === undefined) {
     parsed.forwarded.temperature = 0.9;
@@ -742,11 +708,13 @@ export function compactionPlan(state, parsed, conversation, settings) {
   const projectedStoredBytes =
     encodedBytes(dialogue) +
     assistantStorageReserveBytes(parsed, settings);
-  const forced =
-    parsed.memory.mode === "force" ||
-    estimatedTokens > settings.hardInputTokens ||
+  const manualForced = parsed.memory.mode === "force";
+  const contextForced = estimatedTokens > settings.hardInputTokens;
+  const storageForced =
     projectedStoredBytes > settings.maxStoredBytes ||
     state.storageOverflow === true;
+  const forced =
+    manualForced || contextForced || storageForced;
   const requested =
     parsed.memory.mode !== "off" &&
     (forced || compactableTokens > settings.compactTriggerTokens);
@@ -755,6 +723,9 @@ export function compactionPlan(state, parsed, conversation, settings) {
     return {
       requested: false,
       forced: false,
+      manualForced,
+      contextForced,
+      storageForced,
       estimatedTokens,
       compactableTokens,
       projectedStoredBytes,
@@ -772,6 +743,9 @@ export function compactionPlan(state, parsed, conversation, settings) {
   return {
     requested: window.olderMessages.length > 0,
     forced,
+    manualForced,
+    contextForced,
+    storageForced,
     estimatedTokens,
     compactableTokens,
     projectedStoredBytes,
@@ -946,13 +920,16 @@ export function applyCompaction(
 }
 
 export function buildUpstreamPayload(parsed, candidate, messages) {
-  return applyReasoningPolicy({
+  const payload = {
     model: candidate.model,
     messages,
-    max_tokens: parsed.maxTokens,
     stream: parsed.stream,
     ...parsed.forwarded,
-  }, candidate);
+  };
+  if (Number.isSafeInteger(candidate.resolvedMaxOutputTokens)) {
+    payload.max_tokens = candidate.resolvedMaxOutputTokens;
+  }
+  return applyReasoningPolicy(payload, candidate);
 }
 
 export function extractAssistantContent(payload) {

@@ -1,3 +1,8 @@
+import {
+  parseRoleplayProviderLimits,
+  resolveRoleplayCandidateLimits,
+} from "./capacity.mjs";
+
 const DEFAULT_PROVIDER_ORDER = [
   "opencode",
   "navyai",
@@ -261,15 +266,21 @@ export function getRoleplaySettings(env) {
     ),
     compactTriggerTokens: boundedInteger(
       env.ROLEPLAY_COMPACT_TRIGGER_TOKENS,
-      8_000,
-      1_000,
-      500_000,
+      0,
+      0,
+      1_000_000,
+    ),
+    compactTriggerPercent: boundedInteger(
+      env.ROLEPLAY_COMPACT_TRIGGER_PERCENT,
+      90,
+      50,
+      99,
     ),
     hardInputTokens: boundedInteger(
       env.ROLEPLAY_HARD_INPUT_TOKENS,
-      24_000,
-      2_000,
-      1_000_000,
+      0,
+      0,
+      2_000_000,
     ),
     memoryTargetTokens: boundedInteger(
       env.ROLEPLAY_MEMORY_TARGET_TOKENS,
@@ -283,27 +294,27 @@ export function getRoleplaySettings(env) {
       4,
       64,
     ),
-    maxOutputTokens: boundedInteger(
-      env.ROLEPLAY_MAX_OUTPUT_TOKENS,
-      20_000,
-      128,
-      32_768,
-    ),
-    defaultMaxOutputTokens: boundedInteger(
-      env.ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS,
-      20_000,
-      128,
-      32_768,
-    ),
     imagePromptMinOutputTokens: boundedInteger(
       env.ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS,
       2_048,
       512,
       8_192,
     ),
+    contextReplyReserveTokens: boundedInteger(
+      env.ROLEPLAY_CONTEXT_REPLY_RESERVE_TOKENS,
+      4_096,
+      1_024,
+      131_072,
+    ),
+    contextSafetyTokens: boundedInteger(
+      env.ROLEPLAY_CONTEXT_SAFETY_TOKENS,
+      1_024,
+      256,
+      32_768,
+    ),
     maxRequestBytes: boundedInteger(
       env.ROLEPLAY_MAX_REQUEST_BYTES,
-      1_048_576,
+      8_388_608,
       16_384,
       16_777_216,
     ),
@@ -360,6 +371,9 @@ export function getRoleplaySettings(env) {
     providerModelOverrides: parseProviderModelOverrides(
       env.ROLEPLAY_PROVIDER_MODELS,
     ),
+    providerLimits: parseRoleplayProviderLimits(
+      env.ROLEPLAY_PROVIDER_LIMITS,
+    ),
   };
 }
 
@@ -383,6 +397,11 @@ export function buildConfiguredCandidates(env, settings) {
 
     tokens.forEach((token, credentialRank) => {
       MODEL_FAMILIES.forEach((family, familyRank) => {
+        const limits = resolveRoleplayCandidateLimits(
+          settings.providerLimits,
+          provider,
+          family,
+        );
         candidates.push({
           provider,
           providerRank,
@@ -400,6 +419,7 @@ export function buildConfiguredCandidates(env, settings) {
           credentialId:
             tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
           credentialRank,
+          ...limits,
         });
       });
     });
@@ -496,6 +516,9 @@ export function roleplayCatalog(env, settings) {
         provider_rank: candidate.providerRank,
         family: candidate.family,
         model: candidate.model,
+        context_window: candidate.contextWindow,
+        max_output_tokens: candidate.maxOutputTokens,
+        limits_source: candidate.source,
       });
     }
   }

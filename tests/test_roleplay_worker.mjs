@@ -43,6 +43,10 @@ test("roleplay model catalog exposes configured adaptive tiers without secrets",
       { provider: "navyai", family: "glm", model: "glm-5.2" },
     ],
   );
+  assert.equal(payload.data[0].context_window, 262_144);
+  assert.equal(payload.data[0].max_output_tokens, 262_144);
+  assert.equal(payload.data[3].context_window, 1_048_576);
+  assert.equal(payload.data[3].max_output_tokens, 131_072);
   assert.doesNotMatch(JSON.stringify(payload), /roleplay-key/);
 });
 
@@ -69,6 +73,33 @@ test("worker routes roleplay natively without opening the container", async () =
     response.headers.get("Access-Control-Allow-Origin"),
     "https://client.example",
   );
+});
+
+test("roleplay model catalog applies explicit provider limit overrides", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_LIMITS: JSON.stringify({
+      opencode: {
+        glm: {
+          context_window: 524_288,
+          max_output_tokens: 98_304,
+        },
+      },
+    }),
+  });
+  const response = await handleRoleplayEdgeRequest(
+    new Request("https://proxy.example/v1/roleplay/models", {
+      headers: { Authorization: "Bearer admin-roleplay-key" },
+    }),
+    fixture.env,
+  );
+  const glm = (await response.json()).data.find(
+    (model) => model.provider === "opencode" && model.family === "glm",
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(glm.context_window, 524_288);
+  assert.equal(glm.max_output_tokens, 98_304);
+  assert.equal(glm.limits_source, "environment-override");
 });
 
 test("roleplay endpoint stores continuity and explores Kimi then GLM", async () => {
@@ -715,13 +746,13 @@ test("roleplay validates provider options before upstream generation", async () 
   });
 });
 
-test("roleplay response length adjusts the smart output budget", async () => {
+test("roleplay response length changes pacing without shrinking capacity", async () => {
   const fixture = makeRoleplayEnv();
-  const budgets = [];
+  const requests = [];
 
   await withGlobalFetch(async (_input, init) => {
     const payload = JSON.parse(init.body);
-    budgets.push(payload.max_tokens);
+    requests.push(payload);
     return completionResponse(payload.model);
   }, async () => {
     for (const responseLength of ["compact", "immersive"]) {
@@ -738,11 +769,16 @@ test("roleplay response length adjusts the smart output budget", async () => {
     }
   });
 
-  assert.equal(budgets.length, 2);
-  assert.ok(budgets[0] < budgets[1]);
+  assert.equal(requests.length, 2);
+  assert.ok(
+    Math.abs(requests[0].max_tokens - requests[1].max_tokens) <= 2,
+  );
+  assert.ok(requests[0].max_tokens > 20_000);
+  assert.match(requests[0].messages[0].content, /Response length: compact/);
+  assert.match(requests[1].messages[0].content, /Response length: immersive/);
 });
 
-test("roleplay allows a 20000-token reply budget", async () => {
+test("roleplay removes the proxy-wide 20000-token reply ceiling", async () => {
   const fixture = makeRoleplayEnv();
   const budgets = [];
 
@@ -763,7 +799,7 @@ test("roleplay allows a 20000-token reply budget", async () => {
       roleplayRequest({
         session_id: "session-budget-explicit",
         input: "Continue the scene.",
-        max_tokens: 20_000,
+        max_tokens: 100_000,
         stream: false,
       }),
       fixture.env,
@@ -772,7 +808,8 @@ test("roleplay allows a 20000-token reply budget", async () => {
       roleplayRequest({
         session_id: "session-budget-too-large",
         input: "Continue the scene.",
-        max_tokens: 20_001,
+        model_preference: "glm",
+        max_tokens: 200_000,
         stream: false,
       }),
       fixture.env,
@@ -780,10 +817,11 @@ test("roleplay allows a 20000-token reply budget", async () => {
 
     assert.equal(automatic.status, 200);
     assert.equal(explicit.status, 200);
-    assert.equal(tooLarge.status, 400);
+    assert.equal(tooLarge.status, 413);
   });
 
-  assert.deepEqual(budgets, [20_000, 20_000]);
+  assert.ok(budgets[0] > 20_000);
+  assert.equal(budgets[1], 100_000);
 });
 
 test("roleplay selects and retains a working NanoGPT key per session", async () => {
@@ -885,10 +923,12 @@ test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
     ROLEPLAY_PROVIDER_ORDER: "nanogpt",
   });
   let requestedModel;
+  let requestedMaxTokens;
 
   const response = await withGlobalFetch(async (_input, init) => {
     const payload = JSON.parse(init.body);
     requestedModel = payload.model;
+    requestedMaxTokens = payload.max_tokens;
     assert.equal(payload.reasoning_effort, "max");
     return completionResponse(payload.model);
   }, () =>
@@ -905,6 +945,80 @@ test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(requestedModel, "zai-org/glm-5.2:thinking");
+  assert.equal(requestedMaxTokens, 131_072);
+});
+
+test("roleplay selects a larger provider context before compacting", async () => {
+  const fixture = makeRoleplayEnv({
+    NAVYAI_API_KEY: "navy-roleplay-key",
+    ROLEPLAY_PROVIDER_ORDER: "opencode,navyai",
+    ROLEPLAY_HARD_INPUT_TOKENS: "0",
+    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "0",
+  });
+  const requestedProviders = [];
+  const longMessages = Array.from({ length: 9 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `${index}:${"x".repeat(120_000)}`,
+  }));
+
+  const response = await withGlobalFetch(async (input, init) => {
+    requestedProviders.push(new URL(input).hostname);
+    const payload = JSON.parse(init.body);
+    return completionResponse(payload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-provider-context",
+        messages: longMessages,
+        history_mode: "replace",
+        memory: { mode: "off" },
+        model_preference: "glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "navyai");
+  assert.equal(response.headers.get("X-Roleplay-Memory"), "off");
+  assert.deepEqual(requestedProviders, ["api.navy"]);
+  assert.ok(
+    Number(response.headers.get("X-Roleplay-Estimated-Input-Tokens")) >
+      262_144,
+  );
+});
+
+test("roleplay skips a provider that cannot honor explicit output", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-roleplay-key",
+    NAVYAI_API_KEY: "navy-roleplay-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt,navyai",
+  });
+  const requestedProviders = [];
+
+  const response = await withGlobalFetch(async (input, init) => {
+    requestedProviders.push(new URL(input).hostname);
+    const payload = JSON.parse(init.body);
+    assert.equal(payload.max_tokens, 100_000);
+    return completionResponse(payload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-provider-output",
+        input: "Continue the scene.",
+        model_preference: "kimi",
+        max_tokens: 100_000,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "navyai");
+  assert.deepEqual(requestedProviders, ["api.navy"]);
 });
 
 test("roleplay enables NanoGPT prompt caching for eligible context", async () => {

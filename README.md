@@ -389,6 +389,9 @@ The default policy explores and then selects between OpenCode Go
 second, and configured LinkAPI, NanoGPT, and OpenRouter credentials are later
 tiers. Automatic fallback occurs only after a clear upstream rejection; an
 ambiguous transport or `5xx` outcome stops to avoid duplicate paid generation.
+Each route carries its own context/output limits. The Worker filters out routes
+that cannot fit the current input, so a larger NavyAI or NanoGPT GLM context can
+be selected without assuming every gateway exposes the same capacity.
 
 ```bash
 curl "$PROXY_BASE_URL/v1/roleplay" \
@@ -404,11 +407,11 @@ curl "$PROXY_BASE_URL/v1/roleplay" \
   }'
 ```
 
-Above the configured memory threshold, the selected model receives older
-dialogue and decides whether to return a compact continuity digest. If context
-reaches the hard limit and compaction fails, the final generation does not
-start; history is never silently discarded. Compaction is an extra, potentially
-billable model request.
+Compaction thresholds derive from eligible provider contexts by default.
+Storage-only compaction preserves the complete current request when it still
+fits; context-forced compaction uses the continuity digest. If compaction cannot
+make a request fit, generation does not start. Omitted `max_tokens` uses the
+largest output that fits the selected route, with no proxy-wide 20k ceiling.
 
 See [the roleplay endpoint guide](docs/roleplay.md) for the complete request
 contract, lore activation, adaptive metrics, token controls, retention, and

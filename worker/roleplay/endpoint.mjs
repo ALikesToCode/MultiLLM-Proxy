@@ -19,6 +19,11 @@ import {
   reuseCompactionCheckpoint,
 } from "./checkpoint.mjs";
 import {
+  prepareRoleplayCandidates,
+  resolveRoleplayContextPolicy,
+  shouldPreserveFullGeneration,
+} from "./capacity.mjs";
+import {
   compactionBackoffActive,
   recordCompactionFailure,
   recordCompactionSuccess,
@@ -61,9 +66,7 @@ import {
   requestCompaction,
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
-
 export { isRoleplayPath, scopePublicRoleplaySessionId };
-
 const STATE_KEY = "roleplay-session";
 const MESSAGES_KEY = "roleplay-messages";
 const DIRECTIVES_KEY = "roleplay-directives";
@@ -492,7 +495,7 @@ export class RoleplaySession extends DurableObject {
     let compactionMs = 0;
     const payload = await request.json();
     let state = await loadState(this.ctx.storage);
-    const parsedInitial = parseRoleplayPayload(payload, settings);
+    const parsedInitial = parseRoleplayPayload(payload);
     const { profile, parsed: parsedWithProfile } = effectiveCharacter(
       state,
       parsedInitial,
@@ -522,15 +525,6 @@ export class RoleplaySession extends DurableObject {
       settings,
     );
     state = protectedContext.state;
-    if (
-      estimateTokens(protectedContext.activeDirectives) >
-      settings.hardInputTokens
-    ) {
-      throw new RoleplayRequestError(
-        "Protected system and developer instructions exceed the safe input limit and will not be compacted",
-        413,
-      );
-    }
     const checkpoint = memoryEnabled
       ? await reuseCompactionCheckpoint(
           state,
@@ -583,7 +577,23 @@ export class RoleplaySession extends DurableObject {
         completion: Promise.resolve(),
       };
     }
-
+    const contextPolicy = resolveRoleplayContextPolicy(
+      candidates,
+      parsed.maxTokens,
+      settings,
+    );
+    if (
+      protectedContext.activeDirectives.length > 0 &&
+      contextPolicy.hardInputTokens > 0 &&
+      estimateTokens(protectedContext.activeDirectives) >
+      contextPolicy.hardInputTokens
+    ) {
+      throw new RoleplayRequestError(
+        "Protected system and developer instructions exceed every eligible provider context window and will not be compacted",
+        413,
+      );
+    }
+    const capacitySettings = { ...settings, ...contextPolicy };
     const memoryState = memoryEnabled
       ? state
       : {
@@ -594,8 +604,8 @@ export class RoleplaySession extends DurableObject {
           profile: {},
         };
     let conversation = mergeSessionMessages(memoryState, parsed);
-    // Generation may include one raw overflow turn that the compacted state
-    // intentionally retains only through its semantic digest.
+    const fullConversation = conversation;
+    let generationState = memoryState;
     let persistedConversation = conversation;
     let memoryStatus = memoryEnabled
       ? checkpoint.matched
@@ -606,7 +616,7 @@ export class RoleplaySession extends DurableObject {
       memoryState,
       parsed,
       conversation,
-      settings,
+      capacitySettings,
     );
     const checkpointMessageCount = checkpoint.matched
       ? state.compactionCheckpoint?.messageCount ?? 0
@@ -627,7 +637,7 @@ export class RoleplaySession extends DurableObject {
           compactionDigest = createExtractiveCompactionDigest(
             memoryState,
             plan,
-            settings,
+            capacitySettings,
           );
           compactionSource = "local";
           state = {
@@ -644,7 +654,7 @@ export class RoleplaySession extends DurableObject {
             plan,
             candidates,
             this.env,
-            settings,
+            capacitySettings,
             request.signal,
           );
           compactionDigest = compacted.digest;
@@ -667,7 +677,7 @@ export class RoleplaySession extends DurableObject {
             compactionDigest = createExtractiveCompactionDigest(
               memoryState,
               plan,
-              settings,
+              capacitySettings,
             );
             compactionSource = "local";
             state = {
@@ -698,14 +708,22 @@ export class RoleplaySession extends DurableObject {
         );
         state = applied.state;
         persistedConversation = applied.conversation;
-        conversation = applied.compacted
-          ? [...applied.conversation, ...plan.transientMessages]
-          : applied.conversation;
+        const preserveFullGeneration =
+          applied.compacted &&
+          shouldPreserveFullGeneration(plan, parsed, contextPolicy);
+        generationState = preserveFullGeneration ? memoryState : state;
+        conversation = preserveFullGeneration
+          ? fullConversation
+          : applied.compacted
+            ? [...applied.conversation, ...plan.transientMessages]
+            : applied.conversation;
         memoryStatus = applied.compacted
           ? `${compactionSource}_compacted`
           : "model_retained";
         if (applied.compacted) {
-          messagesOptimized += plan.olderMessages.length;
+          if (!preserveFullGeneration) {
+            messagesOptimized += plan.olderMessages.length;
+          }
           await saveState(this.ctx.storage, state);
         }
       }
@@ -734,7 +752,7 @@ export class RoleplaySession extends DurableObject {
     }
 
     const roleplayMessages = buildRoleplayMessages(
-      memoryEnabled ? state : memoryState,
+      memoryEnabled ? generationState : memoryState,
       parsed,
       conversation,
     );
@@ -747,12 +765,18 @@ export class RoleplaySession extends DurableObject {
       0,
       estimatedInputBefore - estimatedInputTokens,
     );
-    if (estimatedInputTokens > settings.hardInputTokens) {
+    const generationCandidates = prepareRoleplayCandidates(
+      candidates,
+      estimatedInputTokens,
+      parsed.maxTokens,
+      settings,
+    );
+    if (!generationCandidates.length) {
       state = markRequest(state, idempotencyKey, "context_too_large");
       await saveState(this.ctx.storage, state);
       return {
         response: errorResponse(
-          "Roleplay context exceeds the safe input limit",
+          "Roleplay context and requested output exceed every eligible provider limit",
           413,
           "roleplay_context_too_large",
         ),
@@ -762,7 +786,7 @@ export class RoleplaySession extends DurableObject {
 
     const attempted = await attemptRoleplayCandidates(
       state,
-      candidates,
+      generationCandidates,
       (candidate) =>
         applyRoleplayPromptCache(
           buildUpstreamPayload(parsed, candidate, roleplayMessages),
@@ -785,7 +809,6 @@ export class RoleplaySession extends DurableObject {
         completion: Promise.resolve(),
       };
     }
-
     const {
       candidate,
       response,
@@ -807,7 +830,7 @@ export class RoleplaySession extends DurableObject {
       selectionReason,
       memoryStatus,
       estimatedInputTokens,
-      parsed.maxTokens,
+      candidate.resolvedMaxOutputTokens,
       headerMs,
       fallbackCount,
       queueMs,
@@ -854,7 +877,7 @@ export class RoleplaySession extends DurableObject {
               streamMs: Math.round(streamMs),
               heartbeatCount,
               assistantCharacters: assistant.length,
-              maxOutputTokens: parsed.maxTokens,
+              maxOutputTokens: candidate.resolvedMaxOutputTokens,
               inputTokensSaved,
             }),
           );

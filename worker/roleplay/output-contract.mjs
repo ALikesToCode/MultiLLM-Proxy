@@ -43,12 +43,11 @@ export function applyRoleplayOutputContract(
   const imagePromptDeclared = declaresMandatoryImagePrompt(directives);
   const imagePromptRequired =
     imagePromptDeclared && !turnSkipsImagePrompt(parsed.messages);
-  const minimumOutputTokens = Math.min(
-    settings.maxOutputTokens,
-    settings.imagePromptMinOutputTokens,
-  );
+  const minimumOutputTokens = settings.imagePromptMinOutputTokens;
   const budgetAdjusted =
-    imagePromptRequired && parsed.maxTokens < minimumOutputTokens;
+    imagePromptRequired &&
+    parsed.maxTokens !== null &&
+    parsed.maxTokens < minimumOutputTokens;
 
   return {
     ...parsed,

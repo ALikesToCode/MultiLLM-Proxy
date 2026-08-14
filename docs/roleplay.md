@@ -110,13 +110,14 @@ estimated eligible token count. Only upstream prompt reuse is requested;
 roleplay outputs are never response-cached or replayed.
 
 `response_length` accepts `compact`, `balanced`, or `immersive`. It changes the
-automatic output budget and adds a matching pacing instruction. Every mode
-discourages repeated recap and stagnant dialogue.
+pacing instruction without shrinking the model's available output capacity.
+Every mode discourages repeated recap and stagnant dialogue.
 
 Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
-balanced and immersive replies receive the configured 20,000-token budget;
-compact replies use a smaller smart budget. Explicit values can request up to
-`ROLEPLAY_MAX_OUTPUT_TOKENS`.
+the Worker requests the selected provider/model's largest output that still
+fits beside the current input. Explicit positive integer values are preserved;
+a candidate is skipped when its own advertised output or combined context
+limit cannot honor the request. There is no proxy-wide output ceiling.
 
 When a protected caller directive marks an `IMAGE PROMPT:` block as mandatory
 for story responses, the Worker adds a short final-output reminder immediately
@@ -212,10 +213,11 @@ instead of weakening or summarizing the directives.
 
 Storage pressure always makes compaction mandatory. The raw recent-message
 window automatically shrinks below `ROLEPLAY_KEEP_RECENT_MESSAGES` until the
-retained history and expected reply fit the storage budget. If one latest turn
-is too large to retain raw, that turn is included in the continuity digest but
-is still sent unchanged to the current generation; later turns retain the
-digest and the resulting assistant response.
+retained history and expected reply fit the storage budget. Storage-only
+compaction changes the durable checkpoint for later turns but does not shorten
+the current model request while its complete history still fits an eligible
+provider. If context capacity itself forces compaction, the current generation
+uses the compacted continuity digest.
 
 Each successful compaction also stores a versioned SHA-256 checkpoint over the
 character name and exact compacted `user`/`assistant`/`tool` prefix. Protected
@@ -235,8 +237,12 @@ prefix again. Response headers expose `X-MultiLLM-Estimated-Input-Before`,
 `X-MultiLLM-Messages-Summarized`; session metrics accumulate estimated input
 tokens saved. Final assistant output is never compressed.
 
-At `ROLEPLAY_HARD_INPUT_TOKENS`, compaction becomes mandatory. If the model
-request fails, returns malformed JSON, or declines, the Worker creates a
+By default, the hard limit is derived from the largest eligible provider/model
+context and compaction starts at 90% of that limit. A nonzero
+`ROLEPLAY_HARD_INPUT_TOKENS` or `ROLEPLAY_COMPACT_TRIGGER_TOKENS` explicitly
+overrides the derived value. When the effective hard limit is reached,
+compaction becomes mandatory. If that model request fails, returns malformed
+JSON, or declines, the Worker creates a
 bounded, role-labelled extractive memory from the prior digest and archived
 dialogue. Omissions are marked, the same dialogue-only SHA-256 checkpoint is
 stored, and final generation continues without retrying the summarizer.
@@ -367,14 +373,16 @@ Non-secret tuning variables:
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |
-| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `8000` | Ask model about compaction |
-| `ROLEPLAY_HARD_INPUT_TOKENS` | `24000` | Require compaction or reject |
+| `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
+| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `0` | `0` derives the trigger from provider capacity |
+| `ROLEPLAY_COMPACT_TRIGGER_PERCENT` | `90` | Derived compaction threshold percentage |
+| `ROLEPLAY_HARD_INPUT_TOKENS` | `0` | `0` derives the hard limit from eligible providers |
 | `ROLEPLAY_MEMORY_TARGET_TOKENS` | `1200` | Terse continuity-memory target |
 | `ROLEPLAY_KEEP_RECENT_MESSAGES` | `8` | Maximum raw recent history retained; shrinks under storage pressure |
-| `ROLEPLAY_DEFAULT_MAX_OUTPUT_TOKENS` | `20000` | Smart output-budget baseline |
-| `ROLEPLAY_MAX_OUTPUT_TOKENS` | `20000` | Per-turn output ceiling |
 | `ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS` | `2048` | Minimum story budget when protected directives require a final image-prompt block |
-| `ROLEPLAY_MAX_REQUEST_BYTES` | `1048576` | Bounded JSON ingress |
+| `ROLEPLAY_CONTEXT_REPLY_RESERVE_TOKENS` | `4096` | Reply space retained when deriving input capacity |
+| `ROLEPLAY_CONTEXT_SAFETY_TOKENS` | `1024` | Combined-context safety margin |
+| `ROLEPLAY_MAX_REQUEST_BYTES` | `8388608` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
@@ -395,3 +403,22 @@ Provider catalogs can use namespaced IDs. Override only those providers:
 
 Store that compact JSON as `ROLEPLAY_PROVIDER_MODELS`. Secrets never belong in
 this variable or `wrangler.jsonc`.
+
+The roleplay model catalog also returns `context_window`,
+`max_output_tokens`, and `limits_source` for every configured route. Limits
+are provider-specific: NanoGPT Kimi, for example, is not assumed to have the
+same capacity as NavyAI Kimi. Override a gateway only when its live catalog or
+an exercised request proves a different limit:
+
+```json
+{
+  "navyai": {
+    "glm": {
+      "context_window": 1048576,
+      "max_output_tokens": 131072
+    }
+  }
+}
+```
+
+Store that compact JSON as `ROLEPLAY_PROVIDER_LIMITS`.

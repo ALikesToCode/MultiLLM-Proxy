@@ -2,6 +2,7 @@ import {
   buildProviderHeaders,
   isSafeFallbackStatus,
 } from "./config.mjs";
+import { prepareRoleplayCandidates } from "./capacity.mjs";
 import {
   RoleplayRequestError,
   buildCompactionPayload,
@@ -385,7 +386,13 @@ export async function requestCompaction(
   );
   let fallbackCount = 0;
   try {
-    for (const candidate of candidates) {
+    const compactionCandidates = prepareRoleplayCandidates(
+      candidates,
+      plan.compactableTokens + settings.memoryTargetTokens + 1_024,
+      settings.compactionMaxTokens,
+      settings,
+    );
+    for (const candidate of compactionCandidates) {
       if (compactionController.signal.aborted) {
         const error = new Error(
           "Memory compaction exceeded its total time budget",

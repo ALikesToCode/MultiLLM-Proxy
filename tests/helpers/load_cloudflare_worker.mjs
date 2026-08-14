@@ -13,6 +13,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/checkpoint.mjs",
     import.meta.url,
   );
+  const capacityUrl = new URL(
+    "../../worker/roleplay/capacity.mjs",
+    import.meta.url,
+  );
   const configUrl = new URL(
     "../../worker/roleplay/config.mjs",
     import.meta.url,
@@ -68,6 +72,7 @@ export async function roleplayModuleUrl() {
   const [
     compatibilitySource,
     checkpointSource,
+    capacitySource,
     configSource,
     credentialHealthSource,
     compactionPolicySource,
@@ -85,6 +90,7 @@ export async function roleplayModuleUrl() {
     await Promise.all([
       readFile(compatibilityUrl, "utf8"),
       readFile(checkpointUrl, "utf8"),
+      readFile(capacityUrl, "utf8"),
       readFile(configUrl, "utf8"),
       readFile(credentialHealthUrl, "utf8"),
       readFile(compactionPolicyUrl, "utf8"),
@@ -100,7 +106,13 @@ export async function roleplayModuleUrl() {
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
-  const configDataUrl = dataModuleUrl(configSource);
+  const capacityDataUrl = dataModuleUrl(capacitySource);
+  const configDataUrl = dataModuleUrl(
+    configSource.replace(
+      'from "./capacity.mjs";',
+      `from "${capacityDataUrl}";`,
+    ),
+  );
   const credentialHealthDataUrl = dataModuleUrl(
     credentialHealthSource.replace(
       'from "./config.mjs";',
@@ -149,6 +161,10 @@ export async function roleplayModuleUrl() {
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
+      .replace(
+        'from "./capacity.mjs";',
+        `from "${capacityDataUrl}";`,
+      )
       .replace('from "./config.mjs";', `from "${configDataUrl}";`)
       .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`),
   );
@@ -180,6 +196,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./compaction-policy.mjs";',
       `from "${compactionPolicyDataUrl}";`,
+    )
+    .replace(
+      'from "./capacity.mjs";',
+      `from "${capacityDataUrl}";`,
     )
     .replace('from "./config.mjs";', `from "${configDataUrl}";`)
     .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)

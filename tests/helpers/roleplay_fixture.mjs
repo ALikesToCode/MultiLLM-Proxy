@@ -43,8 +43,9 @@ export function makeRoleplayEnv(overrides = {}) {
     ADMIN_API_KEY: "admin-roleplay-key",
     ROLEPLAY_API_KEY: "janitor-roleplay-key",
     OPENCODE_GO_API_KEY: "opencode-roleplay-key",
-    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "8000",
-    ROLEPLAY_HARD_INPUT_TOKENS: "24000",
+    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "0",
+    ROLEPLAY_COMPACT_TRIGGER_PERCENT: "90",
+    ROLEPLAY_HARD_INPUT_TOKENS: "0",
     ROLEPLAY_KEEP_RECENT_MESSAGES: "8",
     ...overrides,
   };
