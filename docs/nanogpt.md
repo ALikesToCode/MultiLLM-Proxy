@@ -17,6 +17,7 @@ the catalog endpoints instead of hard-coding model IDs.
 NANOGPT_API_KEY=your-nanogpt-api-key
 NANOGPT_API_KEY_1=your-second-nanogpt-api-key
 # Continue with NANOGPT_API_KEY_2, NANOGPT_API_KEY_3, ...
+NANOGPT_PREFERRED_KEY_INDEX=1
 
 # Compatibility aliases are also accepted:
 # NANO_GPT_KEY=your-nanogpt-api-key
@@ -53,6 +54,9 @@ pre-generation rejections; their response includes
 `X-MultiLLM-Credential-Attempts`. Ambiguous transport and `5xx` outcomes are
 never replayed. Cloudflare roleplay sessions follow the same safe-retry policy
 while persisting only the successful key identifier, never the secret.
+`NANOGPT_PREFERRED_KEY_INDEX` promotes one numbered credential before the
+normal key order without removing any fallback. Index `0` covers the
+unnumbered `NANOGPT_API_KEY` and `NANO_GPT_KEY` aliases.
 
 ## Subscription-only text mode
 

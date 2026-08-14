@@ -124,6 +124,7 @@ MIMO_API_KEY=your-mimo-token-plan-api-key
 # NanoGPT
 NANOGPT_API_KEY=your-nanogpt-api-key
 NANOGPT_API_KEY_1=your-second-nanogpt-api-key
+NANOGPT_PREFERRED_KEY_INDEX=1
 # Compatibility aliases: NANO_GPT_KEY and NANO_GPT_KEY_N
 
 # NavyAI
@@ -472,6 +473,8 @@ NanoGPT routes keep their single-attempt transport contract. To forward a
 caller-owned upstream bearer/API key, partner
 JWT, Navy OAuth token, or NanoGPT L402 credential, authenticate the proxy with
 `X-MultiLLM-Api-Key` and keep the provider credential in its native header.
+Set `NANOGPT_PREFERRED_KEY_INDEX=1` to try the `_1` credential before key 0;
+the remaining credentials stay available as fallbacks.
 
 NanoGPT unified text routing defaults to `NANOGPT_BILLING_MODE=subscription`
 and uses `https://nano-gpt.com/api/subscription`. Key checks and live model

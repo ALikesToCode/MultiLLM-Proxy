@@ -36,6 +36,18 @@ class NanoGPTConfiguredKeysTest(unittest.TestCase):
             ],
         )
 
+    def test_promotes_the_configured_preferred_key_index(self):
+        keys = configured_nanogpt_keys(
+            {
+                "NANOGPT_API_KEY": "key-zero",
+                "NANOGPT_API_KEY_1": "key-one",
+                "NANOGPT_API_KEY_2": "key-two",
+                "NANOGPT_PREFERRED_KEY_INDEX": "1",
+            }
+        )
+
+        self.assertEqual(keys, ["key-one", "key-zero", "key-two"])
+
 
 class NanoGPTKeyPoolTest(unittest.TestCase):
     def setUp(self):

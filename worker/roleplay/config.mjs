@@ -36,6 +36,7 @@ const PROVIDERS = {
     keyNames: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
     keyListNames: ["NANOGPT_API_KEYS", "NANO_GPT_KEYS"],
     numberedKeyPrefixes: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
+    preferredKeyIndexName: "NANOGPT_PREFERRED_KEY_INDEX",
     baseUrlNames: ["NANOGPT_BASE_URL"],
     defaultPath: "/v1/chat/completions",
   },
@@ -97,11 +98,16 @@ function configuredProviderTokens(env, definition) {
   for (const name of definition.keyNames) {
     const value = env[name];
     if (typeof value === "string" && value.trim()) {
-      tokens.push(value.trim());
+      tokens.push({ index: 0, token: value.trim() });
     }
   }
   for (const name of definition.keyListNames ?? []) {
-    tokens.push(...listedProviderTokens(env[name]));
+    tokens.push(
+      ...listedProviderTokens(env[name]).map((token) => ({
+        index: null,
+        token,
+      })),
+    );
   }
 
   const prefixes = definition.numberedKeyPrefixes ?? [];
@@ -125,8 +131,22 @@ function configuredProviderTokens(env, definition) {
     (left, right) =>
       left.index - right.index || left.prefixRank - right.prefixRank,
   );
-  tokens.push(...numbered.map((entry) => entry.token));
-  return [...new Set(tokens)];
+  tokens.push(...numbered);
+
+  const preferredValue = String(
+    env[definition.preferredKeyIndexName] ?? "",
+  ).trim();
+  const preferredIndex = /^\d+$/.test(preferredValue)
+    ? Number.parseInt(preferredValue, 10)
+    : null;
+  const ordered =
+    preferredIndex === null
+      ? tokens
+      : [
+          ...tokens.filter((entry) => entry.index === preferredIndex),
+          ...tokens.filter((entry) => entry.index !== preferredIndex),
+        ];
+  return [...new Set(ordered.map((entry) => entry.token))];
 }
 
 function boundedInteger(value, fallback, minimum, maximum) {

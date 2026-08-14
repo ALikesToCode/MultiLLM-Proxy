@@ -53,15 +53,15 @@ def configured_nanogpt_keys(
 ) -> list[str]:
     """Return de-duplicated NanoGPT keys in deterministic preference order."""
     source = os.environ if environ is None else environ
-    candidates: list[str] = []
+    candidates: list[tuple[int | None, str]] = []
 
     for name in _DIRECT_KEY_NAMES:
         value = source.get(name)
         if value and value.strip():
-            candidates.append(value.strip())
+            candidates.append((0, value.strip()))
 
     for name in _LIST_KEY_NAMES:
-        candidates.extend(_listed_keys(source.get(name)))
+        candidates.extend((None, value) for value in _listed_keys(source.get(name)))
 
     numbered: list[tuple[int, int, str]] = []
     for name, value in source.items():
@@ -70,11 +70,21 @@ def configured_nanogpt_keys(
             continue
         prefix_rank = _DIRECT_KEY_NAMES.index(match.group(1))
         numbered.append((int(match.group(2)), prefix_rank, value.strip()))
-    candidates.extend(value for _, _, value in sorted(numbered))
+    candidates.extend((index, value) for index, _, value in sorted(numbered))
+
+    preferred_value = (source.get("NANOGPT_PREFERRED_KEY_INDEX") or "").strip()
+    preferred_index = (
+        int(preferred_value) if re.fullmatch(r"\d+", preferred_value) else None
+    )
+    if preferred_index is not None:
+        candidates = [
+            *(candidate for candidate in candidates if candidate[0] == preferred_index),
+            *(candidate for candidate in candidates if candidate[0] != preferred_index),
+        ]
 
     keys: list[str] = []
     seen: set[str] = set()
-    for candidate in candidates:
+    for _, candidate in candidates:
         if candidate in seen:
             continue
         seen.add(candidate)

@@ -187,7 +187,8 @@ Transport=HTTPS</code></pre>
                 <pre><code>{{ documentation.proxy_credential_env }}=your-client-facing-key
 OPENCODE_GO_API_KEY=your-provider-key
 NANOGPT_API_KEY=your-first-provider-key
-NANOGPT_API_KEY_1=your-second-provider-key</code></pre>
+NANOGPT_API_KEY_1=your-second-provider-key
+NANOGPT_PREFERRED_KEY_INDEX=1</code></pre>
             </div>
             <div>
                 <strong>Cloudflare secrets</strong>
@@ -195,6 +196,8 @@ NANOGPT_API_KEY_1=your-second-provider-key</code></pre>
 npx wrangler secret put FLASK_SECRET_KEY
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put OPENCODE_GO_API_KEY
+npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler deploy --containers-rollout immediate</code></pre>
             </div>
         </div>
