@@ -197,6 +197,22 @@ class RateLimitServiceTest(unittest.TestCase):
 
         self.assertTrue(decision.allowed, decision)
 
+    def test_opencode_defaults_allow_glm_sized_output(self):
+        payload = {
+            "messages": [{"role": "user", "content": "Continue the scene."}],
+            "max_tokens": 131072,
+        }
+
+        decision = RateLimitService.enforce_request(
+            provider="opencode",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json=payload,
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed, decision)
+
     def test_mimo_defaults_allow_long_context_request_bodies(self):
         os.environ["RATE_LIMIT_TPM"] = "2000000"
 

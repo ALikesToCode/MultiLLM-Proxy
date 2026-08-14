@@ -416,8 +416,16 @@ this variable or `wrangler.jsonc`.
 The roleplay model catalog also returns `context_window`,
 `max_output_tokens`, and `limits_source` for every configured route. Limits
 are provider-specific: NanoGPT Kimi, for example, is not assumed to have the
-same capacity as NavyAI Kimi. Override a gateway only when its live catalog or
-an exercised request proves a different limit:
+same capacity as NavyAI Kimi.
+
+OpenAI-compatible clients may send a `max_tokens` ceiling larger than a
+selected provider supports. The roleplay route clamps that ceiling to the
+provider's available model capacity and returns the effective value in
+`X-Roleplay-Max-Output-Tokens`; it does not reject the turn solely because the
+client requested a larger ceiling.
+
+Override a gateway only when its live catalog or an exercised request proves a
+different limit:
 
 ```json
 {

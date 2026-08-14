@@ -98,19 +98,19 @@ export function resolveRoleplayCandidateLimits(overrides, provider, family) {
   return normalizedLimit(overrides?.[provider]?.[family], fallback);
 }
 
-function requestedOutputFits(candidate, requestedOutputTokens) {
-  return (
-    requestedOutputTokens === null ||
-    requestedOutputTokens <= candidate.maxOutputTokens
+function candidateOutputCeiling(candidate, requestedOutputTokens, fallback) {
+  return Math.min(
+    requestedOutputTokens ?? fallback,
+    candidate.maxOutputTokens,
   );
 }
 
 function candidateInputCapacity(candidate, requestedOutputTokens, settings) {
-  if (!requestedOutputFits(candidate, requestedOutputTokens)) {
-    return 0;
-  }
-  const reserve =
-    requestedOutputTokens ?? settings.contextReplyReserveTokens;
+  const reserve = candidateOutputCeiling(
+    candidate,
+    requestedOutputTokens,
+    settings.contextReplyReserveTokens,
+  );
   return Math.max(
     0,
     candidate.contextWindow - reserve - settings.contextSafetyTokens,
@@ -122,9 +122,18 @@ export function resolveRoleplayContextPolicy(
   requestedOutputTokens,
   settings,
 ) {
+  const fullOutputCandidates =
+    requestedOutputTokens === null
+      ? candidates
+      : candidates.filter(
+          (candidate) => requestedOutputTokens <= candidate.maxOutputTokens,
+        );
+  const capacityCandidates = fullOutputCandidates.length
+    ? fullOutputCandidates
+    : candidates;
   const dynamicHardLimit = Math.max(
     0,
-    ...candidates.map((candidate) =>
+    ...capacityCandidates.map((candidate) =>
       candidateInputCapacity(candidate, requestedOutputTokens, settings),
     ),
   );
@@ -154,10 +163,7 @@ export function prepareRoleplayCandidates(
   requestedOutputTokens,
   settings,
 ) {
-  return candidates.flatMap((candidate) => {
-    if (!requestedOutputFits(candidate, requestedOutputTokens)) {
-      return [];
-    }
+  const prepared = candidates.flatMap((candidate) => {
     const availableOutputTokens =
       candidate.contextWindow -
       estimatedInputTokens -
@@ -166,17 +172,26 @@ export function prepareRoleplayCandidates(
       return [];
     }
     const resolvedMaxOutputTokens = Math.min(
-      requestedOutputTokens ?? candidate.maxOutputTokens,
+      candidateOutputCeiling(
+        candidate,
+        requestedOutputTokens,
+        candidate.maxOutputTokens,
+      ),
       availableOutputTokens,
     );
-    if (
-      requestedOutputTokens !== null &&
-      resolvedMaxOutputTokens < requestedOutputTokens
-    ) {
-      return [];
-    }
-    return [{ ...candidate, resolvedMaxOutputTokens }];
+    return [
+      {
+        candidate: { ...candidate, resolvedMaxOutputTokens },
+        clamped:
+          requestedOutputTokens !== null &&
+          resolvedMaxOutputTokens < requestedOutputTokens,
+      },
+    ];
   });
+  return [
+    ...prepared.filter((entry) => !entry.clamped),
+    ...prepared.filter((entry) => entry.clamped),
+  ].map((entry) => entry.candidate);
 }
 
 export function shouldPreserveFullGeneration(plan, parsed, policy) {

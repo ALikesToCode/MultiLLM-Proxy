@@ -778,7 +778,7 @@ test("roleplay response length changes pacing without shrinking capacity", async
   assert.match(requests[1].messages[0].content, /Response length: immersive/);
 });
 
-test("roleplay removes the proxy-wide 20000-token reply ceiling", async () => {
+test("roleplay removes the proxy-wide ceiling and clamps to model capacity", async () => {
   const fixture = makeRoleplayEnv();
   const budgets = [];
 
@@ -817,11 +817,12 @@ test("roleplay removes the proxy-wide 20000-token reply ceiling", async () => {
 
     assert.equal(automatic.status, 200);
     assert.equal(explicit.status, 200);
-    assert.equal(tooLarge.status, 413);
+    assert.equal(tooLarge.status, 200);
   });
 
   assert.ok(budgets[0] > 20_000);
   assert.equal(budgets[1], 100_000);
+  assert.equal(budgets[2], 131_072);
 });
 
 test("roleplay selects and retains a working NanoGPT key per session", async () => {

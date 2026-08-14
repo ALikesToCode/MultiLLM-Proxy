@@ -23,6 +23,14 @@ PROVIDER_LIMIT_DEFAULTS = {
         "MAX_OUTPUT_TOKENS": 131_072,
         "RATE_LIMIT_TPM": 1_200_000,
     },
+    "opencode": {
+        # Keep the Container guard aligned with the Worker-native roleplay
+        # capacities so an accepted GLM/Kimi request is not rejected at egress.
+        "MAX_REQUEST_BYTES": 8 * 1024 * 1024,
+        "MAX_PROMPT_TOKENS": 262_144,
+        "MAX_OUTPUT_TOKENS": 262_144,
+        "RATE_LIMIT_TPM": 1_200_000,
+    },
     "nanogpt": {
         "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
     },

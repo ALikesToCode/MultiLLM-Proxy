@@ -111,6 +111,42 @@ test("Janitor Chat Completions keeps edge sessions and uses OpenCode Container e
   assert.equal(containerCalls, 1);
 });
 
+test("Janitor oversized output ceilings are clamped to GLM capacity", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+  });
+  let requestedMaxTokens;
+  fixture.env.MULTILLM_PROXY_CONTAINER = {
+    getByName() {
+      return {
+        async fetch(request) {
+          const payload = await request.json();
+          requestedMaxTokens = payload.max_tokens;
+          return completionResponse(payload.model, "Mira continues the scene.");
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    roleplayRequest(
+      {
+        model: "roleplay:glm",
+        messages: openingMessages("Continue without stopping."),
+        stream: false,
+        max_tokens: 1_000_000,
+      },
+      janitorHeaders({ Origin: "https://janitorai.com" }),
+      JANITOR_PATH,
+    ),
+    fixture.env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(requestedMaxTokens, 131_072);
+  assert.equal(response.headers.get("X-Roleplay-Max-Output-Tokens"), "131072");
+});
+
 test("both roleplay Chat Completions aliases reject invalid input at the edge", async () => {
   const fixture = makeRoleplayEnv();
   fixture.env.MULTILLM_PROXY_CONTAINER = {
