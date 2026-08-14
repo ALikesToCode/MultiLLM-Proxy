@@ -678,14 +678,14 @@ class AuthService:
 
         except subprocess.CalledProcessError as error:
             logger.error(
-                "gcloud token command failed return_code=%s",
+                "gcloud command failed return_code=%s",
                 error.returncode,
             )
         except subprocess.TimeoutExpired:
             logger.error("Timeout while getting Google token")
         except Exception as error:
             logger.error(
-                "Unexpected Google token error type=%s",
+                "Unexpected gcloud error type=%s",
                 type(error).__name__,
             )
 

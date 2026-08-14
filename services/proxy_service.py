@@ -309,7 +309,7 @@ class ProxyService:
                     )
                 else:
                     logger.error(
-                        "gcloud token command failed return_code=%s",
+                        "gcloud command failed return_code=%s",
                         e.returncode,
                     )
                     raise APIError("Unable to obtain a Google Cloud token", status_code=500)
@@ -327,7 +327,7 @@ class ProxyService:
                 cls._google_token = None
                 cls._google_token_expiry = None
                 logger.error(
-                    "Unexpected Google token error type=%s",
+                    "Unexpected gcloud error type=%s",
                     type(e).__name__,
                 )
                 raise APIError("Unable to obtain a Google Cloud token", status_code=500)
@@ -2469,8 +2469,6 @@ class ProxyService:
                     logger.info(f"Found valid {api_provider} API key format in environment, using it instead")
                     api_key = env_key
             
-            logger.debug("Resolved API key for %s", api_provider)
-            
             headers["x-goog-api-key"] = api_key
             
             # Remove the Authorization header as Gemini doesn't use it
@@ -2564,7 +2562,7 @@ class ProxyService:
                     )
                     if count_response.status_code >= 400:
                         logger.warning(
-                            "Gemini countTokens preflight failed provider=%s status=%s",
+                            "Gemini input preflight failed provider=%s status=%s",
                             api_provider,
                             count_response.status_code,
                         )
@@ -2572,13 +2570,13 @@ class ProxyService:
                     try:
                         token_count = count_response.json().get("totalTokens")
                         logger.info(
-                            "Gemini countTokens preflight provider=%s model=%s total_tokens=%s",
+                            "Gemini input preflight provider=%s model=%s input_units=%s",
                             api_provider,
                             model,
                             token_count,
                         )
                     except ValueError:
-                        logger.warning("Gemini countTokens preflight returned non-JSON response")
+                        logger.warning("Gemini input preflight returned non-JSON response")
                 
                 # Re-encode the modified data
                 data = json.dumps(request_data).encode('utf-8')
@@ -2856,8 +2854,6 @@ class ProxyService:
                 if not api_key:
                     raise APIError("No API key found for OpenRouter. Please set OPENROUTER_API_KEY in your .env file.", status_code=401)
                 logger.info("Using API key from AuthService for OpenRouter")
-            
-            logger.debug("Resolved OpenRouter API key")
             
             # Replace auth header with the real OpenRouter API key
             headers['Authorization'] = f'Bearer {api_key}'
