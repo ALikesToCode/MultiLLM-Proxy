@@ -60,7 +60,7 @@
     "SERVER_PORT": "8080",
     "APP_NAME": "MultiLLM Proxy",
     "LINKAPI_BASE_URL": "https://api.linkapi.ai",
-    "ROLEPLAY_PROVIDER_ORDER": "opencode,navyai,linkapi,nanogpt,openrouter",
+    "ROLEPLAY_PROVIDER_ORDER": "nanogpt,opencode,linkapi,openrouter,navyai",
     "ROLEPLAY_KIMI_MODEL": "kimi-k2.6",
     "ROLEPLAY_GLM_MODEL": "glm-5.2",
     "ROLEPLAY_PROVIDER_MODELS": "{}",

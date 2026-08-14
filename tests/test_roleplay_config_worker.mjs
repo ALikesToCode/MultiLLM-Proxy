@@ -10,6 +10,18 @@ import {
 
 const { MultiLLMProxyContainer } = await loadWorkerModule();
 
+test("roleplay defaults to NanoGPT first and NavyAI last", () => {
+  const settings = getRoleplaySettings({});
+
+  assert.deepEqual(settings.providerOrder, [
+    "nanogpt",
+    "opencode",
+    "linkapi",
+    "openrouter",
+    "navyai",
+  ]);
+});
+
 test("roleplay promotes the configured NanoGPT key index", () => {
   const env = {
     NANOGPT_API_KEY: "key-zero",
@@ -43,4 +55,14 @@ test("deployment prefers NanoGPT key index one", async () => {
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
   assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "1");
+});
+
+test("deployment routes roleplay through NanoGPT before other providers", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  assert.equal(
+    config.vars?.ROLEPLAY_PROVIDER_ORDER,
+    "nanogpt,opencode,linkapi,openrouter,navyai",
+  );
 });

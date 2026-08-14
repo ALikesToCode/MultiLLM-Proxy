@@ -409,11 +409,11 @@ stores bounded continuity memory, and records per-model latency and
 reliability. OpenCode generations use Container egress because OpenCode rejects
 Worker-origin HTTP signatures.
 
-The default policy explores and then selects between OpenCode Go
-`kimi-k2.6` and `glm-5.2`. OpenCode Go is the first provider tier, NavyAI is
-second, and configured LinkAPI, NanoGPT, and OpenRouter credentials are later
-tiers. Automatic fallback occurs only after a clear upstream rejection; an
-ambiguous transport or `5xx` outcome stops to avoid duplicate paid generation.
+The default policy explores and then selects between `kimi-k2.6` and
+`glm-5.2`. NanoGPT is the first provider tier, followed by OpenCode Go,
+LinkAPI, and OpenRouter; NavyAI is last. Automatic fallback occurs only after a
+clear upstream rejection; an ambiguous transport or `5xx` outcome stops to
+avoid duplicate paid generation.
 Each route carries its own context/output limits. The Worker filters out routes
 that cannot fit the current input, so a larger NavyAI or NanoGPT GLM context can
 be selected without assuming every gateway exposes the same capacity.

@@ -9,14 +9,14 @@ that session stay ordered while different sessions scale independently. When
 an OpenCode model is selected, only the provider request uses Container egress
 to avoid OpenCode's Worker-signature block.
 
-The default model policy uses OpenCode Go first and learns between:
+The default model policy uses NanoGPT first and learns between:
 
 - Kimi K2.6: `kimi-k2.6`
 - GLM-5.2: `glm-5.2`
 
-NavyAI is the second provider tier. Configured LinkAPI, NanoGPT, and OpenRouter
-keys form later tiers. The provider order is strict; latency and reliability
-choose Kimi or GLM within each tier.
+OpenCode Go, LinkAPI, and OpenRouter form the middle tiers; NavyAI is last. The
+provider order is strict; latency and reliability choose Kimi or GLM within
+each tier.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
@@ -358,27 +358,27 @@ administrative key:
 npx wrangler secret put ROLEPLAY_API_KEY
 ```
 
-OpenCode Go is the preferred provider:
+NanoGPT is the preferred provider:
 
 ```bash
-npx wrangler secret put OPENCODE_GO_API_KEY
+npx wrangler secret put NANOGPT_API_KEY
+npx wrangler secret put NANOGPT_API_KEY_1
 ```
 
 Add later tiers only when used:
 
 ```bash
-npx wrangler secret put NAVYAI_API_KEY
+npx wrangler secret put OPENCODE_GO_API_KEY
 npx wrangler secret put LINKAPI_KEY
-npx wrangler secret put NANOGPT_API_KEY
-npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put NAVYAI_API_KEY
 ```
 
 Non-secret tuning variables:
 
 | Variable | Default | Purpose |
 | --- | ---: | --- |
-| `ROLEPLAY_PROVIDER_ORDER` | `opencode,navyai,linkapi,nanogpt,openrouter` | Strict provider tiers |
+| `ROLEPLAY_PROVIDER_ORDER` | `nanogpt,opencode,linkapi,openrouter,navyai` | Strict provider tiers |
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |

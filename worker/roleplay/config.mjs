@@ -4,11 +4,11 @@ import {
 } from "./capacity.mjs";
 
 const DEFAULT_PROVIDER_ORDER = [
-  "opencode",
-  "navyai",
-  "linkapi",
   "nanogpt",
+  "opencode",
+  "linkapi",
   "openrouter",
+  "navyai",
 ];
 
 const PROVIDERS = {

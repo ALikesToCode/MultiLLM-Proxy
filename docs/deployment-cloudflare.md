@@ -33,11 +33,10 @@ upstream egress; other providers remain direct Worker fetches. Each session
 stores recent dialogue, a compact continuity digest, idempotency keys, and
 per-model EWMA latency/reliability statistics.
 
-Default routing uses OpenCode Go first and adapts between `kimi-k2.6` and
-`glm-5.2`. NavyAI is the second provider tier. Configured LinkAPI, NanoGPT, and
-OpenRouter keys form later tiers. Only `401`, `402`, `403`, `404`, and `429`
-trigger automatic fallback. Transport errors and `5xx` responses stop because
-their billing outcome is ambiguous.
+Default routing uses NanoGPT first and adapts between `kimi-k2.6` and
+`glm-5.2`. OpenCode Go, LinkAPI, and OpenRouter follow; NavyAI is last. Only
+`401`, `402`, `403`, `404`, and `429` trigger automatic fallback. Transport
+errors and `5xx` responses stop because their billing outcome is ambiguous.
 
 At the local compaction threshold, the selected model decides whether older
 dialogue should become a bounded continuity digest. At the hard input limit,
