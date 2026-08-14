@@ -132,7 +132,7 @@ test("roleplay endpoint stores continuity and explores Kimi then GLM", async () 
   assert.equal(metricPayload.models["opencode:glm-5.2"].successes, 1);
 });
 
-test("roleplay enforces maximum reasoning for every provider and model family", async () => {
+test("roleplay defaults to maximum reasoning for every provider and model family", async () => {
   const disabledProviderKeys = {
     OPENCODE_GO_API_KEY: "",
     OPENCODE_API_KEY: "",
@@ -171,7 +171,6 @@ test("roleplay enforces maximum reasoning for every provider and model family", 
           session_id: `session-reasoning-${provider}-${family}`,
           input: "Continue.",
           model_preference: family,
-          reasoning_effort: "none",
           stream: false,
         }),
         fixture.env,
@@ -209,6 +208,69 @@ test("roleplay enforces maximum reasoning for every provider and model family", 
         false,
         `${provider}:${family}`,
       );
+    }
+  }
+});
+
+test("roleplay preserves an explicit GLM reasoning override for every provider", async () => {
+  const disabledProviderKeys = {
+    OPENCODE_GO_API_KEY: "",
+    OPENCODE_API_KEY: "",
+    NAVYAI_API_KEY: "",
+    LINKAPI_KEY: "",
+    LINKAPI_API_KEY: "",
+    NANOGPT_API_KEY: "",
+    OPENROUTER_API_KEY: "",
+  };
+  const cases = [
+    ["opencode", "OPENCODE_GO_API_KEY", "max", undefined],
+    ["navyai", "NAVYAI_API_KEY", "xhigh", undefined],
+    ["linkapi", "LINKAPI_KEY", "high", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "xhigh", undefined],
+    ["openrouter", "OPENROUTER_API_KEY", undefined, "xhigh"],
+  ];
+
+  for (const [provider, keyName, maximumEffort, nestedMaximumEffort] of cases) {
+    for (const requestedEffort of ["low", "max"]) {
+      const fixture = makeRoleplayEnv({
+        ...disabledProviderKeys,
+        [keyName]: `${provider}-reasoning-key`,
+        ROLEPLAY_PROVIDER_ORDER: provider,
+      });
+      let upstreamPayload;
+      const response = await withGlobalFetch(async (_input, init) => {
+        upstreamPayload = JSON.parse(init.body);
+        return completionResponse(upstreamPayload.model);
+      }, () =>
+        handleRoleplayEdgeRequest(
+          roleplayRequest({
+            session_id: `session-reasoning-override-${provider}-${requestedEffort}`,
+            input: "Continue.",
+            model_preference: "glm",
+            reasoning_effort: requestedEffort,
+            stream: false,
+          }),
+          fixture.env,
+        ),
+      );
+
+      assert.equal(response.status, 200, `${provider}:${requestedEffort}`);
+      if (nestedMaximumEffort) {
+        assert.deepEqual(upstreamPayload.reasoning, {
+          effort:
+            requestedEffort === "max"
+              ? nestedMaximumEffort
+              : requestedEffort,
+        });
+        assert.equal("reasoning_effort" in upstreamPayload, false);
+      } else {
+        assert.equal(
+          upstreamPayload.reasoning_effort,
+          requestedEffort === "max" ? maximumEffort : requestedEffort,
+          `${provider}:${requestedEffort}`,
+        );
+        assert.equal("reasoning" in upstreamPayload, false);
+      }
     }
   }
 });

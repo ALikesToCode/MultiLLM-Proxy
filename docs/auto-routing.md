@@ -31,6 +31,13 @@ last successful live provider-catalog refresh. Automatic models also work throug
 require an explicit `provider:model` because their request and stream
 contracts differ across providers.
 
+GLM-5.2 defaults to maximum reasoning on every unified and automatic route.
+The proxy maps semantic `max` to the selected transport: OpenCode receives
+`max`, NanoGPT and NavyAI receive `xhigh`, LinkAPI receives `high`, and
+OpenRouter receives nested `reasoning.effort: xhigh`. Send an explicit lower
+`reasoning_effort` to reduce it; values above a provider's ceiling are clamped
+to that ceiling.
+
 The authenticated `/docs` route presents the same combined catalog alongside
 copyable chat and image requests, runtime credential status, native provider
 paths, and the currently saved automatic priorities. `/docs.json` exposes the

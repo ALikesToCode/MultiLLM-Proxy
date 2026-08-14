@@ -224,7 +224,7 @@ npx wrangler deploy --containers-rollout immediate</code></pre>
         {% else %}
         <div class="docs-empty"><strong>No automatic routes are saved.</strong><p>Create one in Operations, then return here for the live priority list.</p></div>
         {% endif %}
-        <p class="docs-fine-print">Failover advances only after <code>401</code>, <code>402</code>, <code>403</code>, <code>404</code>, <code>429</code>, or a local open/half-open circuit response. Ambiguous timeouts and generic upstream <code>5xx</code> responses are not replayed.</p>
+        <p class="docs-fine-print">Failover advances only after <code>401</code>, <code>402</code>, <code>403</code>, <code>404</code>, <code>429</code>, or a local open/half-open circuit response. Ambiguous timeouts and generic upstream <code>5xx</code> responses are not replayed. GLM-5.2 defaults to maximum reasoning; semantic <code>max</code> maps to each provider's supported ceiling, while an explicit lower effort is preserved.</p>
     </section>
 
     <section class="docs-section" id="model-directory" aria-labelledby="model-directory-title">

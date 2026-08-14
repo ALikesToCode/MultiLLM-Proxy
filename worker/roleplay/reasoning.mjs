@@ -3,6 +3,15 @@ const MAXIMUM_EFFORT_BY_PROVIDER = Object.freeze({
   linkapi: "high",
   nanogpt: "xhigh",
 });
+const REASONING_EFFORT_ORDER = Object.freeze([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 function normalizedCandidate(candidate) {
   return {
@@ -51,12 +60,38 @@ export function maximumReasoningProfile(candidate) {
   throw new TypeError(`No maximum reasoning profile for provider: ${provider}`);
 }
 
-export function enforceMaximumReasoning(payload, candidate) {
+function reasoningFields(candidate, effort) {
+  const { provider, family } = normalizedCandidate(candidate);
+  const maximum = maximumReasoningProfile(candidate).effort;
+  if (maximum === "native" || (provider === "opencode" && family !== "glm")) {
+    return {};
+  }
+  const requestedIndex = REASONING_EFFORT_ORDER.indexOf(effort);
+  const maximumIndex = REASONING_EFFORT_ORDER.indexOf(maximum);
+  const mappedEffort = REASONING_EFFORT_ORDER[
+    Math.min(requestedIndex, maximumIndex)
+  ];
+  if (provider === "openrouter") {
+    return { reasoning: { effort: mappedEffort } };
+  }
+  return { reasoning_effort: mappedEffort };
+}
+
+export function applyReasoningPolicy(payload, candidate) {
   const normalized = { ...payload };
+  const explicitEffort = normalized.reasoning_effort;
+  if (
+    explicitEffort !== undefined &&
+    !REASONING_EFFORT_ORDER.includes(explicitEffort)
+  ) {
+    return normalized;
+  }
   delete normalized.reasoning;
   delete normalized.reasoning_effort;
   return {
     ...normalized,
-    ...maximumReasoningProfile(candidate).fields,
+    ...(explicitEffort === undefined
+      ? maximumReasoningProfile(candidate).fields
+      : reasoningFields(candidate, explicitEffort)),
   };
 }

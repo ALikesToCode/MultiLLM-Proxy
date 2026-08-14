@@ -87,9 +87,10 @@ clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
 values are also accepted. A family-specific value pins the family but still
 follows provider priority.
 
-Every roleplay generation and model-backed memory compaction request enforces
-the strongest provider-compatible reasoning mode. Caller-supplied
-`reasoning_effort` values cannot lower or disable it. NavyAI and NanoGPT receive
+Every roleplay generation defaults to the strongest provider-compatible
+reasoning mode. Callers can lower generation effort with `reasoning_effort`;
+semantic `max` maps to the selected provider's real ceiling. Model-backed
+memory compaction remains at maximum reasoning. NavyAI and NanoGPT receive
 `xhigh`; LinkAPI receives `high`; OpenRouter receives `reasoning.effort` set to
 `high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.2 receives `max`.
 OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport

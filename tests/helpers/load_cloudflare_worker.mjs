@@ -41,6 +41,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/reasoning.mjs",
     import.meta.url,
   );
+  const validationUrl = new URL(
+    "../../worker/roleplay/validation.mjs",
+    import.meta.url,
+  );
   const endpointUrl = new URL(
     "../../worker/roleplay/endpoint.mjs",
     import.meta.url,
@@ -63,6 +67,7 @@ export async function roleplayModuleUrl() {
     memorySource,
     outputContractSource,
     reasoningSource,
+    validationSource,
     transportSource,
     streamingSource,
     endpointSource,
@@ -77,6 +82,7 @@ export async function roleplayModuleUrl() {
       readFile(memoryUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
+      readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
@@ -102,6 +108,7 @@ export async function roleplayModuleUrl() {
   );
   const outputContractDataUrl = dataModuleUrl(outputContractSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource);
+  const validationDataUrl = dataModuleUrl(validationSource);
   const memoryDataUrl = dataModuleUrl(
     memorySource
       .replace(
@@ -115,6 +122,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./reasoning.mjs";',
         `from "${reasoningDataUrl}";`,
+      )
+      .replaceAll(
+        'from "./validation.mjs";',
+        `from "${validationDataUrl}";`,
       ),
   );
   const transportDataUrl = dataModuleUrl(

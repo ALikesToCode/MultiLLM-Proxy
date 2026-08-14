@@ -337,6 +337,10 @@ forward only after a definite authentication, payment, model-availability,
 rate-limit, or local circuit rejection. Direct `provider:model` requests remain
 unchanged.
 
+Unified GLM-5.2 requests default to the strongest reasoning level supported by
+the selected provider. An explicit `reasoning_effort` still lowers the effort;
+`max` means the provider's real maximum rather than a literal unsupported value.
+
 Administrators can reorder candidates and create more virtual models from the
 Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)
 for the exact retry boundary, response headers, persistence behavior, and API.

@@ -23,6 +23,7 @@ from services.auto_route_service import AutoRouteService
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.reasoning_policy import apply_glm_52_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
@@ -227,7 +228,11 @@ def _dispatch_unified_chat_candidate(
             payload.get("model"),
         )
         token = _provider_token(app, auth_service_cls, proxy_service_cls, provider)
-        upstream_payload = _copy_request_payload(payload, provider_model)
+        upstream_payload = apply_glm_52_reasoning_policy(
+            _copy_request_payload(payload, provider_model),
+            provider,
+            provider_model,
+        )
         raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
         headers = proxy_service_cls.prepare_headers(

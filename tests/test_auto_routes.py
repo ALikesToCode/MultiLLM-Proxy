@@ -1,3 +1,4 @@
+import json
 import os
 from unittest.mock import patch
 
@@ -61,6 +62,56 @@ class AutoRouteTest(UnifiedApiTestCase):
             response.headers["X-MultiLLM-Route-Decision"],
             "auto-failover",
         )
+
+    def test_auto_glm_defaults_to_maximum_reasoning_for_selected_provider(self):
+        upstream_response = self._chat_response("maximum reasoning selected")
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request, patch.object(
+            self.app_module.AuthService,
+            "get_api_keys",
+            return_value=[],
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "auto:glm-5.2",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual(upstream_payload["model"], "glm-5.2")
+        self.assertEqual(upstream_payload["reasoning_effort"], "max")
+
+    def test_auto_glm_preserves_explicit_reasoning_override(self):
+        upstream_response = self._chat_response("low reasoning selected")
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request, patch.object(
+            self.app_module.AuthService,
+            "get_api_keys",
+            return_value=[],
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "auto:glm-5.2",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "reasoning_effort": "low",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        upstream_payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual(upstream_payload["reasoning_effort"], "low")
 
     def test_auto_chat_advances_after_provider_rate_limit(self):
         os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
