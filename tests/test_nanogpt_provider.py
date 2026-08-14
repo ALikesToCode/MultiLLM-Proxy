@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import requests
 
-from services.nanogpt_key_pool import NanoGPTKeyPool
+from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTUnifiedKeyPool
 
 
 class NanoGPTProviderRouteTest(unittest.TestCase):
@@ -51,9 +51,11 @@ class NanoGPTProviderRouteTest(unittest.TestCase):
         self.app_module = importlib.import_module("app")
         self.client = self.app_module.create_app().test_client()
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
 
     def tearDown(self):
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
         self.temp_dir.cleanup()
         os.environ.clear()
         os.environ.update(self.original_env)
@@ -244,7 +246,7 @@ class NanoGPTProviderRouteTest(unittest.TestCase):
         self.assertEqual(request_kwargs["api_provider"], "nanogpt")
         self.assertEqual(
             request_kwargs["url"],
-            "https://nano-gpt.com/api/v1/chat/completions",
+            "https://nano-gpt.com/api/subscription/v1/chat/completions",
         )
         upstream_payload = json.loads(request_kwargs["data"])
         self.assertEqual(upstream_payload["model"], "gpt-4o-mini:online:memory-30")
@@ -344,9 +346,11 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
         self.app_module = importlib.import_module("app")
         self.client = self.app_module.create_app().test_client()
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
 
     def tearDown(self):
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
         self.temp_dir.cleanup()
         os.environ.clear()
         os.environ.update(self.original_env)
@@ -552,7 +556,7 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
         self.assertIn("https://nano-gpt.com/oauth/authorize", response.get_data(as_text=True))
         make_request.assert_not_called()
 
-    def test_unified_responses_uses_nanogpt_native_endpoint(self):
+    def test_unified_responses_bridges_to_nanogpt_subscription_chat(self):
         upstream_response = self._json_response(
             {
                 "id": "resp_native",
@@ -568,7 +572,7 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
                 "/v1/responses",
                 headers={"Authorization": "Bearer admin-test-key"},
                 json={
-                    "model": "nanogpt:provider/model:thinking",
+                    "model": "nanogpt:zai-org/glm-5.2:thinking",
                     "input": "Hello",
                 },
             )
@@ -577,12 +581,11 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
         request_kwargs = make_request.call_args.kwargs
         self.assertEqual(
             request_kwargs["url"],
-            "https://nano-gpt.com/api/v1/responses",
+            "https://nano-gpt.com/api/subscription/v1/chat/completions",
         )
-        self.assertEqual(
-            json.loads(request_kwargs["data"])["model"],
-            "provider/model:thinking",
-        )
+        upstream_payload = json.loads(request_kwargs["data"])
+        self.assertEqual(upstream_payload["model"], "zai-org/glm-5.2:thinking")
+        self.assertEqual(upstream_payload["reasoning_effort"], "max")
 
     def test_unified_responses_rotates_after_nanogpt_balance_rejection(self):
         insufficient_balance = self._json_response(
@@ -619,6 +622,13 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "2")
+        self.assertTrue(
+            all(
+                call.kwargs["url"]
+                == "https://nano-gpt.com/api/subscription/v1/chat/completions"
+                for call in make_request.call_args_list
+            )
+        )
         self.assertEqual(
             [
                 call.kwargs["headers"]["Authorization"]
@@ -662,6 +672,13 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["X-MultiLLM-Credential-Attempts"], "2")
+        self.assertTrue(
+            all(
+                call.kwargs["url"]
+                == "https://nano-gpt.com/api/v1/images/generations"
+                for call in make_request.call_args_list
+            )
+        )
         self.assertEqual(
             [
                 call.kwargs["headers"]["Authorization"]

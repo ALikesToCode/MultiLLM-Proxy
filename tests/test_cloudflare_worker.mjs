@@ -493,7 +493,10 @@ test("container envVars are derived from the live Durable Object env", () => {
       NANOGPT_API_KEY_1: "nanogpt-numbered-live-key",
       NANO_GPT_KEY: "nanogpt-alias-live-key",
       NANO_GPT_KEY_1: "nanogpt-alias-numbered-live-key",
+      NANOGPT_BILLING_MODE: "subscription",
       NANOGPT_BASE_URL: "https://cake.nano-gpt.com/api",
+      NANOGPT_SUBSCRIPTION_BASE_URL:
+        "https://cake.nano-gpt.com/api/subscription",
       NANOGPT_BATCH_BASE_URL: "https://api.nano-gpt.com/api/v1",
       NANOGPT_ORIGIN_URL: "https://cake.nano-gpt.com",
       NANOGPT_KEY_CHECK_EVERY_REQUESTS: "75",
@@ -557,6 +560,11 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(
     container.envVars.NANOGPT_BASE_URL,
     "https://cake.nano-gpt.com/api",
+  );
+  assert.equal(container.envVars.NANOGPT_BILLING_MODE, "subscription");
+  assert.equal(
+    container.envVars.NANOGPT_SUBSCRIPTION_BASE_URL,
+    "https://cake.nano-gpt.com/api/subscription",
   );
   assert.equal(
     container.envVars.NANOGPT_BATCH_BASE_URL,

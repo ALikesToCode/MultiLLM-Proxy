@@ -55,7 +55,7 @@ class ProviderAdapterRegistryTest(unittest.TestCase):
         )
         self.assertEqual(
             registry["nanogpt"].chat_completions_url(),
-            "https://nano-gpt.com/api/v1/chat/completions",
+            "https://nano-gpt.com/api/subscription/v1/chat/completions",
         )
         self.assertEqual(
             registry["navyai"].chat_completions_url(),

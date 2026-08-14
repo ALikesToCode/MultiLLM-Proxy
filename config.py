@@ -46,6 +46,15 @@ def load_env_boolean(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def load_env_choice(
+    name: str,
+    default: str,
+    choices: set[str],
+) -> str:
+    value = os.environ.get(name, default).strip().lower()
+    return value if value in choices else default
+
+
 class Config:
     PROJECT_ID = os.environ.get('PROJECT_ID')
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
@@ -58,6 +67,24 @@ class Config:
     NANOGPT_ORIGIN_URL = os.environ.get(
         'NANOGPT_ORIGIN_URL',
         'https://nano-gpt.com',
+    )
+    NANOGPT_BILLING_MODE = load_env_choice(
+        'NANOGPT_BILLING_MODE',
+        'subscription',
+        {'standard', 'subscription'},
+    )
+    NANOGPT_STANDARD_BASE_URL = os.environ.get(
+        'NANOGPT_BASE_URL',
+        'https://nano-gpt.com/api',
+    )
+    NANOGPT_SUBSCRIPTION_BASE_URL = os.environ.get(
+        'NANOGPT_SUBSCRIPTION_BASE_URL',
+        'https://nano-gpt.com/api/subscription',
+    )
+    NANOGPT_TEXT_BASE_URL = (
+        NANOGPT_SUBSCRIPTION_BASE_URL
+        if NANOGPT_BILLING_MODE == 'subscription'
+        else NANOGPT_STANDARD_BASE_URL
     )
     NANOGPT_KEY_CHECK_TIMEOUT_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_CHECK_TIMEOUT_SECONDS', 5, 1, 30
@@ -109,7 +136,7 @@ class Config:
             ),
         ),
         'mimo': 'https://token-plan-sgp.xiaomimimo.com/v1',
-        'nanogpt': os.environ.get('NANOGPT_BASE_URL', 'https://nano-gpt.com/api'),
+        'nanogpt': NANOGPT_TEXT_BASE_URL,
         'navyai': os.environ.get('NAVYAI_BASE_URL', 'https://api.navy'),
         'linkapi': 'https://api.linkapi.ai',
         'codex-easy': 'https://codex-easy.ai',

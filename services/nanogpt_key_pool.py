@@ -276,3 +276,13 @@ class NanoGPTKeyPool:
                 1,
                 rejected_cooldown_seconds,
             )
+
+
+class NanoGPTUnifiedKeyPool(NanoGPTKeyPool):
+    """Keep unified/subscription credential health separate from raw traffic."""
+
+    _lock: ClassVar[threading.RLock] = threading.RLock()
+    _active_key: ClassVar[str | None] = None
+    _active_until: ClassVar[float] = 0.0
+    _active_requests: ClassVar[int] = 0
+    _rejected_until: ClassVar[dict[str, float]] = {}

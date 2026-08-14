@@ -177,7 +177,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 )
             )
 
-            base_url = app.config["API_BASE_URLS"][api_provider]
+            base_url = (
+                app.config["NANOGPT_STANDARD_BASE_URL"]
+                if api_provider == "nanogpt"
+                else app.config["API_BASE_URLS"][api_provider]
+            )
             if api_provider == "groq":
                 if path.startswith("v1/"):
                     path = f"openai/{path}"

@@ -19,6 +19,10 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
             os.environ["GROQ_API_KEY_2"] = "groq-second"
             os.environ["GROQ_API_KEY_1"] = "groq-first"
             os.environ["NANOGPT_BASE_URL"] = "https://cake.nano-gpt.com/api"
+            os.environ["NANOGPT_BILLING_MODE"] = "subscription"
+            os.environ["NANOGPT_SUBSCRIPTION_BASE_URL"] = (
+                "https://cake.nano-gpt.com/api/subscription"
+            )
             os.environ["NANOGPT_BATCH_BASE_URL"] = "https://batch.example.test/v1"
             os.environ["NANOGPT_ORIGIN_URL"] = "https://cake.nano-gpt.com"
             os.environ["NAVYAI_BASE_URL"] = "https://navy.example.test"
@@ -42,6 +46,11 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
         self.assertEqual(config_module.Config.GROQ_API_KEYS, ["groq-first", "groq-second"])
         self.assertEqual(
             config_module.Config.API_BASE_URLS["nanogpt"],
+            "https://cake.nano-gpt.com/api/subscription",
+        )
+        self.assertEqual(config_module.Config.NANOGPT_BILLING_MODE, "subscription")
+        self.assertEqual(
+            config_module.Config.NANOGPT_STANDARD_BASE_URL,
             "https://cake.nano-gpt.com/api",
         )
         self.assertEqual(

@@ -38,6 +38,18 @@ class ProviderPromptCacheTest(unittest.TestCase):
         self.assertEqual(decision.status, "caller")
         self.assertIs(decision.payload["caching"], False)
 
+    def test_nanogpt_subscription_mode_removes_paygo_cache_routing(self):
+        decision = apply_prompt_cache_policy(
+            {**self.payload(), "caching": True},
+            provider="nanogpt",
+            model="zai-org/glm-5.2:thinking",
+            nanogpt_subscription_only=True,
+        )
+
+        self.assertEqual(decision.status, "skipped")
+        self.assertEqual(decision.mode, "nanogpt-subscription-only")
+        self.assertNotIn("caching", decision.payload)
+
     def test_known_cache_key_transport_gets_a_stable_hashed_prefix_key(self):
         first = apply_prompt_cache_policy(
             self.payload(),

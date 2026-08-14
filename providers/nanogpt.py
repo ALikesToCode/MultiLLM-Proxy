@@ -76,6 +76,17 @@ NANOGPT_INTERACTIVE_BROWSER_REQUESTS = frozenset(
         ("GET", "oauth/authorize"),
     }
 )
+NANOGPT_SUBSCRIPTION_PAYLOAD_FIELDS = frozenset(
+    {"billing_mode", "caching", "provider"}
+)
+NANOGPT_SUBSCRIPTION_PAYGO_HEADERS = frozenset(
+    {
+        "x-billing-mode",
+        "x-byok-provider",
+        "x-provider",
+        "x-use-byok",
+    }
+)
 
 
 def _header_value(headers: Mapping[str, Any], name: str) -> Optional[str]:
@@ -92,6 +103,32 @@ def _header_value(headers: Mapping[str, Any], name: str) -> Optional[str]:
 
 def normalized_nanogpt_path(path: str) -> str:
     return path.strip("/")
+
+
+def nanogpt_subscription_only(config: Mapping[str, Any]) -> bool:
+    return str(config.get("NANOGPT_BILLING_MODE") or "").lower() == "subscription"
+
+
+def sanitize_nanogpt_subscription_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove fields that opt a NanoGPT request into PAYG provider routing."""
+    return {
+        key: value
+        for key, value in payload.items()
+        if key.lower() not in NANOGPT_SUBSCRIPTION_PAYLOAD_FIELDS
+    }
+
+
+def sanitize_nanogpt_subscription_headers(
+    headers: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Remove caller billing/provider overrides from subscription-only traffic."""
+    return {
+        key: value
+        for key, value in headers.items()
+        if str(key).lower() not in NANOGPT_SUBSCRIPTION_PAYGO_HEADERS
+    }
 
 
 def is_nanogpt_batch_path(path: str) -> bool:

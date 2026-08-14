@@ -41,6 +41,16 @@ export function applyRoleplayPromptCache(
     );
   }
 
+  if (candidate.provider === "nanogpt" && candidate.subscriptionOnly) {
+    const subscriptionPayload = { ...payload };
+    delete subscriptionPayload.caching;
+    return result(
+      subscriptionPayload,
+      "skipped",
+      "nanogpt-subscription-only",
+      estimatedInputTokens,
+    );
+  }
   if (candidate.provider === "nanogpt") {
     return result(
       { ...payload, caching: true },

@@ -849,6 +849,10 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
       { provider: "nanogpt", family: "glm" },
     ],
   );
+  assert.deepEqual(
+    catalog.data.map(({ billing_mode: billingMode }) => billingMode),
+    ["subscription", "subscription"],
+  );
   assert.doesNotMatch(JSON.stringify(catalog), /nanogpt-(?:rejected|working)-key/);
 
   const responses = await withGlobalFetch(async (_input, init) => {
@@ -1085,7 +1089,7 @@ test("roleplay skips a provider that cannot honor explicit output", async () => 
   assert.deepEqual(requestedProviders, ["api.navy"]);
 });
 
-test("roleplay enables NanoGPT prompt caching for eligible context", async () => {
+test("roleplay keeps NanoGPT subscription traffic free of PAYG cache hints", async () => {
   const fixture = makeRoleplayEnv({
     OPENCODE_GO_API_KEY: "",
     NANOGPT_API_KEY: "nanogpt-working-key",
@@ -1093,8 +1097,10 @@ test("roleplay enables NanoGPT prompt caching for eligible context", async () =>
     PROMPT_CACHE_MIN_TOKENS: "1",
   });
   let upstreamPayload;
+  let upstreamUrl;
 
-  const response = await withGlobalFetch(async (_input, init) => {
+  const response = await withGlobalFetch(async (input, init) => {
+    upstreamUrl = String(input);
     upstreamPayload = JSON.parse(init.body);
     return completionResponse(upstreamPayload.model);
   }, () =>
@@ -1110,12 +1116,49 @@ test("roleplay enables NanoGPT prompt caching for eligible context", async () =>
   );
 
   assert.equal(response.status, 200);
-  assert.equal(upstreamPayload.caching, true);
-  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "applied");
+  assert.equal(
+    upstreamUrl,
+    "https://nano-gpt.com/api/subscription/v1/chat/completions",
+  );
+  assert.equal("caching" in upstreamPayload, false);
+  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "skipped");
   assert.equal(
     response.headers.get("X-MultiLLM-Prompt-Cache-Mode"),
-    "nanogpt-routing",
+    "nanogpt-subscription-only",
   );
+});
+
+test("roleplay standard NanoGPT mode retains explicit cache routing", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-working-key",
+    NANOGPT_BILLING_MODE: "standard",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    PROMPT_CACHE_MIN_TOKENS: "1",
+  });
+  let upstreamPayload;
+  let upstreamUrl;
+
+  const response = await withGlobalFetch(async (input, init) => {
+    upstreamUrl = String(input);
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(upstreamPayload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-nanogpt-standard-prompt-cache",
+        input: "Continue.",
+        model_preference: "glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamUrl, "https://nano-gpt.com/api/v1/chat/completions");
+  assert.equal(upstreamPayload.caching, true);
+  assert.equal(response.headers.get("X-MultiLLM-Prompt-Cache"), "applied");
 });
 
 test("roleplay leaves implicit-cache providers schema-clean", async () => {
@@ -1187,9 +1230,11 @@ test("roleplay revalidates the remembered NanoGPT key after the request interval
     NANOGPT_KEY_CHECK_EVERY_REQUESTS: "1",
   });
   const methods = [];
+  const urls = [];
 
-  const responses = await withGlobalFetch(async (_input, init) => {
+  const responses = await withGlobalFetch(async (input, init) => {
     methods.push(init.method);
+    urls.push(String(input));
     if (init.method === "GET") {
       return new Response(JSON.stringify({ data: [{ id: "kimi-k2.6" }] }), {
         headers: { "Content-Type": "application/json" },
@@ -1221,4 +1266,9 @@ test("roleplay revalidates the remembered NanoGPT key after the request interval
 
   assert.deepEqual(responses.map((response) => response.status), [200, 200]);
   assert.deepEqual(methods, ["POST", "GET", "POST"]);
+  assert.deepEqual(urls, [
+    "https://nano-gpt.com/api/subscription/v1/chat/completions",
+    "https://nano-gpt.com/api/subscription/v1/models",
+    "https://nano-gpt.com/api/subscription/v1/chat/completions",
+  ]);
 });

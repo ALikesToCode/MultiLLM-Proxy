@@ -107,7 +107,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertNotIn("caching", upstream_payload)
         self.assertNotIn("prompt_cache_key", upstream_payload)
 
-    def test_long_nanogpt_chat_enables_provider_cache_routing(self):
+    def test_long_nanogpt_chat_stays_on_subscription_without_paygo_hints(self):
         os.environ["NANOGPT_API_KEY"] = "nanogpt-provider-key"
         upstream_response = self._chat_response("cached upstream")
 
@@ -120,24 +120,41 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         ):
             response = self.client.post(
                 "/v1/chat/completions",
-                headers={"Authorization": "Bearer admin-test-key"},
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "X-Billing-Mode": "paygo",
+                    "X-Provider": "paid-provider",
+                },
                 json={
                     "model": "nanogpt:zai-org/glm-5.2:thinking",
                     "messages": [
                         {"role": "system", "content": "context " * 700},
                         {"role": "user", "content": "Continue."},
                     ],
+                    "billing_mode": "paygo",
+                    "caching": True,
+                    "provider": "paid-provider",
                 },
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-MultiLLM-Prompt-Cache"], "applied")
+        self.assertEqual(response.headers["X-MultiLLM-Prompt-Cache"], "skipped")
         self.assertEqual(
             response.headers["X-MultiLLM-Prompt-Cache-Mode"],
-            "nanogpt-routing",
+            "nanogpt-subscription-only",
         )
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://nano-gpt.com/api/subscription/v1/chat/completions",
+        )
+        self.assertNotIn("X-Billing-Mode", request_kwargs["headers"])
+        self.assertNotIn("X-Provider", request_kwargs["headers"])
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
-        self.assertIs(upstream_payload["caching"], True)
+        self.assertEqual(upstream_payload["reasoning_effort"], "max")
+        self.assertNotIn("billing_mode", upstream_payload)
+        self.assertNotIn("caching", upstream_payload)
+        self.assertNotIn("provider", upstream_payload)
 
     def test_live_catalog_model_is_listed_and_routable(self):
         ProviderCatalogService.replace_provider_models(

@@ -99,16 +99,19 @@ def apply_prompt_cache_policy(
     request_headers: Mapping[str, Any] | None = None,
     enabled: bool = True,
     minimum_tokens: int = 1_024,
+    nanogpt_subscription_only: bool = False,
 ) -> PromptCacheDecision:
     """Add only provider-supported cache affinity hints; never cache responses."""
     copied = dict(payload)
+    if provider == "nanogpt" and nanogpt_subscription_only:
+        copied.pop("caching", None)
     cacheable_input = (
         {"messages": payload["messages"]}
         if isinstance(payload.get("messages"), list)
         else {"input": payload.get("input", "")}
     )
     estimated_tokens = estimate_payload_tokens(cacheable_input)
-    if _caller_controls_cache(payload, request_headers):
+    if _caller_controls_cache(copied, request_headers):
         return PromptCacheDecision(
             payload=copied,
             request_headers={},
@@ -135,6 +138,14 @@ def apply_prompt_cache_policy(
 
     normalized_endpoint = endpoint.strip().lower()
     normalized_model = model.strip().lower()
+    if provider == "nanogpt" and nanogpt_subscription_only:
+        return PromptCacheDecision(
+            payload=copied,
+            request_headers={},
+            status="skipped",
+            mode="nanogpt-subscription-only",
+            estimated_input_tokens=estimated_tokens,
+        )
     if provider == "nanogpt" and normalized_endpoint == "chat":
         copied["caching"] = True
         return PromptCacheDecision(

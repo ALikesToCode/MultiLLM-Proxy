@@ -32,6 +32,7 @@ const PROVIDERS = {
   },
   nanogpt: {
     defaultBaseUrl: "https://nano-gpt.com/api",
+    subscriptionBaseUrl: "https://nano-gpt.com/api/subscription",
     keyNames: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
     keyListNames: ["NANOGPT_API_KEYS", "NANO_GPT_KEYS"],
     numberedKeyPrefixes: ["NANOGPT_API_KEY", "NANO_GPT_KEY"],
@@ -143,6 +144,12 @@ function booleanSetting(value, fallback = true) {
   return ["1", "true", "yes", "on"].includes(
     String(value).trim().toLowerCase(),
   );
+}
+
+function nanogptBillingMode(value) {
+  return String(value ?? "subscription").trim().toLowerCase() === "standard"
+    ? "standard"
+    : "subscription";
 }
 
 function parseProviderOrder(value) {
@@ -387,10 +394,20 @@ export function buildConfiguredCandidates(env, settings) {
       return;
     }
 
-    const configuredBase = firstNonEmpty(env, definition.baseUrlNames);
+    const billingMode =
+      provider === "nanogpt"
+        ? nanogptBillingMode(env.NANOGPT_BILLING_MODE)
+        : "standard";
+    const subscriptionOnly =
+      provider === "nanogpt" && billingMode === "subscription";
+    const configuredBase = subscriptionOnly
+      ? firstNonEmpty(env, ["NANOGPT_SUBSCRIPTION_BASE_URL"])
+      : firstNonEmpty(env, definition.baseUrlNames);
     const baseUrl = trustedBaseUrl(
       configuredBase,
-      definition.defaultBaseUrl,
+      subscriptionOnly
+        ? definition.subscriptionBaseUrl
+        : definition.defaultBaseUrl,
     );
     const endpoint = appendEndpointPath(baseUrl, definition.defaultPath);
     const catalogEndpoint = appendEndpointPath(baseUrl, "/v1/models");
@@ -419,6 +436,8 @@ export function buildConfiguredCandidates(env, settings) {
           credentialId:
             tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
           credentialRank,
+          billingMode,
+          subscriptionOnly,
           ...limits,
         });
       });
@@ -519,6 +538,10 @@ export function roleplayCatalog(env, settings) {
         context_window: candidate.contextWindow,
         max_output_tokens: candidate.maxOutputTokens,
         limits_source: candidate.source,
+        billing_mode:
+          candidate.provider === "nanogpt"
+            ? candidate.billingMode
+            : undefined,
       });
     }
   }

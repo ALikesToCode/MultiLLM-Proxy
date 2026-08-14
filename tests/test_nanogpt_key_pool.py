@@ -3,6 +3,7 @@ import unittest
 from services.nanogpt_key_pool import (
     NanoGPTKeyPool,
     NanoGPTKeyPoolExhausted,
+    NanoGPTUnifiedKeyPool,
     configured_nanogpt_keys,
 )
 
@@ -39,9 +40,11 @@ class NanoGPTConfiguredKeysTest(unittest.TestCase):
 class NanoGPTKeyPoolTest(unittest.TestCase):
     def setUp(self):
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
 
     def tearDown(self):
         NanoGPTKeyPool.reset()
+        NanoGPTUnifiedKeyPool.reset()
 
     def test_selects_first_usable_key_and_reuses_it_until_ttl(self):
         probes = []
@@ -195,6 +198,21 @@ class NanoGPTKeyPoolTest(unittest.TestCase):
 
         self.assertNotIn("secret-one", str(raised.exception))
         self.assertNotIn("secret-two", str(raised.exception))
+
+    def test_unified_subscription_health_is_independent_from_raw_health(self):
+        raw = NanoGPTKeyPool.select_key(
+            ["raw-key", "subscription-key"],
+            lambda key: 200 if key == "raw-key" else 401,
+            now=100,
+        )
+        subscription = NanoGPTUnifiedKeyPool.select_key(
+            ["raw-key", "subscription-key"],
+            lambda key: 200 if key == "subscription-key" else 403,
+            now=100,
+        )
+
+        self.assertEqual(raw, "raw-key")
+        self.assertEqual(subscription, "subscription-key")
 
 
 if __name__ == "__main__":

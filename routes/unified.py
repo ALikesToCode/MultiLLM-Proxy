@@ -7,6 +7,11 @@ import requests
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
+from providers.nanogpt import (
+    nanogpt_subscription_only,
+    sanitize_nanogpt_subscription_headers,
+    sanitize_nanogpt_subscription_payload,
+)
 from providers.registry import get_adapter
 from route_helpers import (
     api_auth_required,
@@ -26,8 +31,8 @@ from services.context_optimizer import ContextOptimizationResult
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import (
-    NanoGPTKeyPool,
     NanoGPTKeyPoolExhausted,
+    NanoGPTUnifiedKeyPool as NanoGPTKeyPool,
     is_nanogpt_credential_rejection,
 )
 from services.provider_prompt_cache import (
@@ -359,6 +364,14 @@ def _dispatch_unified_chat_candidate(
             payload.get("model"),
         )
         candidate_payload = _copy_request_payload(payload, provider_model)
+        subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
+            app.config
+        )
+        if subscription_only:
+            candidate_payload = sanitize_nanogpt_subscription_payload(
+                candidate_payload
+            )
+            headers_source = sanitize_nanogpt_subscription_headers(headers_source)
         adaptive_result = None
         if adaptive_context:
             prompt_limit = RateLimitService._provider_limit(
@@ -386,6 +399,7 @@ def _dispatch_unified_chat_candidate(
             request_headers=headers_source,
             enabled=app.config["PROMPT_CACHE_ENABLED"],
             minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+            nanogpt_subscription_only=subscription_only,
         )
         upstream_payload = cache_decision.payload
         raw_body = serialize_unified_chat_payload(upstream_payload)
@@ -574,11 +588,16 @@ def dispatch_unified_image_generation(
         upstream_path = "v1/images/generations"
         upstream_payload = _copy_request_payload(payload, provider_model)
         raw_body = serialize_unified_chat_payload(upstream_payload)
+        operation_base_url = (
+            app.config["NANOGPT_STANDARD_BASE_URL"]
+            if provider == "nanogpt"
+            else app.config["API_BASE_URLS"][provider]
+        )
 
         def send_request(token: str):
             return proxy_service_cls.make_request(
                 method="POST",
-                url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+                url=f"{operation_base_url.rstrip('/')}/{upstream_path}",
                 headers=proxy_service_cls.prepare_headers(
                     headers_source,
                     provider,
@@ -756,6 +775,14 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     status_code=400,
                 )
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
+            subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
+                app.config
+            )
+            headers_source = (
+                sanitize_nanogpt_subscription_headers(request.headers)
+                if subscription_only
+                else request.headers
+            )
 
             if provider == "kimi-code":
                 raise APIError(
@@ -763,15 +790,20 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     status_code=400,
                 )
 
-            if provider in NATIVE_RESPONSES_PROVIDERS:
+            if provider in NATIVE_RESPONSES_PROVIDERS and not subscription_only:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
+                upstream_payload = apply_glm_52_reasoning_policy(
+                    upstream_payload,
+                    provider,
+                    provider_model,
+                )
                 cache_decision = apply_prompt_cache_policy(
                     upstream_payload,
                     provider=provider,
                     model=provider_model,
                     endpoint="responses",
-                    request_headers=request.headers,
+                    request_headers=headers_source,
                     enabled=app.config["PROMPT_CACHE_ENABLED"],
                     minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
                 )
@@ -780,7 +812,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
                 def send_request(token: str):
                     headers = proxy_service_cls.prepare_headers(
-                        request.headers,
+                        headers_source,
                         provider,
                         token,
                         upstream_path=upstream_path,
@@ -828,12 +860,6 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     credential_attempts,
                 )
 
-            token = _provider_token(
-                app,
-                auth_service_cls,
-                proxy_service_cls,
-                provider,
-            )
             if payload.get("stream"):
                 raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
 
@@ -847,32 +873,56 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 "top_p": "top_p",
                 "tools": "tools",
                 "tool_choice": "tool_choice",
+                "reasoning": "reasoning",
+                "reasoning_effort": "reasoning_effort",
             }.items():
                 if source_key in payload:
                     chat_payload[target_key] = payload[source_key]
 
+            chat_payload = apply_glm_52_reasoning_policy(
+                chat_payload,
+                provider,
+                provider_model,
+            )
             cache_decision = apply_prompt_cache_policy(
                 chat_payload,
                 provider=provider,
                 model=provider_model,
                 endpoint="chat",
-                request_headers=request.headers,
+                request_headers=headers_source,
                 enabled=app.config["PROMPT_CACHE_ENABLED"],
                 minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+                nanogpt_subscription_only=subscription_only,
             )
             chat_payload = cache_decision.payload
 
             raw_body = serialize_unified_chat_payload(chat_payload)
-            headers = proxy_service_cls.prepare_headers(request.headers, provider, token)
-            _merge_request_headers(headers, cache_decision.request_headers)
-            response = proxy_service_cls.make_request(
-                method="POST",
-                url=adapter.chat_completions_url(),
-                headers=headers,
-                params=request.args,
-                data=proxy_service_cls.filter_request_data(provider, raw_body),
-                api_provider=provider,
-                use_cache=False,
+            upstream_path = "v1/chat/completions"
+
+            def send_request(token: str):
+                headers = proxy_service_cls.prepare_headers(
+                    headers_source,
+                    provider,
+                    token,
+                    upstream_path=upstream_path,
+                )
+                _merge_request_headers(headers, cache_decision.request_headers)
+                return proxy_service_cls.make_request(
+                    method="POST",
+                    url=adapter.chat_completions_url(),
+                    headers=headers,
+                    params=request.args,
+                    data=proxy_service_cls.filter_request_data(provider, raw_body),
+                    api_provider=provider,
+                    use_cache=False,
+                )
+
+            response, credential_attempts = _request_with_provider_token_rotation(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                provider,
+                send_request,
             )
 
             metrics_service_cls.get_instance().track_request(
@@ -882,22 +932,34 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             )
 
             if isinstance(response, Response):
-                return _add_prompt_cache_headers(response, cache_decision)
+                return _add_credential_attempt_headers(
+                    _add_prompt_cache_headers(response, cache_decision),
+                    provider,
+                    credential_attempts,
+                )
             if not isinstance(response, requests.Response):
                 raise APIError("Unsupported upstream response type", status_code=502)
             if response.status_code >= 400:
-                return _add_prompt_cache_headers(
-                    _pass_through_response(response),
-                    cache_decision,
+                return _add_credential_attempt_headers(
+                    _add_prompt_cache_headers(
+                        _pass_through_response(response),
+                        cache_decision,
+                    ),
+                    provider,
+                    credential_attempts,
                 )
 
             chat_response = _decode_upstream_json(response)
             responses_payload = _chat_response_to_responses_payload(chat_response, requested_model)
             downstream_response = jsonify(responses_payload)
             downstream_response.status_code = response.status_code
-            return _add_prompt_cache_headers(
-                downstream_response,
-                cache_decision,
+            return _add_credential_attempt_headers(
+                _add_prompt_cache_headers(
+                    downstream_response,
+                    cache_decision,
+                ),
+                provider,
+                credential_attempts,
             )
         except ValueError as error:
             raise APIError(str(error), status_code=400) from error
