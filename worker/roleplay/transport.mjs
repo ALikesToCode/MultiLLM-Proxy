@@ -8,6 +8,7 @@ import {
   buildCompactionPayload,
   parseCompactionResponse,
 } from "./memory.mjs";
+import { fragmentChatPayload } from "./message-fragments.mjs";
 
 const RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
@@ -315,7 +316,7 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
     const requestInit = {
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(fragmentChatPayload(payload)),
       redirect: "manual",
       signal: controller.signal,
     };

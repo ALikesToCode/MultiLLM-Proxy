@@ -54,6 +54,10 @@ import {
 import { applyRoleplayOutputContract } from "./output-contract.mjs";
 import { applyRoleplayPromptCache } from "./prompt-cache.mjs";
 import {
+  loadRoleplayState,
+  saveRoleplayState,
+} from "./session-storage.mjs";
+import {
   MAX_RESPONSE_BYTES,
   attemptRoleplayCandidates,
   copyUpstreamResponseHeaders,
@@ -67,94 +71,6 @@ import {
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
 export { isRoleplayPath, scopePublicRoleplaySessionId };
-const STATE_KEY = "roleplay-session";
-const MESSAGES_KEY = "roleplay-messages";
-const DIRECTIVES_KEY = "roleplay-directives";
-
-function initialState() {
-  return {
-    version: 2,
-    memory: null,
-    compactionCheckpoint: null,
-    messages: [],
-    directives: [],
-    profile: {},
-    stats: {},
-    activeCredentials: {},
-    credentialUses: {},
-    nanogptCredentialChecks: 0,
-    turns: 0,
-    compactions: 0,
-    localCompactions: 0,
-    inputTokensSaved: 0,
-    compactionFailures: 0,
-    compactionBackoffUntil: 0,
-    storageOverflow: false,
-    recentRequests: [],
-    updatedAt: 0,
-  };
-}
-
-function normalizeState(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return initialState();
-  }
-  return {
-    ...initialState(),
-    ...value,
-    version: 2,
-    messages: Array.isArray(value.messages) ? value.messages : [],
-    directives: Array.isArray(value.directives)
-      ? value.directives
-      : [],
-    compactionCheckpoint:
-      value.compactionCheckpoint &&
-      typeof value.compactionCheckpoint === "object" &&
-      !Array.isArray(value.compactionCheckpoint)
-        ? value.compactionCheckpoint
-        : null,
-    profile:
-      value.profile && typeof value.profile === "object" ? value.profile : {},
-    stats: value.stats && typeof value.stats === "object" ? value.stats : {},
-    activeCredentials:
-      value.activeCredentials && typeof value.activeCredentials === "object"
-        ? value.activeCredentials
-        : {},
-    credentialUses:
-      value.credentialUses && typeof value.credentialUses === "object"
-        ? value.credentialUses
-        : {},
-    recentRequests: Array.isArray(value.recentRequests)
-      ? value.recentRequests
-      : [],
-  };
-}
-
-async function loadState(storage) {
-  const [core, messages, directives] = await Promise.all([
-    storage.get(STATE_KEY),
-    storage.get(MESSAGES_KEY),
-    storage.get(DIRECTIVES_KEY),
-  ]);
-  return normalizeState({
-    ...(core && typeof core === "object" ? core : {}),
-    messages: Array.isArray(messages) ? messages : [],
-    directives: Array.isArray(directives)
-      ? directives
-      : Array.isArray(core?.directives)
-        ? core.directives
-        : [],
-  });
-}
-
-async function saveState(storage, state) {
-  const { directives, messages, ...core } = state;
-  await storage.put({
-    [STATE_KEY]: core,
-    [MESSAGES_KEY]: messages,
-    [DIRECTIVES_KEY]: directives,
-  });
-}
 
 async function readBoundedJsonRequest(request, maximumBytes) {
   const declaredLength = Number.parseInt(
@@ -405,7 +321,7 @@ export class RoleplaySession extends DurableObject {
     const pathname = new URL(request.url).pathname;
     if (pathname === "/metrics" && request.method === "GET") {
       await this.turnTail.catch(() => {});
-      const state = await loadState(this.ctx.storage);
+      const state = await loadRoleplayState(this.ctx.storage);
       const metrics = Object.fromEntries(
         Object.entries(state.stats).map(([key, value]) => [
           key,
@@ -494,8 +410,11 @@ export class RoleplaySession extends DurableObject {
     const turnStartedAt = performance.now();
     let compactionMs = 0;
     const payload = await request.json();
-    let state = await loadState(this.ctx.storage);
-    const parsedInitial = parseRoleplayPayload(payload);
+    let state = await loadRoleplayState(this.ctx.storage);
+    const parsedInitial = parseRoleplayPayload(
+      payload,
+      settings.maxRequestBytes,
+    );
     const { profile, parsed: parsedWithProfile } = effectiveCharacter(
       state,
       parsedInitial,
@@ -541,7 +460,7 @@ export class RoleplaySession extends DurableObject {
       ...(memoryEnabled ? { profile } : {}),
     };
     state = markRequest(state, idempotencyKey, "started");
-    await saveState(this.ctx.storage, state);
+    await saveRoleplayState(this.ctx.storage, state);
 
     const configuredCandidates = buildConfiguredCandidates(
       this.env,
@@ -556,7 +475,7 @@ export class RoleplaySession extends DurableObject {
     );
     if (checkedState !== state) {
       state = checkedState;
-      await saveState(this.ctx.storage, state);
+      await saveRoleplayState(this.ctx.storage, state);
     }
     const candidates = rankRoleplayCandidates(
       configuredCandidates,
@@ -567,7 +486,7 @@ export class RoleplaySession extends DurableObject {
     );
     if (!candidates.length) {
       state = markRequest(state, idempotencyKey, "no_provider");
-      await saveState(this.ctx.storage, state);
+      await saveRoleplayState(this.ctx.storage, state);
       return {
         response: errorResponse(
           "No roleplay provider is configured for this model preference",
@@ -724,7 +643,7 @@ export class RoleplaySession extends DurableObject {
           if (!preserveFullGeneration) {
             messagesOptimized += plan.olderMessages.length;
           }
-          await saveState(this.ctx.storage, state);
+          await saveRoleplayState(this.ctx.storage, state);
         }
       }
       compactionMs = performance.now() - compactionStartedAt;
@@ -740,7 +659,7 @@ export class RoleplaySession extends DurableObject {
       projectedStoredBytes > settings.maxStoredBytes
     ) {
       state = markRequest(state, idempotencyKey, "compaction_failed");
-      await saveState(this.ctx.storage, state);
+      await saveRoleplayState(this.ctx.storage, state);
       return {
         response: errorResponse(
           "Automatic memory compaction could not produce a safe retained window",
@@ -773,7 +692,7 @@ export class RoleplaySession extends DurableObject {
     );
     if (!generationCandidates.length) {
       state = markRequest(state, idempotencyKey, "context_too_large");
-      await saveState(this.ctx.storage, state);
+      await saveRoleplayState(this.ctx.storage, state);
       return {
         response: errorResponse(
           "Roleplay context and requested output exceed every eligible provider limit",
@@ -803,7 +722,7 @@ export class RoleplaySession extends DurableObject {
     state = attempted.state;
     if (attempted.terminalResponse) {
       state = markRequest(state, idempotencyKey, "provider_failed");
-      await saveState(this.ctx.storage, state);
+      await saveRoleplayState(this.ctx.storage, state);
       return {
         response: attempted.terminalResponse,
         completion: Promise.resolve(),
@@ -923,7 +842,7 @@ export class RoleplaySession extends DurableObject {
                 ? "output_limited"
                 : "stream_failed",
           );
-          await saveState(this.ctx.storage, nextState);
+          await saveRoleplayState(this.ctx.storage, nextState);
         },
       });
       return {
@@ -987,7 +906,7 @@ export class RoleplaySession extends DurableObject {
       idempotencyKey,
       outputLimited ? "output_limited" : "completed",
     );
-    await saveState(this.ctx.storage, state);
+    await saveRoleplayState(this.ctx.storage, state);
     return {
       response: new Response(bytes, {
         status: response.status,

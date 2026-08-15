@@ -147,6 +147,51 @@ test("Janitor oversized output ceilings are clamped to GLM capacity", async () =
   assert.equal(response.headers.get("X-Roleplay-Max-Output-Tokens"), "131072");
 });
 
+test("Janitor long system prompts reach NanoGPT without truncation", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nano-roleplay-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+  });
+  const systemPrompt = `${"a".repeat(119_999)}😀${"z".repeat(8_513)}`;
+  let upstreamPayload;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return completionResponse(upstreamPayload.model, "Mira continues.");
+  }, () =>
+    worker.fetch(
+      roleplayRequest(
+        {
+          model: "roleplay:glm",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "Continue." },
+          ],
+          stream: false,
+        },
+        janitorHeaders({ Origin: "https://janitorai.com" }),
+        JANITOR_PATH,
+      ),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  const systemChunks = upstreamPayload.messages
+    .filter(({ role }) => role === "system")
+    .map(({ content }) => content);
+  assert.equal(systemChunks.join(""), systemPrompt);
+  assert.equal(
+    systemChunks.every((content) => content.length <= 128_000),
+    true,
+  );
+  for (const chunk of systemChunks) {
+    assert.equal(/[\uD800-\uDBFF]$/.test(chunk), false);
+    assert.equal(/^[\uDC00-\uDFFF]/.test(chunk), false);
+  }
+});
+
 test("both roleplay Chat Completions aliases reject invalid input at the edge", async () => {
   const fixture = makeRoleplayEnv();
   fixture.env.MULTILLM_PROXY_CONTAINER = {

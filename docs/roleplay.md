@@ -74,6 +74,16 @@ Use either:
 - `messages`: OpenAI-style text messages.
 
 When both are present, `input` is appended as the newest user message.
+An individual `system`, `developer`, `user`, or `assistant` message may use the
+remaining bounded request body instead of being rejected at 128,000
+characters. Before provider egress, long text is split losslessly into ordered
+same-role fragments below the gateway field limit; Unicode code points are
+never split and concatenating the fragments reproduces the caller's text.
+Protected directives that exceed one Durable Object value are stored in
+ordered shards and reconstructed on later turns. Tool-result messages retain
+the 128,000-character limit because splitting one result would break its
+one-to-one tool-call association.
+
 `history_mode` controls how incoming messages combine with stored history:
 
 - `auto` (default): detects common full-history and delta-message client

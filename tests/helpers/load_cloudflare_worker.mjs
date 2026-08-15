@@ -41,6 +41,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/memory.mjs",
     import.meta.url,
   );
+  const messageFragmentsUrl = new URL(
+    "../../worker/roleplay/message-fragments.mjs",
+    import.meta.url,
+  );
   const outputContractUrl = new URL(
     "../../worker/roleplay/output-contract.mjs",
     import.meta.url,
@@ -51,6 +55,10 @@ export async function roleplayModuleUrl() {
   );
   const reasoningUrl = new URL(
     "../../worker/roleplay/reasoning.mjs",
+    import.meta.url,
+  );
+  const sessionStorageUrl = new URL(
+    "../../worker/roleplay/session-storage.mjs",
     import.meta.url,
   );
   const validationUrl = new URL(
@@ -79,9 +87,11 @@ export async function roleplayModuleUrl() {
     directivesSource,
     fallbackMemorySource,
     memorySource,
+    messageFragmentsSource,
     outputContractSource,
     promptCacheSource,
     reasoningSource,
+    sessionStorageSource,
     validationSource,
     transportSource,
     streamingSource,
@@ -97,9 +107,11 @@ export async function roleplayModuleUrl() {
       readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
+      readFile(messageFragmentsUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
       readFile(promptCacheUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
+      readFile(sessionStorageUrl, "utf8"),
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
@@ -139,6 +151,13 @@ export async function roleplayModuleUrl() {
   const outputContractDataUrl = dataModuleUrl(outputContractSource);
   const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource);
+  const messageFragmentsDataUrl = dataModuleUrl(messageFragmentsSource);
+  const sessionStorageDataUrl = dataModuleUrl(
+    sessionStorageSource.replace(
+      'from "./message-fragments.mjs";',
+      `from "${messageFragmentsDataUrl}";`,
+    ),
+  );
   const validationDataUrl = dataModuleUrl(validationSource);
   const memoryDataUrl = dataModuleUrl(
     memorySource
@@ -166,7 +185,11 @@ export async function roleplayModuleUrl() {
         `from "${capacityDataUrl}";`,
       )
       .replace('from "./config.mjs";', `from "${configDataUrl}";`)
-      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`),
+      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+      .replace(
+        'from "./message-fragments.mjs";',
+        `from "${messageFragmentsDataUrl}";`,
+      ),
   );
   const patchedEndpoint = endpointSource
     .replace(
@@ -210,6 +233,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./prompt-cache.mjs";',
       `from "${promptCacheDataUrl}";`,
+    )
+    .replace(
+      'from "./session-storage.mjs";',
+      `from "${sessionStorageDataUrl}";`,
     )
     .replace('from "./transport.mjs";', `from "${transportDataUrl}";`)
     .replace('from "./streaming.mjs";', `from "${streamingDataUrl}";`);
