@@ -41,6 +41,35 @@ test("roleplay promotes the configured NanoGPT key index", () => {
   );
 });
 
+test("roleplay limits each provider to configured model families", () => {
+  const env = {
+    NANOGPT_API_KEY: "nano-key",
+    NAVYAI_API_KEY: "navy-key",
+    OPENCODE_GO_API_KEY: "opencode-key",
+    OPENROUTER_API_KEY: "openrouter-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt,navyai,opencode,openrouter",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({
+      nanogpt: ["glm", "invalid", "glm"],
+      navyai: ["glm"],
+      opencode: ["kimi"],
+      openrouter: [],
+    }),
+  };
+  const settings = getRoleplaySettings(env);
+  const candidates = buildConfiguredCandidates(env, settings);
+
+  assert.deepEqual(settings.providerFamilies, {
+    nanogpt: ["glm"],
+    navyai: ["glm"],
+    opencode: ["kimi"],
+    openrouter: [],
+  });
+  assert.deepEqual(
+    [...new Set(candidates.map(({ provider, family }) => `${provider}:${family}`))],
+    ["nanogpt:glm", "navyai:glm", "opencode:kimi"],
+  );
+});
+
 test("Cloudflare forwards NanoGPT key preference into the container", () => {
   const container = new MultiLLMProxyContainer(
     {},
@@ -57,12 +86,22 @@ test("deployment prefers NanoGPT key index one", async () => {
   assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "1");
 });
 
-test("deployment routes roleplay through NanoGPT before other providers", async () => {
+test("deployment keeps GLM away from OpenCode and omits OpenRouter", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
   assert.equal(
     config.vars?.ROLEPLAY_PROVIDER_ORDER,
-    "nanogpt,opencode,linkapi,openrouter,navyai",
+    "nanogpt,navyai,opencode,linkapi",
+  );
+  assert.deepEqual(JSON.parse(config.vars?.ROLEPLAY_PROVIDER_FAMILIES), {
+    nanogpt: ["glm"],
+    navyai: ["glm"],
+    opencode: ["kimi"],
+    linkapi: ["kimi"],
+  });
+  assert.equal(
+    JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,
+    "glm-5.2-venice",
   );
 });

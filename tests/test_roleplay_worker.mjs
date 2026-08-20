@@ -335,6 +335,62 @@ test("roleplay fallback advances only after a clear provider rejection", async (
   assert.ok(calls.every((call) => call.url.includes("opencode.ai")));
 });
 
+test("roleplay GLM fallback bypasses OpenCode and OpenRouter", async () => {
+  const fixture = makeRoleplayEnv({
+    NANOGPT_API_KEY: "nano-key",
+    NAVYAI_API_KEY: "navy-key",
+    OPENROUTER_API_KEY: "openrouter-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt,navyai,opencode,openrouter",
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      navyai: { glm: "glm-5.2-venice" },
+    }),
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({
+      nanogpt: ["glm"],
+      navyai: ["glm"],
+      opencode: ["kimi"],
+      openrouter: [],
+    }),
+  });
+  const calls = [];
+
+  const response = await withGlobalFetch(async (input, init) => {
+    const payload = JSON.parse(init.body);
+    calls.push({ url: String(input), model: payload.model });
+    if (payload.model === "zai-org/glm-5.2:thinking") {
+      return new Response('{"error":"rate limited"}', {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return completionResponse(payload.model);
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-glm-provider-policy",
+        input: "Continue.",
+        model_preference: "glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "navyai");
+  assert.equal(response.headers.get("X-Roleplay-Model"), "glm-5.2-venice");
+  assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
+  assert.deepEqual(calls, [
+    {
+      url: "https://nano-gpt.com/api/subscription/v1/chat/completions",
+      model: "zai-org/glm-5.2:thinking",
+    },
+    {
+      url: "https://api.navy/v1/chat/completions",
+      model: "glm-5.2-venice",
+    },
+  ]);
+});
+
 test("roleplay sends OpenCode requests through Container egress", async () => {
   let containerCalls = 0;
   const fixture = makeRoleplayEnv({

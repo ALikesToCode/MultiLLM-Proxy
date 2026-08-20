@@ -228,6 +228,37 @@ function parseProviderModelOverrides(value) {
   }
 }
 
+function parseProviderFamilies(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const providerFamilies = {};
+    for (const [provider, families] of Object.entries(parsed)) {
+      if (!PROVIDERS[provider] || !Array.isArray(families)) {
+        continue;
+      }
+      providerFamilies[provider] = [
+        ...new Set(
+          families
+            .filter((family) => typeof family === "string")
+            .map((family) => family.trim().toLowerCase())
+            .filter((family) => MODEL_FAMILIES.includes(family)),
+        ),
+      ];
+    }
+    return providerFamilies;
+  } catch {
+    return {};
+  }
+}
+
 function trustedBaseUrl(configuredValue, fallback) {
   const value =
     typeof configuredValue === "string" && configuredValue.trim()
@@ -398,6 +429,7 @@ export function getRoleplaySettings(env) {
     providerModelOverrides: parseProviderModelOverrides(
       env.ROLEPLAY_PROVIDER_MODELS,
     ),
+    providerFamilies: parseProviderFamilies(env.ROLEPLAY_PROVIDER_FAMILIES),
     providerLimits: parseRoleplayProviderLimits(
       env.ROLEPLAY_PROVIDER_LIMITS,
     ),
@@ -431,9 +463,16 @@ export function buildConfiguredCandidates(env, settings) {
     );
     const endpoint = appendEndpointPath(baseUrl, definition.defaultPath);
     const catalogEndpoint = appendEndpointPath(baseUrl, "/v1/models");
+    const enabledFamilies = Object.hasOwn(
+      settings.providerFamilies,
+      provider,
+    )
+      ? settings.providerFamilies[provider]
+      : MODEL_FAMILIES;
 
     tokens.forEach((token, credentialRank) => {
-      MODEL_FAMILIES.forEach((family, familyRank) => {
+      enabledFamilies.forEach((family) => {
+        const familyRank = MODEL_FAMILIES.indexOf(family);
         const limits = resolveRoleplayCandidateLimits(
           settings.providerLimits,
           provider,

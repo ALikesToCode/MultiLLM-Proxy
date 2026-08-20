@@ -14,9 +14,10 @@ The default model policy uses NanoGPT first and learns between:
 - Kimi K2.6: `kimi-k2.6`
 - GLM-5.2: `glm-5.2`
 
-OpenCode Go, LinkAPI, and OpenRouter form the middle tiers; NavyAI is last. The
-provider order is strict; latency and reliability choose Kimi or GLM within
-each tier.
+GLM uses NanoGPT's subscription route first and NavyAI's
+`glm-5.2-venice` next. OpenCode and LinkAPI remain Kimi-only tiers. OpenRouter
+is not part of the roleplay chain. Provider order is strict; latency and
+reliability operate only among each tier's eligible families.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
@@ -392,6 +393,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |
+| `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `0` | `0` derives the trigger from provider capacity |
 | `ROLEPLAY_COMPACT_TRIGGER_PERCENT` | `90` | Derived compaction threshold percentage |
