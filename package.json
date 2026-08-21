@@ -9,7 +9,7 @@
     "lint": "ruff check . --select E9,F63,F7,F82",
     "typecheck": "mypy --ignore-missing-imports --follow-imports=skip --disable-error-code import-untyped --disable-error-code var-annotated --disable-error-code arg-type --disable-error-code assignment --disable-error-code operator app.py routes services providers streaming",
     "test": "python -m pytest -q",
-    "test:worker": "node --test tests/test_cloudflare_worker.mjs tests/test_dashboard_scripts.mjs tests/test_roleplay_worker.mjs tests/test_roleplay_config_worker.mjs tests/test_roleplay_glm_failover_worker.mjs tests/test_roleplay_memory_worker.mjs tests/test_roleplay_compatibility_worker.mjs tests/test_roleplay_output_contract_worker.mjs tests/test_roleplay_session_storage_worker.mjs",
+    "test:worker": "node --test tests/test_cloudflare_worker.mjs tests/test_dashboard_scripts.mjs tests/test_roleplay_worker.mjs tests/test_roleplay_config_worker.mjs tests/test_roleplay_glm_failover_worker.mjs tests/test_roleplay_memory_worker.mjs tests/test_roleplay_compatibility_worker.mjs tests/test_roleplay_output_contract_worker.mjs tests/test_roleplay_session_storage_worker.mjs tests/test_roleplay_unlimited_worker.mjs",
     "db:migrate": "python scripts/validate_sqlite_schema.py --apply",
     "db:validate": "python scripts/validate_sqlite_schema.py",
     "security:secrets": "python scripts/check_static_secrets.py",

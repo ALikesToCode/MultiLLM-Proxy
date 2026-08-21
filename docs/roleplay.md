@@ -136,9 +136,12 @@ Every mode discourages repeated recap and stagnant dialogue.
 
 Streaming is on unless `"stream": false` is sent. If `max_tokens` is omitted,
 the Worker requests the selected provider/model's largest output that still
-fits beside the current input. Explicit positive integer values are preserved;
-a candidate is skipped when its own advertised output or combined context
-limit cannot honor the request. There is no proxy-wide output ceiling.
+fits beside the current input. Explicit positive integer values remain caller
+ceilings for ordinary API clients. `output_mode: "unlimited"`, a
+`max_tokens` value of at least `1000000`, or an authenticated request from the
+JanitorAI browser removes that caller ceiling. Provider and combined-context
+capacity remain the physical safety boundary; there is no proxy-wide 20k
+ceiling.
 
 When a protected caller directive marks an `IMAGE PROMPT:` block as mandatory
 for story responses, the Worker adds a short final-output reminder immediately
@@ -151,10 +154,14 @@ During a quiet streaming interval, the Worker emits a valid SSE comment every
 10 seconds. These keepalives carry no model content and let clients distinguish
 long Kimi/GLM thinking from a dead connection. The Worker imposes no active
 stream idle deadline; it continues until the provider finishes or the client
-disconnects. Provider data events are forwarded byte-for-byte. A stream is
-recorded as complete only after `[DONE]` or a non-`length` finish reason.
-`finish_reason: "length"` is exposed to the client but marked output-limited,
-and neither it nor an unterminated EOF is stored as completed assistant memory.
+disconnects. Ordinary provider data events are forwarded unchanged; only an
+intermediate output-limit terminator is rewritten for continuation. A stream is
+recorded as complete only after `[DONE]` or a non-`length` finish reason. In
+unlimited mode, an intermediate `finish_reason: "length"` and its `[DONE]` are
+withheld while the same assistant response continues from its exact partial
+text. The client receives one terminal finish event and one `[DONE]`. Finite
+requests still expose `length` directly. Unterminated provider EOF is never
+stored as completed assistant memory.
 
 ## JanitorAI proxy configuration
 
@@ -171,6 +178,14 @@ Create a proxy configuration with:
 The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
+
+JanitorAI's public help pages do not specify the JSON sentinel used by its
+**Unlimited** control. MultiLLM does not depend on that implementation detail:
+an authenticated browser request whose `Origin` is `https://janitorai.com` is
+always normalized to unlimited output. Known `max_tokens: 1000000` sentinel
+requests and explicit `output_mode: "unlimited"` API requests receive the same
+behavior. A smaller number sent by JanitorAI is not allowed to truncate the
+story.
 
 If JanitorAI's browser console reports a `connect-src` Content Security Policy
 block for the Worker origin, the request never reaches MultiLLM. A Worker CORS
@@ -419,6 +434,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
+| `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs for an unlimited streamed response |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs or expose multiple generations of a
@@ -447,7 +463,10 @@ OpenAI-compatible clients may send a `max_tokens` ceiling larger than a
 selected provider supports. The roleplay route clamps that ceiling to the
 provider's available model capacity and returns the effective value in
 `X-Roleplay-Max-Output-Tokens`; it does not reject the turn solely because the
-client requested a larger ceiling.
+client requested a larger ceiling. Unlimited requests ignore the caller value,
+use that effective provider capacity for each leg, and transparently continue
+streaming after a `length` finish. Set `ROLEPLAY_MAX_AUTO_CONTINUATIONS=0` to
+disable continuation stitching without changing provider-capacity selection.
 
 Override a gateway only when its live catalog or an exercised request proves a
 different limit:

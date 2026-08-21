@@ -442,6 +442,11 @@ Storage-only compaction preserves the complete current request when it still
 fits; context-forced compaction uses the continuity digest. If compaction cannot
 make a request fit, generation does not start. Omitted `max_tokens` uses the
 largest output that fits the selected route, with no proxy-wide 20k ceiling.
+Authenticated JanitorAI-origin requests are treated as unlimited even when the
+client sends a numeric placeholder. If an upstream SSE leg reaches
+`finish_reason: length`, the Worker suppresses that intermediate terminator and
+continues the same assistant response until the model returns a natural stop or
+the configured continuation safety bound is exhausted.
 
 See [the roleplay endpoint guide](docs/roleplay.md) for the complete request
 contract, lore activation, adaptive metrics, token controls, retention, and

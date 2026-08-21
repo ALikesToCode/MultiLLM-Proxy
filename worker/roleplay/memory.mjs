@@ -4,6 +4,7 @@ import {
 } from "./directives.mjs";
 import { reinforceRoleplayMessages } from "./output-contract.mjs";
 import { applyReasoningPolicy } from "./reasoning.mjs";
+import { parseRoleplayOutputBudget } from "./output-budget.mjs";
 import {
   boundedString,
   RoleplayRequestError,
@@ -304,18 +305,6 @@ function sanitizeForwardedOptions(payload) {
   return forwarded;
 }
 
-function requestedOutputTokens(payload) {
-  if (payload.max_tokens === undefined) {
-    return null;
-  }
-  if (!Number.isSafeInteger(payload.max_tokens) || payload.max_tokens < 1) {
-    throw new RoleplayRequestError(
-      "max_tokens must be a positive safe integer",
-    );
-  }
-  return payload.max_tokens;
-}
-
 function modelPreference(payload) {
   const explicit =
     typeof payload.model_preference === "string"
@@ -362,6 +351,7 @@ function modelPreference(payload) {
 export function parseRoleplayPayload(
   payload,
   maximumMessageCharacters = DEFAULT_MAX_MESSAGE_CHARACTERS,
+  options = {},
 ) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new RoleplayRequestError("Request body must be a JSON object");
@@ -420,6 +410,7 @@ export function parseRoleplayPayload(
     );
   }
 
+  const outputBudget = parseRoleplayOutputBudget(payload, options);
   const parsed = {
     messages,
     character: sanitizeCharacter(payload.character),
@@ -430,7 +421,9 @@ export function parseRoleplayPayload(
     responseLength,
     stream: payload.stream !== false,
     promptCache: payload.prompt_cache !== false,
-    maxTokens: requestedOutputTokens(payload),
+    maxTokens: outputBudget.maxTokens,
+    outputMode: outputBudget.mode,
+    requestedMaxTokens: outputBudget.requestedMaxTokens,
     forwarded: sanitizeForwardedOptions(payload),
   };
 

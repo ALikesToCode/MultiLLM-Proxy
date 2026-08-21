@@ -49,6 +49,14 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/output-contract.mjs",
     import.meta.url,
   );
+  const outputBudgetUrl = new URL(
+    "../../worker/roleplay/output-budget.mjs",
+    import.meta.url,
+  );
+  const continuationUrl = new URL(
+    "../../worker/roleplay/continuation.mjs",
+    import.meta.url,
+  );
   const promptCacheUrl = new URL(
     "../../worker/roleplay/prompt-cache.mjs",
     import.meta.url,
@@ -89,6 +97,8 @@ export async function roleplayModuleUrl() {
     memorySource,
     messageFragmentsSource,
     outputContractSource,
+    outputBudgetSource,
+    continuationSource,
     promptCacheSource,
     reasoningSource,
     sessionStorageSource,
@@ -109,6 +119,8 @@ export async function roleplayModuleUrl() {
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
+      readFile(outputBudgetUrl, "utf8"),
+      readFile(continuationUrl, "utf8"),
       readFile(promptCacheUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
       readFile(sessionStorageUrl, "utf8"),
@@ -149,6 +161,13 @@ export async function roleplayModuleUrl() {
     ),
   );
   const outputContractDataUrl = dataModuleUrl(outputContractSource);
+  const validationDataUrl = dataModuleUrl(validationSource);
+  const outputBudgetDataUrl = dataModuleUrl(
+    outputBudgetSource.replace(
+      'from "./validation.mjs";',
+      `from "${validationDataUrl}";`,
+    ),
+  );
   const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource);
   const messageFragmentsDataUrl = dataModuleUrl(messageFragmentsSource);
@@ -158,7 +177,6 @@ export async function roleplayModuleUrl() {
       `from "${messageFragmentsDataUrl}";`,
     ),
   );
-  const validationDataUrl = dataModuleUrl(validationSource);
   const memoryDataUrl = dataModuleUrl(
     memorySource
       .replace(
@@ -168,6 +186,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./output-contract.mjs";',
         `from "${outputContractDataUrl}";`,
+      )
+      .replace(
+        'from "./output-budget.mjs";',
+        `from "${outputBudgetDataUrl}";`,
       )
       .replace(
         'from "./reasoning.mjs";',
@@ -191,6 +213,22 @@ export async function roleplayModuleUrl() {
         `from "${messageFragmentsDataUrl}";`,
       ),
   );
+  const continuationDataUrl = dataModuleUrl(
+    continuationSource
+      .replace(
+        'from "./capacity.mjs";',
+        `from "${capacityDataUrl}";`,
+      )
+      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+      .replace(
+        'from "./prompt-cache.mjs";',
+        `from "${promptCacheDataUrl}";`,
+      )
+      .replace(
+        'from "./transport.mjs";',
+        `from "${transportDataUrl}";`,
+      ),
+  );
   const patchedEndpoint = endpointSource
     .replace(
       'import { DurableObject } from "cloudflare:workers";',
@@ -199,6 +237,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./fallback-memory.mjs";',
       `from "${fallbackMemoryDataUrl}";`,
+    )
+    .replace(
+      'from "./continuation.mjs";',
+      `from "${continuationDataUrl}";`,
     )
     .replace(
       'from "./directives.mjs";',

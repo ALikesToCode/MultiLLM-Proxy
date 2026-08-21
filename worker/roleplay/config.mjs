@@ -439,6 +439,12 @@ export function getRoleplaySettings(env) {
       3_000,
       30_000,
     ),
+    maxAutoContinuations: boundedInteger(
+      env.ROLEPLAY_MAX_AUTO_CONTINUATIONS,
+      8,
+      0,
+      32,
+    ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,
       2_592_000,

@@ -31,6 +31,7 @@ import {
 import { prepareProtectedContext } from "./directives.mjs";
 import { revalidateNanoCredential } from "./credential-health.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
+import { createRoleplayContinuation } from "./continuation.mjs";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
@@ -72,6 +73,12 @@ import {
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
 export { isRoleplayPath, scopePublicRoleplaySessionId };
+
+const JANITOR_ORIGINS = new Set([
+  "https://janitorai.com",
+  "https://www.janitorai.com",
+]);
+const INTERNAL_OUTPUT_MODE_HEADER = "X-MultiLLM-Roleplay-Output-Mode";
 
 async function readBoundedJsonRequest(request, maximumBytes) {
   const declaredLength = Number.parseInt(
@@ -147,6 +154,10 @@ function roleplayStub(env, sessionId, request) {
   return hint
     ? env.ROLEPLAY_SESSION.getByName(sessionId, { locationHint: hint })
     : env.ROLEPLAY_SESSION.getByName(sessionId);
+}
+
+function janitorUnlimitedOutput(request) {
+  return JANITOR_ORIGINS.has(request.headers.get("Origin") ?? "");
 }
 
 export async function handleRoleplayEdgeRequest(request, env) {
@@ -241,6 +252,9 @@ export async function handleRoleplayEdgeRequest(request, env) {
     const headers = new Headers({ "Content-Type": "application/json" });
     if (idempotencyKey) {
       headers.set("Idempotency-Key", idempotencyKey);
+    }
+    if (janitorUnlimitedOutput(request)) {
+      headers.set(INTERNAL_OUTPUT_MODE_HEADER, "unlimited");
     }
     const response = await stub.fetch(
       new Request("https://roleplay.internal/turn", {
@@ -415,6 +429,10 @@ export class RoleplaySession extends DurableObject {
     const parsedInitial = parseRoleplayPayload(
       payload,
       settings.maxRequestBytes,
+      {
+        forceUnlimited:
+          request.headers.get(INTERNAL_OUTPUT_MODE_HEADER) === "unlimited",
+      },
     );
     const { profile, parsed: parsedWithProfile } = effectiveCharacter(
       state,
@@ -739,6 +757,16 @@ export class RoleplaySession extends DurableObject {
       cleanup,
       promptCache,
     } = attempted;
+    const continuation = createRoleplayContinuation({
+      state,
+      candidate,
+      messages: roleplayMessages,
+      parsed,
+      env: this.env,
+      settings,
+      signal: request.signal,
+      idempotencyKey,
+    });
     const selectionReason =
       (state.stats[candidate.key]?.successes ?? 0) < 2
         ? "exploration"
@@ -774,6 +802,11 @@ export class RoleplaySession extends DurableObject {
         requestSignal: request.signal,
         upstreamController: controller,
         heartbeatMs: settings.streamHeartbeatMs,
+        cleanup,
+        openContinuation: continuation.enabled
+          ? continuation.open.bind(continuation)
+          : null,
+        maxContinuations: settings.maxAutoContinuations,
         onComplete: async ({
           success,
           assistant,
@@ -782,8 +815,9 @@ export class RoleplaySession extends DurableObject {
           ttfbMs,
           streamMs,
           heartbeatCount,
+          continuationCount,
         }) => {
-          cleanup();
+          state = continuation.state;
           console.log(
             JSON.stringify({
               event: "roleplay_stream_completed",
@@ -796,8 +830,11 @@ export class RoleplaySession extends DurableObject {
               ttfbMs: Math.round(ttfbMs),
               streamMs: Math.round(streamMs),
               heartbeatCount,
+              continuationCount,
               assistantCharacters: assistant.length,
               maxOutputTokens: candidate.resolvedMaxOutputTokens,
+              outputMode: parsed.outputMode,
+              requestedMaxTokens: parsed.requestedMaxTokens ?? undefined,
               inputTokensSaved,
             }),
           );
@@ -824,7 +861,12 @@ export class RoleplaySession extends DurableObject {
             inputTokensSaved:
               (nextState.inputTokensSaved ?? 0) + inputTokensSaved,
           };
-          if (success && memoryEnabled) {
+          if (
+            memoryEnabled &&
+            (success ||
+              (parsed.outputMode === "unlimited" &&
+                reason === "output_limit"))
+          ) {
             nextState = appendAssistantMessage(
               nextState,
               persistedConversation,
