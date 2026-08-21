@@ -147,8 +147,9 @@ When a protected caller directive marks an `IMAGE PROMPT:` block as mandatory
 for story responses, the Worker adds a short final-output reminder immediately
 before dialogue and reserves at least
 `ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS` (2,048 by default). This does not
-rewrite provider output or make a second paid request. An explicit `no image`
-command or OOC-prefixed turn bypasses both the reminder and budget floor.
+rewrite bounded provider output or make a second request for bounded callers.
+An explicit `no image` command or OOC-prefixed turn bypasses both the reminder
+and budget floor.
 
 During a quiet streaming interval, the Worker emits a valid SSE comment every
 10 seconds. These keepalives carry no model content and let clients distinguish
@@ -159,9 +160,12 @@ intermediate output-limit terminator is rewritten for continuation. A stream is
 recorded as complete only after `[DONE]` or a non-`length` finish reason. In
 unlimited mode, an intermediate `finish_reason: "length"` and its `[DONE]` are
 withheld while the same assistant response continues from its exact partial
-text. The client receives one terminal finish event and one `[DONE]`. Finite
-requests still expose `length` directly. Unterminated provider EOF is never
-stored as completed assistant memory.
+text. The same repair applies to `finish_reason: "stop"` when a protected
+directive requires an `IMAGE PROMPT:` and one or more of its declared standard
+fields are still missing. A complete contract is accepted without another
+request. The client receives one terminal finish event and one `[DONE]`. Finite
+requests still expose their provider finish reason directly. Unterminated
+provider EOF is never stored as completed assistant memory.
 
 ## JanitorAI proxy configuration
 

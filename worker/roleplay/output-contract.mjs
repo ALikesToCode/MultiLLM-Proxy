@@ -3,6 +3,18 @@ const MANDATORY_LANGUAGE =
   /\b(?:mandatory|required|non-negotiable|must|contract violation)\b/i;
 const NO_IMAGE_COMMAND = /\bno[\s_-]+image\b/i;
 const OOC_PREFIX = /^\s*(?:\[\s*)?\(?\s*ooc\b/i;
+const STANDARD_IMAGE_PROMPT_FIELDS = Object.freeze([
+  "Background/setting",
+  "Main character focus",
+  "Outfit",
+  "Accessories",
+  "Hair and makeup",
+  "Glamour read",
+  "Pose and expression",
+  "Lighting",
+  "Composition and camera",
+  "Mood",
+]);
 
 function messageContent(message) {
   return typeof message?.content === "string" ? message.content : "";
@@ -27,6 +39,22 @@ function declaresMandatoryImagePrompt(directives) {
   });
 }
 
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function declaredImagePromptFields(directives) {
+  return STANDARD_IMAGE_PROMPT_FIELDS.filter((field) => {
+    const pattern = new RegExp(
+      `^\\s*${escapeRegularExpression(field)}\\s*:`,
+      "im",
+    );
+    return directives.some((directive) =>
+      pattern.test(messageContent(directive)),
+    );
+  });
+}
+
 function turnSkipsImagePrompt(messages) {
   const latestUser = latestUserContent(messages);
   return (
@@ -43,6 +71,9 @@ export function applyRoleplayOutputContract(
   const imagePromptDeclared = declaresMandatoryImagePrompt(directives);
   const imagePromptRequired =
     imagePromptDeclared && !turnSkipsImagePrompt(parsed.messages);
+  const imagePromptFields = imagePromptDeclared
+    ? declaredImagePromptFields(directives)
+    : [];
   const minimumOutputTokens = settings.imagePromptMinOutputTokens;
   const budgetAdjusted =
     imagePromptRequired &&
@@ -55,9 +86,37 @@ export function applyRoleplayOutputContract(
     outputContract: {
       imagePromptDeclared,
       imagePromptRequired,
+      imagePromptFields,
       budgetAdjusted,
     },
   };
+}
+
+export function roleplayOutputContractSatisfied(content, contract) {
+  if (!contract?.imagePromptRequired) {
+    return true;
+  }
+  if (typeof content !== "string" || !content.trim()) {
+    return false;
+  }
+  const matches = [...content.matchAll(new RegExp(IMAGE_PROMPT_MARKER, "gim"))];
+  const marker = matches.at(-1);
+  if (!marker) {
+    return false;
+  }
+  const imagePrompt = content.slice(
+    (marker.index ?? 0) + marker[0].length,
+  );
+  if (!imagePrompt.trim()) {
+    return false;
+  }
+  return (contract.imagePromptFields ?? []).every((field) => {
+    const pattern = new RegExp(
+      `^\\s*${escapeRegularExpression(field)}\\s*:\\s*\\S`,
+      "im",
+    );
+    return pattern.test(imagePrompt);
+  });
 }
 
 function renderRoleplayOutputContractReminder(contract) {

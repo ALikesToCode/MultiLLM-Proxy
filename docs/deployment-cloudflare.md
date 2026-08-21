@@ -49,7 +49,9 @@ one additional billed request, but never silently drops history.
 JanitorAI-origin roleplay streams ignore the client's numeric output ceiling.
 When a provider reports `finish_reason: length`, the Worker joins as many as
 `ROLEPLAY_MAX_AUTO_CONTINUATIONS` continuation legs (eight by default) into one
-SSE response with a single terminal `[DONE]`.
+SSE response with a single terminal `[DONE]`. It also repairs a provider
+`finish_reason: stop` when a caller-mandated `IMAGE PROMPT:` block has not yet
+completed its declared fields.
 
 Use `GET /v1/roleplay/models` for configured tiers and
 `GET /v1/roleplay/metrics?session_id=...` for bounded per-session routing

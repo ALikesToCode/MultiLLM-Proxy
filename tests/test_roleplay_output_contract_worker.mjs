@@ -14,6 +14,16 @@ const IMAGE_CONTRACT = [
   "A complete IMAGE PROMPT block is mandatory at the end of every story response.",
   "IMAGE PROMPT:",
   "Create a high-detail modern anime image.",
+  "Background/setting: describe the visible room.",
+  "Main character focus: describe visible identity and anatomy.",
+  "Outfit: describe visible clothes and materials.",
+  "Accessories: describe visible jewelry and props.",
+  "Hair and makeup: describe styling and cosmetics.",
+  "Glamour read: describe concrete presentation details.",
+  "Pose and expression: describe posture and facial muscles.",
+  "Lighting: describe source, direction, color, and shadow.",
+  "Composition and camera: describe viewpoint, crop, and angle.",
+  "Mood: describe only visible light, posture, and room details.",
 ].join("\n");
 
 const STORY_WITH_IMAGE_PROMPT = [
@@ -32,6 +42,16 @@ const STORY_WITH_IMAGE_PROMPT = [
   "Composition and camera: first-person medium shot, eye level.",
   "Mood: long shadows, dusty shelves, still posture.",
 ].join("\n");
+
+function streamingStory(content, finishReason = "stop") {
+  return new Response(
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: finishReason }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""),
+    { headers: { "Content-Type": "text/event-stream" } },
+  );
+}
 
 function imageContractMessages(userContent = "Open the marked shelf.") {
   return [
@@ -198,4 +218,102 @@ test("streaming preserves the complete image prompt block byte for byte", async 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), events.join(""));
   await fixture.waitForBackgroundWork();
+});
+
+test("Janitor unlimited stream repairs a provider stop before the required image prompt", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "2",
+  });
+  const upstreamPayloads = [];
+
+  let response;
+  let body;
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamPayloads.push(payload);
+    return upstreamPayloads.length === 1
+      ? streamingStory(
+          [
+            "*Mira reaches toward the marked shelf.*",
+            "",
+            "IMAGE PROMPT:",
+            "Create a high-detail modern anime image.",
+            "Background/setting: old library at sunset.",
+          ].join("\n"),
+        )
+      : streamingStory(
+          STORY_WITH_IMAGE_PROMPT.slice(
+            STORY_WITH_IMAGE_PROMPT.indexOf("\nMain character focus:"),
+          ),
+        );
+  }, async () => {
+    response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-repair-incomplete-stop",
+          messages: imageContractMessages(),
+          stream: true,
+          max_tokens: 1_000_000,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(upstreamPayloads.length, 2);
+  assert.ok(
+    upstreamPayloads[1].messages.some(
+      (message) =>
+        message.role === "assistant" &&
+        message.content.includes("Background/setting: old library"),
+    ),
+  );
+  assert.ok(
+    upstreamPayloads[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("final output contract was complete"),
+    ),
+  );
+  assert.match(body, /Mira reaches toward the marked shelf/);
+  assert.match(body, /IMAGE PROMPT:/);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+});
+
+test("Janitor unlimited stream accepts stop after the required image prompt is complete", async () => {
+  const fixture = makeRoleplayEnv({ ROLEPLAY_PROVIDER_ORDER: "opencode" });
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return streamingStory(STORY_WITH_IMAGE_PROMPT);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-accept-complete-stop",
+          messages: imageContractMessages(),
+          stream: true,
+          max_tokens: 1_000_000,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(calls, 1);
+  assert.match(body, /Mood: long shadows/);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
 });

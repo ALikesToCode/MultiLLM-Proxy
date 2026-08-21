@@ -90,6 +90,7 @@ function rewrittenChoiceFrame(payload, { finishReason, dropContent }) {
 
 function sseAssistantCollector(
   maximumCharacters = MAX_COLLECTED_ASSISTANT_CHARACTERS,
+  deferTerminalFrames = false,
 ) {
   let buffered = "";
   let assistant = "";
@@ -121,7 +122,7 @@ function sseAssistantCollector(
     }
     if (parsed.done) {
       legTerminated = true;
-      if (legFinishReason === "length") {
+      if (withheld.length) {
         withheld.push(frame);
         return [];
       }
@@ -142,14 +143,14 @@ function sseAssistantCollector(
     }
     legFinishReason = finishReason;
     legTerminated = true;
-    if (finishReason !== "length") {
+    if (finishReason !== "length" && !deferTerminalFrames) {
       return [frame];
     }
 
     if (typeof content === "string" && content) {
       withheld.push(
         rewrittenChoiceFrame(parsed.payload, {
-          finishReason: "length",
+          finishReason,
           dropContent: true,
         }),
       );
@@ -210,6 +211,7 @@ export function createObservedStream({
   onComplete,
   cleanup = () => {},
   openContinuation = null,
+  getIncompleteReason = null,
   maxContinuations = 0,
 }) {
   let resolveCompletion;
@@ -220,7 +222,10 @@ export function createObservedStream({
   let activeController = upstreamController;
   let activeCleanup = cleanup;
   const decoder = new TextDecoder();
-  const collector = sseAssistantCollector();
+  const collector = sseAssistantCollector(
+    MAX_COLLECTED_ASSISTANT_CHARACTERS,
+    typeof openContinuation === "function",
+  );
   let settled = false;
   let released = false;
   let pendingRead = null;
@@ -323,9 +328,17 @@ export function createObservedStream({
           if (done) {
             const collected = collector.finish(decoder.decode());
             const outputLimited = collected.finishReason === "length";
+            const incompleteReason = outputLimited
+              ? "output_limit"
+              : typeof getIncompleteReason === "function"
+                ? getIncompleteReason({
+                    assistant: collected.assistant,
+                    finishReason: collected.finishReason,
+                  })
+                : "";
             enqueueFrames(controller, collected.output);
             if (
-              outputLimited &&
+              incompleteReason &&
               typeof openContinuation === "function" &&
               continuationCount < maxContinuations &&
               !collected.truncated &&
@@ -336,6 +349,7 @@ export function createObservedStream({
                   openContinuation({
                     assistant: collected.assistant,
                     continuationCount: continuationCount + 1,
+                    reason: incompleteReason,
                   }),
                 ).then(
                   (next) => ({ kind: "continuation", next }),
@@ -371,11 +385,11 @@ export function createObservedStream({
             cleanupLeg();
             controller.close();
             void settle({
-              success: collected.terminated && !outputLimited,
+              success: collected.terminated && !incompleteReason,
               assistant: collected.assistant,
               finishReason: collected.finishReason,
-              reason: outputLimited
-                ? "output_limit"
+              reason: incompleteReason
+                ? incompleteReason
                 : collected.terminated
                   ? "complete"
                   : "incomplete_eof",

@@ -225,6 +225,10 @@ export async function roleplayModuleUrl() {
         `from "${promptCacheDataUrl}";`,
       )
       .replace(
+        'from "./output-contract.mjs";',
+        `from "${outputContractDataUrl}";`,
+      )
+      .replace(
         'from "./transport.mjs";',
         `from "${transportDataUrl}";`,
       ),

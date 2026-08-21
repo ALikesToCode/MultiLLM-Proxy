@@ -4,24 +4,32 @@ import {
   estimateTokens,
 } from "./memory.mjs";
 import { applyRoleplayPromptCache } from "./prompt-cache.mjs";
+import { roleplayOutputContractSatisfied } from "./output-contract.mjs";
 import {
   attemptRoleplayCandidates,
   logRoleplayError,
 } from "./transport.mjs";
 
 const CONTINUATION_INSTRUCTION = [
-  "[Automatic continuation after an upstream output limit]",
+  "[Automatic continuation of an incomplete response]",
   "The preceding assistant message is an already-emitted partial response.",
   "Continue from its exact final character without repeating, recapping, or restarting it.",
   "Finish the current response naturally, including every caller-required final block.",
   "Output only the missing continuation.",
-].join("\n");
+];
 
-function continuationMessages(messages, assistant) {
+function continuationMessages(messages, assistant, reason) {
+  const reasonInstruction =
+    reason === "output_contract"
+      ? "The provider stopped before the caller-required final output contract was complete."
+      : "The provider reached an output limit before the response was complete.";
   return [
     ...messages,
     { role: "assistant", content: assistant },
-    { role: "system", content: CONTINUATION_INSTRUCTION },
+    {
+      role: "system",
+      content: [...CONTINUATION_INSTRUCTION, reasonInstruction].join("\n"),
+    },
   ];
 }
 
@@ -53,11 +61,33 @@ export function createRoleplayContinuation({
     get state() {
       return currentState;
     },
-    async open({ assistant, continuationCount }) {
+    incompleteReason({ assistant, finishReason }) {
+      if (!enabled) {
+        return "";
+      }
+      if (finishReason === "length") {
+        return "output_limit";
+      }
+      if (
+        finishReason === "stop" &&
+        !roleplayOutputContractSatisfied(
+          assistant,
+          parsed.outputContract,
+        )
+      ) {
+        return "output_contract";
+      }
+      return "";
+    },
+    async open({ assistant, continuationCount, reason }) {
       if (!enabled || !assistant.trim()) {
         return null;
       }
-      const nextMessages = continuationMessages(messages, assistant);
+      const nextMessages = continuationMessages(
+        messages,
+        assistant,
+        reason,
+      );
       const [nextCandidate] = prepareRoleplayCandidates(
         [candidate],
         estimateTokens(nextMessages),

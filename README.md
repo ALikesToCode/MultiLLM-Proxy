@@ -446,7 +446,9 @@ Authenticated JanitorAI-origin requests are treated as unlimited even when the
 client sends a numeric placeholder. If an upstream SSE leg reaches
 `finish_reason: length`, the Worker suppresses that intermediate terminator and
 continues the same assistant response until the model returns a natural stop or
-the configured continuation safety bound is exhausted.
+the configured continuation safety bound is exhausted. A provider `stop` is
+also continued when the caller declared a mandatory `IMAGE PROMPT:` block and
+the response has not completed its declared fields yet.
 
 See [the roleplay endpoint guide](docs/roleplay.md) for the complete request
 contract, lore activation, adaptive metrics, token controls, retention, and

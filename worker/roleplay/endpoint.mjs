@@ -806,6 +806,9 @@ export class RoleplaySession extends DurableObject {
         openContinuation: continuation.enabled
           ? continuation.open.bind(continuation)
           : null,
+        getIncompleteReason: continuation.enabled
+          ? continuation.incompleteReason.bind(continuation)
+          : null,
         maxContinuations: settings.maxAutoContinuations,
         onComplete: async ({
           success,
@@ -865,7 +868,7 @@ export class RoleplaySession extends DurableObject {
             memoryEnabled &&
             (success ||
               (parsed.outputMode === "unlimited" &&
-                reason === "output_limit"))
+                ["output_limit", "output_contract"].includes(reason)))
           ) {
             nextState = appendAssistantMessage(
               nextState,
@@ -883,6 +886,8 @@ export class RoleplaySession extends DurableObject {
               ? "completed"
               : reason === "output_limit"
                 ? "output_limited"
+                : reason === "output_contract"
+                  ? "output_contract_incomplete"
                 : "stream_failed",
           );
           await saveRoleplayState(this.ctx.storage, nextState);
