@@ -38,6 +38,31 @@ function streamingResponse(model, content, finishReason) {
   );
 }
 
+function unterminatedStreamingResponse(model, content) {
+  const encoder = new TextEncoder();
+  const payload = JSON.stringify({
+    id: "chatcmpl-incomplete-eof",
+    object: "chat.completion.chunk",
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: { content },
+        finish_reason: null,
+      },
+    ],
+  });
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        controller.close();
+      },
+    }),
+    { headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
 function chunkedBody(chunks) {
   const encoder = new TextEncoder();
   const remaining = [...chunks];
@@ -123,6 +148,63 @@ test("Janitor output is unlimited and transparently continues after length", asy
   const metricsPayload = await metrics.json();
   assert.equal(metricsPayload.turns, 1);
   assert.equal(metricsPayload.stored_messages, 2);
+});
+
+test("Janitor max tokens zero continues after an unterminated upstream EOF", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "2",
+  });
+  const upstreamPayloads = [];
+
+  let response;
+  let body;
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamPayloads.push(payload);
+    return upstreamPayloads.length === 1
+      ? unterminatedStreamingResponse(payload.model, "Interrupted sentence, ")
+      : streamingResponse(payload.model, "then the reply completes.", "stop");
+  }, async () => {
+    response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-unlimited-incomplete-eof",
+          model: "roleplay:glm",
+          messages: [{ role: "user", content: "Finish the full reply." }],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        JANITOR_PATH,
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Max-Output-Tokens"), "131072");
+  assert.equal(upstreamPayloads.length, 2);
+  assert.match(body, /Interrupted sentence,/);
+  assert.match(body, /then the reply completes\./);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.ok(
+    upstreamPayloads[1].messages.some(
+      (message) =>
+        message.role === "assistant" &&
+        message.content === "Interrupted sentence, ",
+    ),
+  );
+  assert.ok(
+    upstreamPayloads[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("without a terminal finish event"),
+    ),
+  );
 });
 
 test("finite non-Janitor output keeps the caller ceiling", async () => {

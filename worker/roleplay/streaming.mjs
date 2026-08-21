@@ -330,6 +330,8 @@ export function createObservedStream({
             const outputLimited = collected.finishReason === "length";
             const incompleteReason = outputLimited
               ? "output_limit"
+              : !collected.terminated && collected.assistant.trim()
+                ? "incomplete_eof"
               : typeof getIncompleteReason === "function"
                 ? getIncompleteReason({
                     assistant: collected.assistant,

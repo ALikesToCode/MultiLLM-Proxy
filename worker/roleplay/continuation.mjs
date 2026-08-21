@@ -22,7 +22,9 @@ function continuationMessages(messages, assistant, reason) {
   const reasonInstruction =
     reason === "output_contract"
       ? "The provider stopped before the caller-required final output contract was complete."
-      : "The provider reached an output limit before the response was complete.";
+      : reason === "incomplete_eof"
+        ? "The provider stream ended without a terminal finish event before the response was complete."
+        : "The provider reached an output limit before the response was complete.";
   return [
     ...messages,
     { role: "assistant", content: assistant },

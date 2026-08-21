@@ -163,9 +163,11 @@ withheld while the same assistant response continues from its exact partial
 text. The same repair applies to `finish_reason: "stop"` when a protected
 directive requires an `IMAGE PROMPT:` and one or more of its declared standard
 fields are still missing. A complete contract is accepted without another
-request. The client receives one terminal finish event and one `[DONE]`. Finite
-requests still expose their provider finish reason directly. Unterminated
-provider EOF is never stored as completed assistant memory.
+request. Unlimited streams also continue when an upstream connection ends
+after emitting partial assistant text but before sending a terminal finish
+event. The client receives one terminal finish event and one `[DONE]`. Finite
+requests still expose their provider finish reason directly. An unterminated
+EOF that cannot be continued is never stored as completed assistant memory.
 
 ## JanitorAI proxy configuration
 
