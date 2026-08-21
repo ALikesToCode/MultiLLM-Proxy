@@ -35,6 +35,7 @@ import {
   buildConfiguredCandidates,
   getRoleplaySettings,
   rankRoleplayCandidates,
+  ROLEPLAY_SAFE_FALLBACK_STATUSES,
   roleplayCatalog,
 } from "./config.mjs";
 import {
@@ -185,7 +186,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
       selection: {
         provider_order: settings.providerOrder,
         policy: "latency_reliability_ewma",
-        safe_fallback_statuses: [401, 402, 403, 404, 429],
+        safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
       },
     });
   }

@@ -6,6 +6,8 @@ import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
+  isSafeFallbackStatus,
+  ROLEPLAY_SAFE_FALLBACK_STATUSES,
 } from "../worker/roleplay/config.mjs";
 
 const { MultiLLMProxyContainer } = await loadWorkerModule();
@@ -78,6 +80,47 @@ test("roleplay limits each provider to configured model families", () => {
   );
 });
 
+test("roleplay preserves ordered per-provider model fallbacks", () => {
+  const env = {
+    OPENCODE_GO_API_KEY: "opencode-key",
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3", "glm-5.2", "glm-5.3"] },
+    }),
+  };
+  const candidates = buildConfiguredCandidates(env, getRoleplaySettings(env));
+
+  assert.deepEqual(
+    candidates.map(({ model, modelRank }) => ({ model, modelRank })),
+    [
+      { model: "glm-5.3", modelRank: 0 },
+      { model: "glm-5.2", modelRank: 1 },
+    ],
+  );
+});
+
+test("roleplay only falls back after explicit provider rejections", () => {
+  assert.deepEqual(ROLEPLAY_SAFE_FALLBACK_STATUSES, [
+    400,
+    401,
+    402,
+    403,
+    404,
+    413,
+    415,
+    422,
+    429,
+    503,
+  ]);
+  for (const status of ROLEPLAY_SAFE_FALLBACK_STATUSES) {
+    assert.equal(isSafeFallbackStatus(status), true, String(status));
+  }
+  for (const status of [408, 409, 500, 502, 504]) {
+    assert.equal(isSafeFallbackStatus(status), false, String(status));
+  }
+});
+
 test("Cloudflare forwards NanoGPT key preference into the container", () => {
   const container = new MultiLLMProxyContainer(
     {},
@@ -94,20 +137,24 @@ test("deployment prefers NanoGPT key index one", async () => {
   assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "1");
 });
 
-test("deployment keeps GLM away from OpenCode and omits OpenRouter", async () => {
+test("deployment routes GLM through OpenCode before NavyAI", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
   assert.equal(
     config.vars?.ROLEPLAY_PROVIDER_ORDER,
-    "nanogpt,navyai,opencode,linkapi",
+    "nanogpt,opencode,linkapi,navyai",
   );
   assert.deepEqual(JSON.parse(config.vars?.ROLEPLAY_PROVIDER_FAMILIES), {
     nanogpt: ["glm"],
-    navyai: ["glm"],
-    opencode: ["kimi"],
+    opencode: ["glm", "kimi"],
     linkapi: ["kimi"],
+    navyai: ["glm"],
   });
+  assert.deepEqual(
+    JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode.glm,
+    ["glm-5.3", "glm-5.2"],
+  );
   assert.equal(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,
     "glm-5.2-venice",

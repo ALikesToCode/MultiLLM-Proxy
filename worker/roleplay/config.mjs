@@ -48,8 +48,24 @@ const PROVIDERS = {
   },
 };
 
-const SAFE_FALLBACK_STATUSES = new Set([401, 402, 403, 404, 429]);
+// These responses unambiguously reject the current candidate before a usable
+// completion is returned. Network failures and ambiguous gateway errors stay
+// fail-closed so automatic recovery cannot duplicate a completed generation.
+export const ROLEPLAY_SAFE_FALLBACK_STATUSES = Object.freeze([
+  400,
+  401,
+  402,
+  403,
+  404,
+  413,
+  415,
+  422,
+  429,
+  503,
+]);
+const SAFE_FALLBACK_STATUSES = new Set(ROLEPLAY_SAFE_FALLBACK_STATUSES);
 const MODEL_FAMILIES = ["kimi", "glm"];
+const MAX_PROVIDER_MODELS_PER_FAMILY = 8;
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",
   glm: "glm-5.2",
@@ -208,14 +224,24 @@ function parseProviderModelOverrides(value) {
       }
       const providerModels = {};
       for (const family of MODEL_FAMILIES) {
-        const model = models[family];
-        if (
-          typeof model === "string" &&
-          model.trim() &&
-          model.length <= 200 &&
-          !/[\u0000-\u001f\u007f]/.test(model)
-        ) {
-          providerModels[family] = model.trim();
+        const configured = Array.isArray(models[family])
+          ? models[family]
+          : [models[family]];
+        const orderedModels = [
+          ...new Set(
+            configured
+              .filter(
+                (model) =>
+                  typeof model === "string" &&
+                  model.trim() &&
+                  model.length <= 200 &&
+                  !/[\u0000-\u001f\u007f]/.test(model),
+              )
+              .map((model) => model.trim()),
+          ),
+        ].slice(0, MAX_PROVIDER_MODELS_PER_FAMILY);
+        if (orderedModels.length) {
+          providerModels[family] = orderedModels;
         }
       }
       if (Object.keys(providerModels).length) {
@@ -299,18 +325,25 @@ function appendEndpointPath(baseUrl, endpointPath) {
   return url;
 }
 
-function configuredModelFor(env, overrides, provider, family) {
+function configuredModelsFor(env, overrides, provider, family) {
   const globalName =
     family === "kimi" ? "ROLEPLAY_KIMI_MODEL" : "ROLEPLAY_GLM_MODEL";
   const configuredGlobal =
     typeof env[globalName] === "string" ? env[globalName].trim() : "";
   const providerDefault =
     PROVIDER_DEFAULT_MODELS[provider]?.[family] ?? DEFAULT_MODELS[family];
+  const providerOverrides = overrides[provider]?.[family];
+  if (Array.isArray(providerOverrides) && providerOverrides.length) {
+    return providerOverrides;
+  }
+  if (typeof providerOverrides === "string" && providerOverrides.trim()) {
+    return [providerOverrides.trim()];
+  }
   const globalDefault =
     configuredGlobal && configuredGlobal !== DEFAULT_MODELS[family]
       ? configuredGlobal
       : providerDefault;
-  return overrides[provider]?.[family] ?? globalDefault;
+  return [globalDefault];
 }
 
 export function getRoleplaySettings(env) {
@@ -478,26 +511,30 @@ export function buildConfiguredCandidates(env, settings) {
           provider,
           family,
         );
-        candidates.push({
+        const models = configuredModelsFor(
+          env,
+          settings.providerModelOverrides,
           provider,
-          providerRank,
           family,
-          familyRank,
-          model: configuredModelFor(
-            env,
-            settings.providerModelOverrides,
+        );
+        models.forEach((model, modelRank) => {
+          candidates.push({
             provider,
+            providerRank,
             family,
-          ),
-          endpoint: endpoint.toString(),
-          catalogEndpoint: catalogEndpoint.toString(),
-          token,
-          credentialId:
-            tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
-          credentialRank,
-          billingMode,
-          subscriptionOnly,
-          ...limits,
+            familyRank,
+            model,
+            modelRank,
+            endpoint: endpoint.toString(),
+            catalogEndpoint: catalogEndpoint.toString(),
+            token,
+            credentialId:
+              tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
+            credentialRank,
+            billingMode,
+            subscriptionOnly,
+            ...limits,
+          });
         });
       });
     });
@@ -552,6 +589,7 @@ export function rankRoleplayCandidates(
   );
   const providerRanks = [...new Set(eligible.map((candidate) => candidate.providerRank))];
   const ranked = [];
+  const coolingDown = [];
 
   for (const providerRank of providerRanks) {
     const tier = eligible
@@ -565,12 +603,14 @@ export function rankRoleplayCandidates(
           ...candidate,
           key,
           score: candidateScore(candidate, modelStats[key], now),
+          cooldownUntil: modelStats[key]?.cooldownUntil ?? 0,
           activeCredential:
             activeCredentials[candidate.provider] === candidate.credentialId,
         };
       })
       .sort(
         (left, right) =>
+          left.modelRank - right.modelRank ||
           Number(right.activeCredential) - Number(left.activeCredential) ||
           left.score - right.score ||
           left.credentialRank - right.credentialRank ||
@@ -579,9 +619,22 @@ export function rankRoleplayCandidates(
       );
 
     const available = tier.filter((candidate) => Number.isFinite(candidate.score));
-    ranked.push(...(available.length ? available : tier));
+    if (available.length) {
+      ranked.push(...available);
+    } else {
+      coolingDown.push(...tier);
+    }
   }
-  return ranked;
+  if (ranked.length) {
+    return ranked;
+  }
+  return coolingDown.sort(
+    (left, right) =>
+      left.cooldownUntil - right.cooldownUntil ||
+      left.providerRank - right.providerRank ||
+      left.modelRank - right.modelRank ||
+      left.credentialRank - right.credentialRank,
+  );
 }
 
 export function roleplayCatalog(env, settings) {
@@ -594,6 +647,7 @@ export function roleplayCatalog(env, settings) {
         provider_rank: candidate.providerRank,
         family: candidate.family,
         model: candidate.model,
+        model_priority: candidate.modelRank,
         context_window: candidate.contextWindow,
         max_output_tokens: candidate.maxOutputTokens,
         limits_source: candidate.source,

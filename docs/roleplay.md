@@ -9,15 +9,16 @@ that session stay ordered while different sessions scale independently. When
 an OpenCode model is selected, only the provider request uses Container egress
 to avoid OpenCode's Worker-signature block.
 
-The default model policy uses NanoGPT first and learns between:
+The production model policy uses NanoGPT first and learns between:
 
 - Kimi K2.6: `kimi-k2.6`
-- GLM-5.2: `glm-5.2`
+- GLM-5.3 and GLM-5.2: `glm-5.3`, `glm-5.2`
 
-GLM uses NanoGPT's subscription route first and NavyAI's
-`glm-5.2-venice` next. OpenCode and LinkAPI remain Kimi-only tiers. OpenRouter
-is not part of the roleplay chain. Provider order is strict; latency and
-reliability operate only among each tier's eligible families.
+GLM uses NanoGPT's subscription route first, then OpenCode `glm-5.3` with
+`glm-5.2` as its same-provider fallback, and NavyAI's `glm-5.2-venice` last.
+LinkAPI remains a Kimi-only tier and OpenRouter is not part of the production
+roleplay chain. Provider order is strict; latency and reliability operate only
+among each tier's eligible families.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
@@ -98,17 +99,18 @@ are injected, which keeps each request bounded.
 
 `model_preference` accepts `auto`, `speed`, `kimi`, or `glm`. OpenAI-compatible
 clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
-`roleplay:kimi`, or `roleplay:glm`. The concrete `kimi-k2.6` and `glm-5.2`
-values are also accepted. A family-specific value pins the family but still
-follows provider priority.
+`roleplay:kimi`, or `roleplay:glm`. The concrete `kimi-k2.6`, `glm-5.3`, and
+`glm-5.2` values are also accepted. A family-specific value pins the family
+but still follows provider priority.
 
 Every roleplay generation defaults to the strongest provider-compatible
 reasoning mode. Callers can lower generation effort with `reasoning_effort`;
 semantic `max` maps to the selected provider's real ceiling. Model-backed
-memory compaction remains at maximum reasoning. NavyAI receives `xhigh`;
+memory compaction remains at maximum reasoning. NavyAI receives `max`;
 NanoGPT receives `max` for GLM and `xhigh` for Kimi; LinkAPI receives `high`;
 OpenRouter receives `reasoning.effort` set to
-`high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.2 receives `max`.
+`high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.3 and 5.2 receive
+`max`.
 OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
 does not expose a supported effort overlay for that model.
 
@@ -205,9 +207,11 @@ avoids a global Durable Object bottleneck and keeps regional behavior local to
 the conversation.
 
 Automatic fallback occurs only after a response that clearly rejected work:
-`401`, `402`, `403`, `404`, or `429`. Transport errors and `5xx` responses are
-ambiguous because a provider might have started billable generation. The
-Worker stops instead of risking a duplicate paid request.
+`400`, `401`, `402`, `403`, `404`, `413`, `415`, `422`, `429`, or an explicit
+`503` service-unavailable response. Ordered model arrays are exhausted inside
+one provider before the next provider tier is tried. Transport errors and
+other `5xx` responses remain ambiguous because a provider might have started
+generation; the Worker stops instead of risking a duplicate request.
 
 `Idempotency-Key` is optional but recommended. The session stores recent keys
 before any model call. Reusing one returns `409` and does not start another
@@ -398,7 +402,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_ORDER` | `nanogpt,opencode,linkapi,openrouter,navyai` | Strict provider tiers |
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
-| `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |
+| `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `128000` | Raw-dialogue threshold that forces continuity compaction; `0` derives it from provider capacity |
@@ -417,13 +421,16 @@ Non-secret tuning variables:
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
-Provider catalogs can use namespaced IDs. Override only those providers:
+Provider catalogs can use namespaced IDs or expose multiple generations of a
+model family. A string selects one ID; an array is tried in order:
 
 ```json
 {
+  "opencode": {
+    "glm": ["glm-5.3", "glm-5.2"]
+  },
   "navyai": {
-    "kimi": "provider-specific-kimi-k2.6-id",
-    "glm": "provider-specific-glm-5.2-id"
+    "glm": "glm-5.2-venice"
   }
 }
 ```

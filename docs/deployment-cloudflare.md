@@ -34,10 +34,11 @@ stores recent dialogue, a compact continuity digest, idempotency keys, and
 per-model EWMA latency/reliability statistics.
 
 Production GLM routing uses NanoGPT subscription
-`zai-org/glm-5.2:thinking` first and NavyAI `glm-5.2-venice` second. OpenCode
-and LinkAPI are Kimi-only roleplay tiers, and OpenRouter is omitted from the
-roleplay chain. Only `401`, `402`, `403`, `404`, and `429` trigger automatic
-fallback. Transport errors and `5xx` responses stop because their billing
+`zai-org/glm-5.2:thinking` first, OpenCode `glm-5.3` then `glm-5.2`, and
+NavyAI `glm-5.2-venice` last. LinkAPI is Kimi-only and OpenRouter is omitted
+from the roleplay chain. Explicit `400`, `401`, `402`, `403`, `404`, `413`,
+`415`, `422`, `429`, and `503` responses trigger automatic fallback.
+Transport errors and other `5xx` responses stop because their generation
 outcome is ambiguous.
 
 At the local compaction threshold, the selected model decides whether older

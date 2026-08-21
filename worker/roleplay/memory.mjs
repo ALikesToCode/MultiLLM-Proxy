@@ -345,6 +345,7 @@ function modelPreference(payload) {
     "roleplay:kimi": "kimi",
     "roleplay:glm": "glm",
     "kimi-k2.6": "kimi",
+    "glm-5.3": "glm",
     "glm-5.2": "glm",
   };
   if (aliases[model]) {

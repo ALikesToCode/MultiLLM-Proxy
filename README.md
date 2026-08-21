@@ -409,11 +409,12 @@ stores bounded continuity memory, and records per-model latency and
 reliability. OpenCode generations use Container egress because OpenCode rejects
 Worker-origin HTTP signatures.
 
-The production policy sends GLM to NanoGPT subscription first and NavyAI's
-`glm-5.2-venice` second. OpenCode Go and LinkAPI remain Kimi-only roleplay
-tiers; OpenRouter is omitted from the roleplay chain. Automatic fallback occurs
-only after a clear upstream rejection; an ambiguous transport or `5xx` outcome
-stops to avoid duplicate paid generation.
+The production policy sends GLM to NanoGPT subscription first, OpenCode Go
+`glm-5.3` then `glm-5.2`, and NavyAI `glm-5.2-venice` last. LinkAPI remains a
+Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
+Automatic fallback handles explicit model, capacity, authentication,
+rate-limit, and service-unavailable rejections. Ambiguous transport and
+gateway failures stop to avoid duplicate generation.
 Each route carries its own context/output limits. The Worker filters out routes
 that cannot fit the current input, so a larger NavyAI or NanoGPT GLM context can
 be selected without assuming every gateway exposes the same capacity.

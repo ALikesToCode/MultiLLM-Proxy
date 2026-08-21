@@ -30,7 +30,7 @@ export function maximumReasoningProfile(candidate) {
 
   if (provider === "opencode") {
     // Kimi K2.6 exposes fixed native thinking through OpenCode Go without a
-    // supported effort overlay. GLM 5.2 accepts `max` on this transport.
+    // supported effort overlay. OpenCode GLM 5.3 and 5.2 accept `max`.
     return family === "glm"
       ? { mode: "max", effort: "max", fields: { reasoning_effort: "max" } }
       : { mode: "max", effort: "native", fields: {} };

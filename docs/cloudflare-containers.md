@@ -82,8 +82,9 @@ binding. One object per session serializes turns without creating a global
 bottleneck. It stores bounded continuity memory, idempotency guards, and
 Kimi/GLM latency and reliability statistics.
 
-NanoGPT subscription and NavyAI provide the production GLM tiers. OpenCode Go
-and LinkAPI remain Kimi-only, and OpenRouter is omitted from roleplay. See
+NanoGPT subscription is the first production GLM tier. OpenCode Go follows
+with ordered `glm-5.3` and `glm-5.2` candidates, while NavyAI remains last.
+LinkAPI is Kimi-only and OpenRouter is omitted from roleplay. See
 [the roleplay guide](roleplay.md) for the request schema, compaction policy,
 safe fallback boundary, metrics route, and all `ROLEPLAY_*` variables.
 
