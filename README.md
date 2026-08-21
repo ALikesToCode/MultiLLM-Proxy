@@ -417,6 +417,10 @@ stops to avoid duplicate paid generation.
 Each route carries its own context/output limits. The Worker filters out routes
 that cannot fit the current input, so a larger NavyAI or NanoGPT GLM context can
 be selected without assuming every gateway exposes the same capacity.
+Raw roleplay dialogue remains in Durable Object storage and is resent until the
+conversation crosses 128,000 estimated tokens. Only then does forced
+compaction replace older dialogue with structured continuity memory while
+keeping the newest 32 messages verbatim.
 
 ```bash
 curl "$PROXY_BASE_URL/v1/roleplay" \

@@ -122,6 +122,12 @@ reports `X-MultiLLM-Prompt-Cache`, `X-MultiLLM-Prompt-Cache-Mode`, and the
 estimated eligible token count. Only upstream prompt reuse is requested;
 roleplay outputs are never response-cached or replayed.
 
+Prompt caching is not conversation storage. The production Worker persists and
+resends exact raw dialogue until it exceeds 128,000 estimated tokens. Crossing
+that boundary forces continuity compaction and retains the newest 32 raw
+messages beside the structured digest. The 640,000-byte Durable Object message
+budget prevents storage pressure from silently truncating an active history.
+
 `response_length` accepts `compact`, `balanced`, or `immersive`. It changes the
 pacing instruction without shrinking the model's available output capacity.
 Every mode discourages repeated recap and stagnant dialogue.
@@ -395,16 +401,16 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
-| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `0` | `0` derives the trigger from provider capacity |
+| `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `128000` | Raw-dialogue threshold that forces continuity compaction; `0` derives it from provider capacity |
 | `ROLEPLAY_COMPACT_TRIGGER_PERCENT` | `90` | Derived compaction threshold percentage |
 | `ROLEPLAY_HARD_INPUT_TOKENS` | `0` | `0` derives the hard limit from eligible providers |
 | `ROLEPLAY_MEMORY_TARGET_TOKENS` | `1200` | Terse continuity-memory target |
-| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `8` | Maximum raw recent history retained; shrinks under storage pressure |
+| `ROLEPLAY_KEEP_RECENT_MESSAGES` | `32` | Raw recent messages retained after compaction; shrinks under storage pressure |
 | `ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS` | `2048` | Minimum story budget when protected directives require a final image-prompt block |
 | `ROLEPLAY_CONTEXT_REPLY_RESERVE_TOKENS` | `4096` | Reply space retained when deriving input capacity |
 | `ROLEPLAY_CONTEXT_SAFETY_TOKENS` | `1024` | Combined-context safety margin |
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `8388608` | Bounded JSON ingress |
-| `ROLEPLAY_MAX_STORED_BYTES` | `64000` | Recent-message storage budget |
+| `ROLEPLAY_MAX_STORED_BYTES` | `640000` | Exact raw-message storage budget before forced compaction |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |

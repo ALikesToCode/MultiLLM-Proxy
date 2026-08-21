@@ -22,6 +22,14 @@ test("roleplay defaults to NanoGPT first and NavyAI last", () => {
   ]);
 });
 
+test("roleplay defaults to a 128k raw history window", () => {
+  const settings = getRoleplaySettings({});
+
+  assert.equal(settings.compactTriggerTokens, 128_000);
+  assert.equal(settings.keepRecentMessages, 32);
+  assert.equal(settings.maxStoredBytes, 640_000);
+});
+
 test("roleplay promotes the configured NanoGPT key index", () => {
   const env = {
     NANOGPT_API_KEY: "key-zero",
@@ -104,4 +112,7 @@ test("deployment keeps GLM away from OpenCode and omits OpenRouter", async () =>
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,
     "glm-5.2-venice",
   );
+  assert.equal(config.vars?.ROLEPLAY_COMPACT_TRIGGER_TOKENS, "128000");
+  assert.equal(config.vars?.ROLEPLAY_KEEP_RECENT_MESSAGES, "32");
+  assert.equal(config.vars?.ROLEPLAY_MAX_STORED_BYTES, "640000");
 });

@@ -324,7 +324,7 @@ export function getRoleplaySettings(env) {
     ),
     compactTriggerTokens: boundedInteger(
       env.ROLEPLAY_COMPACT_TRIGGER_TOKENS,
-      0,
+      128_000,
       0,
       1_000_000,
     ),
@@ -348,9 +348,9 @@ export function getRoleplaySettings(env) {
     ),
     keepRecentMessages: boundedInteger(
       env.ROLEPLAY_KEEP_RECENT_MESSAGES,
-      8,
+      32,
       4,
-      64,
+      512,
     ),
     imagePromptMinOutputTokens: boundedInteger(
       env.ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS,
@@ -378,9 +378,9 @@ export function getRoleplaySettings(env) {
     ),
     maxStoredBytes: boundedInteger(
       env.ROLEPLAY_MAX_STORED_BYTES,
-      64_000,
+      640_000,
       16_000,
-      80_000,
+      1_800_000,
     ),
     compactionMaxTokens: boundedInteger(
       env.ROLEPLAY_COMPACTION_MAX_TOKENS,

@@ -188,6 +188,106 @@ test("roleplay shrinks the recent window and compacts storage overflow", async (
   assert.equal((await metrics.json()).estimated_input_tokens_saved, 0);
 });
 
+test("roleplay retains more than 64 messages until the raw history budget is reached", async () => {
+  const fixture = makeRoleplayEnv();
+  const requests = [];
+  const openingMarker = "OPENING-CONTINUITY-MARKER";
+  const initialMessages = Array.from({ length: 70 }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content:
+      index === 0
+        ? `${openingMarker}: the brass key belongs to Mira.`
+        : `Roleplay event ${index}`,
+  }));
+
+  const fetchImpl = async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    assert.equal(isCompactionPayload(payload), false);
+    requests.push(payload);
+    return completionResponse(payload.model, "Mira keeps the key close.");
+  };
+
+  const first = await withGlobalFetch(fetchImpl, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-raw-history-128k",
+        messages: initialMessages,
+        max_tokens: 128,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+  const second = await withGlobalFetch(fetchImpl, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-raw-history-128k",
+        input: "Continue without losing the opening detail.",
+        max_tokens: 128,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(requests.length, 2);
+  assert.equal(
+    requests[1].messages.some((message) =>
+      message.content.includes(openingMarker),
+    ),
+    true,
+  );
+
+  const metrics = await handleRoleplayEdgeRequest(
+    new Request(
+      "https://proxy.example/v1/roleplay/metrics?session_id=session-raw-history-128k",
+      { headers: { Authorization: "Bearer admin-roleplay-key" } },
+    ),
+    fixture.env,
+  );
+  const metricPayload = await metrics.json();
+  assert.equal(metricPayload.compactions, 0);
+  assert.ok(metricPayload.stored_messages > 64);
+});
+
+test("roleplay forces compaction after the raw history token budget", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "64",
+    ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
+    ROLEPLAY_MAX_STORED_BYTES: "1500000",
+  });
+  const requests = [];
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    requests.push(payload);
+    return isCompactionPayload(payload)
+      ? compactionResponse(payload.model, { compact: false })
+      : completionResponse(payload.model, "The exact recent scene continues.");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-raw-history-threshold",
+        messages: Array.from({ length: 6 }, (_, index) => ({
+          role: index % 2 === 0 ? "user" : "assistant",
+          content: `Continuity event ${index}: ${"x".repeat(180)}`,
+        })),
+        max_tokens: 128,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Memory"), "local_compacted");
+  assert.equal(requests.length, 2);
+  const compactedInput = JSON.parse(requests[0].messages[1].content);
+  assert.equal(compactedInput.older_dialogue.length, 2);
+});
+
 test("roleplay compacts one oversized latest turn but sends it raw to generation", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_MAX_STORED_BYTES: "16000",

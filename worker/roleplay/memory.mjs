@@ -727,11 +727,13 @@ export function compactionPlan(state, parsed, conversation, settings) {
   const storageForced =
     projectedStoredBytes > settings.maxStoredBytes ||
     state.storageOverflow === true;
+  const historyForced =
+    compactableTokens > settings.compactTriggerTokens;
   const forced =
-    manualForced || contextForced || storageForced;
+    manualForced || contextForced || storageForced || historyForced;
   const requested =
     parsed.memory.mode !== "off" &&
-    (forced || compactableTokens > settings.compactTriggerTokens);
+    forced;
 
   if (!requested) {
     return {
@@ -740,6 +742,7 @@ export function compactionPlan(state, parsed, conversation, settings) {
       manualForced,
       contextForced,
       storageForced,
+      historyForced,
       estimatedTokens,
       compactableTokens,
       projectedStoredBytes,
@@ -760,6 +763,7 @@ export function compactionPlan(state, parsed, conversation, settings) {
     manualForced,
     contextForced,
     storageForced,
+    historyForced,
     estimatedTokens,
     compactableTokens,
     projectedStoredBytes,
@@ -976,7 +980,7 @@ export function appendAssistantMessage(state, conversation, content, settings) {
     });
   }
 
-  const stored = nextMessages.slice(-64);
+  const stored = nextMessages;
   const storedBytes = new TextEncoder().encode(
     JSON.stringify(stored),
   ).byteLength;
