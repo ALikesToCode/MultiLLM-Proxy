@@ -36,8 +36,10 @@ function reasoningValues(source) {
   }
 
   const values = [];
+  const seen = new Set();
   const push = (value) => {
-    if (typeof value === "string" && value) {
+    if (typeof value === "string" && value && !seen.has(value)) {
+      seen.add(value);
       values.push(value);
     }
   };
@@ -225,12 +227,13 @@ function createReasoningState(metadata) {
     thinkOpen: false,
     thinkClosed: false,
     visibleStarted: false,
+    pendingReasoningWhitespace: "",
     pendingContent: "",
     template: null,
   };
 }
 
-function appendReasoning(state, value) {
+function appendReasoning(state, value, { replay = false } = {}) {
   if (state.thinkClosed || state.visibleStarted) {
     return "";
   }
@@ -238,15 +241,29 @@ function appendReasoning(state, value) {
   let candidate = cleanReasoning(value);
   const candidateComparable = comparable(candidate);
   if (!candidateComparable) {
+    if (!replay && candidate) {
+      if (state.thinkOpen) {
+        state.reasoningText += candidate;
+        return candidate;
+      }
+      state.pendingReasoningWhitespace += candidate;
+    }
     return "";
   }
-  if (state.reasoningComparable.includes(candidateComparable)) {
+  // Explicit reasoning fields are token deltas, where repeated fragments are
+  // meaningful. Historical de-duplication is only safe for replayed markup.
+  if (
+    replay &&
+    state.reasoningComparable.includes(candidateComparable)
+  ) {
     return "";
   }
 
-  const existingTrimmed = state.reasoningText.trim();
-  if (existingTrimmed && candidate.includes(existingTrimmed)) {
-    candidate = candidate.slice(candidate.indexOf(existingTrimmed) + existingTrimmed.length);
+  if (
+    candidate.length > state.reasoningText.length &&
+    candidate.startsWith(state.reasoningText)
+  ) {
+    candidate = candidate.slice(state.reasoningText.length);
   } else if (state.reasoningText) {
     const overlap = longestExactOverlap(state.reasoningText, candidate);
     candidate = candidate.slice(overlap);
@@ -254,6 +271,9 @@ function appendReasoning(state, value) {
   if (!candidate.trim()) {
     return "";
   }
+
+  candidate = state.pendingReasoningWhitespace + candidate;
+  state.pendingReasoningWhitespace = "";
 
   state.reasoningText += candidate;
   state.reasoningComparable = comparable(state.reasoningText);
@@ -309,7 +329,7 @@ function consumePendingContent(state, { flush = false } = {}) {
   let output = "";
   if (containsMarkup) {
     for (const part of parsed.reasoning) {
-      output += appendReasoning(state, part);
+      output += appendReasoning(state, part, { replay: true });
     }
     const visible = state.visibleStarted
       ? parsed.visible

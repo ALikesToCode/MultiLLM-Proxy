@@ -22,6 +22,55 @@ function visibleContent(streamBody) {
     .join("");
 }
 
+async function normalizedReasoningContent({
+  sessionId,
+  reasoningChunks,
+  visible,
+  model = "glm-5.2",
+}) {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: [model] },
+    }),
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+  });
+  const upstreamEvents = [
+    ...reasoningChunks.map((reasoningContent) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: reasoningContent }, finish_reason: null }] })}\n\n`,
+    ),
+    `data: ${JSON.stringify({ choices: [{ delta: { content: visible }, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+
+  const response = await withGlobalFetch(
+    async () =>
+      new Response(upstreamEvents, {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: sessionId,
+            model: "roleplay:glm",
+            messages: [{ role: "user", content: "Continue." }],
+            max_tokens: 512,
+            stream: true,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+  );
+
+  const content = visibleContent(await response.text());
+  await fixture.waitForBackgroundWork();
+  return content;
+}
+
 test("roleplay keeps duplicated provider reasoning inside one labelled think block", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
@@ -162,6 +211,57 @@ test("roleplay preserves leading spaces in visible stream chunks after reasoning
   assert.match(content, /IMAGE PROMPT:/);
 });
 
+test("roleplay preserves repeated GLM token deltas in reasoning", async () => {
+  const reasoningChunks = [
+    "The Human has",
+    " M",
+    "ysterious",
+    " slap",
+    " Ny",
+    "la",
+    " hard.",
+    " ",
+    "Let",
+    " me",
+    " think",
+    ".",
+  ];
+  const content = await normalizedReasoningContent({
+    sessionId: "session-reasoning-repeated-glm-deltas",
+    reasoningChunks,
+    visible: "*Nyla turns back.*",
+  });
+
+  assert.equal(
+    content,
+    [
+      "<think>[provider: opencode | model: glm-5.2]\n",
+      reasoningChunks.join(""),
+      "</think>\n\n",
+      "*Nyla turns back.*",
+    ].join(""),
+  );
+});
+
+test("roleplay collapses cumulative reasoning snapshots", async () => {
+  const reasoning = "Plan the scene carefully. Keep Nyla in character.";
+  const content = await normalizedReasoningContent({
+    sessionId: "session-reasoning-cumulative-snapshots",
+    reasoningChunks: ["Plan the scene carefully.", reasoning, reasoning],
+    visible: "*Nyla stays silent.*",
+  });
+
+  assert.equal(
+    content,
+    [
+      "<think>[provider: opencode | model: glm-5.2]\n",
+      reasoning,
+      "</think>\n\n",
+      "*Nyla stays silent.*",
+    ].join(""),
+  );
+});
+
 test("roleplay continues a chunked post-reasoning image prompt to completion", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
@@ -274,6 +374,8 @@ test("non-streaming roleplay removes duplicate reasoning fields and labels the s
                 role: "assistant",
                 content: malformed,
                 reasoning_content: reasoning,
+                reasoning,
+                reasoning_details: [{ text: reasoning }],
               },
               finish_reason: "stop",
             },
