@@ -41,6 +41,8 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertIn("Janitor AI configuration", body)
         self.assertIn("/roleplay/v1/chat/completions", body)
         self.assertIn("roleplay:auto", body)
+        self.assertIn("roleplay:5.2", body)
+        self.assertIn("roleplay:5.3", body)
         self.assertIn("/opencode/v1/chat/completions", body)
         self.assertIn("ox-alpha-free", body)
         self.assertIn("connect-src", body)

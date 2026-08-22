@@ -109,6 +109,7 @@ Transport=HTTPS</code></pre>
             </div>
         </div>
         <p class="docs-fine-print">The proxy URL is already the complete Chat Completions endpoint. Save it, hard-refresh Janitor AI, then select <code>MultiLLM Roleplay</code>. Use the Worker-facing <code>{{ janitor.api_key_env }}</code>, never a NanoGPT, NavyAI, or other upstream provider key.</p>
+        <p class="docs-fine-print">Model choices: <code>roleplay:auto</code> uses stable adaptive routing, <code>roleplay:glm</code> and <code>roleplay:5.2</code> pin the GLM-5.2 provider chain, and <code>roleplay:5.3</code> explicitly selects experimental OpenCode GLM-5.3 without switching model versions.</p>
 
         <aside class="docs-callout">
             <strong>Try Ox Alpha Free through OpenCode Go.</strong>

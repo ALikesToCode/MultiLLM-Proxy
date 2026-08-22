@@ -12,10 +12,12 @@ to avoid OpenCode's Worker-signature block.
 The production model policy uses NanoGPT first and learns between:
 
 - Kimi K2.6: `kimi-k2.6`
-- GLM-5.3 and GLM-5.2: `glm-5.3`, `glm-5.2`
+- stable GLM-5.2: `zai-org/glm-5.2:thinking`, `glm-5.2`, and `glm-5.2-venice`
+- opt-in GLM-5.3: `glm-5.3` through OpenCode only
 
-GLM uses NanoGPT's subscription route first, then OpenCode `glm-5.3` with
-`glm-5.2` as its same-provider fallback, and NavyAI's `glm-5.2-venice` last.
+The generic GLM route is pinned to 5.2: NanoGPT's subscription route first,
+then OpenCode `glm-5.2`, and NavyAI's `glm-5.2-venice` last. OpenCode
+`glm-5.3` is available only when the caller explicitly selects the 5.3 alias.
 LinkAPI remains a Kimi-only tier and OpenRouter is not part of the production
 roleplay chain. Provider order is strict; latency and reliability operate only
 among each tier's eligible families.
@@ -97,11 +99,13 @@ one-to-one tool-call association.
 request-scoped; only entries marked `always` or whose keys match recent text
 are injected, which keeps each request bounded.
 
-`model_preference` accepts `auto`, `speed`, `kimi`, or `glm`. OpenAI-compatible
+`model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-5.2`, or
+`glm-5.3`. OpenAI-compatible
 clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
-`roleplay:kimi`, or `roleplay:glm`. The concrete `kimi-k2.6`, `glm-5.3`, and
-`glm-5.2` values are also accepted. A family-specific value pins the family
-but still follows provider priority.
+`roleplay:kimi`, `roleplay:glm`, `roleplay:5.2`, or `roleplay:5.3`.
+`roleplay:glm` and `roleplay:5.2` both stay on 5.2 while following provider
+priority. `roleplay:5.3` selects only OpenCode 5.3. The concrete `kimi-k2.6`,
+`glm-5.3`, and `glm-5.2` values are also accepted.
 
 Every roleplay generation defaults to the strongest provider-compatible
 reasoning mode. Callers can lower generation effort with `reasoning_effort`;
@@ -174,6 +178,9 @@ assistant text is eligible for session persistence. The client receives one
 terminal finish event and one `[DONE]`. Finite
 requests still expose their provider finish reason directly. An unterminated
 EOF that cannot be continued is never stored as completed assistant memory.
+If a provider closes after reasoning but before any visible response, the
+Worker discards that hidden leg and retries the same model once from a clean
+response boundary. The failed reasoning is neither streamed nor persisted.
 
 ## JanitorAI proxy configuration
 
@@ -190,6 +197,10 @@ Create a proxy configuration with:
 The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
+
+Use `roleplay:glm` or `roleplay:5.2` for the stable GLM-5.2 chain. Use
+`roleplay:5.3` only when deliberately testing OpenCode GLM-5.3; it does not
+fall back to a different model version.
 
 JanitorAI's public help pages do not specify the JSON sentinel used by its
 **Unlimited** control. MultiLLM does not depend on that implementation detail:
@@ -326,7 +337,7 @@ an upstream model emits separate reasoning fields or raw `<think>` markup, the
 Worker reconciles them into exactly one visible block:
 
 ```text
-<think>[provider: opencode | model: glm-5.3]
+<think>[provider: opencode | model: glm-5.2]
 ...provider reasoning...</think>
 
 ...visible roleplay response...
@@ -469,12 +480,13 @@ Non-secret tuning variables:
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs or expose multiple generations of a
-model family. A string selects one ID; an array is tried in order:
+model family. A string selects one ID; an array preserves priority among the
+candidates eligible for the requested version. Generic GLM selects only 5.2:
 
 ```json
 {
   "opencode": {
-    "glm": ["glm-5.3", "glm-5.2"]
+    "glm": ["glm-5.2", "glm-5.3"]
   },
   "navyai": {
     "glm": "glm-5.2-venice"

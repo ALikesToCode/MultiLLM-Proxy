@@ -33,9 +33,10 @@ upstream egress; other providers remain direct Worker fetches. Each session
 stores recent dialogue, a compact continuity digest, idempotency keys, and
 per-model EWMA latency/reliability statistics.
 
-Production GLM routing uses NanoGPT subscription
-`zai-org/glm-5.2:thinking` first, OpenCode `glm-5.3` then `glm-5.2`, and
-NavyAI `glm-5.2-venice` last. LinkAPI is Kimi-only and OpenRouter is omitted
+Production GLM routing pins generic requests to NanoGPT subscription
+`zai-org/glm-5.2:thinking` first, OpenCode `glm-5.2` second, and NavyAI
+`glm-5.2-venice` last. OpenCode `glm-5.3` is available only through the
+explicit `roleplay:5.3` alias. LinkAPI is Kimi-only and OpenRouter is omitted
 from the roleplay chain. Explicit `400`, `401`, `402`, `403`, `404`, `413`,
 `415`, `422`, `429`, and `503` responses trigger automatic fallback.
 Transport errors and other `5xx` responses stop because their generation
