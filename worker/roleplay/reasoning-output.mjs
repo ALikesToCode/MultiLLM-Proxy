@@ -325,6 +325,7 @@ function consumePendingContent(state, { flush = false } = {}) {
   }
 
   let visible = value;
+  const startsVisibleOutput = !state.visibleStarted;
   const followsThinking = Boolean(
     state.thinkOpen || state.thinkClosed || state.reasoningText,
   );
@@ -340,7 +341,9 @@ function consumePendingContent(state, { flush = false } = {}) {
   if (visible) {
     output += closeThinking(state);
     state.visibleStarted = true;
-    output += followsThinking ? visible.replace(/^\s+/, "") : visible;
+    output += startsVisibleOutput && followsThinking
+      ? visible.replace(/^\s+/, "")
+      : visible;
   }
   return output;
 }

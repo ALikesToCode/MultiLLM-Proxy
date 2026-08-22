@@ -92,6 +92,159 @@ test("roleplay keeps duplicated provider reasoning inside one labelled think blo
   assert.equal(storedMessages.at(-1).content, "*Holly turns in her seat.*");
 });
 
+test("roleplay preserves leading spaces in visible stream chunks after reasoning", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3"] },
+    }),
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+  });
+  const visible = [
+    "*There's",
+    " just",
+    " a",
+    " blade",
+    " in",
+    " her",
+    " hand.*\n\nIMAGE",
+    " PROMPT:\nCreate",
+    " a",
+    " high-detail",
+    " modern",
+    " anime",
+    " image.",
+  ];
+  const upstreamEvents = [
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Plan the scene." }, finish_reason: null }] })}\n\n`,
+    ...visible.map((content, index) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: index === visible.length - 1 ? "stop" : null }] })}\n\n`,
+    ),
+    "data: [DONE]\n\n",
+  ].join("");
+
+  const response = await withGlobalFetch(
+    async () =>
+      new Response(upstreamEvents, {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-reasoning-visible-spacing",
+            model: "roleplay:glm",
+            messages: [{ role: "user", content: "Continue." }],
+            max_tokens: 512,
+            stream: true,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+  );
+
+  const content = visibleContent(await response.text());
+  await fixture.waitForBackgroundWork();
+
+  assert.equal(
+    content,
+    [
+      "<think>[provider: opencode | model: glm-5.3]\n",
+      "Plan the scene.",
+      "</think>\n\n",
+      visible.join(""),
+    ].join(""),
+  );
+  assert.match(content, /There's just a blade in her hand/);
+  assert.match(content, /IMAGE PROMPT:/);
+});
+
+test("roleplay continues a chunked post-reasoning image prompt to completion", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3"] },
+    }),
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "2",
+  });
+  const calls = [];
+  const firstLeg = [
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Plan the scene." }, finish_reason: null }] })}\n\n`,
+    ...[
+      "*There's",
+      " just",
+      " a",
+      " blade.*\n\nIMAGE",
+      " PROMPT:\nComposition",
+      " and",
+      " camera: first-person",
+      " view, viewer's",
+      " glowing",
+      " outline",
+    ].map((content, index, chunks) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: index === chunks.length - 1 ? "stop" : null }] })}\n\n`,
+    ),
+    "data: [DONE]\n\n",
+  ].join("");
+  const secondLeg = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: ".\nMood: cold blue light and frozen dust." }, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+
+  let response;
+  let body;
+  await withGlobalFetch(
+    async (_input, init) => {
+      calls.push(JSON.parse(init.body));
+      return new Response(calls.length === 1 ? firstLeg : secondLeg, {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+    async () => {
+      response = await handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-reasoning-image-continuation",
+            model: "roleplay:glm",
+            messages: [
+              {
+                role: "system",
+                content: [
+                  "A complete IMAGE PROMPT block is mandatory.",
+                  "IMAGE PROMPT:",
+                  "Composition and camera:",
+                  "Mood:",
+                ].join("\n"),
+              },
+              { role: "user", content: "Continue." },
+            ],
+            max_tokens: 0,
+            stream: true,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      );
+      body = await response.text();
+      await fixture.waitForBackgroundWork();
+    },
+  );
+
+  const content = visibleContent(body);
+
+  assert.equal(calls.length, 2);
+  assert.match(content, /There's just a blade/);
+  assert.match(content, /IMAGE PROMPT:/);
+  assert.match(content, /viewer\'s glowing outline\.\nMood: cold blue light/);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+});
+
 test("non-streaming roleplay removes duplicate reasoning fields and labels the selected route", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
