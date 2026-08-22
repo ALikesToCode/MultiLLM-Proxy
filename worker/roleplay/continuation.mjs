@@ -21,6 +21,14 @@ const LENGTH_CONTINUATION_INSTRUCTION = [
   "Output only the missing continuation.",
 ];
 
+const EMPTY_EOF_RETRY_INSTRUCTION = [
+  "[Automatic retry after an empty provider stream]",
+  "The previous provider attempt ended before any visible response was produced.",
+  "Generate the complete response from the beginning using the conversation above.",
+  "Do not mention the failed attempt, this retry, or any internal reasoning.",
+  "Output only the finished response.",
+];
+
 function contractRepairInstruction(analysis) {
   const missing = analysis?.missingFieldLabels?.length
     ? analysis.missingFieldLabels.join(", ")
@@ -35,6 +43,15 @@ function contractRepairInstruction(analysis) {
 }
 
 function continuationMessages(messages, assistant, reason, analysis) {
+  if (reason === "empty_eof") {
+    return [
+      ...messages,
+      {
+        role: "system",
+        content: EMPTY_EOF_RETRY_INSTRUCTION.join("\n"),
+      },
+    ];
+  }
   const instruction =
     reason === "output_contract"
       ? contractRepairInstruction(analysis)
@@ -113,7 +130,7 @@ export function createRoleplayContinuation({
     reason,
     contractAnalysis,
   }) => {
-    if (!enabled || !assistant.trim()) {
+    if (!enabled || (!assistant.trim() && reason !== "empty_eof")) {
       return null;
     }
     const nextMessages = continuationMessages(

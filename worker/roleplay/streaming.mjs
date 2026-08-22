@@ -274,14 +274,17 @@ export function createObservedStream({
                   reason: "output_limit",
                   limit: maxContinuations,
                 };
-              } else if (
-                !collected.terminated &&
-                candidateAssistant.trim()
-              ) {
+              } else if (!collected.terminated) {
                 decision = {
                   ...decision,
-                  reason: "incomplete_eof",
-                  limit: maxContinuations,
+                  reason:
+                    candidateAssistant.trim() || !bufferUntilValidated
+                      ? "incomplete_eof"
+                      : "empty_eof",
+                  limit:
+                    candidateAssistant.trim() || !bufferUntilValidated
+                      ? maxContinuations
+                      : 1,
                 };
               }
 
@@ -307,7 +310,16 @@ export function createObservedStream({
                 });
               }
 
-              if (accepted) {
+              const discardEmptyEof = decision.reason === "empty_eof";
+              if (discardEmptyEof) {
+                continuationDiagnostics.push({
+                  reason: "empty_eof",
+                  charactersDiscarded: candidateClientContent.length,
+                  accepted: false,
+                });
+                template = collected.template ?? template;
+                terminalFrames = [];
+              } else if (accepted) {
                 assistant = candidateAssistant;
                 clientContent = candidateClientContent;
                 template = collected.template ?? template;

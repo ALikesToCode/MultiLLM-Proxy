@@ -83,6 +83,16 @@ function streamingStory(content, finishReason = "stop") {
   );
 }
 
+function reasoningOnlyEof() {
+  return new Response(
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "internal planning that must stay hidden" }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "  " }, finish_reason: null }] })}\n\n`,
+    ].join(""),
+    { headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
 function streamedContent(body) {
   return body
     .split(/\r?\n/)
@@ -264,6 +274,111 @@ test("streaming releases one validated complete image prompt block", async () =>
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
   await fixture.waitForBackgroundWork();
+});
+
+test("reasoning-only provider EOF retries once from a clean response boundary", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
+  });
+  const upstreamPayloads = [];
+  let body;
+
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamPayloads.push(payload);
+    return upstreamPayloads.length === 1
+      ? reasoningOnlyEof()
+      : streamingStory(STORY_WITH_CURRENT_IMAGE_PROMPT);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-retry-reasoning-only-eof",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(upstreamPayloads.length, 2);
+  assert.equal(
+    upstreamPayloads[1].messages.some((message) => message.role === "assistant"),
+    false,
+  );
+  assert.equal(
+    upstreamPayloads[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("ended before any visible response"),
+    ),
+    true,
+  );
+  assert.equal(streamedContent(body), STORY_WITH_CURRENT_IMAGE_PROMPT);
+  assert.doesNotMatch(body, /internal planning|<think>/i);
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  assert.equal(
+    messages.findLast((message) => message.role === "assistant")?.content,
+    STORY_WITH_CURRENT_IMAGE_PROMPT,
+  );
+});
+
+test("repeated empty provider EOF stops after one clean retry and stores nothing", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
+  });
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return reasoningOnlyEof();
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-exhaust-empty-eof-retry",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(streamedContent(body), "");
+  assert.doesNotMatch(body, /internal planning|<think>/i);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  assert.equal(messages.some((message) => message.role === "assistant"), false);
 });
 
 test("Janitor unlimited stream repairs a provider stop before the required image prompt", async () => {
