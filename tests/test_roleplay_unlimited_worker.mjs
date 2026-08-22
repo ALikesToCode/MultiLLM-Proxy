@@ -432,9 +432,10 @@ test("unlimited stream keeps sending heartbeats while a continuation opens", asy
   assert.ok(completion.heartbeatCount >= 1);
 });
 
-test("filtered continuation reasoning cannot starve downstream heartbeats", async () => {
+test("reasoning in initial and continuation legs uses fresh state without duplication", async () => {
   const observed = createObservedStream({
     upstreamBody: chunkedBody([
+      'data: {"choices":[{"delta":{"reasoning_content":"initial-reasoning "},"finish_reason":null}]}\n\n',
       'data: {"choices":[{"delta":{"content":"Visible start. "},"finish_reason":"length"}]}\n\n',
       "data: [DONE]\n\n",
     ]),
@@ -459,11 +460,13 @@ test("filtered continuation reasoning cannot starve downstream heartbeats", asyn
 
   const body = await new Response(observed.stream).text();
   const completion = await observed.completion;
-  assert.match(body, /: roleplay-keepalive/);
   assert.match(body, /Visible start\./);
   assert.match(body, /Visible finish\./);
-  assert.doesNotMatch(body, /reasoning-/);
+  assert.equal(body.match(/initial-reasoning/g)?.length, 1);
+  assert.equal(body.match(/reasoning-1 /g)?.length, 1);
+  assert.equal(body.match(/reasoning-16 /g)?.length, 1);
+  assert.equal(body.match(/<think>/g)?.length, 2);
+  assert.equal(body.match(/<\/think>/g)?.length, 2);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
   assert.equal(completion.success, true);
-  assert.ok(completion.heartbeatCount >= 1);
 });

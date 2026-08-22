@@ -291,7 +291,13 @@ test("roleplay continues a chunked post-reasoning image prompt to completion", a
     "data: [DONE]\n\n",
   ].join("");
   const secondLeg = [
-    `data: ${JSON.stringify({ choices: [{ delta: { content: ".\nMood: cold blue light and frozen dust." }, finish_reason: "stop" }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: [
+      ".",
+      "Primary subject: a young adult woman facing the viewer.",
+      "Setting: frozen academy arena.",
+      "Lighting: cold blue light across airborne dust.",
+      "Mood: cold blue light and frozen dust.",
+    ].join("\n") }, finish_reason: "stop" }] })}\n\n`,
     "data: [DONE]\n\n",
   ].join("");
 
@@ -340,7 +346,8 @@ test("roleplay continues a chunked post-reasoning image prompt to completion", a
   assert.equal(calls.length, 2);
   assert.match(content, /There's just a blade/);
   assert.match(content, /IMAGE PROMPT:/);
-  assert.match(content, /viewer\'s glowing outline\.\nMood: cold blue light/);
+  assert.match(content, /viewer\'s glowing outline\.\nPrimary subject:/);
+  assert.match(content, /Mood: cold blue light and frozen dust/);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
 });

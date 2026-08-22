@@ -1,7 +1,7 @@
 import {
-  createRoleplayReasoningFrameNormalizer,
-  createVisibleRoleplayContentCollector,
-} from "./reasoning-output.mjs";
+  bufferedCompletionFrames,
+  createSseAssistantCollector as createLegCollector,
+} from "./sse-collector.mjs";
 
 const SSE_ENCODER = new TextEncoder();
 const HEARTBEAT_COMMENT = SSE_ENCODER.encode(
@@ -34,201 +34,31 @@ function delayedOutcome(delayMs) {
   };
 }
 
-function splitSseFrames(text, flush = false) {
-  const frames = [];
-  let remaining = text;
-  while (remaining) {
-    const boundary = /\r?\n\r?\n/.exec(remaining);
-    if (!boundary) {
-      break;
-    }
-    const end = boundary.index + boundary[0].length;
-    frames.push(remaining.slice(0, end));
-    remaining = remaining.slice(end);
-  }
-  if (flush && remaining) {
-    frames.push(remaining);
-    remaining = "";
-  }
-  return { frames, remaining };
-}
-
-function frameData(frame) {
-  const data = frame
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trimStart())
-    .join("\n")
-    .trim();
-  if (!data) {
-    return null;
-  }
-  if (data === "[DONE]") {
-    return { done: true, data };
-  }
-  try {
-    return { done: false, data, payload: JSON.parse(data) };
-  } catch {
-    return { done: false, data };
-  }
-}
-
-function rewrittenChoiceFrame(payload, { finishReason, dropContent }) {
-  const choices = Array.isArray(payload?.choices)
-    ? [...payload.choices]
-    : [];
-  const original = choices[0] ?? {};
-  const delta =
-    original.delta && typeof original.delta === "object"
-      ? { ...original.delta }
-      : {};
-  if (dropContent) {
-    delete delta.content;
-  }
-  choices[0] = {
-    ...original,
-    delta,
-    finish_reason: finishReason,
-  };
-  return `data: ${JSON.stringify({ ...payload, choices })}\n\n`;
-}
-
-function sseAssistantCollector(
-  maximumCharacters = MAX_COLLECTED_ASSISTANT_CHARACTERS,
-  deferTerminalFrames = false,
-  reasoningMetadata = null,
-) {
-  let buffered = "";
-  let assistant = "";
-  let legTerminated = false;
-  let legFinishReason = "";
-  let withheld = [];
-  let truncated = false;
-  const reasoningNormalizer = reasoningMetadata
-    ? createRoleplayReasoningFrameNormalizer(reasoningMetadata)
-    : null;
-  const visibleCollector = reasoningMetadata
-    ? createVisibleRoleplayContentCollector()
-    : null;
-
-  const appendAssistantText = (content) => {
-    if (
-      typeof content === "string" &&
-      assistant.length < maximumCharacters
-    ) {
-      const remaining = maximumCharacters - assistant.length;
-      assistant += content.slice(
-        0,
-        remaining,
-      );
-      truncated ||= content.length > remaining;
-    } else if (typeof content === "string" && content) {
-      truncated = true;
-    }
-  };
-
-  const appendContent = (content) => {
-    appendAssistantText(
-      visibleCollector ? visibleCollector.consume(content) : content,
-    );
-  };
-
-  const consumeFrame = (frame) => {
-    const parsed = frameData(frame);
-    if (!parsed) {
-      return [frame];
-    }
-    if (parsed.done) {
-      legTerminated = true;
-      if (withheld.length) {
-        withheld.push(frame);
-        return [];
-      }
-      return [frame];
-    }
-    const choice = parsed.payload?.choices?.[0];
-    if (!choice) {
-      return [frame];
-    }
-    const content = choice?.delta?.content;
-    appendContent(content);
-    const finishReason =
-      typeof choice.finish_reason === "string"
-        ? choice.finish_reason
-        : "";
-    if (!finishReason) {
-      return [frame];
-    }
-    legFinishReason = finishReason;
-    legTerminated = true;
-    if (finishReason !== "length" && !deferTerminalFrames) {
-      return [frame];
-    }
-
-    if (typeof content === "string" && content) {
-      withheld.push(
-        rewrittenChoiceFrame(parsed.payload, {
-          finishReason,
-          dropContent: true,
-        }),
-      );
-      return [
-        rewrittenChoiceFrame(parsed.payload, {
-          finishReason: null,
-          dropContent: false,
-        }),
-      ];
-    }
-    withheld.push(frame);
-    return [];
-  };
-
-  const consumeBuffered = (text, flush = false) => {
-    buffered += text;
-    const split = splitSseFrames(buffered, flush);
-    buffered = split.remaining;
-    const frames = reasoningNormalizer
-      ? split.frames.flatMap((frame) => reasoningNormalizer.transform(frame))
-      : split.frames;
-    return frames.flatMap(consumeFrame);
-  };
-
-  return {
-    consume(text) {
-      return consumeBuffered(text);
-    },
-    finish(text = "") {
-      const output = consumeBuffered(text, true);
-      if (reasoningNormalizer) {
-        output.push(
-          ...reasoningNormalizer.finish().flatMap(consumeFrame),
-        );
-      }
-      if (visibleCollector) {
-        appendAssistantText(visibleCollector.finish());
-      }
-      return {
-        assistant,
-        finishReason: legFinishReason,
-        terminated: legTerminated,
-        truncated,
-        output,
-        withheld: [...withheld],
-      };
-    },
-    resetLeg() {
-      buffered = "";
-      legTerminated = false;
-      legFinishReason = "";
-      withheld = [];
-    },
-  };
-}
-
 function observedRead(reader) {
   return reader.read().then(
     (value) => ({ kind: "read", value }),
     (error) => ({ kind: "error", error }),
+  );
+}
+
+function joinContinuationText(existing, addition, reason) {
+  if (!existing || !addition) {
+    return existing + addition;
+  }
+  if (reason !== "output_contract") {
+    return existing + addition;
+  }
+  return /\s$/.test(existing) || /^\s|^[.,;:!?)]/.test(addition)
+    ? existing + addition
+    : `${existing}\n${addition}`;
+}
+
+function missingFieldsStrictlyDecreased(before, after) {
+  const previous = new Set(before?.missingFields ?? []);
+  const current = after?.missingFields ?? [];
+  return (
+    current.length < previous.size &&
+    current.every((field) => previous.has(field))
   );
 }
 
@@ -241,6 +71,10 @@ export function createObservedStream({
   cleanup = () => {},
   openContinuation = null,
   getIncompleteReason = null,
+  assessCompletion = null,
+  cleanOutput = null,
+  getUpstreamCallCount = null,
+  bufferUntilValidated = false,
   maxContinuations = 0,
   reasoningMetadata = null,
 }) {
@@ -251,19 +85,30 @@ export function createObservedStream({
   let reader = upstreamBody.getReader();
   let activeController = upstreamController;
   let activeCleanup = cleanup;
-  const decoder = new TextDecoder();
-  const collector = sseAssistantCollector(
-    MAX_COLLECTED_ASSISTANT_CHARACTERS,
-    typeof openContinuation === "function",
-    reasoningMetadata,
-  );
+  let decoder = new TextDecoder();
+  const newCollector = () =>
+    createLegCollector({
+      maximumCharacters: MAX_COLLECTED_ASSISTANT_CHARACTERS,
+      deferTerminalFrames: typeof openContinuation === "function",
+      reasoningMetadata,
+    });
+  let collector = newCollector();
   let settled = false;
   let released = false;
   let pendingRead = null;
   let firstByteAt = 0;
   let heartbeatCount = 0;
   let continuationCount = 0;
+  const continuationsByReason = {};
+  const continuationDiagnostics = [];
   let pendingContinuation = null;
+  let activeContinuationReason = "";
+  let repairBaseline = null;
+  let completedLeg = null;
+  let assistant = "";
+  let clientContent = "";
+  let terminalFrames = [];
+  let template = null;
   const streamStartedAt = performance.now();
   let lastDownstreamAt = streamStartedAt;
 
@@ -279,14 +124,18 @@ export function createObservedStream({
     activeCleanup = () => {};
   };
 
-  const activateLeg = (next) => {
+  const activateLeg = (next, decision) => {
     reader = next.upstreamBody.getReader();
     activeController = next.upstreamController;
     activeCleanup = next.cleanup ?? (() => {});
+    decoder = new TextDecoder();
+    collector = newCollector();
     released = false;
     pendingRead = null;
     pendingContinuation = null;
-    collector.resetLeg();
+    completedLeg = null;
+    activeContinuationReason = decision.reason;
+    repairBaseline = decision.contractAnalysis ?? null;
   };
 
   const settle = async (result) => {
@@ -298,6 +147,11 @@ export function createObservedStream({
       ...result,
       heartbeatCount,
       continuationCount,
+      upstreamCallCount:
+        typeof getUpstreamCallCount === "function"
+          ? getUpstreamCallCount()
+          : continuationCount + 1,
+      continuationDiagnostics,
       streamMs: performance.now() - streamStartedAt,
       ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
     };
@@ -378,32 +232,132 @@ export function createObservedStream({
           }
           const { value, done } = outcome.value;
           if (done) {
-            const collected = collector.finish(decoder.decode());
-            const outputLimited = collected.finishReason === "length";
-            const incompleteReason = outputLimited
-              ? "output_limit"
-              : !collected.terminated && collected.assistant.trim()
-                ? "incomplete_eof"
-              : typeof getIncompleteReason === "function"
-                ? getIncompleteReason({
-                    assistant: collected.assistant,
+            if (!completedLeg) {
+              const collected = collector.finish(decoder.decode());
+              const outputLimited = collected.finishReason === "length";
+              let candidateAssistant = joinContinuationText(
+                assistant,
+                collected.assistant,
+                activeContinuationReason,
+              );
+              let candidateClientContent = joinContinuationText(
+                clientContent,
+                collected.clientContent,
+                activeContinuationReason,
+              );
+              let decision = typeof assessCompletion === "function"
+                ? assessCompletion({
+                    assistant: candidateAssistant,
                     finishReason: collected.finishReason,
                   })
-                : "";
-            enqueueFrames(controller, collected.output);
+                : {
+                    reason:
+                      typeof getIncompleteReason === "function"
+                        ? getIncompleteReason({
+                            assistant: candidateAssistant,
+                            finishReason: collected.finishReason,
+                          })
+                        : "",
+                    limit: maxContinuations,
+                    contractAnalysis: null,
+                    cleaned: { content: candidateAssistant },
+                  };
+              candidateAssistant =
+                decision.cleaned?.content ?? candidateAssistant;
+              if (typeof cleanOutput === "function") {
+                candidateClientContent =
+                  cleanOutput(candidateClientContent).content;
+              }
+              if (outputLimited) {
+                decision = {
+                  ...decision,
+                  reason: "output_limit",
+                  limit: maxContinuations,
+                };
+              } else if (
+                !collected.terminated &&
+                candidateAssistant.trim()
+              ) {
+                decision = {
+                  ...decision,
+                  reason: "incomplete_eof",
+                  limit: maxContinuations,
+                };
+              }
+
+              let accepted = true;
+              if (activeContinuationReason === "output_contract") {
+                accepted = missingFieldsStrictlyDecreased(
+                  repairBaseline,
+                  decision.contractAnalysis,
+                );
+                continuationDiagnostics.push({
+                  reason: activeContinuationReason,
+                  schema: decision.contractAnalysis?.schema ?? "unknown",
+                  missingBefore: repairBaseline?.missingFields ?? [],
+                  missingAfter:
+                    decision.contractAnalysis?.missingFields ?? [],
+                  markerCount:
+                    decision.contractAnalysis?.markerCount ?? 0,
+                  charactersAdded: Math.max(
+                    0,
+                    candidateAssistant.length - assistant.length,
+                  ),
+                  accepted,
+                });
+              }
+
+              if (accepted) {
+                assistant = candidateAssistant;
+                clientContent = candidateClientContent;
+                template = collected.template ?? template;
+                terminalFrames = collected.withheld;
+                if (!bufferUntilValidated) {
+                  enqueueFrames(controller, collected.output);
+                }
+              } else {
+                decision = {
+                  reason: "output_contract_no_progress",
+                  limit: 0,
+                  contractAnalysis: repairBaseline,
+                  cleaned: { content: assistant },
+                };
+              }
+
+              const incompleteReason = decision.reason ?? "";
+              completedLeg = {
+                collected,
+                decision,
+                incompleteReason,
+                reasonCount:
+                  continuationsByReason[incompleteReason] ?? 0,
+                reasonLimit: Number.isFinite(decision.limit)
+                  ? decision.limit
+                  : maxContinuations,
+              };
+            }
+            const {
+              collected,
+              decision,
+              incompleteReason,
+              reasonCount,
+              reasonLimit,
+            } = completedLeg;
             if (
               incompleteReason &&
+              incompleteReason !== "output_contract_no_progress" &&
               typeof openContinuation === "function" &&
-              continuationCount < maxContinuations &&
+              reasonCount < reasonLimit &&
               !collected.truncated &&
               !requestSignal?.aborted
             ) {
               if (!pendingContinuation) {
                 pendingContinuation = Promise.resolve(
                   openContinuation({
-                    assistant: collected.assistant,
+                    assistant,
                     continuationCount: continuationCount + 1,
                     reason: incompleteReason,
+                    contractAnalysis: decision.contractAnalysis,
                   }),
                 ).then(
                   (next) => ({ kind: "continuation", next }),
@@ -435,23 +389,36 @@ export function createObservedStream({
                 releaseReader();
                 cleanupLeg();
                 continuationCount += 1;
-                activateLeg(next);
+                continuationsByReason[incompleteReason] = reasonCount + 1;
+                activateLeg(next, decision);
                 continue;
               }
             }
-            enqueueFrames(controller, collected.withheld);
+            if (bufferUntilValidated) {
+              enqueueFrames(
+                controller,
+                bufferedCompletionFrames(
+                  template ?? collected.template,
+                  clientContent,
+                  incompleteReason === "output_limit" ? "length" : "stop",
+                ),
+              );
+            } else {
+              enqueueFrames(controller, terminalFrames);
+            }
             releaseReader();
             cleanupLeg();
             controller.close();
             void settle({
               success: collected.terminated && !incompleteReason,
-              assistant: collected.assistant,
+              assistant,
               finishReason: collected.finishReason,
               reason: incompleteReason
                 ? incompleteReason
                 : collected.terminated
                   ? "complete"
                   : "incomplete_eof",
+              contractAnalysis: decision.contractAnalysis,
             });
             return;
           }
@@ -465,6 +432,9 @@ export function createObservedStream({
           const decoded = decoder.decode(value, { stream: true });
           const frames = collector.consume(decoded);
           if (!frames.length) {
+            continue;
+          }
+          if (bufferUntilValidated) {
             continue;
           }
           enqueueFrames(controller, frames);

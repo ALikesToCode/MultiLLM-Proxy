@@ -43,6 +43,36 @@ const STORY_WITH_IMAGE_PROMPT = [
   "Mood: long shadows, dusty shelves, still posture.",
 ].join("\n");
 
+const CURRENT_IMAGE_CONTRACT = [
+  "Story responses must end with exactly one IMAGE PROMPT block.",
+  "IMAGE PROMPT:",
+  "Always include Camera, Primary subject, Setting, Lighting, and Composition.",
+  "Camera:",
+  "Primary subject:",
+  "Expression:",
+  "Hair and grooming:",
+  "Clothing:",
+  "Ear styling:",
+  "Accessories:",
+  "Pose:",
+  "Setting:",
+  "Lighting:",
+  "Composition:",
+  "Rendering:",
+].join("\n");
+
+const STORY_WITH_CURRENT_IMAGE_PROMPT = [
+  "*Mira closes the library door and points toward the marked shelf.*",
+  "",
+  "IMAGE PROMPT:",
+  "Create a high-detail modern anime image.",
+  "Camera: first-person medium shot at eye level.",
+  "Primary subject: young adult woman with dark hair and brown eyes.",
+  "Setting: old library at sunset, marked wooden shelf.",
+  "Lighting: warm sunset through tall windows.",
+  "Composition: Mira centered beyond a foreground table, shallow depth of field.",
+].join("\n");
+
 function streamingStory(content, finishReason = "stop") {
   return new Response(
     [
@@ -51,6 +81,15 @@ function streamingStory(content, finishReason = "stop") {
     ].join(""),
     { headers: { "Content-Type": "text/event-stream" } },
   );
+}
+
+function streamedContent(body) {
+  return body
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+    .map((line) => JSON.parse(line.slice(6)))
+    .map((payload) => payload.choices?.[0]?.delta?.content ?? "")
+    .join("");
 }
 
 function imageContractMessages(userContent = "Open the marked shelf.") {
@@ -189,7 +228,7 @@ test("retained image-prompt directives reinforce later delta-only turns", async 
   );
 });
 
-test("streaming preserves the complete image prompt block byte for byte", async () => {
+test("streaming releases one validated complete image prompt block", async () => {
   const fixture = makeRoleplayEnv();
   const events = [
     `data: ${JSON.stringify({ choices: [{ delta: { content: "*Mira opens the shelf.*\n\n" } }] })}\n\n`,
@@ -216,7 +255,14 @@ test("streaming preserves the complete image prompt block byte for byte", async 
   );
 
   assert.equal(response.status, 200);
-  assert.equal(await response.text(), events.join(""));
+  const body = await response.text();
+  assert.equal(
+    streamedContent(body),
+    `*Mira opens the shelf.*\n\n${STORY_WITH_IMAGE_PROMPT.slice(STORY_WITH_IMAGE_PROMPT.indexOf("IMAGE PROMPT:"))}`,
+  );
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
   await fixture.waitForBackgroundWork();
 });
 
@@ -277,7 +323,7 @@ test("Janitor unlimited stream repairs a provider stop before the required image
     upstreamPayloads[1].messages.some(
       (message) =>
         message.role === "system" &&
-        message.content.includes("final output contract was complete"),
+        message.content.includes("Automatic repair of an incomplete final output contract"),
     ),
   );
   assert.match(body, /Mira reaches toward the marked shelf/);
@@ -316,4 +362,99 @@ test("Janitor unlimited stream accepts stop after the required image prompt is c
   assert.match(body, /Mood: long shadows/);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+});
+
+test("current image schema remains complete when a legacy contract is retained", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "2",
+  });
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return streamingStory(STORY_WITH_CURRENT_IMAGE_PROMPT);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-current-schema-with-retained-legacy",
+          messages: [
+            { role: "system", content: IMAGE_CONTRACT },
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+});
+
+test("no-progress contract repair is suppressed and never persisted", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const initial = [
+    "*Mira points toward the marked shelf.*",
+    "",
+    "IMAGE PROMPT:",
+    "Setting: old library at sunset.",
+  ].join("\n");
+  const meta =
+    "The response above was already complete. No continuation is needed. The next story turn belongs to Mysterious.";
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return streamingStory(calls === 1 ? initial : meta);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-contract-no-progress",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(streamedContent(body), initial);
+  assert.doesNotMatch(body, /already complete|No continuation|next story turn/i);
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  assert.equal(
+    messages.some((message) => /Automatic repair|already complete/i.test(message.content)),
+    false,
+  );
+  assert.equal(messages.some((message) => message.role === "assistant"), false);
 });

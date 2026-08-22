@@ -30,6 +30,11 @@ import {
 } from "./compaction-policy.mjs";
 import { prepareProtectedContext } from "./directives.mjs";
 import { revalidateNanoCredential } from "./credential-health.mjs";
+import {
+  logRoleplayNonStreamCompletion,
+  logRoleplayStreamCompletion,
+  roleplayCompletionDisposition,
+} from "./completion-result.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
 import {
@@ -48,14 +53,12 @@ import {
   buildUpstreamPayload,
   compactionPlan,
   estimateTokens,
-  extractAssistantContent,
-  extractFinishReason,
   mergeSessionMessages,
   parseRoleplayPayload,
 } from "./memory.mjs";
+import { repairNonStreamingCompletion } from "./nonstream-repair.mjs";
 import { applyRoleplayOutputContract } from "./output-contract.mjs";
 import { applyRoleplayPromptCache } from "./prompt-cache.mjs";
-import { normalizeRoleplayCompletionPayload } from "./reasoning-output.mjs";
 import {
   loadRoleplayState,
   saveRoleplayState,
@@ -810,42 +813,31 @@ export class RoleplaySession extends DurableObject {
         getIncompleteReason: continuation.enabled
           ? continuation.incompleteReason.bind(continuation)
           : null,
+        assessCompletion: continuation.assess.bind(continuation),
+        cleanOutput: continuation.cleanOutput.bind(continuation),
+        getUpstreamCallCount: () => continuation.upstreamCallCount,
+        bufferUntilValidated:
+          parsed.outputContract?.imagePromptRequired === true,
         maxContinuations: settings.maxAutoContinuations,
         reasoningMetadata: {
           provider: candidate.provider,
           model: candidate.model,
         },
-        onComplete: async ({
-          success,
-          assistant,
-          finishReason,
-          reason,
-          ttfbMs,
-          streamMs,
-          heartbeatCount,
-          continuationCount,
-        }) => {
+        onComplete: async (completion) => {
+          const {
+            success,
+            assistant,
+            reason,
+            ttfbMs,
+          } = completion;
           state = continuation.state;
-          console.log(
-            JSON.stringify({
-              event: "roleplay_stream_completed",
-              provider: candidate.provider,
-              model: candidate.model,
-              success,
-              reason,
-              finishReason: finishReason || undefined,
-              headerMs: Math.round(headerMs),
-              ttfbMs: Math.round(ttfbMs),
-              streamMs: Math.round(streamMs),
-              heartbeatCount,
-              continuationCount,
-              assistantCharacters: assistant.length,
-              maxOutputTokens: candidate.resolvedMaxOutputTokens,
-              outputMode: parsed.outputMode,
-              requestedMaxTokens: parsed.requestedMaxTokens ?? undefined,
-              inputTokensSaved,
-            }),
-          );
+          logRoleplayStreamCompletion({
+            candidate,
+            parsed,
+            completion,
+            headerMs,
+            inputTokensSaved,
+          });
           if (reason === "incomplete_eof") {
             logRoleplayError(
               "roleplay_stream_incomplete",
@@ -857,24 +849,25 @@ export class RoleplaySession extends DurableObject {
               },
             );
           }
-          const modelSucceeded = success || reason === "output_limit";
+          const disposition = roleplayCompletionDisposition({
+            success,
+            reason,
+            outputMode: parsed.outputMode,
+            memoryEnabled,
+            failureStatus: "stream_failed",
+          });
           let nextState = recordModelResult(state, candidate, {
-            success: modelSucceeded,
+            success: disposition.modelSucceeded,
             ttfbMs: headerMs + ttfbMs,
             totalMs: performance.now() - startedAt,
-            status: modelSucceeded ? response.status : 0,
+            status: disposition.modelSucceeded ? response.status : 0,
           });
           nextState = {
             ...nextState,
             inputTokensSaved:
               (nextState.inputTokensSaved ?? 0) + inputTokensSaved,
           };
-          if (
-            memoryEnabled &&
-            (success ||
-              (parsed.outputMode === "unlimited" &&
-                ["output_limit", "output_contract"].includes(reason)))
-          ) {
+          if (disposition.persistAssistant) {
             nextState = appendAssistantMessage(
               nextState,
               persistedConversation,
@@ -887,13 +880,7 @@ export class RoleplaySession extends DurableObject {
           nextState = markRequest(
             nextState,
             idempotencyKey,
-            success
-              ? "completed"
-              : reason === "output_limit"
-                ? "output_limited"
-                : reason === "output_contract"
-                  ? "output_contract_incomplete"
-                : "stream_failed",
+            disposition.requestStatus,
           );
           await saveRoleplayState(this.ctx.storage, nextState);
         },
@@ -920,50 +907,72 @@ export class RoleplaySession extends DurableObject {
     }
     const { bytes, firstByteMs } = bounded;
     let responseBytes = bytes;
-    let assistant = "";
-    let finishReason = "";
+    let completionResult = {
+      assistant: "",
+      finishReason: "",
+      success: true,
+      reason: "complete",
+      continuationCount: 0,
+      upstreamCallCount: 1,
+      continuationDiagnostics: [],
+      contractAnalysis: null,
+    };
     if (contentType.toLowerCase().includes("application/json")) {
       try {
         const responsePayload = JSON.parse(
           new TextDecoder().decode(bytes),
         );
-        const normalized = normalizeRoleplayCompletionPayload(
-          responsePayload,
-          {
-            provider: candidate.provider,
-            model: candidate.model,
-          },
+        completionResult = await repairNonStreamingCompletion({
+          initialPayload: responsePayload,
+          continuation,
+          candidate,
+          settings,
+          signal: request.signal,
+        });
+        state = continuation.state;
+        responseBytes = new TextEncoder().encode(
+          JSON.stringify(completionResult.payload),
         );
-        assistant = normalized.changed
-          ? normalized.visibleContent
-          : extractAssistantContent(responsePayload);
-        finishReason = extractFinishReason(normalized.payload);
-        if (normalized.changed) {
-          responseBytes = new TextEncoder().encode(
-            JSON.stringify(normalized.payload),
-          );
-        }
-      } catch {
-        assistant = "";
+      } catch (error) {
+        logRoleplayError("roleplay_nonstream_normalization_failed", error, {
+          provider: candidate.provider,
+          model: candidate.model,
+        });
+        completionResult = {
+          ...completionResult,
+          success: false,
+          reason: "invalid_completion",
+        };
       }
     }
-    const outputLimited = finishReason === "length";
+    const disposition = roleplayCompletionDisposition({
+      success: completionResult.success,
+      reason: completionResult.reason,
+      outputMode: parsed.outputMode,
+      memoryEnabled,
+      failureStatus: "completion_failed",
+    });
     state = recordModelResult(state, candidate, {
-      success: true,
+      success: disposition.modelSucceeded,
       ttfbMs: headerMs + firstByteMs,
       totalMs: performance.now() - startedAt,
-      status: response.status,
+      status: disposition.modelSucceeded ? response.status : 0,
     });
     state = {
       ...state,
       inputTokensSaved:
         (state.inputTokensSaved ?? 0) + inputTokensSaved,
     };
-    if (memoryEnabled && !outputLimited) {
+    logRoleplayNonStreamCompletion({
+      candidate,
+      parsed,
+      completion: completionResult,
+    });
+    if (disposition.persistAssistant) {
       state = appendAssistantMessage(
         state,
         persistedConversation,
-        assistant,
+        completionResult.assistant,
         settings,
       );
     } else {
@@ -972,7 +981,7 @@ export class RoleplaySession extends DurableObject {
     state = markRequest(
       state,
       idempotencyKey,
-      outputLimited ? "output_limited" : "completed",
+      disposition.requestStatus,
     );
     await saveRoleplayState(this.ctx.storage, state);
     return {

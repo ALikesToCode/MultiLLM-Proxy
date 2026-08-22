@@ -25,6 +25,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/credential-health.mjs",
     import.meta.url,
   );
+  const completionResultUrl = new URL(
+    "../../worker/roleplay/completion-result.mjs",
+    import.meta.url,
+  );
   const compactionPolicyUrl = new URL(
     "../../worker/roleplay/compaction-policy.mjs",
     import.meta.url,
@@ -43,6 +47,10 @@ export async function roleplayModuleUrl() {
   );
   const messageFragmentsUrl = new URL(
     "../../worker/roleplay/message-fragments.mjs",
+    import.meta.url,
+  );
+  const nonstreamRepairUrl = new URL(
+    "../../worker/roleplay/nonstream-repair.mjs",
     import.meta.url,
   );
   const outputContractUrl = new URL(
@@ -85,6 +93,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/streaming.mjs",
     import.meta.url,
   );
+  const sseCollectorUrl = new URL(
+    "../../worker/roleplay/sse-collector.mjs",
+    import.meta.url,
+  );
   const reasoningOutputUrl = new URL(
     "../../worker/roleplay/reasoning-output.mjs",
     import.meta.url,
@@ -95,11 +107,13 @@ export async function roleplayModuleUrl() {
     capacitySource,
     configSource,
     credentialHealthSource,
+    completionResultSource,
     compactionPolicySource,
     directivesSource,
     fallbackMemorySource,
     memorySource,
     messageFragmentsSource,
+    nonstreamRepairSource,
     outputContractSource,
     outputBudgetSource,
     continuationSource,
@@ -109,6 +123,7 @@ export async function roleplayModuleUrl() {
     validationSource,
     transportSource,
     reasoningOutputSource,
+    sseCollectorSource,
     streamingSource,
     endpointSource,
   ] =
@@ -118,11 +133,13 @@ export async function roleplayModuleUrl() {
       readFile(capacityUrl, "utf8"),
       readFile(configUrl, "utf8"),
       readFile(credentialHealthUrl, "utf8"),
+      readFile(completionResultUrl, "utf8"),
       readFile(compactionPolicyUrl, "utf8"),
       readFile(directivesUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
+      readFile(nonstreamRepairUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
       readFile(outputBudgetUrl, "utf8"),
       readFile(continuationUrl, "utf8"),
@@ -132,10 +149,12 @@ export async function roleplayModuleUrl() {
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(reasoningOutputUrl, "utf8"),
+      readFile(sseCollectorUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
+  const completionResultDataUrl = dataModuleUrl(completionResultSource);
   const capacityDataUrl = dataModuleUrl(capacitySource);
   const configDataUrl = dataModuleUrl(
     configSource.replace(
@@ -153,11 +172,22 @@ export async function roleplayModuleUrl() {
     compactionPolicySource,
   );
   const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
-  const streamingDataUrl = dataModuleUrl(
-    streamingSource.replace(
+  const sseCollectorDataUrl = dataModuleUrl(
+    sseCollectorSource.replace(
       'from "./reasoning-output.mjs";',
       `from "${reasoningOutputDataUrl}";`,
     ),
+  );
+  const streamingDataUrl = dataModuleUrl(
+    streamingSource
+      .replace(
+        'from "./reasoning-output.mjs";',
+        `from "${reasoningOutputDataUrl}";`,
+      )
+      .replace(
+        'from "./sse-collector.mjs";',
+        `from "${sseCollectorDataUrl}";`,
+      ),
   );
   const directivesDataUrl = dataModuleUrl(directivesSource);
   const checkpointDataUrl = dataModuleUrl(
@@ -225,6 +255,18 @@ export async function roleplayModuleUrl() {
         `from "${messageFragmentsDataUrl}";`,
       ),
   );
+  const nonstreamRepairDataUrl = dataModuleUrl(
+    nonstreamRepairSource
+      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+      .replace(
+        'from "./reasoning-output.mjs";',
+        `from "${reasoningOutputDataUrl}";`,
+      )
+      .replace(
+        'from "./transport.mjs";',
+        `from "${transportDataUrl}";`,
+      ),
+  );
   const continuationDataUrl = dataModuleUrl(
     continuationSource
       .replace(
@@ -267,6 +309,10 @@ export async function roleplayModuleUrl() {
       `from "${credentialHealthDataUrl}";`,
     )
     .replace(
+      'from "./completion-result.mjs";',
+      `from "${completionResultDataUrl}";`,
+    )
+    .replace(
       'from "./compatibility.mjs";',
       `from "${compatibilityDataUrl}";`,
     )
@@ -284,6 +330,10 @@ export async function roleplayModuleUrl() {
     )
     .replace('from "./config.mjs";', `from "${configDataUrl}";`)
     .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+    .replace(
+      'from "./nonstream-repair.mjs";',
+      `from "${nonstreamRepairDataUrl}";`,
+    )
     .replace(
       'from "./output-contract.mjs";',
       `from "${outputContractDataUrl}";`,
@@ -318,16 +368,37 @@ export async function loadRoleplayStreamingModule() {
     "../../worker/roleplay/reasoning-output.mjs",
     import.meta.url,
   );
-  const [streamingSource, reasoningOutputSource] = await Promise.all([
+  const sseCollectorUrl = new URL(
+    "../../worker/roleplay/sse-collector.mjs",
+    import.meta.url,
+  );
+  const [
+    streamingSource,
+    reasoningOutputSource,
+    sseCollectorSource,
+  ] = await Promise.all([
     readFile(streamingUrl, "utf8"),
     readFile(reasoningOutputUrl, "utf8"),
+    readFile(sseCollectorUrl, "utf8"),
   ]);
+  const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
+  const sseCollectorDataUrl = dataModuleUrl(
+    sseCollectorSource.replace(
+      'from "./reasoning-output.mjs";',
+      `from "${reasoningOutputDataUrl}";`,
+    ),
+  );
   return import(
     dataModuleUrl(
-      streamingSource.replace(
-        'from "./reasoning-output.mjs";',
-        `from "${dataModuleUrl(reasoningOutputSource)}";`,
-      ),
+      streamingSource
+        .replace(
+          'from "./reasoning-output.mjs";',
+          `from "${reasoningOutputDataUrl}";`,
+        )
+        .replace(
+          'from "./sse-collector.mjs";',
+          `from "${sseCollectorDataUrl}";`,
+        ),
     )
   );
 }

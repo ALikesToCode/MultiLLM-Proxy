@@ -32,6 +32,17 @@ test("roleplay defaults to a 128k raw history window", () => {
   assert.equal(settings.maxStoredBytes, 640_000);
 });
 
+test("output-contract repair has an independent bounded retry limit", () => {
+  assert.equal(getRoleplaySettings({}).maxAutoContinuations, 8);
+  assert.equal(getRoleplaySettings({}).maxOutputContractRepairs, 1);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "99",
+    }).maxOutputContractRepairs,
+    2,
+  );
+});
+
 test("roleplay promotes the configured NanoGPT key index", () => {
   const env = {
     NANOGPT_API_KEY: "key-zero",
@@ -162,4 +173,8 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
   assert.equal(config.vars?.ROLEPLAY_COMPACT_TRIGGER_TOKENS, "128000");
   assert.equal(config.vars?.ROLEPLAY_KEEP_RECENT_MESSAGES, "32");
   assert.equal(config.vars?.ROLEPLAY_MAX_STORED_BYTES, "640000");
+  assert.equal(
+    config.vars?.ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS,
+    "1",
+  );
 });

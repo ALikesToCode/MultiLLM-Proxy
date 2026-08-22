@@ -165,7 +165,13 @@ directive requires an `IMAGE PROMPT:` and one or more of its declared standard
 fields are still missing. A complete contract is accepted without another
 request. Unlimited streams also continue when an upstream connection ends
 after emitting partial assistant text but before sending a terminal finish
-event. The client receives one terminal finish event and one `[DONE]`. Finite
+event. Image-contract repair is independently limited and proceeds only while
+the canonical missing-field set strictly decreases. Current labels such as
+`Camera`, `Primary subject`, `Setting`, `Lighting`, and `Composition` map to the
+same contract as their legacy aliases. No-progress commentary is discarded,
+multiple image markers are reduced to one final block, and only the cleaned
+assistant text is eligible for session persistence. The client receives one
+terminal finish event and one `[DONE]`. Finite
 requests still expose their provider finish reason directly. An unterminated
 EOF that cannot be continued is never stored as completed assistant memory.
 
@@ -458,7 +464,8 @@ Non-secret tuning variables:
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
-| `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs for an unlimited streamed response |
+| `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
+| `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with an incomplete required image-prompt contract; no-progress repairs stop immediately |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs or expose multiple generations of a
@@ -490,7 +497,10 @@ provider's available model capacity and returns the effective value in
 client requested a larger ceiling. Unlimited requests ignore the caller value,
 use that effective provider capacity for each leg, and transparently continue
 streaming after a `length` finish. Set `ROLEPLAY_MAX_AUTO_CONTINUATIONS=0` to
-disable continuation stitching without changing provider-capacity selection.
+disable output-limit continuation stitching without changing provider-capacity
+selection. Image-prompt contract repair has its own smaller bound,
+`ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` (one by default), and is disabled by
+setting that value to zero.
 
 Override a gateway only when its live catalog or an exercised request proves a
 different limit:

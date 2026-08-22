@@ -445,6 +445,12 @@ export function getRoleplaySettings(env) {
       0,
       32,
     ),
+    maxOutputContractRepairs: boundedInteger(
+      env.ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS,
+      1,
+      0,
+      2,
+    ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,
       2_592_000,
