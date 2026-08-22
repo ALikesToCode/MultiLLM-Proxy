@@ -63,7 +63,7 @@
     "ROLEPLAY_PROVIDER_ORDER": "nanogpt,opencode,linkapi,navyai",
     "ROLEPLAY_KIMI_MODEL": "kimi-k2.6",
     "ROLEPLAY_GLM_MODEL": "glm-5.2",
-    "ROLEPLAY_PROVIDER_MODELS": "{\"opencode\":{\"glm\":[\"glm-5.3\",\"glm-5.2\"]},\"navyai\":{\"glm\":\"glm-5.2-venice\"}}",
+    "ROLEPLAY_PROVIDER_MODELS": "{\"opencode\":{\"glm\":[\"glm-5.2\",\"glm-5.3\"]},\"navyai\":{\"glm\":\"glm-5.2-venice\"}}",
     "ROLEPLAY_PROVIDER_FAMILIES": "{\"nanogpt\":[\"glm\"],\"opencode\":[\"glm\",\"kimi\"],\"linkapi\":[\"kimi\"],\"navyai\":[\"glm\"]}",
     "ROLEPLAY_PROVIDER_LIMITS": "{}",
     "GLM_AUTO_OPTIMIZE": "true",

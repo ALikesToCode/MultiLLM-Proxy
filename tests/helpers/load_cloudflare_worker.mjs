@@ -49,6 +49,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/message-fragments.mjs",
     import.meta.url,
   );
+  const modelSelectionUrl = new URL(
+    "../../worker/roleplay/model-selection.mjs",
+    import.meta.url,
+  );
   const nonstreamRepairUrl = new URL(
     "../../worker/roleplay/nonstream-repair.mjs",
     import.meta.url,
@@ -113,6 +117,7 @@ export async function roleplayModuleUrl() {
     fallbackMemorySource,
     memorySource,
     messageFragmentsSource,
+    modelSelectionSource,
     nonstreamRepairSource,
     outputContractSource,
     outputBudgetSource,
@@ -139,6 +144,7 @@ export async function roleplayModuleUrl() {
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
+      readFile(modelSelectionUrl, "utf8"),
       readFile(nonstreamRepairUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
       readFile(outputBudgetUrl, "utf8"),
@@ -156,11 +162,23 @@ export async function roleplayModuleUrl() {
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
   const completionResultDataUrl = dataModuleUrl(completionResultSource);
   const capacityDataUrl = dataModuleUrl(capacitySource);
-  const configDataUrl = dataModuleUrl(
-    configSource.replace(
-      'from "./capacity.mjs";',
-      `from "${capacityDataUrl}";`,
+  const validationDataUrl = dataModuleUrl(validationSource);
+  const modelSelectionDataUrl = dataModuleUrl(
+    modelSelectionSource.replace(
+      'from "./validation.mjs";',
+      `from "${validationDataUrl}";`,
     ),
+  );
+  const configDataUrl = dataModuleUrl(
+    configSource
+      .replace(
+        'from "./capacity.mjs";',
+        `from "${capacityDataUrl}";`,
+      )
+      .replace(
+        'from "./model-selection.mjs";',
+        `from "${modelSelectionDataUrl}";`,
+      ),
   );
   const credentialHealthDataUrl = dataModuleUrl(
     credentialHealthSource.replace(
@@ -203,7 +221,6 @@ export async function roleplayModuleUrl() {
     ),
   );
   const outputContractDataUrl = dataModuleUrl(outputContractSource);
-  const validationDataUrl = dataModuleUrl(validationSource);
   const outputBudgetDataUrl = dataModuleUrl(
     outputBudgetSource.replace(
       'from "./validation.mjs";',
@@ -224,6 +241,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./directives.mjs";',
         `from "${directivesDataUrl}";`,
+      )
+      .replace(
+        'from "./model-selection.mjs";',
+        `from "${modelSelectionDataUrl}";`,
       )
       .replace(
         'from "./output-contract.mjs";',
@@ -299,6 +320,10 @@ export async function roleplayModuleUrl() {
     .replace(
       'from "./continuation.mjs";',
       `from "${continuationDataUrl}";`,
+    )
+    .replace(
+      'from "./model-selection.mjs";',
+      `from "${modelSelectionDataUrl}";`,
     )
     .replace(
       'from "./directives.mjs";',

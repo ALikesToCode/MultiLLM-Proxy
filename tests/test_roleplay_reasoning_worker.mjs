@@ -105,7 +105,7 @@ test("roleplay keeps duplicated provider reasoning inside one labelled think blo
         roleplayRequest(
           {
             session_id: "session-reasoning-deduplication",
-            model: "roleplay:glm",
+            model: "roleplay:5.3",
             messages: [{ role: "user", content: "Continue." }],
             max_tokens: 512,
             stream: true,
@@ -183,7 +183,7 @@ test("roleplay preserves leading spaces in visible stream chunks after reasoning
         roleplayRequest(
           {
             session_id: "session-reasoning-visible-spacing",
-            model: "roleplay:glm",
+            model: "roleplay:5.3",
             messages: [{ role: "user", content: "Continue." }],
             max_tokens: 512,
             stream: true,
@@ -315,7 +315,7 @@ test("roleplay continues a chunked post-reasoning image prompt to completion", a
         roleplayRequest(
           {
             session_id: "session-reasoning-image-continuation",
-            model: "roleplay:glm",
+            model: "roleplay:5.3",
             messages: [
               {
                 role: "system",
@@ -395,7 +395,7 @@ test("non-streaming roleplay removes duplicate reasoning fields and labels the s
         roleplayRequest(
           {
             session_id: "session-reasoning-non-stream",
-            model: "roleplay:glm",
+            model: "roleplay:5.3",
             messages: [{ role: "user", content: "Continue." }],
             stream: false,
           },

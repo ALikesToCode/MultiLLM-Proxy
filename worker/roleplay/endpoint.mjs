@@ -37,6 +37,7 @@ import {
 } from "./completion-result.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
+import { ROLEPLAY_PUBLIC_MODEL_ALIASES } from "./model-selection.mjs";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
@@ -202,6 +203,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
         provider_order: settings.providerOrder,
         policy: "latency_reliability_ewma",
         safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
+        model_aliases: ROLEPLAY_PUBLIC_MODEL_ALIASES,
       },
     });
   }

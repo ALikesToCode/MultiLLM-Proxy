@@ -238,6 +238,76 @@ test("invalid roleplay model aliases fail before provider generation", async () 
   assert.equal(response.status, 400);
 });
 
+test("versioned roleplay aliases select only the requested GLM version", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3", "glm-5.2"] },
+    }),
+  });
+  const upstreamModels = [];
+
+  const responses = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamModels.push(payload.model);
+    return completionResponse(payload.model, `Reply from ${payload.model}`);
+  }, async () => {
+    const stable = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-explicit-glm-52",
+        model: "roleplay:5.2",
+        messages: openingMessages(),
+        stream: false,
+      }),
+      fixture.env,
+    );
+    const experimental = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-explicit-glm-53",
+        model: "roleplay:5.3",
+        messages: openingMessages(),
+        stream: false,
+      }),
+      fixture.env,
+    );
+    return [stable, experimental];
+  });
+
+  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+  assert.deepEqual(upstreamModels, ["glm-5.2", "glm-5.3"]);
+});
+
+test("generic roleplay GLM stays pinned to stable 5.2 candidates", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3", "glm-5.2"] },
+    }),
+  });
+  let upstreamModel;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamModel = payload.model;
+    return completionResponse(payload.model, "Stable reply.");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-default-glm-52",
+        model: "roleplay:glm",
+        messages: openingMessages(),
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamModel, "glm-5.2");
+});
+
 test("dedicated roleplay key authorizes roleplay without replacing admin access", async () => {
   const fixture = makeRoleplayEnv();
   const roleplayOnlyFixture = makeRoleplayEnv({ ADMIN_API_KEY: "" });

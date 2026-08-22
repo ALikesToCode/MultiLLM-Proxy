@@ -164,7 +164,7 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
   });
   assert.deepEqual(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode.glm,
-    ["glm-5.3", "glm-5.2"],
+    ["glm-5.2", "glm-5.3"],
   );
   assert.equal(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,

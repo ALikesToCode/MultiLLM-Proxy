@@ -2,6 +2,7 @@ import {
   parseRoleplayProviderLimits,
   resolveRoleplayCandidateLimits,
 } from "./capacity.mjs";
+import { roleplayCandidateMatchesPreference } from "./model-selection.mjs";
 
 const DEFAULT_PROVIDER_ORDER = [
   "nanogpt",
@@ -591,13 +592,8 @@ export function rankRoleplayCandidates(
 ) {
   const normalizedPreference =
     typeof preference === "string" ? preference.toLowerCase() : "auto";
-  const allowedFamilies =
-    normalizedPreference === "kimi" || normalizedPreference === "glm"
-      ? new Set([normalizedPreference])
-      : new Set(MODEL_FAMILIES);
-
   const eligible = candidates.filter((candidate) =>
-    allowedFamilies.has(candidate.family),
+    roleplayCandidateMatchesPreference(candidate, normalizedPreference),
   );
   const providerRanks = [...new Set(eligible.map((candidate) => candidate.providerRank))];
   const ranked = [];

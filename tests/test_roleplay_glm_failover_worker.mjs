@@ -10,16 +10,16 @@ import {
 } from "./helpers/roleplay_fixture.mjs";
 import { parseRoleplayPayload } from "../worker/roleplay/memory.mjs";
 
-test("GLM 5.3 is accepted as a roleplay GLM family alias", () => {
+test("GLM 5.3 is accepted as an explicit roleplay model version", () => {
   const parsed = parseRoleplayPayload({
     model: "glm-5.3",
     messages: [{ role: "user", content: "Continue." }],
   });
 
-  assert.equal(parsed.modelPreference, "glm");
+  assert.equal(parsed.modelPreference, "glm-5.3");
 });
 
-test("roleplay remembers failed GLM tiers and recovers through OpenCode", async () => {
+test("stable roleplay GLM skips 5.3 and remembers failed provider tiers", async () => {
   const fixture = makeRoleplayEnv({
     NANOGPT_API_KEY: "nano-key",
     NAVYAI_API_KEY: "navy-key",
@@ -45,12 +45,6 @@ test("roleplay remembers failed GLM tiers and recovers through OpenCode", async 
     if (payload.model === "zai-org/glm-5.2:thinking") {
       return new Response('{"error":"rate limited"}', {
         status: 429,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (payload.model === "glm-5.3") {
-      return new Response('{"error":"temporarily unavailable"}', {
-        status: 503,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -93,7 +87,7 @@ test("roleplay remembers failed GLM tiers and recovers through OpenCode", async 
       roleplayRequest({
         session_id: "session-glm-tier-recovery",
         input: "Continue again.",
-        model: "glm-5.3",
+        model: "roleplay:glm",
         max_tokens: 512,
         stream: false,
       }),
@@ -105,7 +99,7 @@ test("roleplay remembers failed GLM tiers and recovers through OpenCode", async 
   assert.deepEqual(responses.map((response) => response.status), [200, 200]);
   assert.equal(responses[0].headers.get("X-Roleplay-Provider"), "opencode");
   assert.equal(responses[0].headers.get("X-Roleplay-Model"), "glm-5.2");
-  assert.equal(responses[0].headers.get("X-Roleplay-Fallback-Count"), "2");
+  assert.equal(responses[0].headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.equal(responses[1].headers.get("X-Roleplay-Provider"), "opencode");
   assert.equal(responses[1].headers.get("X-Roleplay-Model"), "glm-5.2");
   assert.equal(responses[1].headers.get("X-Roleplay-Fallback-Count"), "0");
@@ -115,7 +109,6 @@ test("roleplay remembers failed GLM tiers and recovers through OpenCode", async 
       model: "zai-org/glm-5.2:thinking",
       reasoningEffort: "max",
     },
-    { host: "roleplay.internal", model: "glm-5.3", reasoningEffort: "max" },
     { host: "roleplay.internal", model: "glm-5.2", reasoningEffort: "max" },
     { host: "roleplay.internal", model: "glm-5.2", reasoningEffort: "max" },
   ]);

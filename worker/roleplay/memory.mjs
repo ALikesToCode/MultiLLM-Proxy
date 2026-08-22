@@ -5,6 +5,7 @@ import {
 import { reinforceRoleplayMessages } from "./output-contract.mjs";
 import { applyReasoningPolicy } from "./reasoning.mjs";
 import { parseRoleplayOutputBudget } from "./output-budget.mjs";
+import { parseRoleplayModelPreference } from "./model-selection.mjs";
 import {
   boundedString,
   RoleplayRequestError,
@@ -305,49 +306,6 @@ function sanitizeForwardedOptions(payload) {
   return forwarded;
 }
 
-function modelPreference(payload) {
-  const explicit =
-    typeof payload.model_preference === "string"
-      ? payload.model_preference.trim().toLowerCase()
-      : "";
-  if (explicit) {
-    if (!["auto", "speed", "kimi", "glm"].includes(explicit)) {
-      throw new RoleplayRequestError(
-        "model_preference must be auto, speed, kimi, or glm",
-      );
-    }
-    return explicit;
-  }
-
-  const model =
-    typeof payload.model === "string"
-      ? payload.model.trim().toLowerCase()
-      : "";
-  const aliases = {
-    auto: "auto",
-    speed: "speed",
-    kimi: "kimi",
-    glm: "glm",
-    roleplay: "auto",
-    "roleplay:auto": "auto",
-    "roleplay:speed": "speed",
-    "roleplay:kimi": "kimi",
-    "roleplay:glm": "glm",
-    "kimi-k2.6": "kimi",
-    "glm-5.3": "glm",
-    "glm-5.2": "glm",
-  };
-  if (aliases[model]) {
-    return aliases[model];
-  }
-  if (model.startsWith("roleplay:")) {
-    throw new RoleplayRequestError(
-      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, or roleplay:glm",
-    );
-  }
-  return "auto";
-}
-
 export function parseRoleplayPayload(
   payload,
   maximumMessageCharacters = DEFAULT_MAX_MESSAGE_CHARACTERS,
@@ -388,7 +346,7 @@ export function parseRoleplayPayload(
     throw new RoleplayRequestError("prompt_cache must be a boolean");
   }
 
-  const preference = modelPreference(payload);
+  const preference = parseRoleplayModelPreference(payload);
 
   const historyMode =
     typeof payload.history_mode === "string"

@@ -47,6 +47,14 @@ test("roleplay model catalog exposes configured adaptive tiers without secrets",
   assert.equal(payload.data[0].max_output_tokens, 262_144);
   assert.equal(payload.data[3].context_window, 1_048_576);
   assert.equal(payload.data[3].max_output_tokens, 131_072);
+  assert.equal(
+    payload.selection.model_aliases["roleplay:glm"],
+    "GLM-5.2 stable default",
+  );
+  assert.equal(
+    payload.selection.model_aliases["roleplay:5.3"],
+    "GLM-5.3 only (experimental)",
+  );
   assert.doesNotMatch(JSON.stringify(payload), /roleplay-key/);
 });
 
