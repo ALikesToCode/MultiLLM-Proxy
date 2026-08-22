@@ -31,6 +31,7 @@ DEFAULT_MODEL_IDS = {
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
     "opencode": [
         "grok-4.5",
+        "ox-alpha-free",
         "glm-5.2",
         "glm-5.1",
         "kimi-k3",

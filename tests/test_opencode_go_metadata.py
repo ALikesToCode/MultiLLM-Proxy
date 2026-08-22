@@ -32,6 +32,7 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
 
         for model_id in (
             "grok-4.5",
+            "ox-alpha-free",
             "glm-5.2",
             "kimi-k3",
             "kimi-k2.7-code",
@@ -68,6 +69,7 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
             "/opencode/v1/models",
             "opencode-go/<model-id>",
             "opencode:kimi-k3",
+            "ox-alpha-free",
             "X-MultiLLM-Api-Key",
         ):
             with self.subTest(value=value):

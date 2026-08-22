@@ -4,6 +4,10 @@ import {
   handleRoleplayEdgeRequest,
   isRoleplayPath,
 } from "./worker/roleplay/endpoint.mjs";
+import {
+  normalizeOpencodeChatResponse,
+  resolveOpencodeChatMetadata,
+} from "./worker/opencode/reasoning-response.mjs";
 
 export { RoleplaySession };
 
@@ -1613,6 +1617,10 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
     );
   }
 
+  const reasoningMetadataPromise = resolveOpencodeChatMetadata(
+    request,
+    requestUrl.pathname,
+  );
   const callerAuth = opencodeCallerUpstreamAuth(request);
   const upstreamToken = env.OPENCODE_GO_API_KEY || env.OPENCODE_API_KEY;
   if (!upstreamToken && !callerAuth.authorization && !callerAuth.apiKey) {
@@ -1636,13 +1644,17 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
   const upstreamResponse = await fetch(upstreamRequest);
 
   if (isOpencodeNativeRequest(requestUrl.pathname, request.method)) {
+    const downstreamResponse = new Response(upstreamResponse.body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+    });
     return applyCorsHeaders(
       request,
-      new Response(upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
-      }),
+      await normalizeOpencodeChatResponse(
+        downstreamResponse,
+        await reasoningMetadataPromise,
+      ),
       env,
     );
   }
@@ -1912,6 +1924,7 @@ export default {
     const codexEasyPath = isCodexEasyNamespacePath(requestUrl.pathname);
     const kimiCodePath = isKimiCodeNamespacePath(requestUrl.pathname);
     const roleplayPath = isRoleplayPath(requestUrl.pathname);
+    let opencodeReasoningMetadataPromise = null;
 
     if (request.method === "OPTIONS" && kimiCodePath) {
       if (!getKimiCodeUpstreamPath(requestUrl.pathname)) {
@@ -2031,6 +2044,10 @@ export default {
         if (rejected) {
           return rejected;
         }
+        opencodeReasoningMetadataPromise = resolveOpencodeChatMetadata(
+          request,
+          requestUrl.pathname,
+        );
       } catch (error) {
         logStructuredError("opencode_edge_auth_failed", error);
         return applyCorsHeaders(
@@ -2079,7 +2096,13 @@ export default {
         }
         return buildContainerNotReadyTextResponse();
       }
-      return applyCorsHeaders(request, response, env);
+      const downstreamResponse = opencodeReasoningMetadataPromise
+        ? await normalizeOpencodeChatResponse(
+            response,
+            await opencodeReasoningMetadataPromise,
+          )
+        : response;
+      return applyCorsHeaders(request, downstreamResponse, env);
     } catch (error) {
       if (rootPath) {
         logStructuredError("container_fetch_failed", error);

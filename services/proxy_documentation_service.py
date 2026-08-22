@@ -108,7 +108,7 @@ def _examples(base_url: str, auto_model: str) -> dict[str, str]:
             '  -H "Authorization: Bearer $MULTILLM_API_KEY" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             "  -d '{\n"
-            '    "model": "opencode:glm-5.2",\n'
+            '    "model": "opencode:ox-alpha-free",\n'
             '    "messages": [{"role": "user", "content": "Hello"}],\n'
             '    "stream": true\n'
             "  }'"
@@ -276,6 +276,9 @@ def build_proxy_documentation(
                 "api_key_env": "ROLEPLAY_API_KEY",
                 "model": "roleplay:auto",
                 "append_chat_completions": False,
+                "opencode_proxy_url": f"{base_url}/opencode/v1/chat/completions",
+                "opencode_api_key_env": "ADMIN_API_KEY",
+                "opencode_model": "ox-alpha-free",
                 "direct_navy_url": "https://api.navy/v1/chat/completions",
             }
         },

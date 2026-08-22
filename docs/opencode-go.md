@@ -5,9 +5,11 @@ The integration follows the live
 [OpenCode Go documentation](https://opencode.ai/docs/go).
 
 The canonical `/opencode/v1/*` routes preserve OpenAI and Anthropic request
-bodies, streaming events, JSON bytes, status codes, repeated query parameters,
-and safe rate-limit/request headers. The proxy does not translate one protocol
-into the other.
+bodies, status codes, repeated query parameters, and safe rate-limit/request
+headers. OpenAI Chat Completions responses have one deliberate compatibility
+layer: duplicate or malformed provider reasoning is reconciled into one visible
+route-labelled `<think>` block. The proxy does not translate one protocol into
+the other.
 
 On Cloudflare, the Worker validates the proxy credential before waking the
 Container, then the Container performs the upstream request. This is required
@@ -91,6 +93,7 @@ it tests provider/model combinations.
 | Model | Request model ID | Protocol |
 | --- | --- | --- |
 | Grok 4.5 | `grok-4.5` | OpenAI Chat Completions |
+| Ox Alpha Free | `ox-alpha-free` | OpenAI Chat Completions |
 | GLM-5.2 | `glm-5.2` | OpenAI Chat Completions |
 | GLM-5.1 | `glm-5.1` | OpenAI Chat Completions |
 | Kimi K3 | `kimi-k3` | OpenAI Chat Completions |
@@ -120,16 +123,43 @@ Chat route instead uses its normal `provider:model` form:
 }
 ```
 
+### Ox Alpha Free
+
+The OpenCode Go catalog currently exposes Ox Alpha Free as
+`ox-alpha-free`. This differs from the separate public Zen catalog, where the
+corresponding preview may appear as `x-preview-f-free`. MultiLLM Proxy uses the
+Go subscription base URL, so configure Janitor AI or another OpenAI-compatible
+client with:
+
+```json
+{
+  "model": "ox-alpha-free"
+}
+```
+
+For the unified route, use `opencode:ox-alpha-free` instead.
+
 ## Streaming and compatibility
 
-`POST /opencode/v1/chat/completions` preserves OpenAI SSE frames.
+`POST /opencode/v1/chat/completions` preserves OpenAI SSE framing while
+reconciling `reasoning_content`, `reasoning`, `reasoning_details`, and raw
+`<think>` markup. When reasoning is present, clients receive exactly one block:
+
+```text
+<think>[provider: opencode | model: ox-alpha-free]
+...reasoning...</think>
+
+...visible response...
+```
+
+The response also exposes `X-MultiLLM-Provider` and `X-MultiLLM-Model`.
 `POST /opencode/v1/messages` preserves Anthropic events such as
 `message_start`, `content_block_delta`, `message_delta`, and `message_stop`.
 
 The older `POST /opencode/chat/completions` route remains available for
 backward compatibility. It retains MultiLLM Proxy's historical OpenAI stream
 normalization, including visible reasoning blocks and recovery from a specific
-legacy OpenCode timeout payload. New clients should use the protocol-native
+legacy OpenCode timeout payload. New clients should use the canonical
 `/opencode/v1/...` routes.
 
 Native routes are single-attempt and do not follow upstream redirects or retain

@@ -28,6 +28,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertIn("opencode:glm-5.1", model_ids)
         self.assertIn("opencode:qwen3.6-plus", model_ids)
         self.assertIn("opencode:kimi-k3", model_ids)
+        self.assertIn("opencode:ox-alpha-free", model_ids)
         self.assertIn("opencode:minimax-m3", model_ids)
         self.assertIn("opencode:deepseek-v4-flash", model_ids)
         self.assertIn("mimo:mimo-v2.5-pro", model_ids)

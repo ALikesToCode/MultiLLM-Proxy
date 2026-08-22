@@ -110,6 +110,16 @@ Transport=HTTPS</code></pre>
         </div>
         <p class="docs-fine-print">The proxy URL is already the complete Chat Completions endpoint. Save it, hard-refresh Janitor AI, then select <code>MultiLLM Roleplay</code>. Use the Worker-facing <code>{{ janitor.api_key_env }}</code>, never a NanoGPT, NavyAI, or other upstream provider key.</p>
 
+        <aside class="docs-callout">
+            <strong>Try Ox Alpha Free through OpenCode Go.</strong>
+            <pre><code>Name=MultiLLM OpenCode Ox Alpha
+Proxy URL={{ janitor.opencode_proxy_url }}
+API key=&lt;value of {{ janitor.opencode_api_key_env }}&gt;
+Model={{ janitor.opencode_model }}
+Add /chat/completions=Disabled</code></pre>
+            <p>This direct route uses your OpenCode Go subscription and normalizes duplicate reasoning into one provider/model-labelled <code>&lt;think&gt;</code> block. It does not use roleplay Durable Object memory or cross-provider failover, so Janitor must send the conversation history on every request.</p>
+        </aside>
+
         <aside class="docs-callout docs-callout--warning">
             <strong>A Janitor <code>connect-src</code> CSP error is controlled by Janitor AI.</strong>
             <p>If the browser console says it blocked <code>{{ janitor.proxy_url }}</code>, MultiLLM never received the request. CORS headers on this Worker cannot override another site's Content Security Policy. Janitor must allowlist this Worker origin, or the request must come from a client that permits custom origins.</p>

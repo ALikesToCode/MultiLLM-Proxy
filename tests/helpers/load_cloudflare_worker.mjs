@@ -334,8 +334,27 @@ export async function loadRoleplayStreamingModule() {
 
 export async function loadWorkerModule() {
   const workerUrl = new URL("../../cloudflare-worker.mjs", import.meta.url);
-  const source = await readFile(workerUrl, "utf8");
+  const opencodeReasoningUrl = new URL(
+    "../../worker/opencode/reasoning-response.mjs",
+    import.meta.url,
+  );
+  const reasoningOutputUrl = new URL(
+    "../../worker/roleplay/reasoning-output.mjs",
+    import.meta.url,
+  );
+  const [source, opencodeReasoningSource, reasoningOutputSource] =
+    await Promise.all([
+      readFile(workerUrl, "utf8"),
+      readFile(opencodeReasoningUrl, "utf8"),
+      readFile(reasoningOutputUrl, "utf8"),
+    ]);
   const endpointDataUrl = await roleplayModuleUrl();
+  const opencodeReasoningDataUrl = dataModuleUrl(
+    opencodeReasoningSource.replace(
+      'from "../roleplay/reasoning-output.mjs";',
+      `from "${dataModuleUrl(reasoningOutputSource)}";`,
+    ),
+  );
   const patchedSource = source
     .replace(
       /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
@@ -344,6 +363,10 @@ export async function loadWorkerModule() {
     .replace(
       'from "./worker/roleplay/endpoint.mjs";',
       `from "${endpointDataUrl}";`,
+    )
+    .replace(
+      'from "./worker/opencode/reasoning-response.mjs";',
+      `from "${opencodeReasoningDataUrl}";`,
     );
 
   return import(dataModuleUrl(patchedSource));

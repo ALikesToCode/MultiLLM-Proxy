@@ -2946,7 +2946,7 @@ test("worker routes the OpenCode model catalog through the Container by default"
   assert.equal(stub.getCalls(), 1);
 });
 
-test("worker exposes protocol-native OpenCode Go chat and model routes", async () => {
+test("worker normalizes native OpenCode Go chat and preserves model discovery", async () => {
   const requestBody =
     '{"model":"kimi-k3","messages":[{"role":"user","content":"ping"}],"stream":false}';
   const rawResponse =
@@ -3010,7 +3010,18 @@ test("worker exposes protocol-native OpenCode Go chat and model routes", async (
         stub.env,
       );
       assert.equal(chatResponse.status, 200);
-      assert.equal(await chatResponse.text(), rawResponse);
+      assert.deepEqual(await chatResponse.json(), {
+        choices: [
+          {
+            message: {
+              content:
+                "<think>[provider: opencode | model: kimi-k3]\nnative</think>\n\npong",
+            },
+          },
+        ],
+      });
+      assert.equal(chatResponse.headers.get("X-MultiLLM-Provider"), "opencode");
+      assert.equal(chatResponse.headers.get("X-MultiLLM-Model"), "kimi-k3");
       assert.equal(chatResponse.headers.get("Set-Cookie"), null);
       assert.equal(chatResponse.headers.get("X-RateLimit-Remaining"), "9");
 
