@@ -265,6 +265,7 @@ export function createObservedStream({
   let continuationCount = 0;
   let pendingContinuation = null;
   const streamStartedAt = performance.now();
+  let lastDownstreamAt = streamStartedAt;
 
   const releaseReader = () => {
     if (!released) {
@@ -321,9 +322,24 @@ export function createObservedStream({
     cleanupLeg();
   };
 
+  const millisecondsUntilHeartbeat = () =>
+    Math.max(
+      0,
+      heartbeatMs - (performance.now() - lastDownstreamAt),
+    );
+
+  const enqueueHeartbeat = (controller) => {
+    heartbeatCount += 1;
+    controller.enqueue(HEARTBEAT_COMMENT.slice());
+    lastDownstreamAt = performance.now();
+  };
+
   const enqueueFrames = (controller, frames) => {
     for (const frame of frames) {
       controller.enqueue(SSE_ENCODER.encode(frame));
+    }
+    if (frames.length) {
+      lastDownstreamAt = performance.now();
     }
   };
 
@@ -334,11 +350,17 @@ export function createObservedStream({
           if (requestSignal?.aborted) {
             throw new DOMException("Request aborted", "AbortError");
           }
+          // Upstream events can be consumed and intentionally filtered. Only
+          // bytes enqueued downstream satisfy the client's liveness timeout.
+          if (millisecondsUntilHeartbeat() === 0) {
+            enqueueHeartbeat(controller);
+            return;
+          }
           if (!pendingRead) {
             pendingRead = observedRead(reader);
           }
 
-          const wait = delayedOutcome(heartbeatMs);
+          const wait = delayedOutcome(millisecondsUntilHeartbeat());
           const outcome = await Promise.race([
             pendingRead,
             wait.promise,
@@ -346,8 +368,7 @@ export function createObservedStream({
           wait.cancel();
 
           if (outcome.kind === "timer") {
-            heartbeatCount += 1;
-            controller.enqueue(HEARTBEAT_COMMENT.slice());
+            enqueueHeartbeat(controller);
             return;
           }
 
@@ -389,15 +410,20 @@ export function createObservedStream({
                   (error) => ({ kind: "continuation_error", error }),
                 );
               }
-              const continuationWait = delayedOutcome(heartbeatMs);
+              if (millisecondsUntilHeartbeat() === 0) {
+                enqueueHeartbeat(controller);
+                return;
+              }
+              const continuationWait = delayedOutcome(
+                millisecondsUntilHeartbeat(),
+              );
               const continuationOutcome = await Promise.race([
                 pendingContinuation,
                 continuationWait.promise,
               ]);
               continuationWait.cancel();
               if (continuationOutcome.kind === "timer") {
-                heartbeatCount += 1;
-                controller.enqueue(HEARTBEAT_COMMENT.slice());
+                enqueueHeartbeat(controller);
                 return;
               }
               pendingContinuation = null;

@@ -78,6 +78,56 @@ function chunkedBody(chunks) {
   });
 }
 
+function reasoningThenContentBody({
+  intervalMs,
+  reasoningFrames,
+  content,
+}) {
+  const encoder = new TextEncoder();
+  let emittedReasoningFrames = 0;
+  let timer = null;
+
+  return new ReadableStream({
+    start(controller) {
+      const emitNext = () => {
+        if (emittedReasoningFrames < reasoningFrames) {
+          emittedReasoningFrames += 1;
+          const payload = JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  reasoning_content: `reasoning-${emittedReasoningFrames} `,
+                },
+                finish_reason: null,
+              },
+            ],
+          });
+          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+          timer = setTimeout(emitNext, intervalMs);
+          return;
+        }
+
+        const payload = JSON.stringify({
+          choices: [
+            {
+              delta: { content },
+              finish_reason: "stop",
+            },
+          ],
+        });
+        controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      };
+
+      timer = setTimeout(emitNext, intervalMs);
+    },
+    cancel() {
+      clearTimeout(timer);
+    },
+  });
+}
+
 test("Janitor output is unlimited and transparently continues after length", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
@@ -377,6 +427,42 @@ test("unlimited stream keeps sending heartbeats while a continuation opens", asy
   assert.match(body, /: roleplay-keepalive/);
   assert.match(body, /Before pause\./);
   assert.match(body, /After pause\./);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.equal(completion.success, true);
+  assert.ok(completion.heartbeatCount >= 1);
+});
+
+test("filtered continuation reasoning cannot starve downstream heartbeats", async () => {
+  const observed = createObservedStream({
+    upstreamBody: chunkedBody([
+      'data: {"choices":[{"delta":{"content":"Visible start. "},"finish_reason":"length"}]}\n\n',
+      "data: [DONE]\n\n",
+    ]),
+    requestSignal: new AbortController().signal,
+    upstreamController: new AbortController(),
+    heartbeatMs: 20,
+    maxContinuations: 1,
+    reasoningMetadata: {
+      provider: "opencode",
+      model: "glm-5.3",
+    },
+    openContinuation: async () => ({
+      upstreamBody: reasoningThenContentBody({
+        intervalMs: 5,
+        reasoningFrames: 16,
+        content: "Visible finish.",
+      }),
+      upstreamController: new AbortController(),
+    }),
+    onComplete() {},
+  });
+
+  const body = await new Response(observed.stream).text();
+  const completion = await observed.completion;
+  assert.match(body, /: roleplay-keepalive/);
+  assert.match(body, /Visible start\./);
+  assert.match(body, /Visible finish\./);
+  assert.doesNotMatch(body, /reasoning-/);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
   assert.equal(completion.success, true);
   assert.ok(completion.heartbeatCount >= 1);
