@@ -55,6 +55,7 @@ import {
 } from "./memory.mjs";
 import { applyRoleplayOutputContract } from "./output-contract.mjs";
 import { applyRoleplayPromptCache } from "./prompt-cache.mjs";
+import { normalizeRoleplayCompletionPayload } from "./reasoning-output.mjs";
 import {
   loadRoleplayState,
   saveRoleplayState,
@@ -810,6 +811,10 @@ export class RoleplaySession extends DurableObject {
           ? continuation.incompleteReason.bind(continuation)
           : null,
         maxContinuations: settings.maxAutoContinuations,
+        reasoningMetadata: {
+          provider: candidate.provider,
+          model: candidate.model,
+        },
         onComplete: async ({
           success,
           assistant,
@@ -914,6 +919,7 @@ export class RoleplaySession extends DurableObject {
       cleanup();
     }
     const { bytes, firstByteMs } = bounded;
+    let responseBytes = bytes;
     let assistant = "";
     let finishReason = "";
     if (contentType.toLowerCase().includes("application/json")) {
@@ -921,8 +927,22 @@ export class RoleplaySession extends DurableObject {
         const responsePayload = JSON.parse(
           new TextDecoder().decode(bytes),
         );
-        assistant = extractAssistantContent(responsePayload);
-        finishReason = extractFinishReason(responsePayload);
+        const normalized = normalizeRoleplayCompletionPayload(
+          responsePayload,
+          {
+            provider: candidate.provider,
+            model: candidate.model,
+          },
+        );
+        assistant = normalized.changed
+          ? normalized.visibleContent
+          : extractAssistantContent(responsePayload);
+        finishReason = extractFinishReason(normalized.payload);
+        if (normalized.changed) {
+          responseBytes = new TextEncoder().encode(
+            JSON.stringify(normalized.payload),
+          );
+        }
       } catch {
         assistant = "";
       }
@@ -956,7 +976,7 @@ export class RoleplaySession extends DurableObject {
     );
     await saveRoleplayState(this.ctx.storage, state);
     return {
-      response: new Response(bytes, {
+      response: new Response(responseBytes, {
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,

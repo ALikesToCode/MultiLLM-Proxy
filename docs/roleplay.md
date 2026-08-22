@@ -315,9 +315,26 @@ Object alarm atomically removes that session's memory and metrics.
 
 ## Response metadata
 
-The upstream OpenAI-compatible JSON body and SSE data events stay unchanged.
+Ordinary OpenAI-compatible JSON bodies and SSE data events stay unchanged. If
+an upstream model emits separate reasoning fields or raw `<think>` markup, the
+Worker reconciles them into exactly one visible block:
+
+```text
+<think>[provider: opencode | model: glm-5.3]
+...provider reasoning...</think>
+
+...visible roleplay response...
+```
+
+Duplicate or malformed provider reasoning is removed, including nested tags,
+stray closing tags, and tags divided across SSE frames. The selected route is
+written inside the block so clients that do not expose HTTP response headers
+can still identify it. Only the visible roleplay response is retained in
+continuity memory; provider reasoning and route metadata are not fed back into
+later turns.
+
 During streaming silence, the Worker may interleave the SSE keepalive comment
-described above. The Worker adds:
+described above. The Worker also adds:
 
 - `X-Roleplay-Session-ID`
 - `X-Roleplay-Session-Source`
@@ -372,9 +389,10 @@ omitted when absent):
 }
 ```
 
-The selected provider's Chat Completions JSON or SSE events are returned
-without reshaping. Session metrics report `protected_directives` and
-`estimated_protected_directive_tokens` without returning directive content.
+Apart from reasoning normalization, the selected provider's Chat Completions
+JSON or SSE events are returned without reshaping. Session metrics report
+`protected_directives` and `estimated_protected_directive_tokens` without
+returning directive content.
 
 Inspect configured tiers:
 

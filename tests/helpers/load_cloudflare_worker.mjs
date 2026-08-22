@@ -85,6 +85,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/streaming.mjs",
     import.meta.url,
   );
+  const reasoningOutputUrl = new URL(
+    "../../worker/roleplay/reasoning-output.mjs",
+    import.meta.url,
+  );
   const [
     compatibilitySource,
     checkpointSource,
@@ -104,6 +108,7 @@ export async function roleplayModuleUrl() {
     sessionStorageSource,
     validationSource,
     transportSource,
+    reasoningOutputSource,
     streamingSource,
     endpointSource,
   ] =
@@ -126,6 +131,7 @@ export async function roleplayModuleUrl() {
       readFile(sessionStorageUrl, "utf8"),
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
+      readFile(reasoningOutputUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
@@ -146,7 +152,13 @@ export async function roleplayModuleUrl() {
   const compactionPolicyDataUrl = dataModuleUrl(
     compactionPolicySource,
   );
-  const streamingDataUrl = dataModuleUrl(streamingSource);
+  const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
+  const streamingDataUrl = dataModuleUrl(
+    streamingSource.replace(
+      'from "./reasoning-output.mjs";',
+      `from "${reasoningOutputDataUrl}";`,
+    ),
+  );
   const directivesDataUrl = dataModuleUrl(directivesSource);
   const checkpointDataUrl = dataModuleUrl(
     checkpointSource.replace(
@@ -281,6 +293,10 @@ export async function roleplayModuleUrl() {
       `from "${promptCacheDataUrl}";`,
     )
     .replace(
+      'from "./reasoning-output.mjs";',
+      `from "${reasoningOutputDataUrl}";`,
+    )
+    .replace(
       'from "./session-storage.mjs";',
       `from "${sessionStorageDataUrl}";`,
     )
@@ -298,7 +314,22 @@ export async function loadRoleplayStreamingModule() {
     "../../worker/roleplay/streaming.mjs",
     import.meta.url,
   );
-  return import(dataModuleUrl(await readFile(streamingUrl, "utf8")));
+  const reasoningOutputUrl = new URL(
+    "../../worker/roleplay/reasoning-output.mjs",
+    import.meta.url,
+  );
+  const [streamingSource, reasoningOutputSource] = await Promise.all([
+    readFile(streamingUrl, "utf8"),
+    readFile(reasoningOutputUrl, "utf8"),
+  ]);
+  return import(
+    dataModuleUrl(
+      streamingSource.replace(
+        'from "./reasoning-output.mjs";',
+        `from "${dataModuleUrl(reasoningOutputSource)}";`,
+      ),
+    )
+  );
 }
 
 export async function loadWorkerModule() {

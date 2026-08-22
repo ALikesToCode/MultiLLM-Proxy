@@ -1,3 +1,8 @@
+import {
+  createRoleplayReasoningFrameNormalizer,
+  createVisibleRoleplayContentCollector,
+} from "./reasoning-output.mjs";
+
 const SSE_ENCODER = new TextEncoder();
 const HEARTBEAT_COMMENT = SSE_ENCODER.encode(
   ": roleplay-keepalive\n\n",
@@ -91,6 +96,7 @@ function rewrittenChoiceFrame(payload, { finishReason, dropContent }) {
 function sseAssistantCollector(
   maximumCharacters = MAX_COLLECTED_ASSISTANT_CHARACTERS,
   deferTerminalFrames = false,
+  reasoningMetadata = null,
 ) {
   let buffered = "";
   let assistant = "";
@@ -98,8 +104,14 @@ function sseAssistantCollector(
   let legFinishReason = "";
   let withheld = [];
   let truncated = false;
+  const reasoningNormalizer = reasoningMetadata
+    ? createRoleplayReasoningFrameNormalizer(reasoningMetadata)
+    : null;
+  const visibleCollector = reasoningMetadata
+    ? createVisibleRoleplayContentCollector()
+    : null;
 
-  const appendContent = (content) => {
+  const appendAssistantText = (content) => {
     if (
       typeof content === "string" &&
       assistant.length < maximumCharacters
@@ -113,6 +125,12 @@ function sseAssistantCollector(
     } else if (typeof content === "string" && content) {
       truncated = true;
     }
+  };
+
+  const appendContent = (content) => {
+    appendAssistantText(
+      visibleCollector ? visibleCollector.consume(content) : content,
+    );
   };
 
   const consumeFrame = (frame) => {
@@ -169,7 +187,10 @@ function sseAssistantCollector(
     buffered += text;
     const split = splitSseFrames(buffered, flush);
     buffered = split.remaining;
-    return split.frames.flatMap(consumeFrame);
+    const frames = reasoningNormalizer
+      ? split.frames.flatMap((frame) => reasoningNormalizer.transform(frame))
+      : split.frames;
+    return frames.flatMap(consumeFrame);
   };
 
   return {
@@ -178,6 +199,14 @@ function sseAssistantCollector(
     },
     finish(text = "") {
       const output = consumeBuffered(text, true);
+      if (reasoningNormalizer) {
+        output.push(
+          ...reasoningNormalizer.finish().flatMap(consumeFrame),
+        );
+      }
+      if (visibleCollector) {
+        appendAssistantText(visibleCollector.finish());
+      }
       return {
         assistant,
         finishReason: legFinishReason,
@@ -213,6 +242,7 @@ export function createObservedStream({
   openContinuation = null,
   getIncompleteReason = null,
   maxContinuations = 0,
+  reasoningMetadata = null,
 }) {
   let resolveCompletion;
   const completion = new Promise((resolve) => {
@@ -225,6 +255,7 @@ export function createObservedStream({
   const collector = sseAssistantCollector(
     MAX_COLLECTED_ASSISTANT_CHARACTERS,
     typeof openContinuation === "function",
+    reasoningMetadata,
   );
   let settled = false;
   let released = false;
