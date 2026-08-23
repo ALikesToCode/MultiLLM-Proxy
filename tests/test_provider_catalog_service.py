@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from typing import ClassVar
+from unittest.mock import patch
 
 import requests
 
@@ -246,6 +247,33 @@ class ProviderCatalogServiceTest(unittest.TestCase):
 
         self.assertTrue(ProviderCatalogService.has_model("opencode", "glm-5.2"))
         self.assertFalse(ProviderCatalogService.has_model("opencode", "missing"))
+
+    def test_list_models_reuses_cache_until_catalog_replacement(self):
+        ProviderCatalogService.replace_provider_models(
+            "opencode",
+            ("glm-5.2",),
+        )
+        original_connect = ProviderCatalogService._connect
+
+        with patch.object(
+            ProviderCatalogService,
+            "_connect",
+            wraps=original_connect,
+        ) as connect:
+            first = ProviderCatalogService.list_models()
+            second = ProviderCatalogService.list_models()
+
+        self.assertEqual(first, second)
+        self.assertEqual(connect.call_count, 1)
+
+        ProviderCatalogService.replace_provider_models(
+            "opencode",
+            ("glm-5.2", "glm-5.3"),
+        )
+        self.assertEqual(
+            [model.model_id for model in ProviderCatalogService.list_models()],
+            ["glm-5.2", "glm-5.3"],
+        )
 
 
 if __name__ == "__main__":

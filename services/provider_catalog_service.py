@@ -1,6 +1,7 @@
 import logging
 import re
 import sqlite3
+import threading
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import closing
@@ -54,6 +55,18 @@ def _utcnow_iso() -> str:
 class ProviderCatalogService:
     """Discover and cache provider model IDs without persisting credentials."""
 
+    _catalog_cache: dict[str, tuple[ProviderCatalogModel, ...]] = {}
+    _catalog_cache_lock = threading.RLock()
+
+    @staticmethod
+    def _cache_key() -> str:
+        return str(
+            storage_path(
+                "MODEL_REGISTRY_DB_PATH",
+                "model_registry.sqlite3",
+            ).absolute()
+        )
+
     @staticmethod
     def _connect() -> sqlite3.Connection:
         return connect(storage_path("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3"))
@@ -95,35 +108,43 @@ class ProviderCatalogService:
 
     @classmethod
     def list_models(cls) -> list[ProviderCatalogModel]:
-        with closing(cls._connect()) as connection:
-            cls._ensure_storage(connection)
-            connection.commit()
-            rows = connection.execute(
-                """
-                SELECT provider, model_id, discovered_at,
-                       context_window, max_output_tokens
-                FROM provider_model_catalog
-                ORDER BY provider, model_id
-                """
-            ).fetchall()
-        return [
-            ProviderCatalogModel(
-                provider=str(row["provider"]),
-                model_id=str(row["model_id"]),
-                discovered_at=str(row["discovered_at"]),
-                context_window=(
-                    int(row["context_window"])
-                    if row["context_window"] is not None
-                    else None
-                ),
-                max_output_tokens=(
-                    int(row["max_output_tokens"])
-                    if row["max_output_tokens"] is not None
-                    else None
-                ),
+        cache_key = cls._cache_key()
+        with cls._catalog_cache_lock:
+            cached = cls._catalog_cache.get(cache_key)
+            if cached is not None:
+                return list(cached)
+
+            with closing(cls._connect()) as connection:
+                cls._ensure_storage(connection)
+                connection.commit()
+                rows = connection.execute(
+                    """
+                    SELECT provider, model_id, discovered_at,
+                           context_window, max_output_tokens
+                    FROM provider_model_catalog
+                    ORDER BY provider, model_id
+                    """
+                ).fetchall()
+            models = tuple(
+                ProviderCatalogModel(
+                    provider=str(row["provider"]),
+                    model_id=str(row["model_id"]),
+                    discovered_at=str(row["discovered_at"]),
+                    context_window=(
+                        int(row["context_window"])
+                        if row["context_window"] is not None
+                        else None
+                    ),
+                    max_output_tokens=(
+                        int(row["max_output_tokens"])
+                        if row["max_output_tokens"] is not None
+                        else None
+                    ),
+                )
+                for row in rows
             )
-            for row in rows
-        ]
+            cls._catalog_cache[cache_key] = models
+            return list(models)
 
     @classmethod
     def has_model(cls, provider: str, model_id: str) -> bool:
@@ -165,28 +186,31 @@ class ProviderCatalogService:
             )
             for model in models
         ]
-        with closing(cls._connect()) as connection:
-            cls._ensure_storage(connection)
-            connection.commit()
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                "DELETE FROM provider_model_catalog WHERE provider = ?",
-                (provider,),
-            )
-            connection.executemany(
-                """
-                INSERT INTO provider_model_catalog (
-                    provider,
-                    model_id,
-                    discovered_at,
-                    context_window,
-                    max_output_tokens
+        cache_key = cls._cache_key()
+        with cls._catalog_cache_lock:
+            with closing(cls._connect()) as connection:
+                cls._ensure_storage(connection)
+                connection.commit()
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "DELETE FROM provider_model_catalog WHERE provider = ?",
+                    (provider,),
                 )
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                records,
-            )
-            connection.commit()
+                connection.executemany(
+                    """
+                    INSERT INTO provider_model_catalog (
+                        provider,
+                        model_id,
+                        discovered_at,
+                        context_window,
+                        max_output_tokens
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    records,
+                )
+                connection.commit()
+            cls._catalog_cache.pop(cache_key, None)
 
     @staticmethod
     def _model_collection(payload: Any) -> list[Any]:

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import threading
 from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
@@ -68,6 +69,8 @@ DEFAULT_MODEL_IDS = {
 
 class ModelRegistry:
     _storage_path: Optional[Path] = None
+    _status_cache: Dict[tuple[str, str], str] = {}
+    _status_cache_lock = threading.RLock()
 
     @classmethod
     def _default_storage_path(cls) -> Path:
@@ -186,13 +189,22 @@ class ModelRegistry:
 
     @classmethod
     def get_model_status(cls, model_id: str) -> str:
+        cache_key = (str(cls._get_storage_path().absolute()), model_id)
+        with cls._status_cache_lock:
+            cached = cls._status_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             row = connection.execute(
                 "SELECT status FROM model_overrides WHERE model_id = ?",
                 (model_id,),
             ).fetchone()
-        return row["status"] if row else "available"
+        status = row["status"] if row else "available"
+        with cls._status_cache_lock:
+            cls._status_cache[cache_key] = status
+        return status
 
     @classmethod
     def get_model_statuses(cls, model_ids: Iterable[str]) -> Dict[str, str]:
@@ -215,6 +227,9 @@ class ModelRegistry:
                 (model_id,),
             )
             connection.commit()
+        cache_key = (str(cls._get_storage_path().absolute()), model_id)
+        with cls._status_cache_lock:
+            cls._status_cache[cache_key] = "disabled"
 
     @staticmethod
     def to_admin_dict(model: ModelInfo) -> Dict[str, Any]:

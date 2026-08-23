@@ -1,6 +1,7 @@
 import json
 import os
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Any
 
 
@@ -27,8 +28,11 @@ class CostService:
             return 0
 
     @classmethod
-    def pricing_table(cls) -> dict[str, dict[str, Decimal]]:
-        raw_pricing = os.environ.get(cls.ENV_NAME, "").strip()
+    @lru_cache(maxsize=8)
+    def _parse_pricing_table(
+        cls,
+        raw_pricing: str,
+    ) -> dict[str, dict[str, Decimal]]:
         if not raw_pricing:
             return {}
         try:
@@ -61,6 +65,11 @@ class CostService:
                 "output": output_price,
             }
         return pricing
+
+    @classmethod
+    def pricing_table(cls) -> dict[str, dict[str, Decimal]]:
+        raw_pricing = os.environ.get(cls.ENV_NAME, "").strip()
+        return cls._parse_pricing_table(raw_pricing)
 
     @classmethod
     def pricing_for(

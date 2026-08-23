@@ -69,6 +69,27 @@ class SQLiteSchemaTest(unittest.TestCase):
 
         self.assertEqual(status, "disabled")
 
+    def test_model_status_reuses_the_process_cache_after_one_lookup(self):
+        model_module = importlib.import_module("services.model_registry")
+        model_module = importlib.reload(model_module)
+        original_connect = model_module.ModelRegistry._connect
+
+        with patch.object(
+            model_module.ModelRegistry,
+            "_connect",
+            wraps=original_connect,
+        ) as connect:
+            first = model_module.ModelRegistry.get_model_status(
+                "opencode:cache-test"
+            )
+            second = model_module.ModelRegistry.get_model_status(
+                "opencode:cache-test"
+            )
+
+        self.assertEqual(first, "available")
+        self.assertEqual(second, "available")
+        self.assertEqual(connect.call_count, 1)
+
     def test_new_sqlite_files_are_owner_only(self):
         sqlite_module = importlib.import_module("services.sqlite_store")
         database_path = sqlite_module.Path(self.temp_dir.name) / "private" / "data.sqlite3"

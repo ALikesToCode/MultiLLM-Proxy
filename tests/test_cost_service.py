@@ -90,6 +90,31 @@ class CostServiceTest(unittest.TestCase):
 
         self.assertEqual(estimate, 0.0)
 
+    def test_pricing_json_is_cached_until_the_environment_value_changes(self):
+        first = json.dumps(
+            {"openai:cache-test": {"input": 7.123, "output": 9.456}}
+        )
+        second = json.dumps(
+            {"openai:cache-test": {"input": 8.123, "output": 10.456}}
+        )
+
+        with patch("services.cost_service.json.loads", wraps=json.loads) as loads:
+            with patch.dict(
+                os.environ,
+                {CostService.ENV_NAME: first},
+                clear=False,
+            ):
+                CostService.estimate("openai:cache-test", 1_000, 1_000)
+                CostService.estimate("openai:cache-test", 1_000, 1_000)
+            with patch.dict(
+                os.environ,
+                {CostService.ENV_NAME: second},
+                clear=False,
+            ):
+                CostService.estimate("openai:cache-test", 1_000, 1_000)
+
+        self.assertEqual(loads.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
