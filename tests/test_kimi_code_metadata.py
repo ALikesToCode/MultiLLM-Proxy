@@ -95,7 +95,12 @@ class KimiCodeMetadataTest(unittest.TestCase):
         self.assertIn("prompt_cache_key", chat_curl)
 
     def test_dashboard_lists_kimi_code_routes_and_operating_boundaries(self):
-        def provider_status(provider, details, _app_config):
+        def provider_status(
+            provider,
+            details,
+            _app_config,
+            provider_stats=None,
+        ):
             return {
                 "name": provider.upper(),
                 "description": details.get("description", ""),

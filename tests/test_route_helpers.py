@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from flask import Flask, Response, g
@@ -12,6 +12,7 @@ from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
     build_cors_preflight_response,
+    check_provider,
     copy_upstream_response_headers,
     extract_bearer_token,
     mask_authorization_header,
@@ -24,6 +25,50 @@ from services.rate_limit_service import LimitDecision
 
 
 class RouteHelperSecretMaskingTest(unittest.TestCase):
+    def test_check_provider_reuses_empty_precomputed_stats(self):
+        metrics_service = Mock()
+
+        with (
+            patch("route_helpers.MetricsService.get_instance", return_value=metrics_service),
+            patch(
+                "route_helpers.ResilienceService.snapshot",
+                return_value={"state": "closed"},
+            ),
+        ):
+            result = check_provider(
+                "unused",
+                {"name": "Unused", "env_key": "UNUSED_API_KEY"},
+                {},
+                provider_stats={},
+            )
+
+        metrics_service.get_provider_stats.assert_not_called()
+        self.assertEqual(result["requests_24h"], 0)
+
+    def test_google_provider_status_does_not_refresh_credentials(self):
+        with (
+            patch.dict(
+                os.environ,
+                {"GOOGLE_APPLICATION_CREDENTIALS_JSON": "configured"},
+                clear=False,
+            ),
+            patch("route_helpers.AuthService.get_google_token") as get_token,
+            patch(
+                "route_helpers.ResilienceService.snapshot",
+                return_value={"state": "closed"},
+            ),
+        ):
+            result = check_provider(
+                "googleai",
+                {"name": "Google AI"},
+                {},
+                provider_stats={},
+            )
+
+        get_token.assert_not_called()
+        self.assertTrue(result["active"])
+        self.assertTrue(result["is_configured"])
+
     def test_mask_secret_keeps_only_short_prefix_and_suffix(self):
         self.assertEqual(mask_secret("sk-1234567890abcdef"), "sk-1...cdef")
 

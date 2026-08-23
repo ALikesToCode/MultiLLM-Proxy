@@ -92,10 +92,19 @@ def build_system_metrics(metrics_service: MetricsService) -> dict:
     }
 
 
-def build_dashboard_analytics(metrics_service: MetricsService, providers: dict, stats: dict | None = None) -> dict:
+def build_dashboard_analytics(
+    metrics_service: MetricsService,
+    providers: dict,
+    stats: dict | None = None,
+    provider_breakdown: list[dict] | None = None,
+) -> dict:
     """Assemble dashboard-focused analytics derived from request and provider data."""
     stats = stats or metrics_service.get_stats()
-    provider_breakdown = metrics_service.get_provider_breakdown()
+    provider_breakdown = (
+        provider_breakdown
+        if provider_breakdown is not None
+        else metrics_service.get_provider_breakdown()
+    )
     recent_failures = metrics_service.get_recent_failures(limit=6)
     circuits = [
         {
@@ -486,6 +495,11 @@ def register_core_routes(app) -> None:
             system = build_system_metrics(metrics_service)
 
             stats = metrics_service.get_stats()
+            provider_breakdown = metrics_service.get_provider_breakdown()
+            provider_stats = {
+                item["provider"]: item
+                for item in provider_breakdown
+            }
             users_info = {
                 "total": AuthService.count_users(),
                 "active_sessions": len(session.keys()) if session else 1,
@@ -494,7 +508,12 @@ def register_core_routes(app) -> None:
 
             for provider, details in PROVIDER_DETAILS.items():
                 try:
-                    providers[provider] = check_provider(provider, details, app.config)
+                    providers[provider] = check_provider(
+                        provider,
+                        details,
+                        app.config,
+                        provider_stats=provider_stats.get(provider, {}),
+                    )
                 except Exception as error:
                     logger.error("Failed to check %s: %s", provider, redact_text(error))
                     errors.append(f"Failed to check {provider}")
@@ -514,7 +533,12 @@ def register_core_routes(app) -> None:
                     }
 
             recent_activity = metrics_service.get_recent_activity()
-            analytics = build_dashboard_analytics(metrics_service, providers, stats)
+            analytics = build_dashboard_analytics(
+                metrics_service,
+                providers,
+                stats,
+                provider_breakdown,
+            )
 
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(
@@ -733,10 +757,20 @@ def register_core_routes(app) -> None:
                         yield f"event: activity\ndata: {json.dumps(recent_activity)}\n\n"
 
                     if current_time % 30 == 0:
+                        provider_breakdown = metrics_service.get_provider_breakdown()
+                        provider_stats = {
+                            item["provider"]: item
+                            for item in provider_breakdown
+                        }
                         providers_info = {}
                         for provider, details in PROVIDER_DETAILS.items():
                             try:
-                                providers_info[provider] = check_provider(provider, details, app.config)
+                                providers_info[provider] = check_provider(
+                                    provider,
+                                    details,
+                                    app.config,
+                                    provider_stats=provider_stats.get(provider, {}),
+                                )
                             except Exception as error:
                                 logger.error(
                                     "Error checking provider %s: %s",
@@ -760,7 +794,8 @@ def register_core_routes(app) -> None:
                         analytics_data = build_dashboard_analytics(
                             metrics_service,
                             providers_info,
-                            stats=metrics_service.get_stats(),
+                            stats=stats_data,
+                            provider_breakdown=provider_breakdown,
                         )
                         yield f"event: analytics\ndata: {json.dumps(analytics_data)}\n\n"
 
@@ -780,7 +815,7 @@ def register_core_routes(app) -> None:
             generate_updates(),
             mimetype="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
             },
         )

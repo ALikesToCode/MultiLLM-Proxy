@@ -49,6 +49,29 @@ class SystemMetricsTest(unittest.TestCase):
         self.assertEqual(circuits["openai"]["mode"], "managed")
         self.assertEqual(analytics["circuit_counts"]["open"], 2)
 
+    def test_dashboard_analytics_reuses_precomputed_traffic_aggregates(self):
+        metrics_service = Mock()
+        metrics_service.get_recent_failures.return_value = []
+        metrics_service.get_cost_summary.return_value = {"currency": "USD"}
+        providers = {"opencode": {"active": True, "is_configured": True}}
+        stats = {"traffic_series": []}
+        breakdown = [{"provider": "opencode", "requests": 9}]
+
+        with patch(
+            "routes.core.ResilienceService.snapshot",
+            return_value={"provider": "opencode", "state": "closed"},
+        ):
+            analytics = build_dashboard_analytics(
+                metrics_service,
+                providers,
+                stats=stats,
+                provider_breakdown=breakdown,
+            )
+
+        self.assertIs(analytics["provider_breakdown"], breakdown)
+        metrics_service.get_stats.assert_not_called()
+        metrics_service.get_provider_breakdown.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

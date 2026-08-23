@@ -1,7 +1,8 @@
 import time
 from collections import deque
-from threading import Lock
 from datetime import datetime, timedelta
+from heapq import nlargest
+from threading import Lock
 from typing import Any, Optional
 
 from flask import g, has_request_context, request
@@ -29,14 +30,24 @@ class MetricsService:
         return cls._instance
     
     @staticmethod
-    def _percentile(values, percentile):
-        """Return a nearest-rank percentile from a numeric series."""
-        if not values:
+    def _percentile_from_ordered(ordered_values, percentile):
+        """Return a nearest-rank percentile from an already sorted series."""
+        if not ordered_values:
             return 0
 
-        ordered = sorted(values)
-        rank = max(0, min(len(ordered) - 1, int(((percentile / 100) * len(ordered)) - 1e-9)))
-        return ordered[rank]
+        rank = max(
+            0,
+            min(
+                len(ordered_values) - 1,
+                int(((percentile / 100) * len(ordered_values)) - 1e-9),
+            ),
+        )
+        return ordered_values[rank]
+
+    @classmethod
+    def _percentile(cls, values, percentile):
+        """Return a nearest-rank percentile from a numeric series."""
+        return cls._percentile_from_ordered(sorted(values), percentile)
 
     def _get_recent_requests(self, hours=24, now=None):
         """Return requests within the requested time window."""
@@ -228,6 +239,7 @@ class MetricsService:
         failed = total - successful
         avg_time = sum(r['response_time'] for r in recent_requests) / total if total > 0 else 0
         latencies = [r['response_time'] for r in recent_requests]
+        ordered_latencies = sorted(latencies)
         provider_totals = {}
         status_code_breakdown = {'2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0, 'other': 0}
 
@@ -249,8 +261,14 @@ class MetricsService:
             'success_rate': round((successful / total * 100) if total > 0 else 0, 1),
             'error_rate': round((failed / total * 100) if total > 0 else 0, 1),
             'avg_response_time': round(avg_time, 2),
-            'p50_response_time': round(self._percentile(latencies, 50), 2),
-            'p95_response_time': round(self._percentile(latencies, 95), 2),
+            'p50_response_time': round(
+                self._percentile_from_ordered(ordered_latencies, 50),
+                2,
+            ),
+            'p95_response_time': round(
+                self._percentile_from_ordered(ordered_latencies, 95),
+                2,
+            ),
             'requests_per_minute': round(total / max(hours * 60, 1), 2),
             'top_provider': top_provider,
             'status_code_breakdown': status_code_breakdown,
@@ -344,11 +362,18 @@ class MetricsService:
     def get_recent_failures(self, limit=5, now=None, hours=24):
         """Return the latest failed requests for operator triage."""
         current_time = now if now is not None else time.time()
-        failures = [
-            request for request in self._get_recent_requests(hours=hours, now=current_time)
-            if request["status_code"] >= 400
-        ]
-        failures = sorted(failures, key=lambda item: item["timestamp"], reverse=True)[:limit]
+        failures = nlargest(
+            limit,
+            (
+                request
+                for request in self._get_recent_requests(
+                    hours=hours,
+                    now=current_time,
+                )
+                if request["status_code"] >= 400
+            ),
+            key=lambda item: item["timestamp"],
+        )
 
         return [
             {
@@ -366,11 +391,11 @@ class MetricsService:
     def get_request_records(self, limit=100, now=None, hours=24):
         """Return recent request-level records without prompt or response bodies."""
         current_time = now if now is not None else time.time()
-        records = sorted(
+        records = nlargest(
+            limit,
             self._get_recent_requests(hours=hours, now=current_time),
             key=lambda item: item["timestamp"],
-            reverse=True,
-        )[:limit]
+        )
 
         return [
             {
@@ -496,7 +521,11 @@ class MetricsService:
     
     def get_recent_activity(self, limit=10):
         """Get recent activity for the status page"""
-        recent = sorted(self.requests, key=lambda x: x['timestamp'], reverse=True)[:limit]
+        recent = nlargest(
+            limit,
+            self.requests,
+            key=lambda item: item['timestamp'],
+        )
         
         return [{
             'time': datetime.fromtimestamp(r['timestamp']).strftime('%Y-%m-%d %H:%M:%S'),

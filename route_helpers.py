@@ -1,5 +1,6 @@
 import inspect
 import logging
+import os
 import re
 import time
 from functools import wraps
@@ -522,16 +523,22 @@ def api_auth_required(func: Callable) -> Callable:
     return wrapper
 
 
-def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str, Any]) -> Dict[str, Any]:
+def check_provider(
+    provider: str,
+    details: Dict[str, Any],
+    app_config: Dict[str, Any],
+    provider_stats: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Check the status of a provider by retrieving stats and verifying tokens.
     """
     metrics_service = MetricsService.get_instance()
-    provider_stats = {}
-    try:
-        provider_stats = metrics_service.get_provider_stats(provider)
-    except Exception as error:
-        logger.error("Error fetching provider stats for %s: %s", provider, error)
+    if provider_stats is None:
+        provider_stats = {}
+        try:
+            provider_stats = metrics_service.get_provider_stats(provider)
+        except Exception as error:
+            logger.error("Error fetching provider stats for %s: %s", provider, error)
 
     circuit = ResilienceService.snapshot(provider)
     circuit["mode"] = provider_circuit_mode(provider)
@@ -539,7 +546,10 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
         "name": provider.upper(),
         "description": details.get("description", ""),
         "endpoints": details.get("endpoints", []),
-        "requests_24h": provider_stats.get("requests_24h", 0),
+        "requests_24h": provider_stats.get(
+            "requests_24h",
+            provider_stats.get("requests", 0),
+        ),
         "success_rate": provider_stats.get("success_rate", 0),
         "error_rate": provider_stats.get("error_rate", 0),
         "errors": provider_stats.get("errors", 0),
@@ -552,8 +562,14 @@ def check_provider(provider: str, details: Dict[str, Any], app_config: Dict[str,
 
     try:
         if provider == "googleai":
-            token = AuthService.get_google_token()
-            if not token:
+            credential_names = AuthService.provider_credential_env_names(
+                provider,
+            )
+            is_configured = any(
+                bool((os.environ.get(name) or "").strip())
+                for name in credential_names
+            )
+            if not is_configured:
                 return {
                     **base_payload,
                     "active": False,

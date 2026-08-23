@@ -107,7 +107,12 @@ class CodexEasyMetadataTest(unittest.TestCase):
         self.assertIn("X-Grok-Conv-Id", chat_curl)
 
     def test_rendered_dashboard_lists_codex_everywhere_routes_and_boundaries(self):
-        def provider_status(provider, details, _app_config):
+        def provider_status(
+            provider,
+            details,
+            _app_config,
+            provider_stats=None,
+        ):
             return {
                 "name": provider.upper(),
                 "description": details.get("description", ""),

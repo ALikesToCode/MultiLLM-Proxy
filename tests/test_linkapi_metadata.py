@@ -87,7 +87,12 @@ class LinkAPIMetadataTest(unittest.TestCase):
         self.assertTrue(details["supported_features"]["images"])
 
     def test_rendered_dashboard_lists_linkapi_native_routes_and_caller_auth(self):
-        def provider_status(provider, details, _app_config):
+        def provider_status(
+            provider,
+            details,
+            _app_config,
+            provider_stats=None,
+        ):
             return {
                 "name": provider.upper(),
                 "description": details.get("description", ""),
