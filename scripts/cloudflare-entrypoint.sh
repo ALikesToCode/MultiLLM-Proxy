@@ -12,7 +12,7 @@ fi
 
 bind_port="${PORT:-${SERVER_PORT:-8080}}"
 
-set -- "app:create_app()" \
+set -- "app:app" \
   --bind "0.0.0.0:${bind_port}" \
   --workers "${GUNICORN_WORKERS:-1}" \
   --threads "${GUNICORN_THREADS:-8}" \

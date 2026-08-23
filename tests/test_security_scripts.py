@@ -47,6 +47,20 @@ class SecurityScriptTest(unittest.TestCase):
         self.assertNotIn("/tmp/google-credentials.json", source)
         self.assertNotIn("export HOME=/tmp", source)
 
+    def test_runtime_entrypoints_reuse_the_single_module_app_instance(self):
+        cloudflare = (
+            REPOSITORY_ROOT / "scripts" / "cloudflare-entrypoint.sh"
+        ).read_text(encoding="utf-8")
+        wsgi = (REPOSITORY_ROOT / "wsgi.py").read_text(encoding="utf-8")
+        vercel = (REPOSITORY_ROOT / "index.py").read_text(encoding="utf-8")
+
+        self.assertIn('set -- "app:app"', cloudflare)
+        self.assertNotIn("app:create_app()", cloudflare)
+        self.assertIn("from app import app", wsgi)
+        self.assertNotIn("create_app()", wsgi)
+        self.assertIn("from app import app", vercel)
+        self.assertNotIn("app = create_app()", vercel)
+
     def test_deployment_shell_scripts_have_valid_syntax(self):
         for shell, script in (
             ("bash", "get_gemini_key.sh"),

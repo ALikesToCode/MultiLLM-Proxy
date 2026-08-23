@@ -13,8 +13,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from google.auth.transport.requests import Request as GoogleAuthRequest
-from google.oauth2 import service_account
 from flask import session
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -619,6 +617,9 @@ class AuthService:
         credentials_path = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
 
         if credentials_json:
+            # Keep optional Google modules off the default container cold start.
+            from google.oauth2 import service_account  # noqa: PLC0415
+
             credentials_info = json.loads(credentials_json)
             return service_account.Credentials.from_service_account_info(
                 credentials_info,
@@ -626,6 +627,9 @@ class AuthService:
             )
 
         if credentials_path and Path(credentials_path).is_file():
+            # Keep optional Google modules off the default container cold start.
+            from google.oauth2 import service_account  # noqa: PLC0415
+
             return service_account.Credentials.from_service_account_file(
                 credentials_path,
                 scopes=scopes,
@@ -649,8 +653,11 @@ class AuthService:
 
                 credentials = cls._build_google_service_account_credentials()
                 if credentials is not None:
+                    # Import transport only when service-account refresh is used.
+                    from google.auth.transport import requests as google_auth_requests  # noqa: E501, PLC0415
+
                     logger.info("Getting new Google Cloud token via service account credentials")
-                    credentials.refresh(GoogleAuthRequest())
+                    credentials.refresh(google_auth_requests.Request())
                     token = (credentials.token or "").strip()
                     expiry = credentials.expiry
 

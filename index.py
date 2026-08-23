@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 init_vercel()
 
 # Import after Vercel env initialization because app import validates secrets.
-from app import create_app
-
-# Create Flask app
-app = create_app()
+from app import app
 
 def handler(request):
     """Handle Vercel serverless function requests."""
