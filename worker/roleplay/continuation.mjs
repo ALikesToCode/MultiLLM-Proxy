@@ -139,9 +139,10 @@ export function createRoleplayContinuation({
       reason,
       contractAnalysis,
     );
+    const nextEstimatedInputTokens = estimateTokens(nextMessages);
     const [nextCandidate] = prepareRoleplayCandidates(
       [candidate],
-      estimateTokens(nextMessages),
+      nextEstimatedInputTokens,
       null,
       settings,
     );
@@ -165,6 +166,7 @@ export function createRoleplayContinuation({
       nextMessages,
       settings,
       parsed.promptCache,
+      nextEstimatedInputTokens,
     );
     let attempted;
     try {

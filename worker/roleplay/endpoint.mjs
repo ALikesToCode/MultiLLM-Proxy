@@ -111,8 +111,12 @@ async function readBoundedJsonRequest(request, maximumBytes) {
   if (!bytes.byteLength) {
     throw new RoleplayRequestError("Request body must not be empty");
   }
+  const bodyText = new TextDecoder().decode(bytes);
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return {
+      bodyText,
+      payload: JSON.parse(bodyText),
+    };
   } catch {
     throw new RoleplayRequestError("Request body must be valid JSON");
   }
@@ -247,7 +251,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
   }
 
   try {
-    const payload = await readBoundedJsonRequest(
+    const { bodyText, payload } = await readBoundedJsonRequest(
       request,
       settings.maxRequestBytes,
     );
@@ -272,7 +276,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
       new Request("https://roleplay.internal/turn", {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: bodyText,
         signal: request.signal,
       }),
     );
@@ -631,10 +635,12 @@ export class RoleplaySession extends DurableObject {
     }
 
     const projectedStoredBytes =
-      new TextEncoder().encode(
-        JSON.stringify(persistedConversation),
-      ).byteLength +
-      assistantStorageReserveBytes(parsed, settings);
+      persistedConversation === fullConversation
+        ? plan.projectedStoredBytes
+        : new TextEncoder().encode(
+            JSON.stringify(persistedConversation),
+          ).byteLength +
+          assistantStorageReserveBytes(parsed, settings);
     if (
       memoryEnabled &&
       projectedStoredBytes > settings.maxStoredBytes
@@ -651,12 +657,19 @@ export class RoleplaySession extends DurableObject {
       };
     }
 
-    const roleplayMessages = buildRoleplayMessages(
-      memoryEnabled ? generationState : memoryState,
-      parsed,
-      conversation,
-    );
-    const estimatedInputTokens = estimateTokens(roleplayMessages);
+    const canReuseInitialAnalysis =
+      generationState === memoryState &&
+      conversation === fullConversation;
+    const roleplayMessages = canReuseInitialAnalysis
+      ? plan.roleplayMessages
+      : buildRoleplayMessages(
+          memoryEnabled ? generationState : memoryState,
+          parsed,
+          conversation,
+        );
+    const estimatedInputTokens = canReuseInitialAnalysis
+      ? plan.estimatedTokens
+      : estimateTokens(roleplayMessages);
     const estimatedInputBefore = Math.max(
       estimatedInputTokens,
       plan.estimatedTokens + checkpointSavedTokens,
@@ -694,6 +707,7 @@ export class RoleplaySession extends DurableObject {
           roleplayMessages,
           settings,
           parsed.promptCache,
+          estimatedInputTokens,
         ),
       this.env,
       settings,

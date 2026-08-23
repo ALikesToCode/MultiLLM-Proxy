@@ -144,18 +144,12 @@ export function isDerivedRoleplaySessionId(sessionId) {
   return DERIVED_SESSION_ID_PATTERN.test(sessionId);
 }
 
-async function timingSafeTokenMatch(providedToken, expectedToken) {
-  const encoder = new TextEncoder();
-  const [providedDigest, expectedDigest] = await Promise.all([
-    crypto.subtle.digest(
-      "SHA-256",
-      encoder.encode(String(providedToken ?? "")),
-    ),
-    crypto.subtle.digest(
-      "SHA-256",
-      encoder.encode(String(expectedToken ?? "")),
-    ),
-  ]);
+function timingSafeDigestMatch(
+  providedToken,
+  expectedToken,
+  providedDigest,
+  expectedDigest,
+) {
   const providedBytes = new Uint8Array(providedDigest);
   const expectedBytes = new Uint8Array(expectedDigest);
 
@@ -185,10 +179,33 @@ export function hasRoleplayAuthentication(env) {
 }
 
 export async function isAuthorizedRoleplayToken(providedToken, env) {
-  const [roleplayMatch, adminMatch] = await Promise.all([
-    timingSafeTokenMatch(providedToken, env.ROLEPLAY_API_KEY),
-    timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY),
+  const encoder = new TextEncoder();
+  const [providedDigest, roleplayDigest, adminDigest] = await Promise.all([
+    crypto.subtle.digest(
+      "SHA-256",
+      encoder.encode(String(providedToken ?? "")),
+    ),
+    crypto.subtle.digest(
+      "SHA-256",
+      encoder.encode(String(env.ROLEPLAY_API_KEY ?? "")),
+    ),
+    crypto.subtle.digest(
+      "SHA-256",
+      encoder.encode(String(env.ADMIN_API_KEY ?? "")),
+    ),
   ]);
+  const roleplayMatch = timingSafeDigestMatch(
+    providedToken,
+    env.ROLEPLAY_API_KEY,
+    providedDigest,
+    roleplayDigest,
+  );
+  const adminMatch = timingSafeDigestMatch(
+    providedToken,
+    env.ADMIN_API_KEY,
+    providedDigest,
+    adminDigest,
+  );
   return roleplayMatch || adminMatch;
 }
 

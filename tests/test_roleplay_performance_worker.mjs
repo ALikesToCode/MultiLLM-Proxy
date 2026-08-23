@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  compactionPlan,
+} from "../worker/roleplay/memory.mjs";
+import { applyRoleplayPromptCache } from "../worker/roleplay/prompt-cache.mjs";
+
+import {
   completionResponse,
   handleRoleplayEdgeRequest,
   makeRoleplayEnv,
@@ -15,6 +20,95 @@ function opencodeOnlyFixture() {
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
   });
 }
+
+test("roleplay compaction planning exposes reusable hot-path analysis", () => {
+  const state = {
+    directives: [{ role: "system", content: "Keep continuity." }],
+    memory: null,
+  };
+  const parsed = {
+    character: {},
+    lore: [],
+    maxTokens: 8192,
+    memory: { mode: "auto" },
+    outputContract: null,
+    responseLength: "balanced",
+  };
+  const conversation = [
+    { role: "user", content: "Continue from the exact current scene." },
+  ];
+  const settings = {
+    compactTriggerTokens: 128_000,
+    hardInputTokens: 128_000,
+    keepRecentMessages: 8,
+    maxStoredBytes: 640_000,
+  };
+
+  const plan = compactionPlan(state, parsed, conversation, settings);
+
+  assert.ok(Array.isArray(plan.roleplayMessages));
+  assert.ok(plan.roleplayMessages.length > conversation.length);
+  assert.ok(plan.estimatedTokens > 0);
+  assert.ok(plan.projectedStoredBytes > 0);
+});
+
+test("prompt-cache policy reuses a precomputed input estimate", () => {
+  const prepared = applyRoleplayPromptCache(
+    { model: "glm-5.2", messages: [] },
+    { provider: "opencode" },
+    [],
+    { promptCacheEnabled: true, promptCacheMinTokens: 1 },
+    true,
+    12_345,
+  );
+
+  assert.equal(prepared.promptCache.estimatedInputTokens, 12_345);
+});
+
+test("roleplay edge forwards the already-validated request body without reserializing it", async () => {
+  const originalBody = JSON.stringify(
+    {
+      session_id: "session-body-reuse",
+      model: "roleplay:5.2",
+      stream: false,
+      messages: [{ role: "user", content: "Preserve this body." }],
+    },
+    null,
+    2,
+  );
+  let forwardedBody = "";
+  const env = {
+    ADMIN_API_KEY: "admin-roleplay-key",
+    ROLEPLAY_API_KEY: "janitor-roleplay-key",
+    ROLEPLAY_SESSION: {
+      getByName() {
+        return {
+          async fetch(request) {
+            forwardedBody = await request.text();
+            return new Response("{}", {
+              headers: { "Content-Type": "application/json" },
+            });
+          },
+        };
+      },
+    },
+  };
+
+  const response = await handleRoleplayEdgeRequest(
+    new Request("https://proxy.example/v1/roleplay", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer admin-roleplay-key",
+        "Content-Type": "application/json",
+      },
+      body: originalBody,
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(forwardedBody, originalBody);
+});
 
 test("warm roleplay turns avoid redundant durable storage operations", async () => {
   const fixture = opencodeOnlyFixture();
@@ -203,4 +297,100 @@ test("roleplay SSE disables intermediary response transformation", async () => {
     fixture.env,
   );
   assert.equal((await completedMetrics.json()).pending_turns, 0);
+});
+
+test("roleplay streams story text before validating the final image prompt", async () => {
+  const fixture = opencodeOnlyFixture();
+  let releaseRemainder;
+  const remainderReady = new Promise((resolve) => {
+    releaseRemainder = resolve;
+  });
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    const frame = (content, finishReason = null) =>
+      `data: ${JSON.stringify({
+        id: "chatcmpl-performance-contract-stream",
+        model: payload.model,
+        choices: [
+          {
+            index: 0,
+            delta: content === null ? {} : { content },
+            finish_reason: finishReason,
+          },
+        ],
+      })}\n\n`;
+    let step = 0;
+    return new Response(
+      new ReadableStream({
+        async pull(controller) {
+          if (step === 0) {
+            step += 1;
+            controller.enqueue(
+              new TextEncoder().encode(
+                frame("🌅 Morning | Academy | Clear\n\n*Story begins.*\n"),
+              ),
+            );
+            return;
+          }
+          await remainderReady;
+          controller.enqueue(
+            new TextEncoder().encode(
+              frame(
+                "\nIMAGE PROMPT:\nCamera: eye level.\nPrimary subject: adult woman.\nSetting: classroom.\nLighting: daylight.\nComposition: medium shot.",
+              ) +
+                frame(null, "stop") +
+                "data: [DONE]\n\n",
+            ),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-performance-contract-streaming",
+        model: "roleplay:5.2",
+        stream: true,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Every story response must end with exactly one IMAGE PROMPT block. " +
+              "Use Camera, Primary subject, Setting, Lighting, and Composition fields.",
+          },
+          { role: "user", content: "Begin." },
+        ],
+      }),
+      fixture.env,
+    ),
+  );
+
+  const reader = response.body.getReader();
+  const first = await Promise.race([
+    reader.read(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("story text was buffered until validation")),
+        50,
+      ),
+    ),
+  ]);
+  const firstText = new TextDecoder().decode(first.value);
+  assert.match(firstText, /Story begins/);
+  assert.doesNotMatch(firstText, /IMAGE PROMPT/);
+
+  releaseRemainder();
+  let remainder = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      break;
+    }
+    remainder += new TextDecoder().decode(chunk.value);
+  }
+  assert.match(remainder, /IMAGE PROMPT/);
+  assert.equal((firstText + remainder).match(/IMAGE PROMPT:/g)?.length, 1);
+  await fixture.waitForBackgroundWork();
 });

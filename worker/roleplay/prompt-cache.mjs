@@ -22,8 +22,13 @@ export function applyRoleplayPromptCache(
   messages,
   settings,
   requestEnabled = true,
+  precomputedInputTokens = null,
 ) {
-  const estimatedInputTokens = estimateInputTokens(messages);
+  const estimatedInputTokens =
+    Number.isSafeInteger(precomputedInputTokens) &&
+    precomputedInputTokens > 0
+      ? precomputedInputTokens
+      : estimateInputTokens(messages);
   if (!settings.promptCacheEnabled || !requestEnabled) {
     return result(
       payload,
