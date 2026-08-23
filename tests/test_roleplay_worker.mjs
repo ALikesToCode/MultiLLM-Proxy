@@ -974,7 +974,6 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
     "Bearer nanogpt-rejected-key",
     "Bearer nanogpt-working-key",
     "Bearer nanogpt-working-key",
-    "Bearer nanogpt-working-key",
   ]);
   assert.deepEqual(requestedModels, [
     "kimi-k2.6",
@@ -1039,7 +1038,6 @@ test("roleplay advances to the next NanoGPT key after insufficient balance", asy
   assert.deepEqual(responses.map((response) => response.status), [200, 200]);
   assert.equal(responses[0].headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.deepEqual(authorizationAttempts, [
-    "Bearer nanogpt-empty-key",
     "Bearer nanogpt-empty-key",
     "Bearer nanogpt-funded-key",
     "Bearer nanogpt-funded-key",

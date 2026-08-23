@@ -16,6 +16,7 @@ function encodedBytes(value) {
 class SizeBoundStorage {
   constructor() {
     this.values = new Map();
+    this.writes = [];
   }
 
   async get(key) {
@@ -23,6 +24,7 @@ class SizeBoundStorage {
   }
 
   async put(entries) {
+    this.writes.push(Object.keys(entries).sort());
     for (const [key, value] of Object.entries(entries)) {
       assert.ok(
         encodedBytes(value) <= MAX_TEST_VALUE_BYTES,
@@ -32,6 +34,22 @@ class SizeBoundStorage {
     }
   }
 }
+
+test("unchanged message partitions are not rewritten with core state", async () => {
+  const storage = new SizeBoundStorage();
+  const initial = {
+    ...createInitialRoleplayState(),
+    messages: [{ role: "user", content: "Remember this." }],
+    directives: [{ role: "system", content: "Stay in character." }],
+  };
+  await saveRoleplayState(storage, initial);
+  storage.writes = [];
+
+  const updated = { ...initial, turns: 1 };
+  await saveRoleplayState(storage, updated, initial);
+
+  assert.deepEqual(storage.writes, [["roleplay-session"]]);
+});
 
 test("long protected directives are sharded and reconstructed losslessly", async () => {
   const storage = new SizeBoundStorage();

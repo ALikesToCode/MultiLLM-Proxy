@@ -10,13 +10,21 @@ class FakeStorage {
   constructor() {
     this.values = new Map();
     this.alarm = null;
+    this.operations = {
+      get: 0,
+      put: 0,
+      setAlarm: 0,
+      deleteAll: 0,
+    };
   }
 
   async get(key) {
+    this.operations.get += 1;
     return structuredClone(this.values.get(key));
   }
 
   async put(key, value) {
+    this.operations.put += 1;
     if (key && typeof key === "object" && !Array.isArray(key)) {
       for (const [entryKey, entryValue] of Object.entries(key)) {
         this.values.set(entryKey, structuredClone(entryValue));
@@ -27,12 +35,20 @@ class FakeStorage {
   }
 
   async setAlarm(value) {
+    this.operations.setAlarm += 1;
     this.alarm = value;
   }
 
   async deleteAll() {
+    this.operations.deleteAll += 1;
     this.values.clear();
     this.alarm = null;
+  }
+
+  resetOperations() {
+    for (const key of Object.keys(this.operations)) {
+      this.operations[key] = 0;
+    }
   }
 }
 

@@ -85,6 +85,14 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/session-storage.mjs",
     import.meta.url,
   );
+  const sessionMetricsUrl = new URL(
+    "../../worker/roleplay/session-metrics.mjs",
+    import.meta.url,
+  );
+  const stateRuntimeUrl = new URL(
+    "../../worker/roleplay/state-runtime.mjs",
+    import.meta.url,
+  );
   const validationUrl = new URL(
     "../../worker/roleplay/validation.mjs",
     import.meta.url,
@@ -134,6 +142,8 @@ export async function roleplayModuleUrl() {
     promptCacheSource,
     reasoningSource,
     sessionStorageSource,
+    sessionMetricsSource,
+    stateRuntimeSource,
     validationSource,
     transportSource,
     reasoningOutputSource,
@@ -163,6 +173,8 @@ export async function roleplayModuleUrl() {
       readFile(promptCacheUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
       readFile(sessionStorageUrl, "utf8"),
+      readFile(sessionMetricsUrl, "utf8"),
+      readFile(stateRuntimeUrl, "utf8"),
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(reasoningOutputUrl, "utf8"),
@@ -263,6 +275,12 @@ export async function roleplayModuleUrl() {
       `from "${messageFragmentsDataUrl}";`,
     ),
   );
+  const stateRuntimeDataUrl = dataModuleUrl(
+    stateRuntimeSource.replace(
+      'from "./session-storage.mjs";',
+      `from "${sessionStorageDataUrl}";`,
+    ),
+  );
   const memoryDataUrl = dataModuleUrl(
     memorySource
       .replace(
@@ -301,6 +319,18 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./message-fragments.mjs";',
         `from "${messageFragmentsDataUrl}";`,
+      ),
+  );
+  const sessionMetricsDataUrl = dataModuleUrl(
+    sessionMetricsSource
+      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+      .replace(
+        'from "./state-runtime.mjs";',
+        `from "${stateRuntimeDataUrl}";`,
+      )
+      .replace(
+        'from "./transport.mjs";',
+        `from "${transportDataUrl}";`,
       ),
   );
   const nonstreamRepairDataUrl = dataModuleUrl(
@@ -399,8 +429,12 @@ export async function roleplayModuleUrl() {
       `from "${reasoningOutputDataUrl}";`,
     )
     .replace(
-      'from "./session-storage.mjs";',
-      `from "${sessionStorageDataUrl}";`,
+      'from "./session-metrics.mjs";',
+      `from "${sessionMetricsDataUrl}";`,
+    )
+    .replace(
+      'from "./state-runtime.mjs";',
+      `from "${stateRuntimeDataUrl}";`,
     )
     .replace('from "./transport.mjs";', `from "${transportDataUrl}";`)
     .replace('from "./streaming.mjs";', `from "${streamingDataUrl}";`);

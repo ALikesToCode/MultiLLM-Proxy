@@ -62,12 +62,20 @@ function storedDirectives(stateDirectives, legacyDirectives) {
 }
 
 export function prepareProtectedContext(state, parsed, memoryEnabled) {
-  const stored = splitProtectedMessages(state.messages);
+  const stateMessages = Array.isArray(state.messages) ? state.messages : [];
+  const stateDirectives = Array.isArray(state.directives)
+    ? state.directives
+    : [];
+  const stored = splitProtectedMessages(stateMessages);
   const incoming = splitProtectedMessages(parsed.messages);
-  const retainedDirectives = storedDirectives(
-    state.directives,
-    stored.directives,
-  );
+  const storedDialogue = stored.directives.length
+    ? stored.dialogue
+    : stateMessages;
+  const retainedDirectives =
+    stored.directives.length === 0 &&
+    stateDirectives.every(isProtectedDirective)
+      ? stateDirectives
+      : storedDirectives(stateDirectives, stored.directives);
 
   let activeDirectives = incoming.directives;
   if (memoryEnabled && parsed.historyMode === "append") {
@@ -94,7 +102,7 @@ export function prepareProtectedContext(state, parsed, memoryEnabled) {
       ? {
           ...state,
           directives: activeDirectives,
-          messages: stored.dialogue,
+          messages: storedDialogue,
         }
       : state,
   };

@@ -81,7 +81,7 @@ export async function revalidateNanoCredential(
     ? state.credentialUses?.nanogpt?.[activeCredential] ?? 0
     : 0;
   const shouldCheck =
-    (!activeCredential && credentials.length > 1) ||
+    Boolean(activeCredential) &&
     activeUses >= settings.nanogptKeyCheckEveryRequests;
   if (!shouldCheck) {
     return state;

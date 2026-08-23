@@ -39,6 +39,7 @@ export function logRoleplayStreamCompletion({
   completion,
   headerMs,
   inputTokensSaved,
+  timings = {},
 }) {
   console.log(
     JSON.stringify({
@@ -49,6 +50,15 @@ export function logRoleplayStreamCompletion({
       reason: completion.reason,
       finishReason: completion.finishReason || undefined,
       headerMs: Math.round(headerMs),
+      queueMs: Math.round(timings.queueMs ?? 0),
+      stateLoadMs: Math.round(timings.stateLoadMs ?? 0),
+      credentialCheckMs: Math.round(timings.credentialCheckMs ?? 0),
+      preparationMs: Math.round(timings.preparationMs ?? 0),
+      totalToHeadersMs: Math.round(timings.totalToHeadersMs ?? headerMs),
+      stateCacheHit: Boolean(timings.stateCacheHit),
+      credentialCheckPerformed: Boolean(
+        timings.credentialCheckPerformed,
+      ),
       ttfbMs: Math.round(completion.ttfbMs),
       streamMs: Math.round(completion.streamMs),
       heartbeatCount: completion.heartbeatCount,
@@ -72,6 +82,7 @@ export function logRoleplayNonStreamCompletion({
   candidate,
   parsed,
   completion,
+  timings = {},
 }) {
   console.log(
     JSON.stringify({
@@ -83,6 +94,15 @@ export function logRoleplayNonStreamCompletion({
       finishReason: completion.finishReason || undefined,
       continuationCount: completion.continuationCount,
       upstreamCallCount: completion.upstreamCallCount,
+      queueMs: Math.round(timings.queueMs ?? 0),
+      stateLoadMs: Math.round(timings.stateLoadMs ?? 0),
+      credentialCheckMs: Math.round(timings.credentialCheckMs ?? 0),
+      preparationMs: Math.round(timings.preparationMs ?? 0),
+      totalToHeadersMs: Math.round(timings.totalToHeadersMs ?? 0),
+      stateCacheHit: Boolean(timings.stateCacheHit),
+      credentialCheckPerformed: Boolean(
+        timings.credentialCheckPerformed,
+      ),
       ...contractTelemetry(
         parsed.outputContract,
         completion.contractAnalysis,

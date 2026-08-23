@@ -30,6 +30,7 @@ const RESPONSE_HEADER_PREFIXES = [
 
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_COMPACTION_RESPONSE_BYTES = 512 * 1024;
+const MAX_LATENCY_SAMPLES = 64;
 
 export function jsonResponse(body, init = {}) {
   const headers = new Headers(init.headers);
@@ -142,6 +143,7 @@ export function decorateRoleplayHeaders(
   compactionMs = 0,
   totalToHeadersMs = headerMs,
   optimization = {},
+  timings = {},
 ) {
   const inputBefore = Math.max(
     estimatedInputTokens,
@@ -197,12 +199,53 @@ export function decorateRoleplayHeaders(
     "Server-Timing",
     [
       `roleplay_queue;dur=${Math.max(0, queueMs).toFixed(1)}`,
+      `roleplay_state_load;dur=${Math.max(0, timings.stateLoadMs ?? 0).toFixed(1)}`,
+      `roleplay_credentials;dur=${Math.max(0, timings.credentialCheckMs ?? 0).toFixed(1)}`,
       `roleplay_compaction;dur=${Math.max(0, compactionMs).toFixed(1)}`,
+      `roleplay_prepare;dur=${Math.max(0, timings.preparationMs ?? 0).toFixed(1)}`,
       `roleplay_upstream_headers;dur=${Math.max(0, headerMs).toFixed(1)}`,
       `roleplay_total_to_headers;dur=${Math.max(0, totalToHeadersMs).toFixed(1)}`,
     ].join(", "),
   );
+  headers.set(
+    "X-Roleplay-State-Cache",
+    timings.stateCacheHit ? "hit" : "miss",
+  );
+  headers.set(
+    "X-Roleplay-Credential-Check",
+    timings.credentialCheckPerformed ? "performed" : "skipped",
+  );
   return headers;
+}
+
+export function createRoleplayTimingSummary({
+  queueMs,
+  stateLoadMs,
+  credentialCheckMs,
+  compactionMs,
+  headerMs,
+  turnStartedAt,
+  stateCacheHit,
+  credentialCheckPerformed,
+}) {
+  const totalToHeadersMs = queueMs + performance.now() - turnStartedAt;
+  return {
+    queueMs,
+    stateLoadMs,
+    credentialCheckMs,
+    preparationMs: Math.max(
+      0,
+      totalToHeadersMs -
+        queueMs -
+        stateLoadMs -
+        credentialCheckMs -
+        compactionMs -
+        headerMs,
+    ),
+    totalToHeadersMs,
+    stateCacheHit,
+    credentialCheckPerformed,
+  };
 }
 
 function updateEwma(current, value, alpha = 0.25) {
@@ -210,6 +253,45 @@ function updateEwma(current, value, alpha = 0.25) {
     return value;
   }
   return current * (1 - alpha) + value * alpha;
+}
+
+function appendLatencySample(values, value) {
+  if (!Number.isFinite(value) || value < 0) {
+    return Array.isArray(values) ? values : [];
+  }
+  return [...(Array.isArray(values) ? values : []), value].slice(
+    -MAX_LATENCY_SAMPLES,
+  );
+}
+
+function percentile(values, percentileValue) {
+  if (!Array.isArray(values) || !values.length) {
+    return null;
+  }
+  const ordered = [...values].sort((left, right) => left - right);
+  const index = Math.max(
+    0,
+    Math.ceil((percentileValue / 100) * ordered.length) - 1,
+  );
+  return Math.round(ordered[index]);
+}
+
+export function modelLatencyPercentiles(stats) {
+  const ttfb = stats?.ttfbSamplesMs ?? [];
+  const total = stats?.totalSamplesMs ?? [];
+  return {
+    sample_count: Math.min(ttfb.length, total.length),
+    ttfb_ms: {
+      p50: percentile(ttfb, 50),
+      p95: percentile(ttfb, 95),
+      p99: percentile(ttfb, 99),
+    },
+    total_ms: {
+      p50: percentile(total, 50),
+      p95: percentile(total, 95),
+      p99: percentile(total, 99),
+    },
+  };
 }
 
 export function recordModelResult(
@@ -282,6 +364,12 @@ export function recordModelResult(
         ewmaTotalMs: success
           ? updateEwma(previous.ewmaTotalMs, totalMs)
           : previous.ewmaTotalMs,
+        ttfbSamplesMs: success
+          ? appendLatencySample(previous.ttfbSamplesMs, ttfbMs)
+          : previous.ttfbSamplesMs,
+        totalSamplesMs: success
+          ? appendLatencySample(previous.totalSamplesMs, totalMs)
+          : previous.totalSamplesMs,
         lastStatus: status,
         lastUsedAt: now,
       },

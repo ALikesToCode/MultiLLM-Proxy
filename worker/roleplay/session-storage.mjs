@@ -29,6 +29,8 @@ export function createInitialRoleplayState() {
     compactions: 0,
     localCompactions: 0,
     inputTokensSaved: 0,
+    stateCacheHits: 0,
+    stateCacheMisses: 0,
     compactionFailures: 0,
     compactionBackoffUntil: 0,
     storageOverflow: false,
@@ -170,11 +172,21 @@ export async function loadRoleplayState(storage) {
   });
 }
 
-export async function saveRoleplayState(storage, state) {
+export async function saveRoleplayState(
+  storage,
+  state,
+  previousState = null,
+) {
   const { directives, messages, ...core } = state;
-  await storage.put({
-    [STATE_KEY]: core,
-    [MESSAGES_KEY]: messages,
-    ...directiveStorageEntries(Array.isArray(directives) ? directives : []),
-  });
+  const entries = { [STATE_KEY]: core };
+  if (!previousState || previousState.messages !== messages) {
+    entries[MESSAGES_KEY] = messages;
+  }
+  if (!previousState || previousState.directives !== directives) {
+    Object.assign(
+      entries,
+      directiveStorageEntries(Array.isArray(directives) ? directives : []),
+    );
+  }
+  await storage.put(entries);
 }

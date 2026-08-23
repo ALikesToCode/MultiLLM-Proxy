@@ -27,6 +27,10 @@ the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
 advances to the next key. A `402` insufficient-balance rejection does the same.
 The successful key identifier—not the secret—is kept
 in that Durable Object's session state and is preferred on later turns.
+Fresh sessions begin with `NANOGPT_PREFERRED_KEY_INDEX` when it is configured;
+they do not delay generation with a separate catalog probe. Definite
+generation rejections still rotate immediately, and the remembered key is
+revalidated after `NANOGPT_KEY_CHECK_EVERY_REQUESTS` successful uses.
 NanoGPT GLM requests use the catalog's exact
 `zai-org/glm-5.2:thinking` ID and its documented `max` reasoning effort.
 
@@ -159,7 +163,9 @@ During a quiet streaming interval, the Worker emits a valid SSE comment every
 10 seconds. These keepalives carry no model content and let clients distinguish
 long Kimi/GLM thinking from a dead connection. The Worker imposes no active
 stream idle deadline; it continues until the provider finishes or the client
-disconnects. Ordinary provider data events are forwarded unchanged; only an
+disconnects. Streaming responses use `Cache-Control: no-cache, no-transform`
+so intermediaries do not transform or coalesce the SSE body. Ordinary provider
+data events are forwarded unchanged; only an
 intermediate output-limit terminator is rewritten for continuation. A stream is
 recorded as complete only after `[DONE]` or a non-`length` finish reason. In
 unlimited mode, an intermediate `finish_reason: "length"` and its `[DONE]` are
@@ -362,14 +368,27 @@ described above. The Worker also adds:
 - `X-Roleplay-Estimated-Input-Tokens`
 - `X-Roleplay-Max-Output-Tokens`
 - `X-Roleplay-Fallback-Count`
+- `X-Roleplay-State-Cache`
+- `X-Roleplay-Credential-Check`
 - `Server-Timing`
 
 These headers are exposed through CORS.
 
-`Server-Timing` separates session queue time, memory compaction, upstream
-header wait, and total time to response headers. This makes slow compaction,
-same-session serialization, and provider startup independently visible without
-logging roleplay content.
+`Server-Timing` separates session queue time, Durable Object state loading,
+credential revalidation, memory compaction, request preparation, upstream
+header wait, and total time to response headers. This makes slow storage,
+compaction, same-session serialization, and provider startup independently
+visible without logging roleplay content. The session metrics endpoint keeps a
+bounded 64-request window per provider/model and reports p50, p95, and p99 for
+time to first byte and total generation time. Metrics reads do not wait for an
+active generation to finish; `pending_turns` exposes the active and queued
+turn count alongside the last completed snapshot.
+
+Warm Durable Object instances retain their already-loaded state in memory.
+Normal turns therefore avoid repeated storage reads, update the inactivity
+alarm at most once per day, and write only changed state partitions after the
+completion. Durable storage remains authoritative across eviction and Worker
+deployments; the in-memory copy is only a hot-path read cache.
 
 The request sent to the selected provider has this order (memory and lore are
 omitted when absent):
@@ -461,6 +480,8 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
+| `NANOGPT_PREFERRED_KEY_INDEX` | unset | Numbered NanoGPT key attempted first for a fresh session |
+| `NANOGPT_KEY_CHECK_EVERY_REQUESTS` | `50` | Successful uses before the remembered NanoGPT key is catalog-revalidated |
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `128000` | Raw-dialogue threshold that forces continuity compaction; `0` derives it from provider capacity |
 | `ROLEPLAY_COMPACT_TRIGGER_PERCENT` | `90` | Derived compaction threshold percentage |
 | `ROLEPLAY_HARD_INPUT_TOKENS` | `0` | `0` derives the hard limit from eligible providers |

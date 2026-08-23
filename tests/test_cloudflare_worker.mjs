@@ -206,6 +206,14 @@ test("worker treats optimized chat as a CORS-safe Container API route", async ()
     preflight.headers.get("Access-Control-Expose-Headers") ?? "",
     /X-MultiLLM-Credential-Attempts/,
   );
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-Roleplay-State-Cache/,
+  );
+  assert.match(
+    preflight.headers.get("Access-Control-Expose-Headers") ?? "",
+    /X-Roleplay-Credential-Check/,
+  );
   assert.equal(stub.getCalls(), 0);
 
   const response = await worker.fetch(
