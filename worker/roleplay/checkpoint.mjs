@@ -1,4 +1,5 @@
 import { compactableDialogue } from "./directives.mjs";
+import { reconcileRoleplayHistory } from "./history-reconciliation.mjs";
 
 function messageSignature(message) {
   return JSON.stringify([
@@ -68,44 +69,45 @@ function contiguousSequenceStart(messages, sequence) {
 
 export async function reuseCompactionCheckpoint(state, parsed) {
   const sourceMessages = compactableDialogue(parsed.messages);
-  const dialogueParsed = { ...parsed, messages: sourceMessages };
+  let matched = false;
+  let incomingMessages = sourceMessages;
   const checkpoint = state.compactionCheckpoint;
   if (
-    dialogueParsed.memory.mode === "off" ||
-    dialogueParsed.historyMode !== "auto" ||
-    !checkpoint ||
-    checkpoint.version !== 2 ||
-    !Number.isInteger(checkpoint.messageCount) ||
-    checkpoint.messageCount < 1 ||
-    checkpoint.messageCount > sourceMessages.length ||
-    !/^[a-f0-9]{64}$/.test(checkpoint.digest ?? "")
+    parsed.memory.mode !== "off" &&
+    parsed.historyMode === "auto" &&
+    checkpoint?.version === 2 &&
+    Number.isInteger(checkpoint.messageCount) &&
+    checkpoint.messageCount >= 1 &&
+    checkpoint.messageCount <= sourceMessages.length &&
+    /^[a-f0-9]{64}$/.test(checkpoint.digest ?? "")
   ) {
-    return {
-      parsed: dialogueParsed,
-      sourceMessages,
-      matched: false,
-    };
+    const prefix = sourceMessages.slice(0, checkpoint.messageCount);
+    const digest = await compactedPrefixDigest(parsed.character, prefix);
+    if (digest === checkpoint.digest) {
+      matched = true;
+      incomingMessages = sourceMessages.slice(checkpoint.messageCount);
+    }
   }
 
-  const prefix = sourceMessages.slice(0, checkpoint.messageCount);
-  const digest = await compactedPrefixDigest(
-    dialogueParsed.character,
-    prefix,
-  );
-  if (digest !== checkpoint.digest) {
-    return {
-      parsed: dialogueParsed,
-      sourceMessages,
-      matched: false,
-    };
+  const reconciled = reconcileRoleplayHistory({
+    state,
+    parsed,
+    incomingMessages,
+    checkpointMatched: matched,
+  });
+  if (reconciled.reset) {
+    matched = false;
+    incomingMessages = sourceMessages;
   }
+
   return {
+    state: reconciled.state,
     parsed: {
-      ...dialogueParsed,
-      messages: sourceMessages.slice(checkpoint.messageCount),
+      ...parsed,
+      messages: incomingMessages,
     },
     sourceMessages,
-    matched: true,
+    matched,
   };
 }
 

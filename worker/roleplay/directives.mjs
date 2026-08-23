@@ -88,6 +88,7 @@ export function prepareProtectedContext(state, parsed, memoryEnabled) {
     parsed: {
       ...parsed,
       messages: incoming.dialogue,
+      authoritativeHistorySnapshot: incoming.directives.length > 0,
     },
     state: memoryEnabled
       ? {

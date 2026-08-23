@@ -480,6 +480,7 @@ export class RoleplaySession extends DurableObject {
           matched: false,
         };
     const parsed = checkpoint.parsed;
+    state = checkpoint.state ?? state;
     state = {
       ...state,
       ...(memoryEnabled ? { profile } : {}),

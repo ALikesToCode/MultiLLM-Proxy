@@ -37,6 +37,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/directives.mjs",
     import.meta.url,
   );
+  const historyReconciliationUrl = new URL(
+    "../../worker/roleplay/history-reconciliation.mjs",
+    import.meta.url,
+  );
   const fallbackMemoryUrl = new URL(
     "../../worker/roleplay/fallback-memory.mjs",
     import.meta.url,
@@ -118,6 +122,7 @@ export async function roleplayModuleUrl() {
     completionResultSource,
     compactionPolicySource,
     directivesSource,
+    historyReconciliationSource,
     fallbackMemorySource,
     memorySource,
     messageFragmentsSource,
@@ -146,6 +151,7 @@ export async function roleplayModuleUrl() {
       readFile(completionResultUrl, "utf8"),
       readFile(compactionPolicyUrl, "utf8"),
       readFile(directivesUrl, "utf8"),
+      readFile(historyReconciliationUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
@@ -221,11 +227,19 @@ export async function roleplayModuleUrl() {
       ),
   );
   const directivesDataUrl = dataModuleUrl(directivesSource);
+  const historyReconciliationDataUrl = dataModuleUrl(
+    historyReconciliationSource,
+  );
   const checkpointDataUrl = dataModuleUrl(
-    checkpointSource.replace(
-      'from "./directives.mjs";',
-      `from "${directivesDataUrl}";`,
-    ),
+    checkpointSource
+      .replace(
+        'from "./directives.mjs";',
+        `from "${directivesDataUrl}";`,
+      )
+      .replace(
+        'from "./history-reconciliation.mjs";',
+        `from "${historyReconciliationDataUrl}";`,
+      ),
   );
   const fallbackMemoryDataUrl = dataModuleUrl(
     fallbackMemorySource.replace(
