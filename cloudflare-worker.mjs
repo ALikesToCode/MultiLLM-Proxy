@@ -1667,7 +1667,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
         status: upstreamResponse.status,
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
+          "Cache-Control": "no-cache, no-transform",
           "X-Accel-Buffering": "no",
         },
       }),

@@ -3,11 +3,8 @@ import logging
 import requests
 from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
-import tiktoken
 from error_handlers import APIError
 from config import Config
-from services.cache_service import CacheService  # If used
-from services.rate_limit_service import RateLimitService
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
@@ -39,8 +36,6 @@ import time
 import uuid
 import flask
 from flask import Response
-import gzip
-import io
 import re
 import os
 from http.cookiejar import DefaultCookiePolicy
@@ -80,9 +75,18 @@ class ProxyService:
     _tokenizer = None  # Lazy-load tokenizer
     _sessions: Dict[str, requests.Session] = {}
     _session_lock = threading.RLock()
+    _ansi_escape_pattern = re.compile(
+        r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]'
+    )
     _mojibake_marker_pattern = re.compile(r"[\u0080-\u009f]|[ÃÂâðÐÑ]")
     _cp1252_utf8_continuation_chars = "€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ"
     _utf8_as_single_byte_sequence_pattern = re.compile(
+        r"[\u00C2-\u00F4][\u0080-\u00BF"
+        + re.escape(_cp1252_utf8_continuation_chars)
+        + r"]+"
+    )
+    _mojibake_fast_pattern = re.compile(
+        r"[\u0080-\u009fÃÂâðÐÑ\ufffd]|"
         r"[\u00C2-\u00F4][\u0080-\u00BF"
         + re.escape(_cp1252_utf8_continuation_chars)
         + r"]+"
@@ -605,6 +609,8 @@ class ProxyService:
         Get or create the tokenizer for token counting.
         """
         if cls._tokenizer is None:
+            import tiktoken  # noqa: PLC0415 - defer tokenizer startup cost until needed
+
             cls._tokenizer = tiktoken.get_encoding("cl100k_base")
         return cls._tokenizer
 
@@ -697,6 +703,8 @@ class ProxyService:
         Repair obvious mojibake in a single string.
         """
         if not isinstance(text, str) or not text:
+            return text
+        if text.isascii() or cls._mojibake_fast_pattern.search(text) is None:
             return text
 
         best_text = text
@@ -999,9 +1007,23 @@ class ProxyService:
         if isinstance(value, str):
             return cls._repair_mojibake_text(value)
         if isinstance(value, list):
-            return [cls.normalize_json_text(item) for item in value]
+            normalized_list = None
+            for index, item in enumerate(value):
+                normalized_item = cls.normalize_json_text(item)
+                if normalized_item is not item:
+                    if normalized_list is None:
+                        normalized_list = list(value)
+                    normalized_list[index] = normalized_item
+            return normalized_list if normalized_list is not None else value
         if isinstance(value, dict):
-            return {key: cls.normalize_json_text(item) for key, item in value.items()}
+            normalized_dict = None
+            for key, item in value.items():
+                normalized_item = cls.normalize_json_text(item)
+                if normalized_item is not item:
+                    if normalized_dict is None:
+                        normalized_dict = dict(value)
+                    normalized_dict[key] = normalized_item
+            return normalized_dict if normalized_dict is not None else value
         return value
 
     @classmethod
@@ -1159,6 +1181,7 @@ class ProxyService:
         retry_count: int = 0,
         timeout_override: Optional[Tuple[int, int]] = None,
         force_raw_passthrough: bool = False,
+        is_streaming: Optional[bool] = None,
     ) -> requests.Response:
         """
         Make a base request with retries and error handling
@@ -1209,15 +1232,15 @@ class ProxyService:
                 return response
 
             # Handle response content
-            try:
-                if data:
-                    # Attempt to see if 'stream' is set to true in JSON
-                    parsed_body = json.loads(data)
-                    is_streaming = bool(parsed_body.get('stream', False))
-                else:
+            if is_streaming is None:
+                try:
+                    if data:
+                        parsed_body = json.loads(data)
+                        is_streaming = bool(parsed_body.get('stream', False))
+                    else:
+                        is_streaming = False
+                except Exception:
                     is_streaming = False
-            except Exception:
-                is_streaming = False
 
             if (
                 cls._should_retry_status(method, headers, response.status_code, is_streaming)
@@ -1240,6 +1263,7 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     retry_count=retry_count + 1,
+                    is_streaming=is_streaming,
                 )
 
             if not is_streaming:
@@ -1252,8 +1276,7 @@ class ProxyService:
                         return response
 
                     decoded = content.decode('utf-8') if isinstance(content, bytes) else str(content)
-                    ansi_escape = re.compile(r'(\x9B|\x1B\[)[0-?]*[ -\/]*[@-~]|\x1B[^[]')
-                    cleaned = ansi_escape.sub('', decoded)
+                    cleaned = cls._ansi_escape_pattern.sub('', decoded)
 
                     normalized_payload = None
 
@@ -1296,6 +1319,7 @@ class ProxyService:
                             api_provider=api_provider,
                             use_cache=use_cache,
                             retry_count=retry_count + 1,
+                            is_streaming=is_streaming,
                         )
 
                     response._content = json.dumps(normalized_payload).encode('utf-8')
@@ -1358,7 +1382,8 @@ class ProxyService:
                     data=data,
                     api_provider=api_provider,
                     use_cache=use_cache,
-                    retry_count=retry_count + 1
+                    retry_count=retry_count + 1,
+                    is_streaming=is_streaming,
                 )
             if not raw_passthrough:
                 cls._record_circuit_result(api_provider, 503)
@@ -1755,7 +1780,7 @@ class ProxyService:
                             generate(),
                             mimetype='text/event-stream',
                             headers={
-                                'Cache-Control': 'no-cache',
+                                'Cache-Control': 'no-cache, no-transform',
                                 'Content-Type': 'text/event-stream',
                                 'X-Accel-Buffering': 'no'
                             }
@@ -1936,7 +1961,7 @@ class ProxyService:
                     generate(),
                     mimetype='text/event-stream',
                     headers={
-                        'Cache-Control': 'no-cache',
+                        'Cache-Control': 'no-cache, no-transform',
                         'Content-Type': 'text/event-stream',
                         'X-Accel-Buffering': 'no'
                     }
@@ -2625,7 +2650,8 @@ class ProxyService:
                 params=params,
                 data=data,
                 api_provider=api_provider,
-                use_cache=use_cache
+                use_cache=use_cache,
+                is_streaming=is_streaming_request,
             )
             
             # Handle authentication errors with more detailed logging
@@ -2781,7 +2807,7 @@ class ProxyService:
                         generate_stream(),
                         mimetype='text/event-stream',
                         headers={
-                            'Cache-Control': 'no-cache',
+                            'Cache-Control': 'no-cache, no-transform',
                             'Content-Type': 'text/event-stream',
                             'X-Accel-Buffering': 'no'
                         }
@@ -3031,7 +3057,7 @@ class ProxyService:
                     generate(),
                     mimetype='text/event-stream',
                     headers={
-                        'Cache-Control': 'no-cache',
+                        'Cache-Control': 'no-cache, no-transform',
                         'Content-Type': 'text/event-stream',
                         'X-Accel-Buffering': 'no'
                     }
@@ -3208,11 +3234,27 @@ class ProxyService:
             return f"data: {json.dumps({'choices': [{'delta': {'content': chunk}}]})}\n\n"
 
     @staticmethod
+    def _iter_stream_content(response: requests.Response) -> Generator[bytes, None, None]:
+        """Yield decoded upstream bytes as soon as the socket exposes them."""
+        raw_response = getattr(response, "raw", None)
+        raw_read1 = getattr(raw_response, "read1", None)
+        if callable(raw_read1):
+            while True:
+                chunk = raw_read1(64 * 1024, decode_content=True)
+                if not chunk:
+                    return
+                yield chunk
+
+        yield from response.iter_content(chunk_size=128)
+
+    @staticmethod
     def _iter_stream_lines(response: requests.Response) -> Generator[str, None, None]:
         content_type = response.headers.get("content-type", "").lower()
         if content_type.startswith("text/event-stream") and hasattr(response, "iter_content"):
             try:
-                for data_payload in iter_sse_data(response.iter_content(chunk_size=1024)):
+                for data_payload in iter_sse_data(
+                    ProxyService._iter_stream_content(response)
+                ):
                     yield f"data: {data_payload}"
                 return
             except Exception as error:
@@ -3234,88 +3276,39 @@ class ProxyService:
             A generator yielding standardized chunks
         """
         try:
-            is_gzipped = response.headers.get('content-encoding', '').lower() == 'gzip'
             done_sent = False
             inside_reasoning_block = False
             visible_thinking_state = cls._new_visible_thinking_state() if provider == "opencode" else None
-            
-            # For gzipped responses, we need to accumulate and decompress
-            if is_gzipped:
-                buffer = io.BytesIO()
-                
-                # Read raw response in chunks
-                for chunk in response.iter_content(chunk_size=1024):
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-                
-                # Decompress and process
-                buffer.seek(0)
-                with gzip.GzipFile(fileobj=buffer, mode='rb') as gz:
-                    decompressed = gz.read().decode('utf-8')
-                    parsed_lines = [
-                        f"data: {payload}"
-                        for payload in iter_sse_data([decompressed])
-                    ]
-                    lines = parsed_lines or decompressed.split('\n')
-                    for line in lines:
-                        if provider == "opencode":
-                            line, inside_reasoning_block = cls._strip_reasoning_block_markup(
-                                line,
-                                inside_reasoning_block,
-                            )
-                            if not line:
-                                continue
-                        standardized_chunk = cls._standardize_streaming_chunk(
-                            line,
-                            provider,
-                            visible_thinking_state,
-                        )
-                        if standardized_chunk:
-                            if "data: [DONE]" in standardized_chunk:
-                                done_sent = True
-                                yield standardized_chunk
-                                if hasattr(response, "close"):
-                                    response.close()
-                                return
-                            yield standardized_chunk
-                
-                # Signal completion
-                if not done_sent:
-                    closing_think_chunk = cls._close_visible_thinking_chunk(visible_thinking_state)
-                    if closing_think_chunk:
-                        yield closing_think_chunk
-                    yield 'data: [DONE]\n\n'
-            else:
-                # For non-gzipped responses
-                for line in cls._iter_stream_lines(response):
-                    if provider == "opencode":
-                        line, inside_reasoning_block = cls._strip_reasoning_block_markup(
-                            line,
-                            inside_reasoning_block,
-                        )
-                        if not line:
-                            continue
-                    standardized_chunk = cls._standardize_streaming_chunk(
+
+            # Requests transparently decodes gzip/deflate before iter_content
+            # yields bytes. Keep every encoded SSE response on the same
+            # incremental path so the first complete event can be forwarded
+            # without buffering the rest of the generation.
+            for line in cls._iter_stream_lines(response):
+                if provider == "opencode":
+                    line, inside_reasoning_block = cls._strip_reasoning_block_markup(
                         line,
-                        provider,
-                        visible_thinking_state,
+                        inside_reasoning_block,
                     )
-                    if standardized_chunk:
-                        if "data: [DONE]" in standardized_chunk:
-                            done_sent = True
-                            yield standardized_chunk
-                            if hasattr(response, "close"):
-                                response.close()
-                            return
+                    if not line:
+                        continue
+                standardized_chunk = cls._standardize_streaming_chunk(
+                    line,
+                    provider,
+                    visible_thinking_state,
+                )
+                if standardized_chunk:
+                    if "data: [DONE]" in standardized_chunk:
+                        done_sent = True
                         yield standardized_chunk
-                
-                # Signal completion
-                if not done_sent:
-                    closing_think_chunk = cls._close_visible_thinking_chunk(visible_thinking_state)
-                    if closing_think_chunk:
-                        yield closing_think_chunk
-                    yield 'data: [DONE]\n\n'
+                        return
+                    yield standardized_chunk
+
+            if not done_sent:
+                closing_think_chunk = cls._close_visible_thinking_chunk(visible_thinking_state)
+                if closing_think_chunk:
+                    yield closing_think_chunk
+                yield 'data: [DONE]\n\n'
         except Exception as e:
             logger.error(
                 "Streaming response processing failed provider=%s type=%s",
@@ -3429,7 +3422,8 @@ class ProxyService:
                 params=params,
                 data=data,
                 api_provider=api_provider,
-                use_cache=use_cache
+                use_cache=use_cache,
+                is_streaming=is_streaming,
             )
             
             # If the response should be streamed, wrap it in a streaming response
@@ -3439,7 +3433,7 @@ class ProxyService:
                     cls._create_streaming_response(response, api_provider),
                     content_type='text/event-stream',
                     headers={
-                        'Cache-Control': 'no-cache',
+                        'Cache-Control': 'no-cache, no-transform',
                         'X-Accel-Buffering': 'no'
                     }
                 )

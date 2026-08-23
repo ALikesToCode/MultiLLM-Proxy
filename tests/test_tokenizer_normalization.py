@@ -2,6 +2,7 @@ import json
 import importlib
 import sys
 import unittest
+from unittest.mock import patch
 
 
 class FakeTokenizer:
@@ -10,6 +11,38 @@ class FakeTokenizer:
 
 
 class TokenizerNormalizationTest(unittest.TestCase):
+    def test_clean_large_text_uses_the_normalization_fast_path(self):
+        clean_text = "ordinary roleplay text with clean utf-8. " * 12_500
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_mojibake_score",
+            side_effect=AssertionError("clean text should not enter repair scoring"),
+        ):
+            normalized = self.proxy_module.ProxyService._repair_mojibake_text(
+                clean_text,
+            )
+
+        self.assertIs(normalized, clean_text)
+
+    def test_clean_json_normalization_avoids_rebuilding_the_payload(self):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Clean response text.",
+                    },
+                },
+            ],
+            "usage": {"total_tokens": 12},
+        }
+
+        normalized = self.proxy_module.ProxyService.normalize_json_text(payload)
+
+        self.assertIs(normalized, payload)
+        self.assertIs(normalized["choices"], payload["choices"])
+
     def setUp(self):
         sys.modules.pop("services.proxy_service", None)
         self.proxy_module = importlib.import_module("services.proxy_service")

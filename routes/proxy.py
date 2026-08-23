@@ -417,7 +417,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     status=response.status_code,
                     content_type="text/event-stream",
                     headers={
-                        "Cache-Control": "no-cache",
+                        "Cache-Control": "no-cache, no-transform",
                         "X-Accel-Buffering": "no",
                     },
                 )
@@ -683,7 +683,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                             error_stream(),
                             mimetype="text/event-stream",
                             headers={
-                                "Cache-Control": "no-cache",
+                                "Cache-Control": "no-cache, no-transform",
                                 "Content-Type": "text/event-stream",
                                 "X-Accel-Buffering": "no",
                             },
@@ -800,7 +800,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                         generate(),
                         mimetype="text/event-stream",
                         headers={
-                            "Cache-Control": "no-cache",
+                            "Cache-Control": "no-cache, no-transform",
                             "Content-Type": "text/event-stream",
                             "X-Accel-Buffering": "no",
                         },

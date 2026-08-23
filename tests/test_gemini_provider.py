@@ -75,6 +75,10 @@ class GeminiProviderRequestTest(unittest.TestCase):
         self.assertEqual(request_kwargs["params"], {"alt": "sse"})
         self.assertEqual(request_kwargs["headers"]["x-goog-api-key"], "AIza-query-key")
         self.assertNotIn("Authorization", request_kwargs["headers"])
+        self.assertEqual(
+            response.headers["Cache-Control"],
+            "no-cache, no-transform",
+        )
 
         upstream_payload = json.loads(request_kwargs["data"])
         self.assertNotIn("stream", upstream_payload)

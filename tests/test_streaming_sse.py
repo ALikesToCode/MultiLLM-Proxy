@@ -116,6 +116,100 @@ class SSEParserTest(unittest.TestCase):
         self.assertEqual(chunks[1], "data: [DONE]\n\n")
         self.assertTrue(upstream.closed)
 
+    def test_gzip_header_stream_yields_before_upstream_finishes(self):
+        """Requests has already decoded gzip before iter_content yields bytes."""
+        sys.modules.pop("services.proxy_service", None)
+        proxy_module = importlib.import_module("services.proxy_service")
+
+        class AutoDecodedGzipResponse:
+            headers = {
+                "content-type": "text/event-stream",
+                "content-encoding": "gzip",
+            }
+            closed = False
+            reads = 0
+            requested_chunk_size = None
+
+            def iter_content(self, chunk_size=1024):
+                self.requested_chunk_size = chunk_size
+                self.reads += 1
+                yield b'data: {"choices":[{"delta":{"content":"Immediate"}}]}\n\n'
+                self.reads += 1
+                yield b"data: [DONE]\n\n"
+
+            def iter_lines(self, decode_unicode=True):
+                raise AssertionError("SSE streams should use iter_content")
+
+            def close(self):
+                self.closed = True
+
+        upstream = AutoDecodedGzipResponse()
+        stream = proxy_module.ProxyService._create_streaming_response(
+            upstream,
+            "openrouter",
+        )
+
+        first = next(stream)
+        first_payload = json.loads(first[6:].strip())
+        self.assertEqual(
+            first_payload["choices"][0]["delta"]["content"],
+            "Immediate",
+        )
+        self.assertEqual(upstream.reads, 1)
+        self.assertEqual(upstream.requested_chunk_size, 128)
+        self.assertEqual(list(stream), ["data: [DONE]\n\n"])
+        self.assertTrue(upstream.closed)
+
+    def test_proxy_stream_uses_available_raw_bytes_without_waiting_for_chunk_fill(self):
+        sys.modules.pop("services.proxy_service", None)
+        proxy_module = importlib.import_module("services.proxy_service")
+
+        class IncrementalRaw:
+            def __init__(self):
+                self.chunks = [
+                    b'data: {"choices":[{"delta":{"content":"First"}}]}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+                self.calls = []
+
+            def read1(self, amount, decode_content=False):
+                self.calls.append((amount, decode_content))
+                return self.chunks.pop(0) if self.chunks else b""
+
+        class RawStreamingResponse:
+            headers = {
+                "content-type": "text/event-stream",
+                "content-encoding": "gzip",
+            }
+            closed = False
+
+            def __init__(self):
+                self.raw = IncrementalRaw()
+
+            def iter_content(self, chunk_size=1024):
+                raise AssertionError("raw read1 should be preferred for SSE latency")
+
+            def iter_lines(self, decode_unicode=True):
+                raise AssertionError("SSE streams should use the shared parser")
+
+            def close(self):
+                self.closed = True
+
+        upstream = RawStreamingResponse()
+        stream = proxy_module.ProxyService._create_streaming_response(
+            upstream,
+            "openrouter",
+        )
+
+        first = next(stream)
+        self.assertEqual(
+            json.loads(first[6:].strip())["choices"][0]["delta"]["content"],
+            "First",
+        )
+        self.assertEqual(upstream.raw.calls, [(64 * 1024, True)])
+        self.assertEqual(list(stream), ["data: [DONE]\n\n"])
+        self.assertTrue(upstream.closed)
+
 
 if __name__ == "__main__":
     unittest.main()
