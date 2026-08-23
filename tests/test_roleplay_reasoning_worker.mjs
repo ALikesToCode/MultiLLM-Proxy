@@ -479,6 +479,104 @@ test("roleplay repairs think tags split across provider stream frames", async ()
   );
 });
 
+test("roleplay streams inline think content before the closing tag arrives", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.2"] },
+    }),
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+  });
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseFinalFrame;
+  const finalFrameGate = new Promise((resolve) => {
+    releaseFinalFrame = resolve;
+  });
+
+  const response = await withGlobalFetch(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "<think>private" }, finish_reason: null }] })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: " analysis" }, finish_reason: null }] })}\n\n`,
+              ),
+            );
+            void finalFrameGate.then(() => {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: "</think>\n\n*Holly closes her notebook.*" }, finish_reason: "stop" }] })}\n\n` +
+                    "data: [DONE]\n\n",
+                ),
+              );
+              controller.close();
+            });
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      ),
+    () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-live-inline-reasoning",
+            model: "roleplay:5.2",
+            messages: [{ role: "user", content: "Continue." }],
+            stream: true,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+  );
+
+  const reader = response.body.getReader();
+  let firstReadSettled = false;
+  const firstReadPromise = reader.read().then((result) => {
+    firstReadSettled = true;
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const streamedBeforeClose = firstReadSettled;
+  releaseFinalFrame();
+
+  const firstRead = await firstReadPromise;
+  let body = decoder.decode(firstRead.value ?? new Uint8Array());
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      break;
+    }
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  body += decoder.decode();
+  await fixture.waitForBackgroundWork();
+
+  assert.equal(
+    streamedBeforeClose,
+    true,
+    "inline reasoning must reach the client before the provider closes </think>",
+  );
+  assert.equal(
+    visibleContent(body),
+    [
+      "<think>[provider: opencode | model: glm-5.2]\n",
+      "private analysis",
+      "</think>\n\n",
+      "*Holly closes her notebook.*",
+    ].join(""),
+  );
+});
+
 test("roleplay drops provider reasoning that arrives after visible story content", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",

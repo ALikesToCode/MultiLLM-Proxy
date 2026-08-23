@@ -97,6 +97,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/streaming.mjs",
     import.meta.url,
   );
+  const streamValidationGateUrl = new URL(
+    "../../worker/roleplay/stream-validation-gate.mjs",
+    import.meta.url,
+  );
   const sseCollectorUrl = new URL(
     "../../worker/roleplay/sse-collector.mjs",
     import.meta.url,
@@ -129,6 +133,7 @@ export async function roleplayModuleUrl() {
     transportSource,
     reasoningOutputSource,
     sseCollectorSource,
+    streamValidationGateSource,
     streamingSource,
     endpointSource,
   ] =
@@ -156,6 +161,7 @@ export async function roleplayModuleUrl() {
       readFile(transportUrl, "utf8"),
       readFile(reasoningOutputUrl, "utf8"),
       readFile(sseCollectorUrl, "utf8"),
+      readFile(streamValidationGateUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
@@ -196,6 +202,9 @@ export async function roleplayModuleUrl() {
       `from "${reasoningOutputDataUrl}";`,
     ),
   );
+  const streamValidationGateDataUrl = dataModuleUrl(
+    streamValidationGateSource,
+  );
   const streamingDataUrl = dataModuleUrl(
     streamingSource
       .replace(
@@ -205,6 +214,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./sse-collector.mjs";',
         `from "${sseCollectorDataUrl}";`,
+      )
+      .replace(
+        'from "./stream-validation-gate.mjs";',
+        `from "${streamValidationGateDataUrl}";`,
       ),
   );
   const directivesDataUrl = dataModuleUrl(directivesSource);
@@ -397,14 +410,20 @@ export async function loadRoleplayStreamingModule() {
     "../../worker/roleplay/sse-collector.mjs",
     import.meta.url,
   );
+  const streamValidationGateUrl = new URL(
+    "../../worker/roleplay/stream-validation-gate.mjs",
+    import.meta.url,
+  );
   const [
     streamingSource,
     reasoningOutputSource,
     sseCollectorSource,
+    streamValidationGateSource,
   ] = await Promise.all([
     readFile(streamingUrl, "utf8"),
     readFile(reasoningOutputUrl, "utf8"),
     readFile(sseCollectorUrl, "utf8"),
+    readFile(streamValidationGateUrl, "utf8"),
   ]);
   const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
   const sseCollectorDataUrl = dataModuleUrl(
@@ -412,6 +431,9 @@ export async function loadRoleplayStreamingModule() {
       'from "./reasoning-output.mjs";',
       `from "${reasoningOutputDataUrl}";`,
     ),
+  );
+  const streamValidationGateDataUrl = dataModuleUrl(
+    streamValidationGateSource,
   );
   return import(
     dataModuleUrl(
@@ -423,6 +445,10 @@ export async function loadRoleplayStreamingModule() {
         .replace(
           'from "./sse-collector.mjs";',
           `from "${sseCollectorDataUrl}";`,
+        )
+        .replace(
+          'from "./stream-validation-gate.mjs";',
+          `from "${streamValidationGateDataUrl}";`,
         ),
     )
   );

@@ -86,7 +86,7 @@ function streamingStory(content, finishReason = "stop") {
 function reasoningOnlyEof() {
   return new Response(
     [
-      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "internal planning that must stay hidden" }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "provider planning from the empty attempt" }, finish_reason: null }] })}\n\n`,
       `data: ${JSON.stringify({ choices: [{ delta: { content: "  " }, finish_reason: null }] })}\n\n`,
     ].join(""),
     { headers: { "Content-Type": "text/event-stream" } },
@@ -276,7 +276,103 @@ test("streaming releases one validated complete image prompt block", async () =>
   await fixture.waitForBackgroundWork();
 });
 
-test("reasoning-only provider EOF retries once from a clean response boundary", async () => {
+test("streaming releases reasoning and story before the image prompt is complete", async () => {
+  const fixture = makeRoleplayEnv();
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let releaseImagePrompt;
+  const imagePromptGate = new Promise((resolve) => {
+    releaseImagePrompt = resolve;
+  });
+
+  const response = await withGlobalFetch(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "Plan the visible scene." }, finish_reason: null }] })}\n\n`,
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: "*Mira opens the shelf.*\n\n" }, finish_reason: null }] })}\n\n`,
+              ),
+            );
+            void imagePromptGate.then(() => {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ choices: [{ delta: { content: STORY_WITH_IMAGE_PROMPT.slice(STORY_WITH_IMAGE_PROMPT.indexOf("IMAGE PROMPT:")) }, finish_reason: "stop" }] })}\n\n` +
+                    "data: [DONE]\n\n",
+                ),
+              );
+              controller.close();
+            });
+          },
+        }),
+        { headers: { "Content-Type": "text/event-stream" } },
+      ),
+    () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest({
+          session_id: "session-stream-story-before-image-validation",
+          messages: imageContractMessages(),
+          max_tokens: 512,
+          stream: true,
+        }),
+        fixture.env,
+      ),
+  );
+
+  const reader = response.body.getReader();
+  let settledReads = 0;
+  const firstReadPromise = reader.read().then((result) => {
+    settledReads += 1;
+    return result;
+  });
+  const secondReadPromise = reader.read().then((result) => {
+    settledReads += 1;
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const liveChunksBeforeImagePrompt = settledReads;
+  releaseImagePrompt();
+
+  const earlyReads = await Promise.all([firstReadPromise, secondReadPromise]);
+  let body = earlyReads
+    .map((result) => decoder.decode(result.value ?? new Uint8Array()))
+    .join("");
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      break;
+    }
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  body += decoder.decode();
+  await fixture.waitForBackgroundWork();
+
+  assert.equal(
+    liveChunksBeforeImagePrompt,
+    2,
+    "reasoning and story must not wait for final image-prompt validation",
+  );
+  assert.equal(
+    streamedContent(body),
+    [
+      "<think>[provider: opencode | model: kimi-k2.6]\n",
+      "Plan the visible scene.",
+      "</think>\n\n",
+      "*Mira opens the shelf.*\n\n",
+      STORY_WITH_IMAGE_PROMPT.slice(STORY_WITH_IMAGE_PROMPT.indexOf("IMAGE PROMPT:")),
+    ].join(""),
+  );
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+});
+
+test("reasoning-only provider EOF streams immediately before a clean retry", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
     ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
@@ -324,8 +420,15 @@ test("reasoning-only provider EOF retries once from a clean response boundary", 
     ),
     true,
   );
-  assert.equal(streamedContent(body), STORY_WITH_CURRENT_IMAGE_PROMPT);
-  assert.doesNotMatch(body, /internal planning|<think>/i);
+  assert.equal(
+    streamedContent(body),
+    [
+      "<think>[provider: opencode | model: kimi-k2.6]\n",
+      "provider planning from the empty attempt",
+      "</think>\n\n",
+      STORY_WITH_CURRENT_IMAGE_PROMPT,
+    ].join(""),
+  );
   assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
@@ -338,7 +441,7 @@ test("reasoning-only provider EOF retries once from a clean response boundary", 
   );
 });
 
-test("repeated empty provider EOF stops after one clean retry and stores nothing", async () => {
+test("repeated empty provider EOF streams each attempt but stores nothing", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
     ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
@@ -371,8 +474,9 @@ test("repeated empty provider EOF stops after one clean retry and stores nothing
   });
 
   assert.equal(calls, 2);
-  assert.equal(streamedContent(body), "");
-  assert.doesNotMatch(body, /internal planning|<think>/i);
+  assert.equal(streamedContent(body).match(/<think>/g)?.length, 2);
+  assert.equal(streamedContent(body).match(/provider planning from the empty attempt/g)?.length, 2);
+  assert.doesNotMatch(body, /IMAGE PROMPT:/i);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
 

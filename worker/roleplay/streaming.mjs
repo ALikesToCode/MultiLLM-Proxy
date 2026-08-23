@@ -2,6 +2,7 @@ import {
   bufferedCompletionFrames,
   createSseAssistantCollector as createLegCollector,
 } from "./sse-collector.mjs";
+import { createRoleplayStreamValidationGate } from "./stream-validation-gate.mjs";
 
 const SSE_ENCODER = new TextEncoder();
 const HEARTBEAT_COMMENT = SSE_ENCODER.encode(
@@ -89,10 +90,14 @@ export function createObservedStream({
   const newCollector = () =>
     createLegCollector({
       maximumCharacters: MAX_COLLECTED_ASSISTANT_CHARACTERS,
-      deferTerminalFrames: typeof openContinuation === "function",
+      deferTerminalFrames:
+        typeof openContinuation === "function" || bufferUntilValidated,
       reasoningMetadata,
     });
   let collector = newCollector();
+  const validationGate = createRoleplayStreamValidationGate(
+    bufferUntilValidated,
+  );
   let settled = false;
   let released = false;
   let pendingRead = null;
@@ -317,6 +322,7 @@ export function createObservedStream({
                   charactersDiscarded: candidateClientContent.length,
                   accepted: false,
                 });
+                validationGate.discardLeg();
                 template = collected.template ?? template;
                 terminalFrames = [];
               } else if (accepted) {
@@ -324,9 +330,12 @@ export function createObservedStream({
                 clientContent = candidateClientContent;
                 template = collected.template ?? template;
                 terminalFrames = collected.withheld;
-                if (!bufferUntilValidated) {
-                  enqueueFrames(controller, collected.output);
-                }
+                enqueueFrames(
+                  controller,
+                  validationGate.consume(collected.output, {
+                    hold: activeContinuationReason === "output_contract",
+                  }),
+                );
               } else {
                 decision = {
                   reason: "output_contract_no_progress",
@@ -411,7 +420,7 @@ export function createObservedStream({
                 controller,
                 bufferedCompletionFrames(
                   template ?? collected.template,
-                  clientContent,
+                  validationGate.remaining(clientContent),
                   incompleteReason === "output_limit" ? "length" : "stop",
                 ),
               );
@@ -446,10 +455,13 @@ export function createObservedStream({
           if (!frames.length) {
             continue;
           }
-          if (bufferUntilValidated) {
+          const releasableFrames = validationGate.consume(frames, {
+            hold: activeContinuationReason === "output_contract",
+          });
+          if (!releasableFrames.length) {
             continue;
           }
-          enqueueFrames(controller, frames);
+          enqueueFrames(controller, releasableFrames);
           return;
         }
       } catch (error) {

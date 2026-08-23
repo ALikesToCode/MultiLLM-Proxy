@@ -81,11 +81,11 @@ function nextThinkTag(value, fromIndex) {
   return { index: closing, tag: CLOSE_THINK, opening: false };
 }
 
-function parseThinkMarkup(value, { flush = false } = {}) {
+function parseThinkMarkup(value, { initialDepth = 0 } = {}) {
   const reasoning = [];
   const visible = [];
   let cursor = 0;
-  let depth = 0;
+  let depth = initialDepth;
   let sawTag = false;
   let sawClosing = false;
 
@@ -128,20 +128,24 @@ function parseThinkMarkup(value, { flush = false } = {}) {
     visible: visible.join(""),
     sawTag,
     sawClosing,
-    complete: depth === 0 || flush,
+    depth,
   };
 }
 
-function hasPossibleTagSuffix(value) {
+function possibleThinkTagSuffixLength(value) {
   const lower = value.toLowerCase();
   const maximum = Math.min(CLOSE_THINK.length - 1, lower.length);
-  for (let size = 1; size <= maximum; size += 1) {
+  for (let size = maximum; size >= 1; size -= 1) {
     const suffix = lower.slice(-size);
     if (OPEN_THINK.startsWith(suffix) || CLOSE_THINK.startsWith(suffix)) {
-      return true;
+      return size;
     }
   }
-  return false;
+  return 0;
+}
+
+function hasPossibleTagSuffix(value) {
+  return possibleThinkTagSuffixLength(value) > 0;
 }
 
 function frameData(frame) {
@@ -227,6 +231,7 @@ function createReasoningState(metadata) {
     thinkOpen: false,
     thinkClosed: false,
     visibleStarted: false,
+    contentThinkDepth: 0,
     pendingReasoningWhitespace: "",
     pendingContent: "",
     template: null,
@@ -307,27 +312,33 @@ function consumePendingContent(state, { flush = false } = {}) {
     return "";
   }
 
-  const parsed = parseThinkMarkup(value, { flush });
+  const suffixLength = flush ? 0 : possibleThinkTagSuffixLength(value);
+  const processable = suffixLength
+    ? value.slice(0, -suffixLength)
+    : value;
+  if (!processable) {
+    return "";
+  }
+
+  const continuingInlineReasoning = state.contentThinkDepth > 0;
+  const parsed = parseThinkMarkup(processable, {
+    initialDepth: state.contentThinkDepth,
+  });
   const containsMarkup = parsed.sawTag;
   if (
     !flush &&
-    (containsMarkup && !parsed.complete || hasPossibleTagSuffix(value)) &&
-    value.length < MAX_PENDING_MARKUP_CHARACTERS
-  ) {
-    return "";
-  }
-  if (
-    !flush &&
     !containsMarkup &&
+    !continuingInlineReasoning &&
     looksLikeReasoningReplay(state, value) &&
     value.length < MAX_PENDING_MARKUP_CHARACTERS
   ) {
     return "";
   }
 
-  state.pendingContent = "";
+  state.pendingContent = suffixLength ? value.slice(-suffixLength) : "";
+  state.contentThinkDepth = flush ? 0 : parsed.depth;
   let output = "";
-  if (containsMarkup) {
+  if (containsMarkup || continuingInlineReasoning) {
     for (const part of parsed.reasoning) {
       output += appendReasoning(state, part, { replay: true });
     }
