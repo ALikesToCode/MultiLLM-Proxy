@@ -206,6 +206,79 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual(upstream_payload["model"], "new-live-model")
 
+    def test_v1_models_exposes_safe_navy_model_metadata(self):
+        metadata = {
+            "object": "model",
+            "created": 1_749_028_256,
+            "owned_by": "google",
+            "endpoint": "/v1/chat/completions",
+            "token_multiplier": 45,
+            "premium": False,
+            "required_plan": None,
+            "context_window": 131_072,
+            "max_output_tokens": 32_768,
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text", "image"],
+            "modality": "text+image->text+image",
+            "tokenizer": "Gemini",
+            "supports_vision": True,
+            "supports_tools": False,
+            "supports_function_calling": False,
+            "supports_reasoning": True,
+            "supports_json_mode": True,
+            "supports_audio_input": False,
+            "supports_image_output": True,
+            "supports_streaming": True,
+            "description": "Navy image-output chat model.",
+            "pricing": {
+                "prompt": "0.0000005",
+                "completion": "0.000003",
+                "image": None,
+                "request": None,
+            },
+            "metadata_source": "openrouter",
+            "metadata_resolved_from": "google/gemini-image",
+            "metadata_status": "known",
+        }
+        ProviderCatalogService.replace_provider_models(
+            "navyai",
+            (
+                ProviderCatalogModel(
+                    provider="navyai",
+                    model_id="gemini-image-live",
+                    discovered_at="ignored-on-write",
+                    context_window=131_072,
+                    max_output_tokens=32_768,
+                    metadata=metadata,
+                ),
+            ),
+        )
+
+        response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        models = {
+            model["id"]: model for model in response.get_json()["data"]
+        }
+        model = models["navyai:gemini-image-live"]
+        self.assertEqual(model["owned_by"], "navyai")
+        self.assertEqual(model["upstream_owned_by"], "google")
+        self.assertEqual(model["provider"], "navyai")
+        self.assertEqual(model["provider_model"], "gemini-image-live")
+        self.assertEqual(model["created"], 1_749_028_256)
+        self.assertEqual(model["endpoint"], "/v1/chat/completions")
+        self.assertEqual(model["output_modalities"], ["text", "image"])
+        self.assertTrue(model["supports_image_output"])
+        self.assertEqual(model["pricing"], metadata["pricing"])
+        self.assertEqual(
+            model["metadata_resolved_from"],
+            "google/gemini-image",
+        )
+        self.assertEqual(model["provider_metadata"], metadata)
+
     def test_v1_image_generations_routes_linkapi_model_and_preserves_response(self):
         native_body = (
             b'{"created":1716112000,"data":[{"url":"https://images.example/result.png"}]}'

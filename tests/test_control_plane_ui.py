@@ -72,17 +72,17 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v9", worker)
+        self.assertIn("multillm-proxy-v10", worker)
         for asset in (
             "/static/css/shell.css",
             "/static/css/auto-routes.css?v=7",
-            "/static/css/documentation.css?v=8",
+            "/static/css/documentation.css?v=9",
             "/static/css/operations.css",
             "/static/css/surfaces.css",
             "/static/js/auto-route-catalog.js?v=8",
             "/static/js/auto-routes.js?v=7",
             "/static/js/dashboard.js",
-            "/static/js/documentation.js?v=9",
+            "/static/js/documentation.js?v=10",
             "/static/js/openrouter.js",
             "/static/js/users.js",
         ):
@@ -107,6 +107,9 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertIn("replaceChildren", script)
         self.assertIn("context_window", script)
         self.assertIn("max_output_tokens", script)
+        self.assertIn("provider_metadata", script)
+        self.assertIn("output_modalities", script)
+        self.assertIn("Provider details", documentation)
 
     def test_provider_matrix_distinguishes_passthrough_from_managed_circuits(self):
         dashboard = self.read("static/js/dashboard.js")

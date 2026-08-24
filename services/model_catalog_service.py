@@ -18,6 +18,7 @@ def _add_source(
     *,
     context_window: int | None = None,
     max_output_tokens: int | None = None,
+    provider_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     model_id = f"{provider}:{provider_model}"
     entry = entries.setdefault(
@@ -29,6 +30,7 @@ def _add_source(
             "sources": set(),
             "context_window": None,
             "max_output_tokens": None,
+            "provider_metadata": None,
         },
     )
     entry["sources"].add(source)
@@ -40,6 +42,11 @@ def _add_source(
             continue
         current = entry[field]
         entry[field] = min(current, value) if current is not None else value
+    if provider_metadata:
+        entry["provider_metadata"] = {
+            **(entry["provider_metadata"] or {}),
+            **provider_metadata,
+        }
 
 
 def build_model_catalog(
@@ -59,6 +66,7 @@ def build_model_catalog(
             "live",
             context_window=model.context_window,
             max_output_tokens=model.max_output_tokens,
+            provider_metadata=model.metadata,
         )
 
     for route in routes:
@@ -82,3 +90,47 @@ def build_model_catalog(
             }
         )
     return catalog
+
+
+def unified_model_payload(model: Mapping[str, Any]) -> dict[str, Any]:
+    """Serialize a catalog model without discarding safe upstream metadata."""
+    provider_metadata = dict(model.get("provider_metadata") or {})
+    upstream_created = provider_metadata.get("created")
+    payload = {
+        "id": model["id"],
+        "object": "model",
+        "created": (
+            upstream_created
+            if isinstance(upstream_created, int)
+            and not isinstance(upstream_created, bool)
+            else 0
+        ),
+        "owned_by": model["provider"],
+        "provider": model["provider"],
+        "provider_model": model["model"],
+        "sources": list(model["sources"]),
+        "status": model["status"],
+        "context_window": model["context_window"],
+        "max_output_tokens": model["max_output_tokens"],
+        "capabilities": dict(model.get("capabilities") or {}),
+    }
+    if not provider_metadata:
+        return payload
+
+    payload["provider_metadata"] = provider_metadata
+    upstream_owner = provider_metadata.get("owned_by")
+    if isinstance(upstream_owner, str) and upstream_owner:
+        payload["upstream_owned_by"] = upstream_owner
+    reserved_fields = {
+        "id",
+        "object",
+        "created",
+        "owned_by",
+        "status",
+        "context_window",
+        "max_output_tokens",
+    }
+    for field, value in provider_metadata.items():
+        if field not in reserved_fields:
+            payload[field] = value
+    return payload

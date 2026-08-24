@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services.sqlite_store import connect, storage_path
+from services.provider_catalog_metadata import (
+    decode_provider_metadata,
+    encode_provider_metadata,
+    sanitize_provider_metadata,
+)
 
 logger = logging.getLogger(__name__)
 MAX_MODELS_PER_PROVIDER = 5000
@@ -30,6 +35,7 @@ class ProviderCatalogModel:
     discovered_at: str
     context_window: int | None = None
     max_output_tokens: int | None = None
+    metadata: dict[str, Any] | None = None
 
 
 PROVIDER_CATALOG_SPECS = {
@@ -81,6 +87,7 @@ class ProviderCatalogService:
                 discovered_at TEXT NOT NULL,
                 context_window INTEGER,
                 max_output_tokens INTEGER,
+                metadata_json TEXT,
                 PRIMARY KEY (provider, model_id)
             )
             """
@@ -98,6 +105,10 @@ class ProviderCatalogService:
         if "max_output_tokens" not in columns:
             connection.execute(
                 "ALTER TABLE provider_model_catalog ADD COLUMN max_output_tokens INTEGER"
+            )
+        if "metadata_json" not in columns:
+            connection.execute(
+                "ALTER TABLE provider_model_catalog ADD COLUMN metadata_json TEXT"
             )
         connection.execute(
             """
@@ -120,7 +131,7 @@ class ProviderCatalogService:
                 rows = connection.execute(
                     """
                     SELECT provider, model_id, discovered_at,
-                           context_window, max_output_tokens
+                           context_window, max_output_tokens, metadata_json
                     FROM provider_model_catalog
                     ORDER BY provider, model_id
                     """
@@ -140,6 +151,7 @@ class ProviderCatalogService:
                         if row["max_output_tokens"] is not None
                         else None
                     ),
+                    metadata=decode_provider_metadata(row["metadata_json"]),
                 )
                 for row in rows
             )
@@ -183,6 +195,9 @@ class ProviderCatalogService:
                 model.max_output_tokens
                 if isinstance(model, ProviderCatalogModel)
                 else None,
+                encode_provider_metadata(model.metadata)
+                if isinstance(model, ProviderCatalogModel)
+                else None,
             )
             for model in models
         ]
@@ -203,9 +218,10 @@ class ProviderCatalogService:
                         model_id,
                         discovered_at,
                         context_window,
-                        max_output_tokens
+                        max_output_tokens,
+                        metadata_json
                     )
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     records,
                 )
@@ -320,6 +336,7 @@ class ProviderCatalogService:
                 ),
             )
             existing = normalized.get(model_id)
+            metadata = sanitize_provider_metadata(item)
             if existing:
                 context_window = cls._minimum_limit(
                     existing.context_window,
@@ -329,12 +346,17 @@ class ProviderCatalogService:
                     existing.max_output_tokens,
                     max_output_tokens,
                 )
+                metadata = {
+                    **(existing.metadata or {}),
+                    **(metadata or {}),
+                }
             normalized[model_id] = ProviderCatalogModel(
                 provider=provider,
                 model_id=model_id,
                 discovered_at=timestamp,
                 context_window=context_window,
                 max_output_tokens=max_output_tokens,
+                metadata=metadata or None,
             )
         return tuple(normalized[model_id] for model_id in sorted(normalized))
 

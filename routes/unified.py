@@ -29,7 +29,7 @@ from services.adaptive_context_service import apply_adaptive_glm_context
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
-from services.model_catalog_service import build_model_catalog
+from services.model_catalog_service import build_model_catalog, unified_model_payload
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import (
     NanoGPTKeyPoolExhausted,
@@ -689,15 +689,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @api_auth_required
     def list_unified_models():
         models = [
-            {
-                "id": model["id"],
-                "object": "model",
-                "created": 0,
-                "owned_by": model["provider"],
-                "status": model["status"],
-                "context_window": model["context_window"],
-                "max_output_tokens": model["max_output_tokens"],
-            }
+            unified_model_payload(model)
             for model in build_model_catalog(
                 app.config["API_BASE_URLS"],
                 AutoRouteService.list_routes(),

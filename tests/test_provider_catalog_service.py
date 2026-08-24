@@ -191,6 +191,83 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         self.assertEqual(models[0].context_window, 262_144)
         self.assertEqual(models[0].max_output_tokens, 65_536)
 
+    def test_extract_models_keeps_safe_navy_capability_metadata(self):
+        models = ProviderCatalogService.extract_models(
+            "navyai",
+            {
+                "data": [
+                    {
+                        "id": "gpt-image-2",
+                        "object": "model",
+                        "created": 1_749_028_256,
+                        "owned_by": "openai",
+                        "endpoint": "/v1/images/generations",
+                        "token_multiplier": 40,
+                        "premium": True,
+                        "required_plan": None,
+                        "context_window": 128_000,
+                        "max_output_tokens": None,
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["image"],
+                        "modality": "text+image->image",
+                        "tokenizer": None,
+                        "supports_vision": True,
+                        "supports_tools": None,
+                        "supports_image_output": True,
+                        "supports_streaming": None,
+                        "description": "Image generation and editing.",
+                        "pricing": {
+                            "prompt": "0.0000050505",
+                            "completion": "0.0000323232",
+                            "image": None,
+                            "request": None,
+                        },
+                        "metadata_source": "poe",
+                        "metadata_resolved_from": "gpt-image-1.5",
+                        "metadata_status": "known",
+                        "api_key": "must-not-be-stored",
+                        "unknown_nested": {"secret": "must-not-be-stored"},
+                    }
+                ]
+            },
+            discovered_at="2026-08-24T10:00:00+00:00",
+        )
+
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].context_window, 128_000)
+        self.assertEqual(
+            models[0].metadata,
+            {
+                "object": "model",
+                "created": 1_749_028_256,
+                "owned_by": "openai",
+                "endpoint": "/v1/images/generations",
+                "token_multiplier": 40,
+                "premium": True,
+                "required_plan": None,
+                "context_window": 128_000,
+                "max_output_tokens": None,
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["image"],
+                "modality": "text+image->image",
+                "tokenizer": None,
+                "supports_vision": True,
+                "supports_tools": None,
+                "supports_image_output": True,
+                "supports_streaming": None,
+                "description": "Image generation and editing.",
+                "pricing": {
+                    "prompt": "0.0000050505",
+                    "completion": "0.0000323232",
+                    "image": None,
+                    "request": None,
+                },
+                "metadata_source": "poe",
+                "metadata_resolved_from": "gpt-image-1.5",
+                "metadata_status": "known",
+            },
+        )
+
     def test_existing_catalog_schema_is_migrated_without_losing_models(self):
         database_path = os.environ["MODEL_REGISTRY_DB_PATH"]
         with sqlite3.connect(database_path) as connection:
@@ -218,6 +295,7 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         self.assertEqual(models[0].model_id, "glm-5.2")
         self.assertIsNone(models[0].context_window)
         self.assertIsNone(models[0].max_output_tokens)
+        self.assertIsNone(models[0].metadata)
 
     def test_replace_provider_models_persists_reported_limits(self):
         ProviderCatalogService.replace_provider_models(
@@ -229,6 +307,12 @@ class ProviderCatalogServiceTest(unittest.TestCase):
                     discovered_at="ignored-on-write",
                     context_window=1_048_576,
                     max_output_tokens=131_072,
+                    metadata={
+                        "endpoint": "/v1/chat/completions",
+                        "output_modalities": ["text"],
+                        "supports_reasoning": True,
+                        "api_key": "must-not-be-stored",
+                    },
                 ),
             ),
             discovered_at="2026-08-14T10:00:00+00:00",
@@ -238,6 +322,14 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         self.assertEqual(model.discovered_at, "2026-08-14T10:00:00+00:00")
         self.assertEqual(model.context_window, 1_048_576)
         self.assertEqual(model.max_output_tokens, 131_072)
+        self.assertEqual(
+            model.metadata,
+            {
+                "endpoint": "/v1/chat/completions",
+                "output_modalities": ["text"],
+                "supports_reasoning": True,
+            },
+        )
 
     def test_has_model_reads_the_last_successful_catalog(self):
         ProviderCatalogService.replace_provider_models(

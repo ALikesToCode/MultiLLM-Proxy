@@ -31,6 +31,15 @@ last successful live provider-catalog refresh. Automatic models also work throug
 require an explicit `provider:model` because their request and stream
 contracts differ across providers.
 
+Live entries retain safe provider metadata rather than reducing every model to
+an ID and token limits. NavyAI entries, for example, expose endpoint,
+modalities, plan requirements, token multiplier, model capability flags,
+description, pricing, and metadata provenance. `owned_by` continues to name the
+MultiLLM routing provider; `upstream_owned_by` identifies the owner reported by
+the upstream catalog. The original allowlisted fields are grouped under
+`provider_metadata` as well as promoted where they do not conflict with the
+OpenAI-compatible model envelope.
+
 GLM-5.2 defaults to maximum reasoning on every unified and automatic route.
 The proxy maps semantic `max` to the selected transport: OpenCode receives
 `max`, NanoGPT receives `max`, NavyAI receives `xhigh`, LinkAPI receives `high`, and

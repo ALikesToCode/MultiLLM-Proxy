@@ -9,6 +9,23 @@ This integration follows the live [NavyAI documentation](https://api.navy/docs).
 Use `GET /navyai/v1/models` to discover current models, plan gates,
 capabilities, and token multipliers instead of hard-coding the catalog.
 
+The same safe model metadata is also retained by the unified catalog after an
+administrator refreshes provider catalogs in Operations. Query `GET /v1/models`
+with a MultiLLM API key and select entries whose IDs start with `navyai:`. Each
+live entry includes the routing `provider` and `provider_model`, its catalog
+`sources`, effective context/output limits, the adapter capability summary, and
+the provider's allowlisted metadata. Common Navy fields such as `endpoint`,
+`input_modalities`, `output_modalities`, `premium`, `required_plan`,
+`token_multiplier`, capability flags, description, pricing, and metadata
+provenance (`metadata_source`, `metadata_resolved_from`, and `metadata_status`)
+are available both at the top level and in `provider_metadata`.
+
+`owned_by` remains `navyai` so OpenAI-compatible clients keep the proxy routing
+identity. When Navy reports the underlying model owner, it appears separately
+as `upstream_owned_by`. Use the direct `/navyai/v1/models` route when you need
+the immediate, byte-preserved Navy response; use `/v1/models` when a client
+needs provider-prefixed IDs and one combined MultiLLM catalog.
+
 ## Configuration
 
 ```env

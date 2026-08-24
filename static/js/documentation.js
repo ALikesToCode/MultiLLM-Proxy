@@ -45,17 +45,29 @@
 
     function capabilityLabels(model) {
         const capabilities = model.capabilities || {};
+        const providerMetadata = model.provider_metadata || {};
+        const endpoint = normalized(providerMetadata.endpoint);
+        const outputModalities = Array.isArray(providerMetadata.output_modalities)
+            ? providerMetadata.output_modalities.map(normalized)
+            : [];
         const labels = [];
-        if (capabilities.supports_chat !== false) {
+        if (endpoint.includes('/chat/completions') || (!endpoint && capabilities.supports_chat !== false)) {
             labels.push('chat');
         }
-        if (capabilities.supports_images) {
+        if (
+            providerMetadata.supports_image_output === true
+            || outputModalities.includes('image')
+            || (!endpoint && capabilities.supports_images)
+        ) {
             labels.push('images');
         }
-        if (capabilities.supports_vision) {
+        if (outputModalities.includes('video')) {
+            labels.push('video');
+        }
+        if (providerMetadata.supports_vision === true || (!endpoint && capabilities.supports_vision)) {
             labels.push('vision');
         }
-        if (capabilities.supports_tools) {
+        if (providerMetadata.supports_tools === true || (!endpoint && capabilities.supports_tools)) {
             labels.push('tools');
         }
         return labels;
@@ -69,7 +81,26 @@
         const sources = Array.isArray(model.sources) ? model.sources : [];
         const capabilities = capabilityLabels(model);
 
-        if (query && !normalized(`${model.id} ${model.provider} ${model.model}`).includes(query)) {
+        const providerMetadata = model.provider_metadata || {};
+        const inputModalities = Array.isArray(providerMetadata.input_modalities)
+            ? providerMetadata.input_modalities
+            : [];
+        const outputModalities = Array.isArray(providerMetadata.output_modalities)
+            ? providerMetadata.output_modalities
+            : [];
+        const searchable = [
+            model.id,
+            model.provider,
+            model.model,
+            providerMetadata.owned_by,
+            providerMetadata.endpoint,
+            providerMetadata.modality,
+            providerMetadata.description,
+            providerMetadata.metadata_resolved_from,
+            ...inputModalities,
+            ...outputModalities,
+        ].join(' ');
+        if (query && !normalized(searchable).includes(query)) {
             return false;
         }
         if (provider && model.provider !== provider) {
@@ -127,6 +158,52 @@
         return cell;
     }
 
+    function providerDetailsCell(model) {
+        const cell = document.createElement('td');
+        const providerMetadata = model.provider_metadata || {};
+        const details = [];
+        const inputModalities = Array.isArray(providerMetadata.input_modalities)
+            ? providerMetadata.input_modalities.join('+')
+            : '';
+        const outputModalities = Array.isArray(providerMetadata.output_modalities)
+            ? providerMetadata.output_modalities.join('+')
+            : '';
+        if (providerMetadata.endpoint) {
+            details.push(providerMetadata.endpoint);
+        }
+        if (inputModalities || outputModalities) {
+            details.push(`${inputModalities || '?'} → ${outputModalities || '?'}`);
+        }
+        if (providerMetadata.required_plan) {
+            details.push(`plan: ${providerMetadata.required_plan}`);
+        } else if (providerMetadata.premium === true) {
+            details.push('premium');
+        }
+        if (
+            providerMetadata.token_multiplier !== null
+            && providerMetadata.token_multiplier !== undefined
+            && Number.isFinite(Number(providerMetadata.token_multiplier))
+        ) {
+            details.push(`${Number(providerMetadata.token_multiplier).toLocaleString()}× tokens`);
+        }
+        if (providerMetadata.owned_by) {
+            details.push(`by ${providerMetadata.owned_by}`);
+        }
+        if (providerMetadata.metadata_resolved_from) {
+            details.push(`metadata: ${providerMetadata.metadata_resolved_from}`);
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'provider-detail-list';
+        for (const detail of details.length ? details : ['Not reported']) {
+            const line = document.createElement('span');
+            line.textContent = detail;
+            wrapper.appendChild(line);
+        }
+        cell.appendChild(wrapper);
+        return cell;
+    }
+
     function copyCell(model) {
         const cell = document.createElement('td');
         const button = document.createElement('button');
@@ -148,6 +225,7 @@
             modelCell(model),
             textCell(model.provider),
             capabilitiesCell(model),
+            providerDetailsCell(model),
             limitsCell(model),
             textCell((model.sources || []).join(', ')),
             textCell(

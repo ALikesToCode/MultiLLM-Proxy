@@ -666,7 +666,7 @@
 }
 
 .model-table {
-    min-width: 58rem;
+    min-width: 70rem;
 }
 
 .model-table tbody th code {
@@ -678,6 +678,16 @@
 .model-row--inactive {
     color: var(--ink-500);
     background: var(--ink-50);
+}
+
+.provider-detail-list {
+    display: grid;
+    min-width: 10rem;
+    gap: 0.2rem;
+    color: var(--ink-600);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.64rem;
+    line-height: 1.35;
 }
 
 .model-copy-button {
