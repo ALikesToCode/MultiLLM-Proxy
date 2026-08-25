@@ -50,8 +50,8 @@ const PROVIDERS = {
 };
 
 // These responses unambiguously reject the current candidate before a usable
-// completion is returned. Network failures and ambiguous gateway errors stay
-// fail-closed so automatic recovery cannot duplicate a completed generation.
+// completion is returned. Pre-response transport failures have a separate
+// operator-controlled policy because they do not produce an HTTP status.
 export const ROLEPLAY_SAFE_FALLBACK_STATUSES = Object.freeze([
   400,
   401,
@@ -350,6 +350,10 @@ function configuredModelsFor(env, overrides, provider, family) {
 export function getRoleplaySettings(env) {
   return {
     promptCacheEnabled: booleanSetting(env.PROMPT_CACHE_ENABLED, true),
+    preResponseFallbackEnabled: booleanSetting(
+      env.ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED,
+      true,
+    ),
     promptCacheMinTokens: boundedInteger(
       env.PROMPT_CACHE_MIN_TOKENS,
       1_024,

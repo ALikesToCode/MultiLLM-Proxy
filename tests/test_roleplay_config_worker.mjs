@@ -111,7 +111,7 @@ test("roleplay preserves ordered per-provider model fallbacks", () => {
   );
 });
 
-test("roleplay only falls back after explicit provider rejections", () => {
+test("roleplay HTTP fallback only advances after explicit rejections", () => {
   assert.deepEqual(ROLEPLAY_SAFE_FALLBACK_STATUSES, [
     400,
     401,
@@ -130,6 +130,16 @@ test("roleplay only falls back after explicit provider rejections", () => {
   for (const status of [408, 409, 500, 502, 504]) {
     assert.equal(isSafeFallbackStatus(status), false, String(status));
   }
+});
+
+test("roleplay enables pre-response transport fallback by default", () => {
+  assert.equal(getRoleplaySettings({}).preResponseFallbackEnabled, true);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED: "false",
+    }).preResponseFallbackEnabled,
+    false,
+  );
 });
 
 test("Cloudflare forwards NanoGPT key preference into the container", () => {

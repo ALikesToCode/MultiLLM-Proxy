@@ -293,6 +293,13 @@ export async function handleRoleplayEdgeRequest(request, env) {
         error.status === 413 ? "request_too_large" : "invalid_request",
       );
     }
+    if (request.signal.aborted || error?.name === "AbortError") {
+      return errorResponse(
+        "Roleplay request was aborted by the client",
+        499,
+        "request_aborted",
+      );
+    }
     logRoleplayError("roleplay_edge_request_failed", error);
     return errorResponse(
       "Roleplay request could not be handled",

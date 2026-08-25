@@ -494,7 +494,8 @@ Non-secret tuning variables:
 | `ROLEPLAY_MAX_STORED_BYTES` | `640000` | Exact raw-message storage budget before forced compaction |
 | `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
 | `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
-| `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Header wait before fail-closed abort |
+| `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Maximum wait for provider response headers before advancing to the next tier |
+| `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
 | `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with an incomplete required image-prompt contract; no-progress repairs stop immediately |

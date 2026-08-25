@@ -32,6 +32,15 @@ export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_COMPACTION_RESPONSE_BYTES = 512 * 1024;
 const MAX_LATENCY_SAMPLES = 64;
 
+class RoleplayPreResponseFailure extends Error {
+  constructor(kind, cause) {
+    super("Roleplay provider failed before response headers");
+    this.name = "RoleplayPreResponseFailure";
+    this.kind = kind;
+    this.cause = cause;
+  }
+}
+
 export function jsonResponse(body, init = {}) {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -55,11 +64,15 @@ export function errorResponse(
   );
 }
 
-export function logRoleplayError(event, error, details = {}) {
+function safeErrorName(error) {
   const candidateName = error instanceof Error ? error.name : "UnknownError";
-  const errorName = /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(candidateName)
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(candidateName)
     ? candidateName
     : "Error";
+}
+
+export function logRoleplayError(event, error, details = {}) {
+  const errorName = safeErrorName(error);
   console.error(JSON.stringify({ event, errorName, ...details }));
 }
 
@@ -436,21 +449,111 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   } catch (error) {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", abort);
-    if (
-      ["upstream_header_timeout", "compaction_timeout"].includes(
-        controller.signal.reason,
-      )
-    ) {
-      const timeoutError = new Error(
-        controller.signal.reason === "compaction_timeout"
-          ? "Memory compaction exceeded its total time budget"
-          : "Upstream response headers exceeded the time budget",
-      );
-      timeoutError.name = "TimeoutError";
-      throw timeoutError;
-    }
-    throw error;
+    const failureKind = signal?.aborted
+      ? "client_abort"
+      : controller.signal.reason === "compaction_timeout"
+        ? "compaction_timeout"
+        : controller.signal.reason === "upstream_header_timeout"
+          ? "upstream_header_timeout"
+          : "transport_rejection";
+    throw new RoleplayPreResponseFailure(failureKind, error);
   }
+}
+
+function terminalPreResponseFailure(
+  candidate,
+  failure,
+  fallbackCount,
+  fallbackEnabled,
+) {
+  if (!fallbackEnabled) {
+    return errorResponse(
+      "Selected provider outcome is ambiguous; automatic fallback was stopped",
+      502,
+      "ambiguous_provider_failure",
+    );
+  }
+
+  const timedOut = failure.kind === "upstream_header_timeout";
+  const response = errorResponse(
+    timedOut
+      ? `${candidate.provider} did not return response headers before the timeout and no fallback candidate remained`
+      : `${candidate.provider} transport failed before response headers and no fallback candidate remained`,
+    timedOut ? 504 : 502,
+    timedOut ? "provider_header_timeout" : "provider_transport_failure",
+  );
+  response.headers.set("X-Roleplay-Provider", candidate.provider);
+  response.headers.set("X-Roleplay-Model", candidate.model);
+  response.headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
+  response.headers.set("X-Roleplay-Failure-Kind", failure.kind);
+  return response;
+}
+
+function handleCandidatePreResponseFailure(
+  state,
+  candidate,
+  error,
+  settings,
+  hasFallbackCandidate,
+  fallbackCount,
+) {
+  const failure =
+    error instanceof RoleplayPreResponseFailure ? error : null;
+  const clientAborted = failure?.kind === "client_abort";
+  const nextState = clientAborted
+    ? state
+    : recordModelResult(state, candidate, {
+        success: false,
+        ttfbMs: 0,
+        totalMs: 0,
+        status: failure?.kind === "upstream_header_timeout" ? 504 : 0,
+      });
+  const shouldAdvance = Boolean(
+    failure &&
+      !clientAborted &&
+      settings.preResponseFallbackEnabled &&
+      hasFallbackCandidate,
+  );
+  logRoleplayError("roleplay_provider_fetch_failed", error, {
+    provider: candidate.provider,
+    model: candidate.model,
+    failureKind: failure?.kind ?? "unknown",
+    causeName: failure ? safeErrorName(failure.cause) : undefined,
+    fallback: shouldAdvance,
+  });
+
+  if (clientAborted) {
+    return {
+      state: nextState,
+      terminalResponse: errorResponse(
+        "Roleplay request was aborted by the client",
+        499,
+        "request_aborted",
+      ),
+    };
+  }
+  if (shouldAdvance) {
+    return {
+      state: nextState,
+      fallbackCount: fallbackCount + 1,
+      shouldAdvance: true,
+    };
+  }
+  return {
+    state: nextState,
+    terminalResponse: failure
+      ? terminalPreResponseFailure(
+          candidate,
+          failure,
+          fallbackCount,
+          settings.preResponseFallbackEnabled,
+        )
+      : errorResponse(
+          "Selected provider outcome is ambiguous; automatic fallback was stopped",
+          502,
+          "ambiguous_provider_failure",
+        ),
+  };
 }
 
 export async function requestCompaction(
@@ -591,11 +694,32 @@ export async function attemptRoleplayCandidates(
   let nextState = state;
   let fallbackCount = 0;
 
-  for (const candidate of candidates) {
+  for (
+    let candidateIndex = 0;
+    candidateIndex < candidates.length;
+    candidateIndex += 1
+  ) {
+    const candidate = candidates[candidateIndex];
     let attempted;
     let preparedPayload;
     try {
       preparedPayload = await payloadFactory(candidate);
+    } catch (error) {
+      logRoleplayError("roleplay_provider_payload_failed", error, {
+        provider: candidate.provider,
+        model: candidate.model,
+      });
+      return {
+        state: nextState,
+        terminalResponse: errorResponse(
+          "Unable to prepare the selected provider request",
+          500,
+          "provider_request_preparation_failed",
+        ),
+      };
+    }
+
+    try {
       attempted = await fetchCandidate(
         candidate,
         preparedPayload?.payload ?? preparedPayload,
@@ -605,23 +729,22 @@ export async function attemptRoleplayCandidates(
         idempotencyKey,
       );
     } catch (error) {
-      nextState = recordModelResult(nextState, candidate, {
-        success: false,
-        ttfbMs: 0,
-        totalMs: 0,
-        status: 0,
-      });
-      logRoleplayError("roleplay_provider_fetch_failed", error, {
-        provider: candidate.provider,
-        model: candidate.model,
-      });
+      const failure = handleCandidatePreResponseFailure(
+        nextState,
+        candidate,
+        error,
+        settings,
+        candidateIndex + 1 < candidates.length,
+        fallbackCount,
+      );
+      nextState = failure.state;
+      if (failure.shouldAdvance) {
+        fallbackCount = failure.fallbackCount;
+        continue;
+      }
       return {
         state: nextState,
-        terminalResponse: errorResponse(
-          "Selected provider outcome is ambiguous; automatic fallback was stopped",
-          502,
-          "ambiguous_provider_failure",
-        ),
+        terminalResponse: failure.terminalResponse,
       };
     }
 
