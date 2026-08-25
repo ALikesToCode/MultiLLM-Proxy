@@ -9,6 +9,7 @@ import {
   parseCompactionResponse,
 } from "./memory.mjs";
 import { fragmentChatPayload } from "./message-fragments.mjs";
+import { classifyExplicitProviderError } from "./provider-errors.mjs";
 
 const RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
@@ -141,6 +142,70 @@ export function copyUpstreamResponseHeaders(headers) {
     }
   }
   return copied;
+}
+
+function terminalProviderResponse(attempted, candidate, fallbackCount) {
+  const headers = copyUpstreamResponseHeaders(attempted.response.headers);
+  headers.set("X-Roleplay-Provider", candidate.provider);
+  headers.set("X-Roleplay-Model", candidate.model);
+  headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
+  headers.set("X-Roleplay-Failure-Kind", "http_status");
+  return new Response(attempted.response.body, {
+    status: attempted.response.status,
+    statusText: attempted.response.statusText,
+    headers,
+  });
+}
+
+async function handleCandidateHttpFailure(
+  state,
+  candidate,
+  attempted,
+  settings,
+  fallbackCount,
+) {
+  const nextState = recordModelResult(state, candidate, {
+    success: false,
+    ttfbMs: attempted.headerMs,
+    totalMs: attempted.headerMs,
+    status: attempted.response.status,
+  });
+  const explicitProviderError = settings.providerErrorFallbackEnabled
+    ? await classifyExplicitProviderError(attempted.response)
+    : null;
+  attempted.cleanup();
+
+  const safeFallback =
+    isSafeFallbackStatus(attempted.response.status) ||
+    Boolean(explicitProviderError);
+  logRoleplayError(
+    "roleplay_provider_rejected",
+    new Error("Roleplay provider rejected the request"),
+    {
+      provider: candidate.provider,
+      model: candidate.model,
+      status: attempted.response.status,
+      providerErrorCode: explicitProviderError?.code,
+      safeFallback,
+    },
+  );
+
+  if (safeFallback) {
+    await attempted.response.body?.cancel();
+    return {
+      state: nextState,
+      fallbackCount: fallbackCount + 1,
+      shouldAdvance: true,
+    };
+  }
+  return {
+    state: nextState,
+    terminalResponse: terminalProviderResponse(
+      attempted,
+      candidate,
+      fallbackCount,
+    ),
+  };
 }
 
 export function decorateRoleplayHeaders(
@@ -758,27 +823,21 @@ export async function attemptRoleplayCandidates(
       };
     }
 
-    nextState = recordModelResult(nextState, candidate, {
-      success: false,
-      ttfbMs: attempted.headerMs,
-      totalMs: attempted.headerMs,
-      status: attempted.response.status,
-    });
-    attempted.cleanup();
-
-    if (isSafeFallbackStatus(attempted.response.status)) {
-      fallbackCount += 1;
-      await attempted.response.body?.cancel();
+    const failure = await handleCandidateHttpFailure(
+      nextState,
+      candidate,
+      attempted,
+      settings,
+      fallbackCount,
+    );
+    nextState = failure.state;
+    if (failure.shouldAdvance) {
+      fallbackCount = failure.fallbackCount;
       continue;
     }
-
     return {
       state: nextState,
-      terminalResponse: new Response(attempted.response.body, {
-        status: attempted.response.status,
-        statusText: attempted.response.statusText,
-        headers: copyUpstreamResponseHeaders(attempted.response.headers),
-      }),
+      terminalResponse: failure.terminalResponse,
     };
   }
 

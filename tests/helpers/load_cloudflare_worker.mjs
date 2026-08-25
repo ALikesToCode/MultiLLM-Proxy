@@ -77,6 +77,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/prompt-cache.mjs",
     import.meta.url,
   );
+  const providerErrorsUrl = new URL(
+    "../../worker/roleplay/provider-errors.mjs",
+    import.meta.url,
+  );
   const reasoningUrl = new URL(
     "../../worker/roleplay/reasoning.mjs",
     import.meta.url,
@@ -140,6 +144,7 @@ export async function roleplayModuleUrl() {
     outputBudgetSource,
     continuationSource,
     promptCacheSource,
+    providerErrorsSource,
     reasoningSource,
     sessionStorageSource,
     sessionMetricsSource,
@@ -171,6 +176,7 @@ export async function roleplayModuleUrl() {
       readFile(outputBudgetUrl, "utf8"),
       readFile(continuationUrl, "utf8"),
       readFile(promptCacheUrl, "utf8"),
+      readFile(providerErrorsUrl, "utf8"),
       readFile(reasoningUrl, "utf8"),
       readFile(sessionStorageUrl, "utf8"),
       readFile(sessionMetricsUrl, "utf8"),
@@ -267,6 +273,7 @@ export async function roleplayModuleUrl() {
     ),
   );
   const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
+  const providerErrorsDataUrl = dataModuleUrl(providerErrorsSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource);
   const messageFragmentsDataUrl = dataModuleUrl(messageFragmentsSource);
   const sessionStorageDataUrl = dataModuleUrl(
@@ -319,6 +326,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./message-fragments.mjs";',
         `from "${messageFragmentsDataUrl}";`,
+      )
+      .replace(
+        'from "./provider-errors.mjs";',
+        `from "${providerErrorsDataUrl}";`,
       ),
   );
   const sessionMetricsDataUrl = dataModuleUrl(

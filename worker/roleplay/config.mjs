@@ -354,6 +354,10 @@ export function getRoleplaySettings(env) {
       env.ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED,
       true,
     ),
+    providerErrorFallbackEnabled: booleanSetting(
+      env.ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED,
+      true,
+    ),
     promptCacheMinTokens: boundedInteger(
       env.PROMPT_CACHE_MIN_TOKENS,
       1_024,

@@ -142,6 +142,16 @@ test("roleplay enables pre-response transport fallback by default", () => {
   );
 });
 
+test("roleplay enables explicit provider-error fallback by default", () => {
+  assert.equal(getRoleplaySettings({}).providerErrorFallbackEnabled, true);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED: "false",
+    }).providerErrorFallbackEnabled,
+    false,
+  );
+});
+
 test("Cloudflare forwards NanoGPT key preference into the container", () => {
   const container = new MultiLLMProxyContainer(
     {},

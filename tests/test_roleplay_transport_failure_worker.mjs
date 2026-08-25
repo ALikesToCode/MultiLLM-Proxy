@@ -38,6 +38,19 @@ function streamingCompletionResponse(model, content) {
   );
 }
 
+function providerErrorResponse(status = 500) {
+  return Response.json(
+    {
+      error: {
+        message: "An unexpected provider error occurred",
+        type: "provider_error",
+        code: "provider_error",
+      },
+    },
+    { status },
+  );
+}
+
 test("roleplay advances after a pre-response transport rejection", async () => {
   const fixture = transportFallbackEnv();
   const calls = [];
@@ -104,6 +117,165 @@ test("roleplay streaming advances before exposing response headers", async () =>
   assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.match(await response.text(), /Immediate stream\./);
   assert.equal(calls, 2);
+});
+
+test("roleplay advances after an explicit upstream provider error", async () => {
+  const fixture = transportFallbackEnv();
+  let calls = 0;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    calls += 1;
+    if (calls === 1) {
+      return providerErrorResponse();
+    }
+    const payload = JSON.parse(init.body);
+    return streamingCompletionResponse(payload.model, "Recovered stream.");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-explicit-provider-error",
+        input: "Continue.",
+        model: "roleplay:glm",
+        stream: true,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "opencode");
+  assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
+  assert.match(await response.text(), /Recovered stream\./);
+  assert.equal(calls, 2);
+});
+
+for (const status of [502, 504]) {
+  test(`roleplay advances after an explicit upstream ${status}`, async () => {
+    const fixture = transportFallbackEnv();
+    let calls = 0;
+
+    const response = await withGlobalFetch(async (_input, init) => {
+      calls += 1;
+      if (calls === 1) {
+        return providerErrorResponse(status);
+      }
+      const payload = JSON.parse(init.body);
+      return completionResponse(payload.model, "Recovered response.");
+    }, () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest({
+          session_id: `session-explicit-provider-${status}`,
+          input: "Continue.",
+          model: "roleplay:glm",
+          stream: false,
+        }),
+        fixture.env,
+      ),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("X-Roleplay-Provider"), "opencode");
+    assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
+    assert.equal(calls, 2);
+  });
+}
+
+test("roleplay keeps unknown upstream 500 responses fail-closed", async () => {
+  const fixture = transportFallbackEnv();
+  let calls = 0;
+
+  const response = await withGlobalFetch(async () => {
+    calls += 1;
+    return Response.json(
+      {
+        error: {
+          message: "Unknown upstream failure",
+          type: "server_error",
+          code: "server_error",
+        },
+      },
+      { status: 500 },
+    );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-unknown-provider-500",
+        input: "Continue.",
+        model: "roleplay:glm",
+        stream: true,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "nanogpt");
+  assert.equal(response.headers.get("X-Roleplay-Model"), "zai-org/glm-5.2:thinking");
+  assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "0");
+  assert.equal(response.headers.get("X-Roleplay-Failure-Kind"), "http_status");
+  assert.equal((await response.json()).error.code, "server_error");
+  assert.equal(calls, 1);
+});
+
+test("roleplay can disable explicit provider-error fallback", async () => {
+  const fixture = transportFallbackEnv({
+    ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED: "false",
+  });
+  let calls = 0;
+
+  const response = await withGlobalFetch(async () => {
+    calls += 1;
+    return providerErrorResponse();
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-provider-error-fail-closed",
+        input: "Continue.",
+        model: "roleplay:glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error.code, "provider_error");
+  assert.equal(calls, 1);
+});
+
+test("roleplay does not inspect oversized provider error bodies", async () => {
+  const fixture = transportFallbackEnv();
+  const oversizedBody = JSON.stringify({
+    error: {
+      message: "An unexpected provider error occurred",
+      type: "provider_error",
+      code: "provider_error",
+      detail: "x".repeat(40 * 1024),
+    },
+  });
+  let calls = 0;
+
+  const response = await withGlobalFetch(async () => {
+    calls += 1;
+    return new Response(oversizedBody, {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-oversized-provider-error",
+        input: "Continue.",
+        model: "roleplay:glm",
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 500);
+  assert.equal(await response.text(), oversizedBody);
+  assert.equal(calls, 1);
 });
 
 test("roleplay can keep fail-closed transport behavior", async () => {
