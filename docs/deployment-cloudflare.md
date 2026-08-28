@@ -133,6 +133,26 @@ The Worker streams request and response bodies without parsing or translating na
 
 LinkAPI's live pricing page lists `gpt-image-2-c` for `/linkapi/v1/images/generations` and `/linkapi/v1/images/edits`. Use native Gemini `generateContent` for Gemini Flash Image models such as `gemini-2.5-flash-image`. See [the LinkAPI image guide](linkapi.md) for complete examples.
 
+## AIHubMix Container Routes
+
+Configure the upstream credential as a Worker secret:
+
+```bash
+npx wrangler secret put AIHUBMIX_API_KEY
+```
+
+`wrangler.jsonc` sets `AIHUBMIX_BASE_URL=https://aihubmix.com` and
+`AIHUBMIX_BACKUP_BASE_URL=https://api.inferera.com`. Both values are validated
+against the fixed official-host allowlist before use. The Worker forwards
+`/aihubmix/*` into Flask rather than contacting AIHubMix directly, preserving
+the native multipart body and the unified image translators.
+
+Use `/aihubmix/v1/models` for the live provider catalog. Use
+`/v1/images/generations` with `aihubmix:gpt-image-2-free`,
+`aihubmix:gemini-3.1-flash-image-preview-free`, or
+`aihubmix:doubao-seedream-4-0` for the normalized OpenAI Images interface. See
+[the AIHubMix guide](aihubmix.md) for native routes and request examples.
+
 ## Adaptive and Explicit Context Optimization
 
 Normal Container-backed GLM-5.2 requests on `/v1/chat/completions` safely preprocess context above `GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS` (8,000 by default). Only old high-confidence image-prompt blocks are eligible; surrounding assistant story text, the newest full prompt, protected directives, recent turns, media, tools, and reasoning data remain intact. This automatic path never summarizes ordinary text or makes an extra provider request. `/v1/responses` and provider-specific routes remain unchanged.
@@ -189,6 +209,7 @@ npx wrangler secret put LINKAPI_KEY
 npx wrangler secret put NANOGPT_API_KEY
 npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put NAVYAI_API_KEY
+npx wrangler secret put AIHUBMIX_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put GROQ_API_KEY_1
 npx wrangler secret put CHUTES_API_TOKEN

@@ -13,6 +13,7 @@ from services.model_catalog_service import build_model_catalog
 from services.provider_catalog_service import PROVIDER_CATALOG_SPECS
 
 PROVIDER_DISPLAY_NAMES = {
+    "aihubmix": "AIHubMix",
     "azure": "Azure AI",
     "cerebras": "Cerebras",
     "chutes": "Chutes",
@@ -127,9 +128,11 @@ def _examples(base_url: str, auto_model: str) -> dict[str, str]:
             '  -H "Authorization: Bearer $MULTILLM_API_KEY" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             "  -d '{\n"
-            '    "model": "linkapi:gpt-image-2-c",\n'
+            '    "model": "aihubmix:gpt-image-2-free",\n'
             '    "prompt": "A cinematic lighthouse during a storm",\n'
             '    "size": "1024x1024",\n'
+            '    "quality": "low",\n'
+            '    "output_format": "png",\n'
             '    "n": 1\n'
             "  }'"
         ),
@@ -189,8 +192,14 @@ def build_proxy_documentation(
                 "live_model_count": sum(
                     "live" in model["sources"] for model in provider_models
                 ),
-                "unified_chat": adapter is not None,
-                "unified_responses": adapter is not None and provider != "kimi-code",
+                "unified_chat": bool(
+                    capabilities and capabilities.supports_chat
+                ),
+                "unified_responses": bool(
+                    capabilities
+                    and capabilities.supports_chat
+                    and provider != "kimi-code"
+                ),
                 "unified_images": bool(capabilities and capabilities.supports_images),
                 "native_images": any(
                     endpoint["kind"] == "Images" for endpoint in endpoints

@@ -24,6 +24,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Xiaomi MiMo Token Plan
   - NanoGPT
   - NavyAI
+  - AIHubMix
   - Codex Everywhere
   - Kimi Code
   - LinkAPI
@@ -129,6 +130,12 @@ NANOGPT_PREFERRED_KEY_INDEX=1
 
 # NavyAI
 NAVYAI_API_KEY=your-navyai-api-key
+
+# AIHubMix
+AIHUBMIX_API_KEY=your-aihubmix-api-key
+# Optional trusted-origin overrides
+AIHUBMIX_BASE_URL=https://aihubmix.com
+AIHUBMIX_BACKUP_BASE_URL=https://api.inferera.com
 
 # Codex Everywhere (preferred key name)
 CODEX_EASY_API_KEY=your-codex-everywhere-key
@@ -242,6 +249,22 @@ Models:                    http://localhost:1400/opencode/v1/models
 See [OpenCode Go integration](docs/opencode-go.md) for model/protocol mapping,
 authentication, subscription limits, and the backward-compatible legacy chat
 route.
+
+AIHubMix exposes its free text catalog and three image contracts through the
+same proxy. Use `aihubmix:<model>` on unified routes, or preserve the native
+provider contract under `/aihubmix/*`:
+
+```text
+Models:                    http://localhost:1400/aihubmix/v1/models
+Chat:                      http://localhost:1400/aihubmix/v1/chat/completions
+Unified image generation: http://localhost:1400/v1/images/generations
+Native image generation:  http://localhost:1400/aihubmix/v1/images/generations
+Native image editing:     http://localhost:1400/aihubmix/v1/images/edits
+```
+
+See [AIHubMix free models and image generation](docs/aihubmix.md) for the
+current seeded free catalog, model-specific payloads, response normalization,
+and backup-origin behavior.
 
 Quick reference for all provider endpoint URLs:
 

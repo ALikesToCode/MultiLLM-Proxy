@@ -38,6 +38,13 @@ PROVIDER_SPECS = (
         ),
     ),
     (
+        "aihubmix",
+        "v1/chat/completions",
+        ProviderCapabilities(
+            supports_images=True,
+        ),
+    ),
+    (
         "codex-easy",
         "v1/chat/completions",
         ProviderCapabilities(),

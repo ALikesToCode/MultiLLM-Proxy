@@ -165,7 +165,13 @@ def _is_linkapi_request_path(path: str) -> bool:
 
 
 def _accepts_native_api_key(path: str) -> bool:
-    return _provider_prefix(path) in {"linkapi", "nanogpt", "navyai", "opencode"}
+    return _provider_prefix(path) in {
+        "aihubmix",
+        "linkapi",
+        "nanogpt",
+        "navyai",
+        "opencode",
+    }
 
 
 def request_api_key() -> Optional[str]:

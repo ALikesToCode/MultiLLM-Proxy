@@ -381,6 +381,15 @@ class ProxyService:
             )
             if upstream_path.strip("/").lower() == "v1/chat/completions":
                 header_whitelist["x-grok-conv-id"] = "X-Grok-Conv-Id"
+        elif api_provider == "aihubmix":
+            header_whitelist.update(
+                {
+                    "idempotency-key": "Idempotency-Key",
+                    "openai-beta": "OpenAI-Beta",
+                    "openai-project": "OpenAI-Project",
+                    "x-client-request-id": "X-Client-Request-ID",
+                }
+            )
         elif api_provider == "codex-easy":
             header_whitelist.update(
                 {
@@ -1336,6 +1345,7 @@ class ProxyService:
         except requests.exceptions.RequestException as e:
             if raw_passthrough:
                 provider_name = {
+                    "aihubmix": "AIHubMix",
                     "codex-easy": "Codex Everywhere",
                     "kimi-code": "Kimi Code",
                     "linkapi": "LinkAPI",

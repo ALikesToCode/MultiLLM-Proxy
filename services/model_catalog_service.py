@@ -4,6 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import asdict
 from typing import Any
 
+from providers.aihubmix import is_aihubmix_image_model
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.model_registry import ModelRegistry
@@ -81,6 +82,10 @@ def build_model_catalog(
         entry = entries[model_id]
         adapter = adapters.get(entry["provider"])
         capabilities = asdict(adapter.capabilities()) if adapter else {}
+        if entry["provider"] == "aihubmix":
+            capabilities["supports_images"] = is_aihubmix_image_model(
+                entry["model"]
+            )
         catalog.append(
             {
                 **entry,

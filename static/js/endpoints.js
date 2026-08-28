@@ -41,6 +41,13 @@ const endpoints = [
         '/navyai/v1/oauth/me',
         '/navyai/v1/oauth/revoke'
     ]],
+    ['AIHubMix', [
+        '/aihubmix/v1/models',
+        '/aihubmix/v1/chat/completions',
+        '/aihubmix/v1/images/generations',
+        '/aihubmix/v1/images/edits',
+        '/aihubmix/v1/models/doubao/doubao-seedream-4-0/predictions'
+    ]],
     ['PaLM', '/palm/models/chat-bison-001:generateText'],
     ['Nineteen AI', '/nineteen/v1/completions']
 ];

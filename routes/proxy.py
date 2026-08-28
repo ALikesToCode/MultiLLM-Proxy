@@ -9,6 +9,11 @@ from urllib.parse import unquote
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
+from providers.aihubmix import (
+    build_aihubmix_url,
+    is_valid_aihubmix_request,
+    request_with_aihubmix_origin_fallback,
+)
 from providers.nanogpt import (
     build_nanogpt_url,
     is_nanogpt_accountless_request,
@@ -140,6 +145,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
             if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):
                 raise APIError("Invalid LinkAPI path", status_code=400)
+            if api_provider == "aihubmix" and not is_valid_aihubmix_request(
+                path,
+                request.method,
+            ):
+                raise APIError("Invalid AIHubMix path", status_code=400)
             if api_provider == "codex-easy" and not _is_valid_codex_easy_path(path):
                 raise APIError("Invalid Codex Everywhere path", status_code=400)
             if api_provider == "kimi-code" and not _is_valid_kimi_code_request(
@@ -328,20 +338,32 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 else proxy_service_cls.filter_request_data(api_provider, raw_request_data)
             )
 
-            response = proxy_service_cls.make_request(
-                method=request.method,
-                url=url,
-                headers=headers,
-                params=params,
-                data=request_data,
-                api_provider=api_provider,
-                use_cache=(
-                    request.method.upper() == "GET"
-                    and not is_streaming
-                    and not raw_passthrough
-                ),
-                force_raw_passthrough=raw_passthrough,
-            )
+            def send_to_url(target_url: str):
+                return proxy_service_cls.make_request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    params=params,
+                    data=request_data,
+                    api_provider=api_provider,
+                    use_cache=(
+                        request.method.upper() == "GET"
+                        and not is_streaming
+                        and not raw_passthrough
+                    ),
+                    force_raw_passthrough=raw_passthrough,
+                )
+
+            if api_provider == "aihubmix":
+                response = request_with_aihubmix_origin_fallback(
+                    lambda origin: send_to_url(build_aihubmix_url(origin, path)),
+                    primary_origin=base_url,
+                    secondary_origin=app.config["AIHUBMIX_BACKUP_BASE_URL"],
+                    method=request.method,
+                    request_headers=request.headers,
+                )
+            else:
+                response = send_to_url(url)
 
             if configured_nanogpt_key:
                 NanoGPTKeyPool.record_result(

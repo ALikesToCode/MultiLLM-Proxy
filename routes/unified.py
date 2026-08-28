@@ -7,6 +7,7 @@ import requests
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
+from providers.aihubmix import build_aihubmix_image_request
 from providers.nanogpt import (
     nanogpt_subscription_only,
     sanitize_nanogpt_subscription_headers,
@@ -24,6 +25,11 @@ from routes.auto_routes import (
     dispatch_auto_route_chat_completion,
     openai_auto_route_models,
     register_auto_route_admin_routes,
+)
+from routes.unified_transport import (
+    normalized_aihubmix_image_response,
+    send_configured_unified_provider_request,
+    send_unified_image_request,
 )
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services.auth_service import AuthService
@@ -442,7 +448,14 @@ def _dispatch_unified_chat_candidate(
             }
             if request_timeout is not None:
                 request_kwargs["timeout_override"] = request_timeout
-            return proxy_service_cls.make_request(**request_kwargs)
+            return send_configured_unified_provider_request(
+                proxy_service_cls,
+                request_kwargs,
+                provider=provider,
+                runtime_config=app.config,
+                upstream_path=upstream_path,
+                request_headers=headers_source,
+            )
 
         response, credential_attempts = _request_with_provider_token_rotation(
             app,
@@ -572,7 +585,7 @@ def dispatch_unified_image_generation(
     request_headers=None,
     request_args=None,
 ):
-    """Dispatch an OpenAI Images generation request without changing its response."""
+    """Dispatch an OpenAI Images request, translating provider-native models."""
     start_time = time.time()
     provider = "unknown"
     headers_source = request.headers if request_headers is None else request_headers
@@ -588,8 +601,18 @@ def dispatch_unified_image_generation(
                 status_code=400,
             )
 
-        upstream_path = "v1/images/generations"
-        upstream_payload = _copy_request_payload(payload, provider_model)
+        response_kind = "openai"
+        if provider == "aihubmix":
+            image_request = build_aihubmix_image_request(
+                provider_model,
+                payload,
+            )
+            upstream_path = image_request.path
+            upstream_payload = image_request.payload
+            response_kind = image_request.response_kind
+        else:
+            upstream_path = "v1/images/generations"
+            upstream_payload = _copy_request_payload(payload, provider_model)
         raw_body = serialize_unified_chat_payload(upstream_payload)
         operation_base_url = (
             app.config["NANOGPT_STANDARD_BASE_URL"]
@@ -598,24 +621,20 @@ def dispatch_unified_image_generation(
         )
 
         def send_request(token: str):
-            return proxy_service_cls.make_request(
-                method="POST",
-                url=f"{operation_base_url.rstrip('/')}/{upstream_path}",
-                headers=proxy_service_cls.prepare_headers(
-                    headers_source,
-                    provider,
-                    token,
-                    upstream_path=upstream_path,
+            return send_unified_image_request(
+                proxy_service_cls,
+                provider=provider,
+                token=token,
+                request_headers=headers_source,
+                request_args=args_source,
+                upstream_path=upstream_path,
+                raw_body=raw_body,
+                primary_origin=operation_base_url,
+                secondary_origin=(
+                    app.config["AIHUBMIX_BACKUP_BASE_URL"]
+                    if provider == "aihubmix"
+                    else None
                 ),
-                params=proxy_service_cls.prepare_params(
-                    args_source,
-                    provider,
-                    token,
-                    upstream_path=upstream_path,
-                ),
-                data=raw_body,
-                api_provider=provider,
-                use_cache=False,
             )
 
         response, credential_attempts = _request_with_provider_token_rotation(
@@ -635,7 +654,11 @@ def dispatch_unified_image_generation(
         if isinstance(response, Response):
             downstream_response = response
         else:
-            downstream_response = stream_upstream_response(response)
+            downstream_response = (
+                normalized_aihubmix_image_response(response, response_kind)
+                if provider == "aihubmix"
+                else None
+            ) or stream_upstream_response(response)
         return _add_credential_attempt_headers(
             downstream_response,
             provider,
@@ -902,14 +925,22 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     upstream_path=upstream_path,
                 )
                 _merge_request_headers(headers, cache_decision.request_headers)
-                return proxy_service_cls.make_request(
-                    method="POST",
-                    url=adapter.chat_completions_url(),
-                    headers=headers,
-                    params=request.args,
-                    data=proxy_service_cls.filter_request_data(provider, raw_body),
-                    api_provider=provider,
-                    use_cache=False,
+                request_kwargs = {
+                    "method": "POST",
+                    "url": adapter.chat_completions_url(),
+                    "headers": headers,
+                    "params": request.args,
+                    "data": proxy_service_cls.filter_request_data(provider, raw_body),
+                    "api_provider": provider,
+                    "use_cache": False,
+                }
+                return send_configured_unified_provider_request(
+                    proxy_service_cls,
+                    request_kwargs,
+                    provider=provider,
+                    runtime_config=app.config,
+                    upstream_path=upstream_path,
+                    request_headers=headers_source,
                 )
 
             response, credential_attempts = _request_with_provider_token_rotation(

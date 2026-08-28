@@ -354,6 +354,40 @@ PROVIDER_DETAILS = {
         },
         'default_model': 'k3'
     },
+    'aihubmix': {
+        'description': 'AIHubMix OpenAI-compatible gateway with a seeded free-model catalog and GPT Image, Gemini image, and Doubao Seedream generation',
+        'endpoints': [
+            {
+                'url': '/v1/models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/aihubmix/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/v1/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/aihubmix/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"coding-glm-5.3-free\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/aihubmix/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Idempotency-Key: $REQUEST_ID" -H "Content-Type: application/json" -d "{\\"model\\": \\"gpt-image-2-free\\", \\"prompt\\": \\"A green triangle on white\\", \\"size\\": \\"1024x1024\\", \\"quality\\": \\"low\\", \\"output_format\\": \\"png\\", \\"n\\": 1}"'
+            },
+            {
+                'url': '/v1/images/edits',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/aihubmix/v1/images/edits" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Idempotency-Key: $REQUEST_ID" -F "model=gpt-image-2-free" -F "prompt=Change the circle to a square" -F "image=@input.png;type=image/png"'
+            },
+            {
+                'url': '/v1/models/doubao/doubao-seedream-4-0/predictions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/aihubmix/v1/models/doubao/doubao-seedream-4-0/predictions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Idempotency-Key: $REQUEST_ID" -H "Content-Type: application/json" -d "{\\"input\\": {\\"model\\": \\"doubao-seedream-4-0\\", \\"prompt\\": \\"A glass observatory\\", \\"size\\": \\"2K\\", \\"stream\\": false, \\"response_format\\": \\"url\\", \\"watermark\\": false}}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True,
+            'images': True,
+            'image_editing': True,
+            'free_models': True,
+            'origin_fallback': True
+        },
+        'default_model': 'gpt-image-2-free'
+    },
     'linkapi': {
         'description': 'LinkAPI multi-cloud gateway with native Claude, Gemini, OpenAI Responses, OpenAI-compatible chat, and image generation/editing',
         'endpoints': [

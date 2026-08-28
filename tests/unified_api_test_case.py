@@ -23,6 +23,7 @@ class UnifiedApiTestCase(unittest.TestCase):
                 "OPENCODE_API_KEY": "opencode-provider-key",
                 "MIMO_API_KEY": "mimo-provider-key",
                 "LINKAPI_KEY": "linkapi-provider-key",
+                "AIHUBMIX_API_KEY": "aihubmix-provider-key",
                 "CODEX_EASY_API_KEY": "codex-easy-provider-key",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(

@@ -12,6 +12,7 @@ import {
 export { RoleplaySession };
 
 const API_ROUTE_PREFIXES = new Set([
+  "aihubmix",
   "azure",
   "cerebras",
   "chutes",
@@ -166,6 +167,10 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 
 const DIRECT_ENV_KEYS = [
+  "AIHUBMIX_API_KEY",
+  "AIHUBMIX_BASE_URL",
+  "AIHUBMIX_BACKUP_BASE_URL",
+  "AIHUBMIX_PREFERRED_BASE_URL",
   "ADMIN_USERNAME",
   "ADMIN_API_KEY",
   "AUTH_DB_PATH",

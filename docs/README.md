@@ -13,4 +13,5 @@
 - [NanoGPT raw gateway](nanogpt.md)
 - [NavyAI raw gateway](navyai.md)
 - [LinkAPI chat and image generation](linkapi.md)
+- [AIHubMix free models and image generation](aihubmix.md)
 - [Deployment planning notes](deployment/)

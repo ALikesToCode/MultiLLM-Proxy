@@ -59,6 +59,7 @@ npx wrangler secret put OPENCODE_GO_API_KEY
 npx wrangler secret put NANOGPT_API_KEY
 npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler secret put NAVYAI_API_KEY
+npx wrangler secret put AIHUBMIX_API_KEY
 npx wrangler secret put GEMINI_API_KEY
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put OPENROUTER_API_KEY
@@ -149,6 +150,25 @@ Gemini clients should prefer `x-goog-api-key`. Query-string `?key=` remains avai
 Request and response bodies are streamed without parsing or changing native SSE event frames. The raw OpenAI routes preserve Responses `prompt_cache_key` and Chat `X-Grok-Conv-Id`; for Grok, xAI recommends those shapes for cache routing, but neither this proxy nor LinkAPI guarantees a cache hit. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency, because a retry can duplicate upstream work and billing. A caller should retry only when the selected upstream protocol and endpoint explicitly document an idempotency guarantee.
 
 LinkAPI's live pricing page lists `gpt-image-2-c` for `/linkapi/v1/images/generations` and `/linkapi/v1/images/edits`. Use native Gemini `generateContent` for Gemini Flash Image models such as `gemini-2.5-flash-image`. See [the LinkAPI image guide](linkapi.md) for request examples and live-catalog guidance.
+
+### AIHubMix free models and image routes
+
+Set `AIHUBMIX_API_KEY` as a Worker secret. The committed non-secret variables
+use `https://aihubmix.com` first and `https://api.inferera.com` as the trusted
+backup. The Worker forwards all `/aihubmix/*` routes to the Container so Flask
+can enforce the path allowlist, preserve multipart image edits, normalize
+Gemini and Doubao image responses, and record provider metrics.
+
+| Operation | Route |
+| --- | --- |
+| Live provider catalog | `/aihubmix/v1/models` |
+| Native chat | `/aihubmix/v1/chat/completions` |
+| Native GPT image generation | `/aihubmix/v1/images/generations` |
+| Native GPT image edit | `/aihubmix/v1/images/edits` |
+| Unified GPT, Gemini, or Doubao image generation | `/v1/images/generations` with `aihubmix:<model>` |
+
+See [the AIHubMix guide](aihubmix.md) for the seeded free catalog, examples,
+and the bounded backup-origin policy.
 
 ### Adaptive and explicit context optimization
 

@@ -1,5 +1,5 @@
 RAW_PASSTHROUGH_PROVIDERS = frozenset(
-    {"codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
+    {"aihubmix", "codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
 )
 MIXED_PASSTHROUGH_PROVIDERS = frozenset({"opencode"})
 

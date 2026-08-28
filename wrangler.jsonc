@@ -59,6 +59,8 @@
     "SERVER_HOST": "0.0.0.0",
     "SERVER_PORT": "8080",
     "APP_NAME": "MultiLLM Proxy",
+    "AIHUBMIX_BASE_URL": "https://aihubmix.com",
+    "AIHUBMIX_BACKUP_BASE_URL": "https://api.inferera.com",
     "LINKAPI_BASE_URL": "https://api.linkapi.ai",
     "ROLEPLAY_PROVIDER_ORDER": "nanogpt,opencode,linkapi,navyai",
     "ROLEPLAY_KIMI_MODEL": "kimi-k2.6",

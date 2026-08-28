@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from config import Config
+from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
 from providers.base import ModelInfo
 from providers.registry import get_registry
 from services.provider_catalog_service import ProviderCatalogService
@@ -28,6 +29,7 @@ DYNAMIC_PROVIDER_MODELS = {
 }
 
 DEFAULT_MODEL_IDS = {
+    "aihubmix": list(AIHUBMIX_BUILTIN_MODEL_IDS),
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
     "opencode": [

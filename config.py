@@ -3,6 +3,11 @@ import re
 from datetime import timedelta
 
 from env_loader import load_runtime_env
+from providers.aihubmix import (
+    AIHUBMIX_PRIMARY_BASE_URL,
+    AIHUBMIX_SECONDARY_BASE_URL,
+    trusted_aihubmix_origin,
+)
 
 
 load_runtime_env()
@@ -102,6 +107,17 @@ class Config:
     PROMPT_CACHE_MIN_TOKENS = load_bounded_env_integer(
         'PROMPT_CACHE_MIN_TOKENS', 1024, 1, 1000000
     )
+    AIHUBMIX_BASE_URL = trusted_aihubmix_origin(
+        os.environ.get('AIHUBMIX_BASE_URL'),
+        AIHUBMIX_PRIMARY_BASE_URL,
+    )
+    AIHUBMIX_BACKUP_BASE_URL = trusted_aihubmix_origin(
+        os.environ.get(
+            'AIHUBMIX_BACKUP_BASE_URL',
+            os.environ.get('AIHUBMIX_PREFERRED_BASE_URL'),
+        ),
+        AIHUBMIX_SECONDARY_BASE_URL,
+    )
     DEFAULT_PORT = 1400
     DEFAULT_HOST = '0.0.0.0'  # Listen on all interfaces
     REQUEST_TIMEOUT = 30
@@ -139,6 +155,7 @@ class Config:
         'nanogpt': NANOGPT_TEXT_BASE_URL,
         'navyai': os.environ.get('NAVYAI_BASE_URL', 'https://api.navy'),
         'linkapi': 'https://api.linkapi.ai',
+        'aihubmix': AIHUBMIX_BASE_URL,
         'codex-easy': 'https://codex-easy.ai',
         'kimi-code': 'https://api.kimi.com/coding/v1',
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
@@ -166,6 +183,7 @@ class Config:
         'nanogpt': (5, 600),  # NanoGPT supports long-running research and media operations
         'navyai': (5, 660),  # NavyAI video jobs can run for up to ten minutes
         'linkapi': (5, 600),  # LinkAPI supports long-running native agent requests
+        'aihubmix': (5, 600),  # Image generation and editing can be long-running
         'codex-easy': (5, 600),  # Codex Easy supports long-running Responses API agent requests
         'kimi-code': (5, 600),  # Kimi Code supports long-running agent and tool requests
         'palm': (10, 120),  # PaLM API can be slow to respond

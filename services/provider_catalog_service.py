@@ -39,6 +39,7 @@ class ProviderCatalogModel:
 
 
 PROVIDER_CATALOG_SPECS = {
+    "aihubmix": ProviderCatalogSpec("v1/models", "/aihubmix/v1/models"),
     "openai": ProviderCatalogSpec("v1/models", "/openai/v1/models"),
     "openrouter": ProviderCatalogSpec("models", "/openrouter/models"),
     "linkapi": ProviderCatalogSpec("v1/models", "/linkapi/v1/models"),
