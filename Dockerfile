@@ -29,4 +29,7 @@ USER multillm
 
 EXPOSE 8080
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import os, urllib.request; port = int(os.getenv('PORT') or os.getenv('SERVER_PORT') or '8080'); urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=3).close()"
+
 CMD ["/usr/local/bin/cloudflare-entrypoint.sh"]
