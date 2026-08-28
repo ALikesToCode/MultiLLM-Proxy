@@ -38,13 +38,17 @@ class FailingSession:
 
 
 class FailingStreamResponse:
-    headers = {}
+    status_code = 200
+
+    def __init__(self):
+        self.headers = {}
+        self.closed = False
 
     def iter_lines(self, decode_unicode=True):
         raise RuntimeError("stream failed with secret-provider-key")
 
     def close(self):
-        return None
+        self.closed = True
 
 
 class TrackingResponse(requests.Response):
@@ -347,6 +351,117 @@ class TransportResilienceTest(unittest.TestCase):
 
         self.assertIn(self.proxy_module.STREAM_FAILURE_MESSAGE, chunks)
         self.assertNotIn("secret-provider-key", chunks)
+
+    def test_gemini_authentication_errors_do_not_reflect_upstream_body(self):
+        upstream = _json_response(
+            401,
+            {"error": {"message": "credential secret-provider-key was rejected"}},
+        )
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=upstream,
+        ):
+            response = self.proxy_module.ProxyService._handle_gemini_request(
+                method="POST",
+                url=(
+                    "https://generativelanguage.googleapis.com/v1beta/"
+                    "chat/completions"
+                ),
+                headers={},
+                params={"key": "AIza-provider-key"},
+                data=b"{}",
+                request_data={
+                    "model": "gemini-2.0-flash",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+                use_cache=False,
+                api_provider="gemini",
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("secret-provider-key", response.text)
+        self.assertIn("configured provider credential was rejected", response.text)
+        self.assertEqual(upstream.close_calls, 1)
+
+    def test_openrouter_authentication_errors_do_not_reflect_upstream_body(self):
+        upstream = _json_response(
+            401,
+            {"error": {"message": "credential secret-provider-key was rejected"}},
+        )
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=upstream,
+        ):
+            response = self.proxy_module.ProxyService._handle_openrouter_request(
+                method="POST",
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={},
+                params={},
+                data=b"{}",
+                request_data={},
+                use_cache=False,
+                auth_token="provider-key",
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("secret-provider-key", response.text)
+        self.assertIn("configured provider credential was rejected", response.text)
+        self.assertEqual(upstream.close_calls, 1)
+
+    def test_provider_stream_handlers_emit_opaque_errors(self):
+        gemini_upstream = FailingStreamResponse()
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=gemini_upstream,
+        ):
+            gemini_response = self.proxy_module.ProxyService._handle_gemini_request(
+                method="POST",
+                url=(
+                    "https://generativelanguage.googleapis.com/v1beta/"
+                    "chat/completions"
+                ),
+                headers={},
+                params={"key": "AIza-provider-key"},
+                data=b"{}",
+                request_data={
+                    "model": "gemini-2.0-flash",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+                use_cache=False,
+                api_provider="gemini",
+            )
+
+        openrouter_upstream = FailingStreamResponse()
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=openrouter_upstream,
+        ):
+            openrouter_response = (
+                self.proxy_module.ProxyService._handle_openrouter_request(
+                    method="POST",
+                    url="https://openrouter.ai/api/v1/chat/completions",
+                    headers={},
+                    params={},
+                    data=b"{}",
+                    request_data={"stream": True},
+                    use_cache=False,
+                    auth_token="provider-key",
+                )
+            )
+
+        for response in (gemini_response, openrouter_response):
+            chunks = "".join(response.response)
+            self.assertIn(self.proxy_module.STREAM_FAILURE_MESSAGE, chunks)
+            self.assertNotIn("secret-provider-key", chunks)
+        self.assertTrue(gemini_upstream.closed)
+        self.assertTrue(openrouter_upstream.closed)
 
 if __name__ == "__main__":
     unittest.main()

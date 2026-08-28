@@ -8,7 +8,7 @@ from urllib.parse import unquote
 
 from flask import Response, jsonify, request
 
-from error_handlers import APIError
+from error_handlers import INTERNAL_ERROR_MESSAGE, APIError
 from providers.aihubmix import (
     build_aihubmix_url,
     is_valid_aihubmix_request,
@@ -41,8 +41,9 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
-from services.redaction import redact_payload
+from services.redaction import redact_headers, redact_payload
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from services.upstream_errors import stream_error_event
 
 logger = logging.getLogger(__name__)
 
@@ -398,13 +399,12 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     try:
                         return proxy_service_cls._standardize_streaming_chunk(chunk, provider_name)
                     except Exception as error:
-                        logger.error("Error standardizing chunk: %s", error)
-                        fallback = {
-                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                            "object": "chat.completion.chunk",
-                            "choices": [{"delta": {"content": str(chunk)}}],
-                        }
-                        return f"data: {json.dumps(fallback)}\n\n"
+                        logger.error(
+                            "Error standardizing %s stream chunk (%s)",
+                            provider_name,
+                            type(error).__name__,
+                        )
+                        return stream_error_event(model=f"{provider_name}-stream")
 
                 def generate_stream():
                     done_sent = False
@@ -422,13 +422,12 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                         if not done_sent:
                             yield "data: [DONE]\n\n"
                     except Exception as error:
-                        logger.error("Error in streaming response: %s", error)
-                        error_chunk = {
-                            "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                            "object": "chat.completion.chunk",
-                            "choices": [{"delta": {"content": f"Error: {str(error)}"}}],
-                        }
-                        yield f"data: {json.dumps(error_chunk)}\n\n"
+                        logger.error(
+                            "Error in %s streaming response (%s)",
+                            api_provider,
+                            type(error).__name__,
+                        )
+                        yield stream_error_event(model=f"{api_provider}-stream")
                         yield "data: [DONE]\n\n"
                     finally:
                         if hasattr(response, "close"):
@@ -467,12 +466,16 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     type(error).__name__,
                 )
             else:
-                logger.error("Proxy error for %s: %s", api_provider, error)
+                logger.error(
+                    "Proxy error for %s (%s)",
+                    api_provider,
+                    type(error).__name__,
+                )
             if isinstance(error, APIError):
                 raise error
             if raw_passthrough:
                 raise APIError("Upstream proxy request failed", status_code=502)
-            raise APIError(f"Proxy error: {str(error)}", status_code=500)
+            raise APIError("Proxy request failed", status_code=500) from error
 
     @app.route("/api/backends/chat-completions/generate", methods=["POST"])
     @login_required
@@ -674,35 +677,22 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     logger.info(
                         "Handling Google AI streaming response, status: %s, headers: %s",
                         response.status_code,
-                        response.headers,
+                        redact_headers(response.headers),
                     )
 
                     if response.status_code != 200:
                         logger.error("Google AI streaming error: HTTP %s", response.status_code)
-                        error_msg = f"Google AI streaming failed with HTTP {response.status_code}"
-                        try:
-                            error_data = response.json()
-                            if isinstance(error_data, dict) and "error" in error_data:
-                                error_msg = f"Google AI error: {error_data['error']}"
-                        except Exception:
-                            try:
-                                error_msg = f"Google AI error: {response.text[:200]}"
-                            except Exception:
-                                pass
+                        status_code = response.status_code
+                        if getattr(response, "raw", None) is not None:
+                            response.close()
 
                         def error_stream():
-                            error_chunk = {
-                                "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                                "object": "chat.completion.chunk",
-                                "created": int(time.time()),
-                                "model": "googleai-stream",
-                                "choices": [{"delta": {"content": error_msg}}],
-                            }
-                            yield f"data: {json.dumps(error_chunk)}\n\n"
+                            yield stream_error_event(model="googleai-stream")
                             yield "data: [DONE]\n\n"
 
                         return Response(
                             error_stream(),
+                            status=status_code,
                             mimetype="text/event-stream",
                             headers={
                                 "Cache-Control": "no-cache, no-transform",
@@ -809,14 +799,14 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
 
                             yield "data: [DONE]\n\n"
                         except Exception as error:
-                            logger.error("Error in streaming response: %s", error)
-                            error_chunk = {
-                                "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                                "object": "chat.completion.chunk",
-                                "choices": [{"delta": {"content": f"Error: {str(error)}"}}],
-                            }
-                            yield f"data: {json.dumps(error_chunk)}\n\n"
+                            logger.error(
+                                "Error in Google AI streaming response (%s)",
+                                type(error).__name__,
+                            )
+                            yield stream_error_event(model="googleai-stream")
                             yield "data: [DONE]\n\n"
+                        finally:
+                            response.close()
 
                     return Response(
                         generate(),
@@ -854,7 +844,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     401 if "authentication" in error.message.lower() else error.status_code
                 )
             except Exception as error:
-                logger.error("Unexpected error in Google chat completions: %s", error)
+                logger.error(
+                    "Unexpected error in Google chat completions (%s)",
+                    type(error).__name__,
+                )
                 response_time = (time.time() - start_time) * 1000
                 metrics_service_cls.get_instance().track_request(
                     provider="googleai",
@@ -864,7 +857,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 return jsonify(
                     {
                         "status": "error",
-                        "message": f"Internal server error: {str(error)}",
+                        "message": INTERNAL_ERROR_MESSAGE,
                     }
                 ), 500
 
@@ -880,7 +873,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 401 if "authentication" in error.message.lower() else error.status_code
             )
         except Exception as error:
-            logger.error("Unexpected error in Google chat completions: %s", error)
+            logger.error(
+                "Unexpected error in Google chat completions (%s)",
+                type(error).__name__,
+            )
             response_time = (time.time() - start_time) * 1000
             metrics_service_cls.get_instance().track_request(
                 provider="googleai",
@@ -890,6 +886,6 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             return jsonify(
                 {
                     "status": "error",
-                    "message": f"Internal server error: {str(error)}",
+                    "message": INTERNAL_ERROR_MESSAGE,
                 }
             ), 500

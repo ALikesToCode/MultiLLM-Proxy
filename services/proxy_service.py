@@ -11,6 +11,12 @@ from services.auth_service import AuthService
 from services.resilience_service import ResilienceService
 from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from services.upstream_errors import (
+    STREAM_FAILURE_MESSAGE,
+    UPSTREAM_FAILURE_MESSAGE,
+    authentication_error_response,
+    stream_error_event,
+)
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -45,8 +51,6 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-UPSTREAM_FAILURE_MESSAGE = "Upstream request could not be completed."
-STREAM_FAILURE_MESSAGE = "Upstream stream terminated unexpectedly."
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -2672,59 +2676,27 @@ class ProxyService:
                 is_streaming=is_streaming_request,
             )
             
-            # Handle authentication errors with more detailed logging
+            # Do not reflect provider error bodies: they may contain credential or
+            # account details that are not safe for downstream clients.
             if response.status_code == 401:
                 logger.error(
-                    "Authentication failed for %s status=%s response=%s",
+                    "Authentication failed for %s status=%s",
                     api_provider,
                     response.status_code,
-                    redact_text(response.text),
                 )
-                # Try to parse the error response for more details
-                try:
-                    error_data = response.json()
-                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
-                    logger.error(f"Detailed error: {error_message}")
-                    
-                    # Create a more informative error response
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model ({model}). Error: {error_message}",
-                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
-                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
-                except Exception as e:
-                    logger.error(
-                        "Could not parse error response: %s, %s",
-                        redact_text(response.text),
-                        str(e),
-                    )
-                    
-                    # Return a generic error
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model.",
-                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
-                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
+                response.close()
+                return authentication_error_response(
+                    api_provider,
+                    model=model,
+                    solution=(
+                        "Create a valid Google AI Studio API key and update "
+                        "GEMINI_API_KEY in the server environment."
+                    ),
+                    details=(
+                        "The admin API key cannot be used as a Gemini provider "
+                        "credential."
+                    ),
+                )
             
             # Process response to convert from Google's format to OpenAI compatible format
             if response.status_code == 200:
@@ -2805,16 +2777,22 @@ class ProxyService:
                                             len(line),
                                         )
                                         continue
-                                    except Exception as e:
-                                        logger.error(f"Error processing Gemini streaming chunk: {e}")
+                                    except Exception as error:
+                                        logger.error(
+                                            "Error processing Gemini streaming chunk (%s)",
+                                            type(error).__name__,
+                                        )
                                         continue
                             
                             # Make sure to send the final [DONE] marker
                             if not done_sent:
                                 yield "data: [DONE]\n\n"
-                        except Exception as e:
-                            logger.error(f"Error in Gemini streaming response: {str(e)}")
-                            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                        except Exception as error:
+                            logger.error(
+                                "Error in Gemini streaming response (%s)",
+                                type(error).__name__,
+                            )
+                            yield stream_error_event(model=model)
                             yield "data: [DONE]\n\n"
                         finally:
                             if hasattr(response, "close"):
@@ -2873,17 +2851,23 @@ class ProxyService:
                         })
                         
                         return new_response
-                    except Exception as e:
-                        logger.error(f"Error converting Google response to OpenAI format: {str(e)}")
+                    except Exception as error:
+                        logger.error(
+                            "Error converting Google response to OpenAI format (%s)",
+                            type(error).__name__,
+                        )
             
             return response
             
-        except Exception as e:
-            error_msg = f"Error in _handle_gemini_request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            logger.error(
+                "Gemini request handling failed for %s (%s)",
+                api_provider,
+                type(error).__name__,
+            )
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            raise APIError("Gemini request handling failed", status_code=500) from error
 
     @classmethod
     def _handle_openrouter_request(
@@ -2981,39 +2965,25 @@ class ProxyService:
                 use_cache=use_cache
             )
             
-            # Handle authentication errors
+            # Do not reflect provider error bodies: they may contain credential or
+            # account details that are not safe for downstream clients.
             if response.status_code == 401:
                 logger.error(
-                    "Authentication failed for OpenRouter status=%s response=%s",
+                    "Authentication failed for OpenRouter status=%s",
                     response.status_code,
-                    redact_text(response.text),
                 )
-                try:
-                    error_data = response.json()
-                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
-                    logger.error(f"Detailed error: {error_message}")
-                    
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for OpenRouter: {error_message}",
-                            "solution": "Please create a valid API key from OpenRouter (https://openrouter.ai) and update your .env file with OPENROUTER_API_KEY=your-key",
-                            "details": "The admin API key cannot be used directly - you need to obtain a specific OpenRouter API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
-                except Exception as e:
-                    logger.error(
-                        "Could not parse error response: %s, %s",
-                        redact_text(response.text),
-                        str(e),
-                    )
+                response.close()
+                return authentication_error_response(
+                    "OpenRouter",
+                    solution=(
+                        "Create a valid OpenRouter API key and update "
+                        "OPENROUTER_API_KEY in the server environment."
+                    ),
+                    details=(
+                        "The admin API key cannot be used as an OpenRouter "
+                        "provider credential."
+                    ),
+                )
             
             # Check for streaming response
             if request_data.get('stream', False) and response.status_code == 200:
@@ -3055,16 +3025,22 @@ class ProxyService:
                                         len(line),
                                     )
                                     continue
-                                except Exception as e:
-                                    logger.error(f"Error processing streaming chunk: {e}")
+                                except Exception as error:
+                                    logger.error(
+                                        "Error processing OpenRouter streaming chunk (%s)",
+                                        type(error).__name__,
+                                    )
                                     continue
                         
                         # Ensure final [DONE] marker
                         if not done_sent:
                             yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logger.error(f"Error in streaming generation: {str(e)}")
-                        yield f"data: {json.dumps({'choices': [{'delta': {'content': str(e)}}]})}\n\n"
+                    except Exception as error:
+                        logger.error(
+                            "Error in OpenRouter streaming response (%s)",
+                            type(error).__name__,
+                        )
+                        yield stream_error_event(model="openrouter")
                         yield 'data: [DONE]\n\n'
                     finally:
                         if hasattr(response, "close"):
@@ -3084,12 +3060,14 @@ class ProxyService:
             
             return response
             
-        except Exception as e:
-            error_msg = f"Error in _handle_openrouter_request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            logger.error(
+                "OpenRouter request handling failed (%s)",
+                type(error).__name__,
+            )
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            raise APIError("OpenRouter request handling failed", status_code=500) from error
 
     @classmethod
     def _standardize_streaming_chunk(
