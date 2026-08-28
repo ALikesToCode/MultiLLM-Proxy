@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -12,6 +12,7 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = list(responses)
         self.request_calls = 0
+        self.request_kwargs = []
         self.mounts = []
         self.cookies = requests.cookies.RequestsCookieJar()
 
@@ -20,8 +21,12 @@ class FakeSession:
 
     def request(self, **kwargs):
         self.request_calls += 1
+        self.request_kwargs.append(kwargs)
         if self.responses:
-            return self.responses.pop(0)
+            response = self.responses.pop(0)
+            if isinstance(response, requests.RequestException):
+                raise response
+            return response
         return _json_response(200, {"ok": True})
 
 
@@ -42,10 +47,21 @@ class FailingStreamResponse:
         return None
 
 
+class TrackingResponse(requests.Response):
+    def __init__(self):
+        super().__init__()
+        self.close_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+        super().close()
+
+
 def _json_response(status_code, payload):
-    response = requests.Response()
+    response = TrackingResponse()
     response.status_code = status_code
     response._content = json.dumps(payload).encode("utf-8")
+    response.raw = Mock()
     response.headers["Content-Type"] = "application/json"
     return response
 
@@ -162,6 +178,112 @@ class TransportResilienceTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(fake_session.request_calls, 2)
+
+    def test_retry_closes_response_and_preserves_timeout_override(self):
+        retry_response = _json_response(503, {"error": "temporary"})
+        fake_session = FakeSession([
+            retry_response,
+            _json_response(200, {"ok": True}),
+        ])
+
+        with (
+            patch("services.proxy_service.requests.Session", return_value=fake_session),
+            patch("services.proxy_service.time.sleep"),
+        ):
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="GET",
+                url="https://example.invalid/v1/models",
+                headers={},
+                params={},
+                data=None,
+                api_provider="openai",
+                use_cache=False,
+                timeout_override=(1, 2),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.close_calls, 1)
+        self.assertEqual(
+            [call["timeout"] for call in fake_session.request_kwargs],
+            [(1, 2), (1, 2)],
+        )
+
+    def test_timeout_payload_retry_closes_consumed_response(self):
+        retry_response = _json_response(
+            400,
+            {"error": {"message": "timeout", "code": 400}},
+        )
+        fake_session = FakeSession([
+            retry_response,
+            _json_response(200, {"ok": True}),
+        ])
+
+        with (
+            patch("services.proxy_service.requests.Session", return_value=fake_session),
+            patch("services.proxy_service.time.sleep"),
+        ):
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="POST",
+                url="https://example.invalid/v1/chat/completions",
+                headers={"Idempotency-Key": "req_123"},
+                params={},
+                data=b"{}",
+                api_provider="opencode",
+                use_cache=False,
+                timeout_override=(1, 2),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.close_calls, 1)
+        self.assertEqual(
+            [call["timeout"] for call in fake_session.request_kwargs],
+            [(1, 2), (1, 2)],
+        )
+
+    def test_make_request_forwards_timeout_override_to_managed_transport(self):
+        fake_session = FakeSession([_json_response(200, {"ok": True})])
+
+        with patch("services.proxy_service.requests.Session", return_value=fake_session):
+            response = self.proxy_module.ProxyService.make_request(
+                method="GET",
+                url="https://example.invalid/v1/models",
+                headers={},
+                params={},
+                data=None,
+                api_provider="openai",
+                use_cache=False,
+                timeout_override=(2, 4),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake_session.request_kwargs[0]["timeout"], (2, 4))
+
+    def test_exception_retry_preserves_timeout_override(self):
+        fake_session = FakeSession([
+            requests.ConnectTimeout("connect timed out"),
+            _json_response(200, {"ok": True}),
+        ])
+
+        with (
+            patch("services.proxy_service.requests.Session", return_value=fake_session),
+            patch("services.proxy_service.time.sleep"),
+        ):
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="GET",
+                url="https://example.invalid/v1/models",
+                headers={},
+                params={},
+                data=None,
+                api_provider="openai",
+                use_cache=False,
+                timeout_override=(2, 4),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [call["timeout"] for call in fake_session.request_kwargs],
+            [(2, 4), (2, 4)],
+        )
 
     def test_circuit_breaker_opens_after_failure_threshold(self):
         os.environ["CIRCUIT_BREAKER_FAILURES"] = "1"

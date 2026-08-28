@@ -1262,6 +1262,7 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
+                response.close()
                 time.sleep(RETRY_DELAY * (retry_count + 1))
                 return cls._make_base_request(
                     method=method,
@@ -1272,6 +1273,8 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     retry_count=retry_count + 1,
+                    timeout_override=timeout_override,
+                    force_raw_passthrough=force_raw_passthrough,
                     is_streaming=is_streaming,
                 )
 
@@ -1318,6 +1321,7 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
+                        response.close()
                         time.sleep(RETRY_DELAY * (retry_count + 1))
                         return cls._make_base_request(
                             method=method,
@@ -1328,6 +1332,8 @@ class ProxyService:
                             api_provider=api_provider,
                             use_cache=use_cache,
                             retry_count=retry_count + 1,
+                            timeout_override=timeout_override,
+                            force_raw_passthrough=force_raw_passthrough,
                             is_streaming=is_streaming,
                         )
 
@@ -1393,6 +1399,8 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     retry_count=retry_count + 1,
+                    timeout_override=timeout_override,
+                    force_raw_passthrough=force_raw_passthrough,
                     is_streaming=is_streaming,
                 )
             if not raw_passthrough:
@@ -3402,6 +3410,7 @@ class ProxyService:
                         data=data,
                         api_provider=api_provider,
                         use_cache=use_cache,
+                        timeout_override=timeout_override,
                     )
                 return cls._handle_googleai_request(
                     method, url, headers, params, data, request_data, use_cache
@@ -3433,6 +3442,7 @@ class ProxyService:
                 data=data,
                 api_provider=api_provider,
                 use_cache=use_cache,
+                timeout_override=timeout_override,
                 is_streaming=is_streaming,
             )
             
