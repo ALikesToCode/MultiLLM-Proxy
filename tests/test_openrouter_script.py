@@ -50,6 +50,60 @@ class OpenRouterScriptConfigTest(unittest.TestCase):
 
         self.assertEqual(post.call_args.kwargs["timeout"], (5, 120))
 
+    def test_non_streaming_content_is_hidden_by_default(self):
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{"message": {"content": "sensitive response"}}]
+            },
+        )
+        output = io.StringIO()
+
+        with (
+            patch.object(self.script_module.requests, "post", return_value=response),
+            redirect_stdout(output),
+        ):
+            self.assertTrue(
+                self.script_module.test_openrouter_non_streaming(
+                    "http://localhost:1400",
+                    "test/model",
+                    "sensitive prompt",
+                    "test-key",
+                )
+            )
+
+        diagnostics = output.getvalue()
+        self.assertNotIn("sensitive prompt", diagnostics)
+        self.assertNotIn("sensitive response", diagnostics)
+        self.assertIn("content: [hidden", diagnostics)
+
+    def test_non_streaming_content_can_be_shown_explicitly(self):
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "choices": [{"message": {"content": "visible response"}}]
+            },
+        )
+        output = io.StringIO()
+
+        with (
+            patch.object(self.script_module.requests, "post", return_value=response),
+            redirect_stdout(output),
+        ):
+            self.assertTrue(
+                self.script_module.test_openrouter_non_streaming(
+                    "http://localhost:1400",
+                    "test/model",
+                    "visible prompt",
+                    "test-key",
+                    show_content=True,
+                )
+            )
+
+        diagnostics = output.getvalue()
+        self.assertIn("visible prompt", diagnostics)
+        self.assertIn("visible response", diagnostics)
+
     def test_streaming_request_has_bounded_read_timeout(self):
         response = SimpleNamespace(raise_for_status=lambda: None)
         with (
@@ -66,6 +120,32 @@ class OpenRouterScriptConfigTest(unittest.TestCase):
             )
 
         self.assertEqual(post.call_args.kwargs["timeout"], (5, 300))
+
+    def test_streaming_content_is_hidden_by_default(self):
+        response = SimpleNamespace(raise_for_status=lambda: None)
+        event = SimpleNamespace(
+            data='{"choices":[{"delta":{"content":"sensitive stream"}}]}'
+        )
+        output = io.StringIO()
+
+        with (
+            patch.object(self.script_module.requests, "post", return_value=response),
+            patch.object(self.script_module, "SSEClient", return_value=[event]),
+            redirect_stdout(output),
+        ):
+            self.assertTrue(
+                self.script_module.test_openrouter_streaming(
+                    "http://localhost:1400",
+                    "test/model",
+                    "sensitive prompt",
+                    "test-key",
+                )
+            )
+
+        diagnostics = output.getvalue()
+        self.assertNotIn("sensitive prompt", diagnostics)
+        self.assertNotIn("sensitive stream", diagnostics)
+        self.assertIn("content: [hidden", diagnostics)
 
     def test_credit_request_has_connect_and_read_timeout(self):
         response = SimpleNamespace(
