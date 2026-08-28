@@ -414,6 +414,35 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 429)
         self.assertEqual(decision.error, "token_rate_limit_exceeded")
 
+    def test_reserves_output_budget_when_generation_limit_is_omitted(self):
+        os.environ["RATE_LIMIT_TPM"] = "1024"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"messages": [{"role": "user", "content": "hello"}]},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.error, "token_rate_limit_exceeded")
+        self.assertEqual(decision.metadata["output_tokens"], 1024)
+
+    def test_non_generation_payload_does_not_reserve_output_budget(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"metadata": {"operation": "catalog"}},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.metadata["output_tokens"], 0)
+
     def test_estimate_input_tokens_counts_message_text_not_metadata(self):
         payload = {
             "messages": [
