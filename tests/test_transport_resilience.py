@@ -108,6 +108,24 @@ class TransportResilienceTest(unittest.TestCase):
         self.assertEqual(fake_session.request_calls, 2)
         self.assertEqual(len(fake_session.mounts), 2)
 
+    def test_managed_requests_do_not_forward_keys_across_redirects(self):
+        fake_session = FakeSession([_json_response(302, {"redirect": True})])
+
+        with patch("services.proxy_service.requests.Session", return_value=fake_session):
+            response = self.proxy_module.ProxyService._make_base_request(
+                method="POST",
+                url="https://generativelanguage.googleapis.com/v1beta/models/test",
+                headers={"X-Goog-Api-Key": "provider-key"},
+                params={},
+                data=b"{}",
+                api_provider="gemini",
+                use_cache=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(fake_session.request_calls, 1)
+        self.assertFalse(fake_session.request_kwargs[0]["allow_redirects"])
+
     def test_prepare_headers_canonicalizes_allowed_request_headers(self):
         headers = self.proxy_module.ProxyService.prepare_headers(
             {

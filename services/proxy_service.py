@@ -1191,7 +1191,7 @@ class ProxyService:
                 params=params,
                 data=data,
                 timeout=timeout,
-                allow_redirects=True,
+                allow_redirects=False,
                 verify=True,
                 stream=is_streaming
             )
@@ -1259,7 +1259,7 @@ class ProxyService:
                 data=data,
                 stream=True,  # always enable streaming
                 timeout=timeout,
-                allow_redirects=not raw_passthrough,
+                allow_redirects=False,
             )
 
             # Native/raw providers expose protocol-specific streams and binary
