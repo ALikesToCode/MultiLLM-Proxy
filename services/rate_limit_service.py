@@ -685,22 +685,6 @@ class RateLimitService:
         output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
         if invalid_output is not None:
             return invalid_output
-        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
-            "0",
-            "false",
-            "no",
-        }:
-            return LimitDecision(
-                True,
-                metadata={
-                    **size_decision.metadata,
-                    "provider": provider,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "estimated_tokens": input_tokens + output_tokens,
-                },
-            )
-
         max_prompt_tokens = cls._provider_limit(provider, "MAX_PROMPT_TOKENS", 128000)
         max_output_tokens = cls._provider_limit(provider, "MAX_OUTPUT_TOKENS", 8192)
         if input_tokens > max_prompt_tokens:
@@ -718,6 +702,22 @@ class RateLimitService:
                 error="max_output_too_large",
                 message="Requested output token count exceeds the configured maximum.",
                 metadata={"output_tokens": output_tokens, "max_output_tokens": max_output_tokens},
+            )
+
+        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
+            "0",
+            "false",
+            "no",
+        }:
+            return LimitDecision(
+                True,
+                metadata={
+                    **size_decision.metadata,
+                    "provider": provider,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "estimated_tokens": input_tokens + output_tokens,
+                },
             )
 
         identity, key_prefix = cls._identity_for_user(user, remote_addr)

@@ -249,6 +249,31 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 400)
         self.assertEqual(decision.error, "invalid_max_output_tokens")
 
+    def test_safety_token_caps_remain_active_when_rate_limits_are_disabled(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+        os.environ["MAX_PROMPT_TOKENS"] = "1"
+        os.environ["MAX_OUTPUT_TOKENS"] = "5"
+
+        prompt_decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"messages": [{"role": "user", "content": "12345678"}]},
+            remote_addr="203.0.113.10",
+        )
+        output_decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"max_tokens": 6},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(prompt_decision.allowed)
+        self.assertEqual(prompt_decision.error, "prompt_too_large")
+        self.assertFalse(output_decision.allowed)
+        self.assertEqual(output_decision.error, "max_output_too_large")
+
     def test_reservation_rejects_invalid_output_token_count_without_writing(self):
         with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
             RateLimitService._ensure_storage(connection)
