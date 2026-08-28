@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import requests
 
+from services.auto_route_service import AutoRoute
 from services.context_analysis_cache import ContextAnalysisCache
 from services.nanogpt_key_pool import (
     NanoGPTKeyPoolExhausted,
@@ -565,6 +566,33 @@ class AutoRouteTest(UnifiedApiTestCase):
             providers["opencode"]["catalog_updated_at"],
             "2026-08-14T10:00:00+00:00",
         )
+
+    def test_admin_payload_tolerates_routes_for_retired_providers(self):
+        self._authenticate_admin()
+        retired_route = AutoRoute(
+            id="auto:legacy",
+            candidates=("retired:model-v1",),
+            updated_at="2026-08-14T10:00:00+00:00",
+        )
+
+        with patch(
+            "routes.auto_routes.AutoRouteService.list_routes",
+            return_value=[retired_route],
+        ):
+            response = self.client.get("/admin/auto-routes")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        route = next(
+            item for item in payload["routes"] if item["id"] == "auto:legacy"
+        )
+        self.assertFalse(route["candidates"][0]["configured"])
+        model = next(
+            item
+            for item in payload["model_catalog"]
+            if item["id"] == "retired:model-v1"
+        )
+        self.assertFalse(model["configured"])
 
     def test_admin_can_refresh_configured_provider_catalogs(self):
         self._authenticate_admin()
