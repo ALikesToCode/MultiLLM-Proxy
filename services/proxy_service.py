@@ -271,20 +271,23 @@ class ProxyService:
                     logger.error(error_msg)
                     raise APIError(error_msg, status_code=500)
 
-                if not shutil.which('gcloud'):
+                gcloud_path = shutil.which('gcloud')
+                if not gcloud_path:
                     error_msg = "gcloud CLI not found. Please install Google Cloud SDK"
                     logger.error(error_msg)
                     raise APIError(error_msg, status_code=500)
 
-                # Set credentials file for gcloud
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+                gcloud_env = os.environ.copy()
+                gcloud_env['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
 
                 # Add --quiet flag to avoid interactive prompts
                 result = subprocess.run(
-                    ['gcloud', 'auth', 'print-access-token', '--quiet'],
+                    [gcloud_path, 'auth', 'print-access-token', '--quiet'],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    timeout=30,
+                    env=gcloud_env,
                 )
 
                 token = result.stdout.strip()

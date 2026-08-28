@@ -712,7 +712,8 @@ class AuthService:
                     cls._google_token_expiry = None
                     return None
 
-                if not shutil.which("gcloud"):
+                gcloud_path = shutil.which("gcloud")
+                if not gcloud_path:
                     logger.error(
                         "No Google service account credentials configured and gcloud is not available"
                     )
@@ -722,7 +723,7 @@ class AuthService:
 
                 logger.info("Getting new Google Cloud token via gcloud CLI fallback")
                 result = subprocess.run(
-                    ["gcloud", "auth", "print-access-token", "--quiet"],
+                    [gcloud_path, "auth", "print-access-token", "--quiet"],
                     capture_output=True,
                     text=True,
                     check=True,
