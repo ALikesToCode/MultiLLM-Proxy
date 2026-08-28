@@ -121,16 +121,13 @@ class AIHubMixProviderRegistrationTest(unittest.TestCase):
             for model in build_model_catalog(Config.API_BASE_URLS)
         }
 
-        self.assertTrue(
-            models["aihubmix:gpt-image-2-free"]["capabilities"][
-                "supports_images"
-            ]
-        )
-        self.assertTrue(
-            models[
-                "aihubmix:gemini-3.1-flash-image-preview-free"
-            ]["capabilities"]["supports_images"]
-        )
+        for model_id in AIHUBMIX_IMAGE_MODEL_IDS:
+            with self.subTest(model_id=model_id):
+                self.assertTrue(
+                    models[f"aihubmix:{model_id}"]["capabilities"][
+                        "supports_images"
+                    ]
+                )
         self.assertFalse(
             models["aihubmix:coding-glm-5.3-free"]["capabilities"][
                 "supports_images"
@@ -391,6 +388,29 @@ class AIHubMixContractTest(unittest.TestCase):
 
 
 class AIHubMixUnifiedRouteTest(UnifiedApiTestCase):
+    def test_unified_catalog_advertises_every_aihubmix_image_model(self):
+        response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        models = {
+            model["id"]: model
+            for model in response.get_json()["data"]
+        }
+        for model_id in AIHUBMIX_IMAGE_MODEL_IDS:
+            with self.subTest(model_id=model_id):
+                model = models[f"aihubmix:{model_id}"]
+                self.assertEqual(model["provider"], "aihubmix")
+                self.assertTrue(model["capabilities"]["supports_images"])
+
+        self.assertFalse(
+            models["aihubmix:coding-glm-5.3-free"]["capabilities"][
+                "supports_images"
+            ]
+        )
+
     def test_unified_chat_uses_backup_after_replayable_transport_failure(self):
         transport_failure = _response(
             {
