@@ -269,7 +269,7 @@ class RateLimitService:
             if value is not None:
                 requested_values.append(value)
 
-        return requested_values[0] if requested_values else 0
+        return max(requested_values, default=0)
 
     @classmethod
     def _validated_output_tokens(

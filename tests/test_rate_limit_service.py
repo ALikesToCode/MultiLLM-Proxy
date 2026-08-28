@@ -180,6 +180,25 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 400)
         self.assertEqual(decision.error, "max_output_too_large")
 
+    def test_rejects_largest_conflicting_output_token_limit(self):
+        os.environ["MAX_OUTPUT_TOKENS"] = "5"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={
+                "max_tokens": 1,
+                "max_completion_tokens": 6,
+                "generationConfig": {"maxOutputTokens": 4},
+            },
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 400)
+        self.assertEqual(decision.error, "max_output_too_large")
+
     def test_rejects_invalid_output_token_counts_before_recording_usage(self):
         with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
             RateLimitService._ensure_storage(connection)
