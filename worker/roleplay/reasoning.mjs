@@ -22,11 +22,15 @@ function normalizedCandidate(candidate) {
       typeof candidate?.family === "string"
         ? candidate.family.toLowerCase()
         : "",
+    model:
+      typeof candidate?.model === "string"
+        ? candidate.model.toLowerCase()
+        : "",
   };
 }
 
 export function maximumReasoningProfile(candidate) {
-  const { provider, family } = normalizedCandidate(candidate);
+  const { provider, family, model } = normalizedCandidate(candidate);
 
   if (provider === "opencode") {
     // Kimi K2.6 exposes fixed native thinking through OpenCode Go without a
@@ -48,7 +52,12 @@ export function maximumReasoningProfile(candidate) {
   }
 
   if (provider === "nanogpt") {
-    const effort = family === "glm" ? "max" : "xhigh";
+    const effort =
+      family === "glm"
+        ? model.includes("glm-5.3-flash-uncensored")
+          ? "high"
+          : "max"
+        : "xhigh";
     return {
       mode: "max",
       effort,

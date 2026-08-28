@@ -238,12 +238,12 @@ test("invalid roleplay model aliases fail before provider generation", async () 
   assert.equal(response.status, 400);
 });
 
-test("versioned roleplay aliases select only the requested GLM version", async () => {
+test("versioned roleplay aliases select only the requested GLM variant", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
     ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
-      opencode: { glm: ["glm-5.3", "glm-5.2"] },
+      opencode: { glm: ["glm-5.3-flash", "glm-5.3", "glm-5.2"] },
     }),
   });
   const upstreamModels = [];
@@ -271,19 +271,31 @@ test("versioned roleplay aliases select only the requested GLM version", async (
       }),
       fixture.env,
     );
-    return [stable, experimental];
+    const flash = await handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-explicit-glm-53-flash",
+        model: "roleplay:5.3-flash",
+        messages: openingMessages(),
+        stream: false,
+      }),
+      fixture.env,
+    );
+    return [stable, experimental, flash];
   });
 
-  assert.deepEqual(responses.map((response) => response.status), [200, 200]);
-  assert.deepEqual(upstreamModels, ["glm-5.2", "glm-5.3"]);
+  assert.deepEqual(
+    responses.map((response) => response.status),
+    [200, 200, 200],
+  );
+  assert.deepEqual(upstreamModels, ["glm-5.2", "glm-5.3", "glm-5.3-flash"]);
 });
 
-test("generic roleplay GLM stays pinned to stable 5.2 candidates", async () => {
+test("generic roleplay GLM starts with GLM-5.3-Flash", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
     ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
-      opencode: { glm: ["glm-5.3", "glm-5.2"] },
+      opencode: { glm: ["glm-5.3-flash", "glm-5.3", "glm-5.2"] },
     }),
   });
   let upstreamModel;
@@ -291,11 +303,11 @@ test("generic roleplay GLM stays pinned to stable 5.2 candidates", async () => {
   const response = await withGlobalFetch(async (_input, init) => {
     const payload = JSON.parse(init.body);
     upstreamModel = payload.model;
-    return completionResponse(payload.model, "Stable reply.");
+    return completionResponse(payload.model, "Fast reply.");
   }, () =>
     handleRoleplayEdgeRequest(
       roleplayRequest({
-        session_id: "session-default-glm-52",
+        session_id: "session-default-glm-53-flash",
         model: "roleplay:glm",
         messages: openingMessages(),
         stream: false,
@@ -305,7 +317,7 @@ test("generic roleplay GLM stays pinned to stable 5.2 candidates", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(upstreamModel, "glm-5.2");
+  assert.equal(upstreamModel, "glm-5.3-flash");
 });
 
 test("dedicated roleplay key authorizes roleplay without replacing admin access", async () => {
@@ -744,7 +756,7 @@ test("Janitor model field can pin GLM while explicit sessions remain exact", asy
   );
 
   assert.equal(response.status, 200);
-  assert.equal(upstreamModel, "glm-5.2");
+  assert.equal(upstreamModel, "glm-5.3-flash");
   assert.equal(
     response.headers.get("X-Roleplay-Session-ID"),
     "janitor-explicit-session",

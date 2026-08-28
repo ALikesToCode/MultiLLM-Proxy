@@ -114,7 +114,7 @@ PROVIDER_DETAILS = {
         }
     },
     'opencode': {
-        'description': 'OpenCode Go subscription - native OpenAI Chat Completions, Anthropic Messages, streaming, and dynamic model discovery for curated coding models',
+        'description': 'OpenCode Go subscription - native OpenAI Chat Completions, Responses, Anthropic Messages, streaming, and dynamic model discovery for curated coding models',
         'endpoints': [
             {
                 'url': '/v1/chat/completions',
@@ -123,6 +123,10 @@ PROVIDER_DETAILS = {
             {
                 'url': '/v1/messages',
                 'curl': 'curl -X POST "$PROXY_BASE_URL/opencode/v1/messages" -H "X-Api-Key: $ADMIN_API_KEY" -H "Anthropic-Version: 2023-06-01" -H "Content-Type: application/json" -d "{\\"model\\": \\"minimax-m3\\", \\"max_tokens\\": 128, \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            },
+            {
+                'url': '/v1/responses',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/opencode/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"gpt-5.6-luna\\", \\"input\\": \\"Hello!\\"}"'
             },
             {
                 'url': '/v1/models',
@@ -136,6 +140,7 @@ PROVIDER_DETAILS = {
         'supported_features': {
             'streaming': True,
             'function_calling': True,
+            'responses': True,
             'anthropic_messages': True,
             'model_discovery': True,
             'json_mode': True

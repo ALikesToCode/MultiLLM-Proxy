@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Any
 
 from providers.aihubmix import is_aihubmix_image_model
+from providers.opencode_go import opencode_go_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.model_registry import ModelRegistry
@@ -57,7 +58,29 @@ def build_model_catalog(
     """Combine built-in, discovered, and route-referenced model IDs."""
     entries: dict[str, dict[str, Any]] = {}
     for model in ModelRegistry.list_models(dict(base_urls)):
-        _add_source(entries, model.provider, model.display_name, "built-in")
+        endpoint = (
+            opencode_go_model_endpoint(model.display_name)
+            if model.provider == "opencode"
+            else None
+        )
+        _add_source(
+            entries,
+            model.provider,
+            model.display_name,
+            "built-in",
+            provider_metadata=(
+                {
+                    "api_endpoint": f"/{endpoint}",
+                    "api_protocol": {
+                        "v1/chat/completions": "openai_chat_completions",
+                        "v1/messages": "anthropic_messages",
+                        "v1/responses": "openai_responses",
+                    }[endpoint],
+                }
+                if endpoint
+                else None
+            ),
+        )
 
     for model in ProviderCatalogService.list_models():
         _add_source(

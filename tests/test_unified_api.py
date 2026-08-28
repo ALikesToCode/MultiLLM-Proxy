@@ -34,6 +34,35 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertIn("mimo:mimo-v2.5-pro", model_ids)
         self.assertIn("gemini:gemini-test-model", model_ids)
 
+    def test_v1_models_exposes_each_opencode_native_protocol(self):
+        response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        models = {
+            model["id"]: model for model in response.get_json()["data"]
+        }
+        expected = {
+            "opencode:glm-5.3-flash": (
+                "/v1/chat/completions",
+                "openai_chat_completions",
+            ),
+            "opencode:qwen3.8-flash": (
+                "/v1/messages",
+                "anthropic_messages",
+            ),
+            "opencode:gpt-5.6-luna": (
+                "/v1/responses",
+                "openai_responses",
+            ),
+        }
+        for model_id, (endpoint, protocol) in expected.items():
+            with self.subTest(model_id=model_id):
+                self.assertEqual(models[model_id]["api_endpoint"], endpoint)
+                self.assertEqual(models[model_id]["api_protocol"], protocol)
+
     def test_v1_chat_completions_routes_provider_model(self):
         upstream_response = self._chat_response("hello")
 
@@ -515,6 +544,46 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
                 {"role": "system", "content": "Be brief"},
                 {"role": "user", "content": "Say hi"},
             ],
+        )
+
+    def test_opencode_responses_model_uses_the_native_endpoint(self):
+        native_body = (
+            b'{"id":"resp_go","object":"response",'
+            b'"status":"completed","output":[]}'
+        )
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(native_body)
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/v1/responses",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "opencode:gpt-5.6-luna",
+                    "input": "Say hi",
+                    "stream": False,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, native_body)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://opencode.ai/zen/go/v1/responses",
+        )
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "gpt-5.6-luna",
+                "input": "Say hi",
+                "stream": False,
+            },
         )
 
     def test_v1_responses_treats_success_non_json_upstream_as_provider_failure(self):

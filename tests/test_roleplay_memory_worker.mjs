@@ -80,11 +80,11 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
     /roleplay_total_to_headers;dur=/,
   );
   assert.equal(requests.length, 2);
-  assert.equal(requests[0].model, "glm-5.2");
+  assert.equal(requests[0].model, "glm-5.3-flash");
   assert.equal(requests[0].reasoning_effort, "max");
   assert.equal(requests[0].stream, false);
   assert.equal(requests[0].response_format, undefined);
-  assert.equal(requests[1].model, "glm-5.2");
+  assert.equal(requests[1].model, "glm-5.3-flash");
   assert.equal(requests[1].reasoning_effort, "none");
   const compactedInput = JSON.parse(requests[0].messages[1].content);
   assert.equal(

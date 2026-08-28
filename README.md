@@ -340,6 +340,7 @@ http://localhost:1400/navyai/v1/usage
 # OpenCode Go native protocol routes
 http://localhost:1400/opencode/v1/chat/completions
 http://localhost:1400/opencode/v1/messages
+http://localhost:1400/opencode/v1/responses
 http://localhost:1400/opencode/v1/models
 
 # Codex Everywhere OpenAI-compatible routes
@@ -412,7 +413,10 @@ for the exact retry boundary, response headers, persistence behavior, and API.
 - **Hyperbolic**: OpenAI-compatible hosted model inference
 - **SambaNova**: Text generation with streaming support
 - **OpenRouter**: Gateway to multiple AI providers
-- **OpenCode Go**: Protocol-native OpenAI Chat Completions, Anthropic Messages, streaming, and live model discovery under `/opencode/v1/*`
+- **OpenCode Go**: Protocol-native OpenAI Chat Completions, OpenAI Responses,
+  Anthropic Messages, streaming, and live model discovery under `/opencode/v1/*`;
+  unified catalog entries include the native endpoint/protocol for every current
+  Go model
 - **Xiaomi MiMo Token Plan**: MiMo-V2.5-Pro through the SGP OpenAI-compatible endpoint
 - **NanoGPT**: Raw OpenAI and Anthropic text APIs plus models, embeddings, images, video, audio, memory, search/extraction, moderation, batches, evals, TEE verification, partner auth, and x402 payments under `/nanogpt/*`
 - **NavyAI**: Raw OpenAI Chat and Responses, Anthropic Messages, images and video jobs, embeddings, speech, moderation, models/status, usage, and OAuth token flows under `/navyai/*`
@@ -432,9 +436,12 @@ stores bounded continuity memory, and records per-model latency and
 reliability. OpenCode generations use Container egress because OpenCode rejects
 Worker-origin HTTP signatures.
 
-The production policy sends GLM to NanoGPT subscription first, OpenCode Go
-`glm-5.3` then `glm-5.2`, and NavyAI `glm-5.2-venice` last. LinkAPI remains a
-Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
+The production policy starts GLM on NanoGPT `z-ai/glm-5.3-flash`, then
+OpenCode Go `glm-5.3-flash`, while retaining full GLM-5.3 and GLM-5.2
+fallbacks. Full GLM-5.3 leads Flash only after same-session p95 TTFB and total
+latency measurements are both within the configured 20% premium. Explicit
+Flash, full 5.3, 5.2, and uncensored aliases remain available. LinkAPI remains
+a Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
 Automatic fallback handles explicit model, capacity, authentication,
 rate-limit, and service-unavailable rejections. Ambiguous transport and
 gateway failures stop to avoid duplicate generation.

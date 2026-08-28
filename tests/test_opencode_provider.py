@@ -191,6 +191,47 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
         )
         self.assertNotIn("Authorization", request_kwargs["headers"])
 
+    def test_native_responses_preserve_openai_events(self):
+        response_events = (
+            'event: response.created\ndata: {"type":"response.created"}\n\n'
+            'event: response.completed\ndata: {"type":"response.completed"}\n\n'
+        )
+        upstream_response = Response(
+            response_events,
+            status=200,
+            content_type="text/event-stream",
+        )
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/opencode/v1/responses",
+                headers={
+                    "Authorization": "Bearer admin-test-key",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-5.6-luna",
+                    "input": "Hello",
+                    "stream": True,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), response_events)
+        request_kwargs = make_request.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["url"],
+            "https://opencode.ai/zen/go/v1/responses",
+        )
+        self.assertTrue(request_kwargs["force_raw_passthrough"])
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer opencode-provider-key",
+        )
+
     def test_native_models_preserve_repeated_query_parameters(self):
         upstream_response = requests.Response()
         upstream_response.status_code = 200

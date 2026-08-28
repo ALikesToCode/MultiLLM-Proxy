@@ -12,15 +12,22 @@ to avoid OpenCode's Worker-signature block.
 The production model policy uses NanoGPT first and learns between:
 
 - Kimi K2.6: `kimi-k2.6`
-- stable GLM-5.2: `zai-org/glm-5.2:thinking`, `glm-5.2`, and `glm-5.2-venice`
-- opt-in GLM-5.3: `glm-5.3` through OpenCode only
+- fast GLM-5.3: NanoGPT `z-ai/glm-5.3-flash`, then OpenCode
+  `glm-5.3-flash`
+- full GLM-5.3: NanoGPT `zai-org/glm-5.3`, then OpenCode `glm-5.3`
+- GLM-5.2 fallback: NanoGPT `zai-org/glm-5.2:thinking`, OpenCode
+  `glm-5.2`, and NavyAI `glm-5.2-venice`
+- explicit uncensored route: NanoGPT `z-ai/glm-5.3-flash-uncensored`, with
+  NavyAI `glm-5.2-venice` as its final fallback
 
-The generic GLM route is pinned to 5.2: NanoGPT's subscription route first,
-then OpenCode `glm-5.2`, and NavyAI's `glm-5.2-venice` last. OpenCode
-`glm-5.3` is available only when the caller explicitly selects the 5.3 alias.
-LinkAPI remains a Kimi-only tier and OpenRouter is not part of the production
-roleplay chain. Provider order is strict; latency and reliability operate only
-among each tier's eligible families.
+The generic GLM route starts with GLM-5.3-Flash. Full GLM-5.3 can move ahead of
+Flash only after the same session has at least three successful samples for
+both variants and the full model's p95 time-to-first-byte and p95 total latency
+are each no more than 20% above Flash. With insufficient evidence, Flash stays
+first. An explicit `roleplay:5.3` request bypasses that adaptive guard. LinkAPI
+remains a Kimi-only tier and OpenRouter is not part of the production roleplay
+chain. Provider order is strict; latency and reliability operate only among
+each tier's eligible models.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
@@ -31,8 +38,9 @@ Fresh sessions begin with `NANOGPT_PREFERRED_KEY_INDEX` when it is configured;
 they do not delay generation with a separate catalog probe. Definite
 generation rejections still rotate immediately, and the remembered key is
 revalidated after `NANOGPT_KEY_CHECK_EVERY_REQUESTS` successful uses.
-NanoGPT GLM requests use the catalog's exact
-`zai-org/glm-5.2:thinking` ID and its documented `max` reasoning effort.
+NanoGPT GLM-5.3-Flash and standard GLM-5.x requests use `max` reasoning. The
+explicit uncensored Flash variant exposes `high` as its strongest supported
+effort, so semantic `max` is safely clamped to `high` for that one model.
 
 ## Request
 
@@ -103,13 +111,15 @@ one-to-one tool-call association.
 request-scoped; only entries marked `always` or whose keys match recent text
 are injected, which keeps each request bounded.
 
-`model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-5.2`, or
-`glm-5.3`. OpenAI-compatible
-clients can instead set `model` to `roleplay:auto`, `roleplay:speed`,
-`roleplay:kimi`, `roleplay:glm`, `roleplay:5.2`, or `roleplay:5.3`.
-`roleplay:glm` and `roleplay:5.2` both stay on 5.2 while following provider
-priority. `roleplay:5.3` selects only OpenCode 5.3. The concrete `kimi-k2.6`,
-`glm-5.3`, and `glm-5.2` values are also accepted.
+`model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-5.3-flash`,
+`glm-5.3`, `glm-5.2`, or `uncensored`. OpenAI-compatible clients can instead
+set `model` to `roleplay:auto`, `roleplay:speed`, `roleplay:kimi`,
+`roleplay:glm`, `roleplay:5.3-flash`, `roleplay:5.3`, `roleplay:5.2`, or
+`roleplay:uncensored`. `roleplay:glm` starts on GLM-5.3-Flash and applies the
+measured 20% full-model guard. The versioned aliases pin their named variant.
+`roleplay:uncensored` is the only alias that selects NanoGPT's explicitly
+uncensored model. Concrete `kimi-k2.6`, `glm-5.3-flash`, `glm-5.3`, and
+`glm-5.2` values are also accepted.
 
 Every roleplay generation defaults to the strongest provider-compatible
 reasoning mode. Callers can lower generation effort with `reasoning_effort`;
@@ -117,8 +127,7 @@ semantic `max` maps to the selected provider's real ceiling. Model-backed
 memory compaction remains at maximum reasoning. NavyAI receives `max`;
 NanoGPT receives `max` for GLM and `xhigh` for Kimi; LinkAPI receives `high`;
 OpenRouter receives `reasoning.effort` set to
-`high` for Kimi and `xhigh` for GLM 5.2; OpenCode GLM 5.3 and 5.2 receive
-`max`.
+`high` for Kimi and `xhigh` for GLM; OpenCode GLM-5.x receives `max`.
 OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
 does not expose a supported effort overlay for that model.
 
@@ -204,9 +213,11 @@ The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
 
-Use `roleplay:glm` or `roleplay:5.2` for the stable GLM-5.2 chain. Use
-`roleplay:5.3` only when deliberately testing OpenCode GLM-5.3; it does not
-fall back to a different model version.
+Use `roleplay:glm` for the GLM-5.3-Flash default with the measured quality
+guard. Use `roleplay:5.3-flash`, `roleplay:5.3`, or `roleplay:5.2` to pin a
+variant across eligible providers. Use `roleplay:uncensored` only when the
+explicitly uncensored NanoGPT route is intended; it can fall back to NavyAI's
+GLM-5.2 Venice model.
 
 JanitorAI's public help pages do not specify the JSON sentinel used by its
 **Unlimited** control. MultiLLM does not depend on that implementation detail:
@@ -476,10 +487,12 @@ Non-secret tuning variables:
 | --- | ---: | --- |
 | `ROLEPLAY_PROVIDER_ORDER` | `nanogpt,opencode,linkapi,openrouter,navyai` | Strict provider tiers |
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
-| `ROLEPLAY_GLM_MODEL` | `glm-5.2` | Default GLM model ID |
+| `ROLEPLAY_GLM_MODEL` | `glm-5.3-flash` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
+| `ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT` | `20` | Largest allowed full GLM-5.3 p95 TTFB and total-latency premium over Flash |
+| `ROLEPLAY_QUALITY_MIN_SAMPLES` | `3` | Successful samples required for both full and Flash before promotion |
 | `NANOGPT_PREFERRED_KEY_INDEX` | unset | Numbered NanoGPT key attempted first for a fresh session |
 | `NANOGPT_KEY_CHECK_EVERY_REQUESTS` | `50` | Successful uses before the remembered NanoGPT key is catalog-revalidated |
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `128000` | Raw-dialogue threshold that forces continuity compaction; `0` derives it from provider capacity |
@@ -504,12 +517,20 @@ Non-secret tuning variables:
 
 Provider catalogs can use namespaced IDs or expose multiple generations of a
 model family. A string selects one ID; an array preserves priority among the
-candidates eligible for the requested version. Generic GLM selects only 5.2:
+candidates eligible for the requested variant. Generic GLM begins with Flash:
 
 ```json
 {
+  "nanogpt": {
+    "glm": [
+      "z-ai/glm-5.3-flash",
+      "zai-org/glm-5.3",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3-flash-uncensored"
+    ]
+  },
   "opencode": {
-    "glm": ["glm-5.2", "glm-5.3"]
+    "glm": ["glm-5.3-flash", "glm-5.3", "glm-5.2"]
   },
   "navyai": {
     "glm": "glm-5.2-venice"

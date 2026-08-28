@@ -54,6 +54,16 @@ const PROVIDER_LIMITS = {
   },
 };
 
+const MODEL_LIMITS = {
+  nanogpt: {
+    "z-ai/glm-5.3-flash-uncensored": {
+      contextWindow: 262_144,
+      maxOutputTokens: 32_768,
+      source: "provider-model-catalog",
+    },
+  },
+};
+
 function positiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
@@ -92,9 +102,20 @@ export function parseRoleplayProviderLimits(value) {
   }
 }
 
-export function resolveRoleplayCandidateLimits(overrides, provider, family) {
-  const fallback =
-    PROVIDER_LIMITS[provider]?.[family] ?? FAMILY_LIMITS[family];
+export function resolveRoleplayCandidateLimits(
+  overrides,
+  provider,
+  family,
+  model = "",
+) {
+  const modelLimit = MODEL_LIMITS[provider]?.[String(model).toLowerCase()];
+  if (modelLimit) {
+    return normalizedLimit(
+      overrides?.[provider]?.models?.[model],
+      modelLimit,
+    );
+  }
+  const fallback = PROVIDER_LIMITS[provider]?.[family] ?? FAMILY_LIMITS[family];
   return normalizedLimit(overrides?.[provider]?.[family], fallback);
 }
 

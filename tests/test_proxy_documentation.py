@@ -44,7 +44,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertIn("roleplay:5.2", body)
         self.assertIn("roleplay:5.3", body)
         self.assertIn("/opencode/v1/chat/completions", body)
-        self.assertIn("ox-alpha-free", body)
+        self.assertIn("glm-5.3-flash", body)
         self.assertIn("connect-src", body)
         self.assertIn("NanoGPT text billing mode", body)
         self.assertIn("subscription endpoint", body)
@@ -113,7 +113,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         )
         self.assertEqual(
             payload["client_integrations"]["janitor_ai"]["opencode_model"],
-            "ox-alpha-free",
+            "glm-5.3-flash",
         )
 
     def test_trusted_worker_headers_preserve_public_https_origin(self):

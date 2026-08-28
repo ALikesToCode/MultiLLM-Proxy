@@ -26,6 +26,18 @@ def is_glm_52_model(model: str) -> bool:
     return model_name.split(":", 1)[0] == "glm-5.2"
 
 
+def is_glm_5_model(model: str) -> bool:
+    model_name = model.strip().lower().rsplit("/", 1)[-1]
+    return model_name.split(":", 1)[0].startswith("glm-5.")
+
+
+def _maximum_effort(provider: str, model: str) -> str:
+    model_name = model.strip().lower()
+    if provider == "nanogpt" and "glm-5.3-flash-uncensored" in model_name:
+        return "high"
+    return GLM_52_MAX_REASONING_EFFORTS.get(provider, "max")
+
+
 def _requested_effort(payload: Mapping[str, Any]) -> tuple[bool, str | None]:
     direct = payload.get("reasoning_effort")
     if "reasoning_effort" in payload:
@@ -53,18 +65,18 @@ def _bounded_effort(requested: str, maximum: str) -> str:
     return REASONING_EFFORT_ORDER[min(requested_index, maximum_index)]
 
 
-def apply_glm_52_reasoning_policy(
+def apply_glm_5_reasoning_policy(
     payload: Mapping[str, Any],
     provider: str,
     model: str,
 ) -> dict[str, Any]:
-    """Default GLM-5.2 to max and map effort onto the provider contract."""
+    """Default GLM-5.x to its maximum and map onto the provider contract."""
     normalized = dict(payload)
-    if not is_glm_52_model(model):
+    if not is_glm_5_model(model):
         return normalized
 
     provider_name = provider.lower()
-    maximum = GLM_52_MAX_REASONING_EFFORTS.get(provider_name, "max")
+    maximum = _maximum_effort(provider_name, model)
     specified, requested = _requested_effort(normalized)
     if specified and requested is None:
         return normalized
@@ -80,3 +92,12 @@ def apply_glm_52_reasoning_policy(
     else:
         normalized["reasoning_effort"] = effort
     return normalized
+
+
+def apply_glm_52_reasoning_policy(
+    payload: Mapping[str, Any],
+    provider: str,
+    model: str,
+) -> dict[str, Any]:
+    """Compatibility alias for callers using the original GLM-5.2 name."""
+    return apply_glm_5_reasoning_policy(payload, provider, model)

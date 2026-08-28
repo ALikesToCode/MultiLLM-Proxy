@@ -57,6 +57,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/model-selection.mjs",
     import.meta.url,
   );
+  const qualityRoutingUrl = new URL(
+    "../../worker/roleplay/quality-routing.mjs",
+    import.meta.url,
+  );
   const nonstreamRepairUrl = new URL(
     "../../worker/roleplay/nonstream-repair.mjs",
     import.meta.url,
@@ -139,6 +143,7 @@ export async function roleplayModuleUrl() {
     memorySource,
     messageFragmentsSource,
     modelSelectionSource,
+    qualityRoutingSource,
     nonstreamRepairSource,
     outputContractSource,
     outputBudgetSource,
@@ -171,6 +176,7 @@ export async function roleplayModuleUrl() {
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
       readFile(modelSelectionUrl, "utf8"),
+      readFile(qualityRoutingUrl, "utf8"),
       readFile(nonstreamRepairUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
       readFile(outputBudgetUrl, "utf8"),
@@ -199,6 +205,12 @@ export async function roleplayModuleUrl() {
       `from "${validationDataUrl}";`,
     ),
   );
+  const qualityRoutingDataUrl = dataModuleUrl(
+    qualityRoutingSource.replace(
+      'from "./model-selection.mjs";',
+      `from "${modelSelectionDataUrl}";`,
+    ),
+  );
   const configDataUrl = dataModuleUrl(
     configSource
       .replace(
@@ -208,6 +220,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./model-selection.mjs";',
         `from "${modelSelectionDataUrl}";`,
+      )
+      .replace(
+        'from "./quality-routing.mjs";',
+        `from "${qualityRoutingDataUrl}";`,
       ),
   );
   const credentialHealthDataUrl = dataModuleUrl(

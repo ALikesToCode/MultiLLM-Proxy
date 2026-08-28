@@ -14,6 +14,7 @@ const endpoints = [
     ['OpenCode Go', [
         '/opencode/v1/chat/completions',
         '/opencode/v1/messages',
+        '/opencode/v1/responses',
         '/opencode/v1/models'
     ]],
     ['Xiaomi MiMo', '/mimo/chat/completions'],

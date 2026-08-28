@@ -3120,6 +3120,64 @@ test("worker preserves OpenCode Go Anthropic messages and caller-owned credentia
   assert.equal(stub.getCalls(), 0);
 });
 
+test("worker preserves native OpenCode Go Responses events", async () => {
+  const events =
+    'event: response.created\ndata: {"type":"response.created"}\n\n' +
+    'event: response.completed\ndata: {"type":"response.completed"}\n\n';
+  const stub = makeEnv(
+    async () => {
+      throw new Error("OpenCode Go Responses must bypass the container");
+    },
+    {
+      ADMIN_API_KEY: "admin-live-key",
+      OPENCODE_GO_API_KEY: "go-live-key",
+    },
+  );
+
+  await withGlobalFetch(
+    async (input, init) => {
+      const upstreamRequest =
+        input instanceof Request ? input : new Request(input, init);
+      assert.equal(
+        upstreamRequest.url,
+        "https://opencode.ai/zen/go/v1/responses",
+      );
+      assert.equal(
+        upstreamRequest.headers.get("Authorization"),
+        "Bearer go-live-key",
+      );
+      return new Response(events, {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request(
+          "https://multillm-proxy.cserules.workers.dev/opencode/v1/responses",
+          {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer admin-live-key",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "gpt-5.6-luna",
+              input: "ping",
+              stream: true,
+            }),
+          },
+        ),
+        stub.env,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), events);
+    },
+  );
+
+  assert.equal(stub.getCalls(), 0);
+});
+
 test("worker streams OpenCode request bodies without buffering", async () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();

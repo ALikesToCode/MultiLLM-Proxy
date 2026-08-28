@@ -831,6 +831,7 @@ function isOpencodeNativeRequest(pathname, method) {
   const documented =
     (upstreamPath === "/v1/chat/completions" && method === "POST") ||
     (upstreamPath === "/v1/messages" && method === "POST") ||
+    (upstreamPath === "/v1/responses" && method === "POST") ||
     (upstreamPath === "/v1/models" && method === "GET");
   return documented && pathname.toLowerCase() !== "/opencode/chat/completions";
 }

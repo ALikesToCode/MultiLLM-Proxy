@@ -43,6 +43,42 @@ test("output-contract repair has an independent bounded retry limit", () => {
   );
 });
 
+test("roleplay guards full GLM quality routing with measured p95 latency", () => {
+  const settings = getRoleplaySettings({});
+
+  assert.equal(settings.qualityLatencyPremiumPercent, 20);
+  assert.equal(settings.qualityMinimumSamples, 3);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT: "25",
+      ROLEPLAY_QUALITY_MIN_SAMPLES: "5",
+    }).qualityLatencyPremiumPercent,
+    25,
+  );
+});
+
+test("roleplay defaults NanoGPT GLM to Flash with explicit quality fallbacks", () => {
+  const env = {
+    NANOGPT_API_KEY: "nano-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+  };
+  const candidates = buildConfiguredCandidates(env, getRoleplaySettings(env));
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.model),
+    [
+      "z-ai/glm-5.3-flash",
+      "zai-org/glm-5.3",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3-flash-uncensored",
+    ],
+  );
+  const uncensored = candidates.at(-1);
+  assert.equal(uncensored.contextWindow, 262_144);
+  assert.equal(uncensored.maxOutputTokens, 32_768);
+});
+
 test("roleplay promotes the configured NanoGPT key index", () => {
   const env = {
     NANOGPT_API_KEY: "key-zero",
@@ -183,8 +219,17 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
     navyai: ["glm"],
   });
   assert.deepEqual(
+    JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).nanogpt.glm,
+    [
+      "z-ai/glm-5.3-flash",
+      "zai-org/glm-5.3",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3-flash-uncensored",
+    ],
+  );
+  assert.deepEqual(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode.glm,
-    ["glm-5.2", "glm-5.3"],
+    ["glm-5.3-flash", "glm-5.3", "glm-5.2"],
   );
   assert.equal(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,
@@ -197,4 +242,9 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
     config.vars?.ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS,
     "1",
   );
+  assert.equal(
+    config.vars?.ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT,
+    "20",
+  );
+  assert.equal(config.vars?.ROLEPLAY_QUALITY_MIN_SAMPLES, "3");
 });

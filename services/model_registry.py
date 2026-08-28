@@ -9,6 +9,10 @@ from typing import Any, Dict, Iterable, Optional
 from config import Config
 from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
 from providers.base import ModelInfo
+from providers.opencode_go import (
+    OPENCODE_GO_LEGACY_MODEL_IDS,
+    OPENCODE_GO_MODEL_IDS,
+)
 from providers.registry import get_registry
 from services.provider_catalog_service import ProviderCatalogService
 from services.sqlite_store import connect, storage_path
@@ -32,31 +36,14 @@ DEFAULT_MODEL_IDS = {
     "aihubmix": list(AIHUBMIX_BUILTIN_MODEL_IDS),
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
-    "opencode": [
-        "grok-4.5",
-        "ox-alpha-free",
-        "glm-5.2",
-        "glm-5.1",
-        "kimi-k3",
-        "kimi-k2.7-code",
-        "kimi-k2.6",
-        "mimo-v2.5",
-        "mimo-v2.5-pro",
-        "minimax-m3",
-        "minimax-m2.7",
-        "minimax-m2.5",
-        "qwen3.7-max",
-        "qwen3.7-plus",
-        "qwen3.6-plus",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "hy3",
-        # Compatibility IDs retained for existing unified-route clients.
-        "glm-5",
-        "kimi-k2.5",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
-        "qwen3.5-plus",
+    "opencode": [*OPENCODE_GO_MODEL_IDS, *OPENCODE_GO_LEGACY_MODEL_IDS],
+    "nanogpt": [
+        "z-ai/glm-5.3-flash",
+        "z-ai/glm-5.3-flash-uncensored",
+        "zai-org/glm-5.3",
+        "zai-org/glm-5.3:thinking",
+        "zai-org/glm-5.2",
+        "zai-org/glm-5.2:thinking",
     ],
     "mimo": ["mimo-v2.5-pro"],
     "kimi-code": ["k3"],

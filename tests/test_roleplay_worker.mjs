@@ -31,29 +31,31 @@ test("roleplay model catalog exposes configured adaptive tiers without secrets",
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(
-    payload.data.slice(0, 4).map(({ provider, family, model }) => ({
+    payload.data.slice(0, 6).map(({ provider, family, model }) => ({
       provider,
       family,
       model,
     })),
     [
       { provider: "opencode", family: "kimi", model: "kimi-k2.6" },
+      { provider: "opencode", family: "glm", model: "glm-5.3-flash" },
+      { provider: "opencode", family: "glm", model: "glm-5.3" },
       { provider: "opencode", family: "glm", model: "glm-5.2" },
       { provider: "navyai", family: "kimi", model: "kimi-k2.6" },
-      { provider: "navyai", family: "glm", model: "glm-5.2" },
+      { provider: "navyai", family: "glm", model: "glm-5.2-venice" },
     ],
   );
   assert.equal(payload.data[0].context_window, 262_144);
   assert.equal(payload.data[0].max_output_tokens, 262_144);
-  assert.equal(payload.data[3].context_window, 1_048_576);
-  assert.equal(payload.data[3].max_output_tokens, 131_072);
+  assert.equal(payload.data[5].context_window, 1_048_576);
+  assert.equal(payload.data[5].max_output_tokens, 131_072);
   assert.equal(
     payload.selection.model_aliases["roleplay:glm"],
-    "GLM-5.2 stable default",
+    "GLM-5.3-Flash with a measured 20% full-model latency guard",
   );
   assert.equal(
     payload.selection.model_aliases["roleplay:5.3"],
-    "GLM-5.3 only (experimental)",
+    "full GLM-5.3 only",
   );
   assert.doesNotMatch(JSON.stringify(payload), /roleplay-key/);
 });
@@ -152,11 +154,11 @@ test("roleplay endpoint stores continuity and explores Kimi then GLM", async () 
       fixture.env,
     );
     assert.equal(second.status, 200);
-    assert.equal(second.headers.get("X-Roleplay-Model"), "glm-5.2");
+    assert.equal(second.headers.get("X-Roleplay-Model"), "glm-5.3-flash");
     await fixture.waitForBackgroundWork();
   });
 
-  assert.deepEqual(upstreamModels, ["kimi-k2.6", "glm-5.2"]);
+  assert.deepEqual(upstreamModels, ["kimi-k2.6", "glm-5.3-flash"]);
   const metrics = await handleRoleplayEdgeRequest(
     new Request(
       "https://proxy.example/v1/roleplay/metrics?session_id=session-adaptive",
@@ -168,7 +170,7 @@ test("roleplay endpoint stores continuity and explores Kimi then GLM", async () 
   assert.equal(metricPayload.turns, 2);
   assert.equal(metricPayload.stored_messages, 4);
   assert.equal(metricPayload.models["opencode:kimi-k2.6"].successes, 1);
-  assert.equal(metricPayload.models["opencode:glm-5.2"].successes, 1);
+  assert.equal(metricPayload.models["opencode:glm-5.3-flash"].successes, 1);
 });
 
 test("roleplay defaults to maximum reasoning for every provider and model family", async () => {
@@ -337,7 +339,7 @@ test("roleplay fallback advances only after a clear provider rejection", async (
   );
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("X-Roleplay-Model"), "glm-5.2");
+  assert.equal(response.headers.get("X-Roleplay-Model"), "glm-5.3-flash");
   assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.equal(calls.length, 2);
   assert.ok(calls.every((call) => call.url.includes("opencode.ai")));
@@ -350,6 +352,7 @@ test("roleplay GLM fallback bypasses OpenCode and OpenRouter", async () => {
     OPENROUTER_API_KEY: "openrouter-key",
     ROLEPLAY_PROVIDER_ORDER: "nanogpt,navyai,opencode,openrouter",
     ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      nanogpt: { glm: "z-ai/glm-5.3-flash" },
       navyai: { glm: "glm-5.2-venice" },
     }),
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({
@@ -364,7 +367,7 @@ test("roleplay GLM fallback bypasses OpenCode and OpenRouter", async () => {
   const response = await withGlobalFetch(async (input, init) => {
     const payload = JSON.parse(init.body);
     calls.push({ url: String(input), model: payload.model });
-    if (payload.model === "zai-org/glm-5.2:thinking") {
+    if (payload.model === "z-ai/glm-5.3-flash") {
       return new Response('{"error":"rate limited"}', {
         status: 429,
         headers: { "Content-Type": "application/json" },
@@ -390,7 +393,7 @@ test("roleplay GLM fallback bypasses OpenCode and OpenRouter", async () => {
   assert.deepEqual(calls, [
     {
       url: "https://nano-gpt.com/api/subscription/v1/chat/completions",
-      model: "zai-org/glm-5.2:thinking",
+      model: "z-ai/glm-5.3-flash",
     },
     {
       url: "https://api.navy/v1/chat/completions",
@@ -893,6 +896,9 @@ test("roleplay selects and retains a working NanoGPT key per session", async () 
     NANO_GPT_KEY: "nanogpt-rejected-key",
     NANO_GPT_KEY_1: "nanogpt-working-key",
     ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      nanogpt: { glm: "z-ai/glm-5.3-flash" },
+    }),
   });
   const authorizationAttempts = [];
   const requestedModels = [];
@@ -1044,7 +1050,7 @@ test("roleplay advances to the next NanoGPT key after insufficient balance", asy
   ]);
 });
 
-test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
+test("roleplay maps NanoGPT GLM to GLM-5.3-Flash", async () => {
   const fixture = makeRoleplayEnv({
     OPENCODE_GO_API_KEY: "",
     NANOGPT_API_KEY: "nanogpt-working-key",
@@ -1072,7 +1078,7 @@ test("roleplay maps NanoGPT GLM to its exact thinking model", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.equal(requestedModel, "zai-org/glm-5.2:thinking");
+  assert.equal(requestedModel, "z-ai/glm-5.3-flash");
   assert.equal(requestedMaxTokens, 131_072);
 });
 

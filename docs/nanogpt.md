@@ -66,7 +66,7 @@ Those requests use `https://nano-gpt.com/api/subscription`. The deployed
 default does not add `X-Billing-Mode: paygo`, provider-selection headers, or a
 body `provider` field. It also removes `caching: true`: live validation showed
 that flag opts the request into NanoGPT's PAYG provider path, while the same
-GLM-5.2 Thinking request succeeds on the subscription endpoint without it.
+GLM request succeeds on the subscription endpoint without it.
 
 Use the unified endpoint for a subscription model:
 
@@ -75,7 +75,7 @@ curl "$PROXY_BASE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model":"nanogpt:zai-org/glm-5.2:thinking",
+    "model":"nanogpt:z-ai/glm-5.3-flash",
     "messages":[{"role":"user","content":"Continue."}]
   }'
 ```
@@ -86,6 +86,20 @@ and converts the successful result back to the Responses shape. Raw
 `/nanogpt/*` and NanoGPT media paths retain the standard provider contract;
 the NanoGPT account's disabled-PAYG setting remains the final billing guard.
 Set `NANOGPT_BILLING_MODE=standard` only when PAYG is intentional.
+
+The built-in catalog seeds the current roleplay GLM choices even before a live
+catalog refresh:
+
+- `z-ai/glm-5.3-flash`
+- `z-ai/glm-5.3-flash-uncensored`
+- `zai-org/glm-5.3` and `zai-org/glm-5.3:thinking`
+- `zai-org/glm-5.2` and `zai-org/glm-5.2:thinking`
+
+Standard GLM-5.x variants accept semantic `max` reasoning. The uncensored
+Flash variant's published ceiling is `high`, so the proxy maps a default or
+explicit `max` request to `high` for that model. NanoGPT's full GLM-5.3 preview
+may have different logging or training terms from Flash; verify the live model
+record before sending sensitive roleplay data.
 
 ## URL mapping
 
@@ -188,8 +202,10 @@ model-specific parameters.
 
 ### OpenAI Responses
 
-NanoGPT is treated as a native Responses provider. Both direct and unified
-routes preserve its native response:
+Direct NanoGPT Responses traffic preserves the native protocol. Unified
+Responses uses that native path in standard billing mode; subscription mode
+bridges to subscription Chat Completions because the subscription Responses
+path currently returns `404`:
 
 ```bash
 curl "$PROXY_BASE_URL/v1/responses" \
@@ -198,8 +214,8 @@ curl "$PROXY_BASE_URL/v1/responses" \
   -d '{"model":"nanogpt:MODEL_FROM_CATALOG","input":"Summarize this change","stream":true}'
 ```
 
-The unified route only changes the `nanogpt:` model prefix. It does not bridge
-the request through Chat Completions.
+The bridge applies only to unified subscription traffic. Raw `/nanogpt/*`
+requests remain protocol-preserving.
 
 ### Media and multipart bodies
 

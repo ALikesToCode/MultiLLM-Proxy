@@ -3,6 +3,7 @@ import {
   resolveRoleplayCandidateLimits,
 } from "./capacity.mjs";
 import { roleplayCandidateMatchesPreference } from "./model-selection.mjs";
+import { applyGlmQualityLatencyGuard } from "./quality-routing.mjs";
 
 const DEFAULT_PROVIDER_ORDER = [
   "nanogpt",
@@ -69,11 +70,28 @@ const MODEL_FAMILIES = ["kimi", "glm"];
 const MAX_PROVIDER_MODELS_PER_FAMILY = 8;
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",
-  glm: "glm-5.2",
+  glm: "glm-5.3-flash",
 };
 const PROVIDER_DEFAULT_MODELS = {
   nanogpt: {
-    glm: "zai-org/glm-5.2:thinking",
+    glm: [
+      "z-ai/glm-5.3-flash",
+      "zai-org/glm-5.3",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3-flash-uncensored",
+    ],
+  },
+  opencode: {
+    glm: ["glm-5.3-flash", "glm-5.3", "glm-5.2"],
+  },
+  navyai: {
+    glm: "glm-5.2-venice",
+  },
+  linkapi: {
+    glm: "glm-5.2",
+  },
+  openrouter: {
+    glm: "glm-5.2",
   },
 };
 
@@ -344,7 +362,7 @@ function configuredModelsFor(env, overrides, provider, family) {
     configuredGlobal && configuredGlobal !== DEFAULT_MODELS[family]
       ? configuredGlobal
       : providerDefault;
-  return [globalDefault];
+  return Array.isArray(globalDefault) ? globalDefault : [globalDefault];
 }
 
 export function getRoleplaySettings(env) {
@@ -460,6 +478,18 @@ export function getRoleplaySettings(env) {
       0,
       2,
     ),
+    qualityLatencyPremiumPercent: boundedInteger(
+      env.ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT,
+      20,
+      0,
+      100,
+    ),
+    qualityMinimumSamples: boundedInteger(
+      env.ROLEPLAY_QUALITY_MIN_SAMPLES,
+      3,
+      1,
+      100,
+    ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,
       2_592_000,
@@ -527,11 +557,6 @@ export function buildConfiguredCandidates(env, settings) {
     tokens.forEach((token, credentialRank) => {
       enabledFamilies.forEach((family) => {
         const familyRank = MODEL_FAMILIES.indexOf(family);
-        const limits = resolveRoleplayCandidateLimits(
-          settings.providerLimits,
-          provider,
-          family,
-        );
         const models = configuredModelsFor(
           env,
           settings.providerModelOverrides,
@@ -539,6 +564,12 @@ export function buildConfiguredCandidates(env, settings) {
           family,
         );
         models.forEach((model, modelRank) => {
+          const limits = resolveRoleplayCandidateLimits(
+            settings.providerLimits,
+            provider,
+            family,
+            model,
+          );
           candidates.push({
             provider,
             providerRank,
@@ -597,6 +628,7 @@ export function rankRoleplayCandidates(
   preference = "auto",
   now = Date.now(),
   activeCredentials = {},
+  qualityPolicy = {},
 ) {
   const normalizedPreference =
     typeof preference === "string" ? preference.toLowerCase() : "auto";
@@ -608,7 +640,7 @@ export function rankRoleplayCandidates(
   const coolingDown = [];
 
   for (const providerRank of providerRanks) {
-    const tier = eligible
+    const scoredTier = eligible
       .filter((candidate) => candidate.providerRank === providerRank)
       .map((candidate) => {
         const key =
@@ -623,10 +655,16 @@ export function rankRoleplayCandidates(
           activeCredential:
             activeCredentials[candidate.provider] === candidate.credentialId,
         };
-      })
+      });
+    const tier = applyGlmQualityLatencyGuard(
+      scoredTier,
+      modelStats,
+      normalizedPreference,
+      qualityPolicy,
+    )
       .sort(
         (left, right) =>
-          left.modelRank - right.modelRank ||
+          left.routingRank - right.routingRank ||
           Number(right.activeCredential) - Number(left.activeCredential) ||
           left.score - right.score ||
           left.credentialRank - right.credentialRank ||

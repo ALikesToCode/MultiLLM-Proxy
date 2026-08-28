@@ -17,6 +17,10 @@ function transportFallbackEnv(overrides = {}) {
       nanogpt: ["glm"],
       opencode: ["glm"],
     }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      nanogpt: { glm: "z-ai/glm-5.3-flash" },
+      opencode: { glm: "glm-5.3-flash" },
+    }),
     ...overrides,
   });
 }
@@ -80,11 +84,11 @@ test("roleplay advances after a pre-response transport rejection", async () => {
   assert.deepEqual(calls, [
     {
       url: "https://nano-gpt.com/api/subscription/v1/chat/completions",
-      model: "zai-org/glm-5.2:thinking",
+      model: "z-ai/glm-5.3-flash",
     },
     {
       url: "https://opencode.ai/zen/go/v1/chat/completions",
-      model: "glm-5.2",
+      model: "glm-5.3-flash",
     },
   ]);
 });
@@ -210,7 +214,7 @@ test("roleplay keeps unknown upstream 500 responses fail-closed", async () => {
 
   assert.equal(response.status, 500);
   assert.equal(response.headers.get("X-Roleplay-Provider"), "nanogpt");
-  assert.equal(response.headers.get("X-Roleplay-Model"), "zai-org/glm-5.2:thinking");
+  assert.equal(response.headers.get("X-Roleplay-Model"), "z-ai/glm-5.3-flash");
   assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "0");
   assert.equal(response.headers.get("X-Roleplay-Failure-Kind"), "http_status");
   assert.equal((await response.json()).error.code, "server_error");

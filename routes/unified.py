@@ -13,6 +13,7 @@ from providers.nanogpt import (
     sanitize_nanogpt_subscription_headers,
     sanitize_nanogpt_subscription_payload,
 )
+from providers.opencode_go import build_opencode_go_url, opencode_go_model_endpoint
 from providers.registry import get_adapter
 from route_helpers import (
     api_auth_required,
@@ -47,12 +48,12 @@ from services.provider_prompt_cache import (
     apply_prompt_cache_policy,
 )
 from services.rate_limit_service import RateLimitService
-from services.reasoning_policy import apply_glm_52_reasoning_policy
+from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 NATIVE_RESPONSES_PROVIDERS = frozenset(
-    {"codex-easy", "linkapi", "nanogpt", "navyai"}
+    {"codex-easy", "linkapi", "nanogpt", "navyai", "opencode"}
 )
 
 
@@ -395,7 +396,7 @@ def _dispatch_unified_chat_candidate(
             )
             if adaptive_result is not None:
                 candidate_payload = adaptive_result.payload
-        upstream_payload = apply_glm_52_reasoning_policy(
+        upstream_payload = apply_glm_5_reasoning_policy(
             candidate_payload,
             provider,
             provider_model,
@@ -808,10 +809,14 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     status_code=400,
                 )
 
-            if provider in NATIVE_RESPONSES_PROVIDERS and not subscription_only:
+            native_responses = provider in NATIVE_RESPONSES_PROVIDERS and (
+                provider != "opencode"
+                or opencode_go_model_endpoint(provider_model) == "v1/responses"
+            )
+            if native_responses and not subscription_only:
                 upstream_path = "v1/responses"
                 upstream_payload = _copy_request_payload(payload, provider_model)
-                upstream_payload = apply_glm_52_reasoning_policy(
+                upstream_payload = apply_glm_5_reasoning_policy(
                     upstream_payload,
                     provider,
                     provider_model,
@@ -836,9 +841,20 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                         upstream_path=upstream_path,
                     )
                     _merge_request_headers(headers, cache_decision.request_headers)
+                    upstream_url = (
+                        build_opencode_go_url(
+                            app.config["API_BASE_URLS"][provider],
+                            upstream_path,
+                        )
+                        if provider == "opencode"
+                        else (
+                            f"{app.config['API_BASE_URLS'][provider].rstrip('/')}"
+                            f"/{upstream_path}"
+                        )
+                    )
                     return proxy_service_cls.make_request(
                         method="POST",
-                        url=f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{upstream_path}",
+                        url=upstream_url,
                         headers=headers,
                         params=proxy_service_cls.prepare_params(
                             request.args,
@@ -897,7 +913,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 if source_key in payload:
                     chat_payload[target_key] = payload[source_key]
 
-            chat_payload = apply_glm_52_reasoning_policy(
+            chat_payload = apply_glm_5_reasoning_policy(
                 chat_payload,
                 provider,
                 provider_model,

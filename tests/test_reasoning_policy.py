@@ -51,6 +51,27 @@ class ReasoningPolicyTest(unittest.TestCase):
 
         self.assertEqual(result["reasoning_effort"], "max")
 
+    def test_glm_53_variants_default_to_their_supported_maximum(self):
+        full = apply_glm_52_reasoning_policy(
+            {"model": "zai-org/glm-5.3"},
+            "nanogpt",
+            "zai-org/glm-5.3",
+        )
+        flash = apply_glm_52_reasoning_policy(
+            {"model": "glm-5.3-flash"},
+            "opencode",
+            "glm-5.3-flash",
+        )
+        uncensored = apply_glm_52_reasoning_policy(
+            {"model": "z-ai/glm-5.3-flash-uncensored"},
+            "nanogpt",
+            "z-ai/glm-5.3-flash-uncensored",
+        )
+
+        self.assertEqual(full["reasoning_effort"], "max")
+        self.assertEqual(flash["reasoning_effort"], "max")
+        self.assertEqual(uncensored["reasoning_effort"], "high")
+
     def test_explicit_lower_effort_is_preserved_within_provider_ceiling(self):
         self.assertEqual(
             apply_glm_52_reasoning_policy(

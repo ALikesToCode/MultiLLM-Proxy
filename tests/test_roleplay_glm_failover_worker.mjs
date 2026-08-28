@@ -19,7 +19,7 @@ test("GLM 5.3 is accepted as an explicit roleplay model version", () => {
   assert.equal(parsed.modelPreference, "glm-5.3");
 });
 
-test("stable roleplay GLM skips 5.3 and remembers failed provider tiers", async () => {
+test("roleplay GLM prefers Flash and remembers failed provider tiers", async () => {
   const fixture = makeRoleplayEnv({
     NANOGPT_API_KEY: "nano-key",
     NAVYAI_API_KEY: "navy-key",
@@ -30,7 +30,8 @@ test("stable roleplay GLM skips 5.3 and remembers failed provider tiers", async 
       navyai: ["glm"],
     }),
     ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
-      opencode: { glm: ["glm-5.3", "glm-5.2"] },
+      nanogpt: { glm: "z-ai/glm-5.3-flash" },
+      opencode: { glm: ["glm-5.3-flash", "glm-5.3", "glm-5.2"] },
       navyai: { glm: "glm-5.2-venice" },
     }),
   });
@@ -42,7 +43,7 @@ test("stable roleplay GLM skips 5.3 and remembers failed provider tiers", async 
       model: payload.model,
       reasoningEffort: payload.reasoning_effort,
     });
-    if (payload.model === "zai-org/glm-5.2:thinking") {
+    if (payload.model === "z-ai/glm-5.3-flash") {
       return new Response('{"error":"rate limited"}', {
         status: 429,
         headers: { "Content-Type": "application/json" },
@@ -98,18 +99,26 @@ test("stable roleplay GLM skips 5.3 and remembers failed provider tiers", async 
 
   assert.deepEqual(responses.map((response) => response.status), [200, 200]);
   assert.equal(responses[0].headers.get("X-Roleplay-Provider"), "opencode");
-  assert.equal(responses[0].headers.get("X-Roleplay-Model"), "glm-5.2");
+  assert.equal(responses[0].headers.get("X-Roleplay-Model"), "glm-5.3-flash");
   assert.equal(responses[0].headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.equal(responses[1].headers.get("X-Roleplay-Provider"), "opencode");
-  assert.equal(responses[1].headers.get("X-Roleplay-Model"), "glm-5.2");
+  assert.equal(responses[1].headers.get("X-Roleplay-Model"), "glm-5.3-flash");
   assert.equal(responses[1].headers.get("X-Roleplay-Fallback-Count"), "0");
   assert.deepEqual(calls, [
     {
       host: "nano-gpt.com",
-      model: "zai-org/glm-5.2:thinking",
+      model: "z-ai/glm-5.3-flash",
       reasoningEffort: "max",
     },
-    { host: "roleplay.internal", model: "glm-5.2", reasoningEffort: "max" },
-    { host: "roleplay.internal", model: "glm-5.2", reasoningEffort: "max" },
+    {
+      host: "roleplay.internal",
+      model: "glm-5.3-flash",
+      reasoningEffort: "max",
+    },
+    {
+      host: "roleplay.internal",
+      model: "glm-5.3-flash",
+      reasoningEffort: "max",
+    },
   ]);
 });

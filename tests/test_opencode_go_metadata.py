@@ -1,6 +1,13 @@
 import unittest
 from pathlib import Path
 
+from providers.opencode_go import (
+    OPENCODE_GO_CHAT_MODEL_IDS,
+    OPENCODE_GO_MESSAGES_MODEL_IDS,
+    OPENCODE_GO_MODEL_ENDPOINTS,
+    OPENCODE_GO_MODEL_IDS,
+    OPENCODE_GO_RESPONSES_MODEL_IDS,
+)
 from proxy import PROVIDER_DETAILS
 from services.model_registry import DEFAULT_MODEL_IDS
 
@@ -16,12 +23,14 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
         self.assertTrue(details["supported_features"]["streaming"])
         self.assertTrue(details["supported_features"]["function_calling"])
         self.assertTrue(details["supported_features"]["anthropic_messages"])
+        self.assertTrue(details["supported_features"]["responses"])
         self.assertTrue(details["supported_features"]["model_discovery"])
         self.assertEqual(details["default_model"], "kimi-k3")
         self.assertTrue(
             {
                 "/v1/chat/completions",
                 "/v1/messages",
+                "/v1/responses",
                 "/v1/models",
                 "/chat/completions",
             }.issubset(endpoint_urls)
@@ -30,21 +39,22 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
     def test_current_go_models_are_available_to_unified_routes(self):
         model_ids = set(DEFAULT_MODEL_IDS["opencode"])
 
-        for model_id in (
-            "grok-4.5",
-            "ox-alpha-free",
-            "glm-5.2",
-            "kimi-k3",
-            "kimi-k2.7-code",
-            "mimo-v2.5",
-            "minimax-m3",
-            "qwen3.7-max",
-            "deepseek-v4-pro",
-            "deepseek-v4-flash",
-            "hy3",
-        ):
+        for model_id in OPENCODE_GO_MODEL_IDS:
             with self.subTest(model_id=model_id):
                 self.assertIn(model_id, model_ids)
+
+    def test_current_go_catalog_has_one_explicit_protocol_per_model(self):
+        self.assertEqual(len(OPENCODE_GO_MODEL_IDS), 33)
+        self.assertEqual(len(OPENCODE_GO_MODEL_IDS), len(set(OPENCODE_GO_MODEL_IDS)))
+        for model_id in OPENCODE_GO_RESPONSES_MODEL_IDS:
+            self.assertEqual(OPENCODE_GO_MODEL_ENDPOINTS[model_id], "v1/responses")
+        for model_id in OPENCODE_GO_CHAT_MODEL_IDS:
+            self.assertEqual(
+                OPENCODE_GO_MODEL_ENDPOINTS[model_id],
+                "v1/chat/completions",
+            )
+        for model_id in OPENCODE_GO_MESSAGES_MODEL_IDS:
+            self.assertEqual(OPENCODE_GO_MODEL_ENDPOINTS[model_id], "v1/messages")
 
     def test_docs_configuration_and_dashboard_cover_native_routes(self):
         docs = (self.repo_root / "docs/opencode-go.md").read_text(encoding="utf-8")
@@ -66,10 +76,12 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
             "OPENCODE_GO_BASE_URL",
             "/opencode/v1/chat/completions",
             "/opencode/v1/messages",
+            "/opencode/v1/responses",
             "/opencode/v1/models",
             "opencode-go/<model-id>",
             "opencode:kimi-k3",
-            "ox-alpha-free",
+            "glm-5.3-flash",
+            "gpt-5.6-luna",
             "X-MultiLLM-Api-Key",
         ):
             with self.subTest(value=value):

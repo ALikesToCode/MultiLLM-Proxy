@@ -211,7 +211,10 @@ export async function handleRoleplayEdgeRequest(request, env) {
       data: roleplayCatalog(env, settings),
       selection: {
         provider_order: settings.providerOrder,
-        policy: "latency_reliability_ewma",
+        policy: "strict_provider_p95_quality_guard",
+        quality_latency_premium_percent:
+          settings.qualityLatencyPremiumPercent,
+        quality_minimum_samples: settings.qualityMinimumSamples,
         safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
         model_aliases: ROLEPLAY_PUBLIC_MODEL_ALIASES,
       },
@@ -475,6 +478,10 @@ export class RoleplaySession extends DurableObject {
       parsed.modelPreference,
       Date.now(),
       state.activeCredentials,
+      {
+        premiumPercent: settings.qualityLatencyPremiumPercent,
+        minimumSamples: settings.qualityMinimumSamples,
+      },
     );
     if (!candidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "no_provider");

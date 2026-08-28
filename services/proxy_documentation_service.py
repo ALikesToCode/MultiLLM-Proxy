@@ -109,7 +109,7 @@ def _examples(base_url: str, auto_model: str) -> dict[str, str]:
             '  -H "Authorization: Bearer $MULTILLM_API_KEY" \\\n'
             '  -H "Content-Type: application/json" \\\n'
             "  -d '{\n"
-            '    "model": "opencode:ox-alpha-free",\n'
+            '    "model": "opencode:glm-5.3-flash",\n'
             '    "messages": [{"role": "user", "content": "Hello"}],\n'
             '    "stream": true\n'
             "  }'"
@@ -287,7 +287,7 @@ def build_proxy_documentation(
                 "append_chat_completions": False,
                 "opencode_proxy_url": f"{base_url}/opencode/v1/chat/completions",
                 "opencode_api_key_env": "ADMIN_API_KEY",
-                "opencode_model": "ox-alpha-free",
+                "opencode_model": "glm-5.3-flash",
                 "direct_navy_url": "https://api.navy/v1/chat/completions",
             }
         },

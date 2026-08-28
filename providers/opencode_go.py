@@ -4,6 +4,65 @@ from collections.abc import Mapping
 from typing import Any, Optional
 
 
+# OpenCode Go intentionally serves different models through different wire
+# protocols. Keep this mapping close to the native route allowlist so model
+# discovery and request routing cannot drift independently.
+OPENCODE_GO_RESPONSES_MODEL_IDS = (
+    "grok-4.6",
+    "gpt-5.6-luna",
+    "muse-spark-1.2-contributor",
+)
+OPENCODE_GO_CHAT_MODEL_IDS = (
+    "glm-5.3-flash",
+    "glm-5.3",
+    "glm-5.2",
+    "glm-5.1",
+    "kimi-k3",
+    "kimi-k2.7-code",
+    "kimi-k2.6",
+    "longcat-2.0",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+    "mimo-v2.5",
+    "mimo-v2.5-pro",
+    "hy4-preview",
+    "hy3",
+)
+OPENCODE_GO_MESSAGES_MODEL_IDS = (
+    "minimax-m3",
+    "minimax-m2.7",
+    "minimax-m2.5",
+    "qwen3.8-max",
+    "qwen3.8-flash",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-plus",
+)
+
+# These IDs remain in the live Go catalog even though the current endpoint
+# table no longer gives them individual rows. Their established protocol is
+# retained for compatible clients while runtime discovery remains authoritative.
+OPENCODE_GO_CATALOG_COMPATIBILITY_MODELS = {
+    "grok-4.5": "v1/chat/completions",
+    "glm-5": "v1/chat/completions",
+    "kimi-k2.5": "v1/chat/completions",
+    "mimo-v2-pro": "v1/chat/completions",
+    "mimo-v2-omni": "v1/chat/completions",
+    "qwen3.5-plus": "v1/messages",
+    "hy3-preview": "v1/chat/completions",
+}
+OPENCODE_GO_LEGACY_MODEL_IDS = ("ox-alpha-free",)
+
+OPENCODE_GO_MODEL_ENDPOINTS = {
+    **{model: "v1/responses" for model in OPENCODE_GO_RESPONSES_MODEL_IDS},
+    **{model: "v1/chat/completions" for model in OPENCODE_GO_CHAT_MODEL_IDS},
+    **{model: "v1/messages" for model in OPENCODE_GO_MESSAGES_MODEL_IDS},
+    **OPENCODE_GO_CATALOG_COMPATIBILITY_MODELS,
+}
+OPENCODE_GO_MODEL_IDS = tuple(OPENCODE_GO_MODEL_ENDPOINTS)
+
+
 OPENCODE_GO_REQUEST_HEADER_WHITELIST = {
     "anthropic-beta": "Anthropic-Beta",
     "anthropic-dangerous-direct-browser-access": "Anthropic-Dangerous-Direct-Browser-Access",
@@ -19,6 +78,7 @@ OPENCODE_GO_ENDPOINTS = frozenset(
     {
         ("POST", "v1/chat/completions"),
         ("POST", "v1/messages"),
+        ("POST", "v1/responses"),
         ("GET", "v1/models"),
     }
 )
@@ -76,6 +136,10 @@ def is_opencode_go_documented_request(path: str, method: str) -> bool:
 
 def is_opencode_go_anthropic_request(path: str) -> bool:
     return canonical_opencode_go_path(path).lower() == "v1/messages"
+
+
+def opencode_go_model_endpoint(model_id: str) -> Optional[str]:
+    return OPENCODE_GO_MODEL_ENDPOINTS.get(model_id.strip().lower())
 
 
 def is_opencode_go_native_path(path: str) -> bool:

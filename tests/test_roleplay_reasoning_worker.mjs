@@ -471,7 +471,7 @@ test("roleplay repairs think tags split across provider stream frames", async ()
   assert.equal(
     content,
     [
-      "<think>[provider: nanogpt | model: zai-org/glm-5.2:thinking]\n",
+      "<think>[provider: nanogpt | model: z-ai/glm-5.3-flash]\n",
       "private analysis",
       "</think>\n\n",
       "*Holly closes her notebook.*",
