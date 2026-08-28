@@ -122,7 +122,7 @@ class AuthService:
                 if column_name not in required_columns:
                     raise ValueError("Unsupported users column name")
                 # Identifiers and definitions come from the fixed required_columns map.
-                connection.execute(
+                connection.execute(  # nosemgrep
                     f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"
                 )
 
@@ -134,7 +134,7 @@ class AuthService:
         if table_name not in {"users", "users_new"}:
             raise ValueError("Unsupported users table name")
         # table_name is validated against a fixed allowlist above.
-        connection.execute(  # nosec B608
+        connection.execute(  # nosec B608  # nosemgrep
             f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 username TEXT PRIMARY KEY,

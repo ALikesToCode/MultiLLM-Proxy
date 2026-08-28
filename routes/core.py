@@ -224,7 +224,9 @@ def register_core_routes(app) -> None:
 
             if username and api_key and AuthService.authenticate_user(username, api_key):
                 LoginAttemptService.record_success(request.remote_addr, username)
-                next_page = request.args.get("next")
+                # The validator rejects schemes, hosts, protocol-relative paths,
+                # and backslashes before the value reaches redirect().
+                next_page = request.args.get("next")  # nosemgrep
                 if is_safe_redirect_target(next_page):
                     return redirect(next_page)
                 return redirect(url_for("status_page"))

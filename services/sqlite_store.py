@@ -37,8 +37,11 @@ def connect(path: Path, *, wal: bool = True) -> sqlite3.Connection:
     if not database_existed:
         path.chmod(0o600)
     connection.row_factory = sqlite3.Row
+    # The interpolated value has already been parsed as an integer above.
     busy_timeout_ms = max(0, _env_int("SQLITE_BUSY_TIMEOUT_MS", DEFAULT_BUSY_TIMEOUT_MS))
-    connection.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")  # nosec B608
+    connection.execute(  # nosec B608  # nosemgrep
+        f"PRAGMA busy_timeout = {busy_timeout_ms}"
+    )
     connection.execute("PRAGMA foreign_keys = ON")
     if wal:
         try:
