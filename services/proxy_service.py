@@ -9,7 +9,6 @@ import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.resilience_service import ResilienceService
-from services.redaction import redact_headers, redact_payload, redact_query_params
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.upstream_errors import (
     STREAM_FAILURE_MESSAGE,
@@ -615,7 +614,7 @@ class ProxyService:
                     "topK": data.get('top_k', 40)
                 }
                 data = formatted_data
-                logger.info("Formatted Google AI request data: %s", redact_payload(data))
+                logger.info("Formatted Google AI request data")
 
         try:
             return json.dumps(data).encode('utf-8')
@@ -1179,18 +1178,11 @@ class ProxyService:
 
             if not is_streaming:
                 _ = response.content
-                try:
-                    logger.info("Response status: %s", response.status_code)
-                    logger.info("Response headers: %s", redact_headers(response.headers))
-                    if response.headers.get('content-type', '').startswith('application/json'):
-                        logger.info("Response content: %s", redact_payload(response.json()))
-                    else:
-                        logger.info("Response content length: %s", len(response.content))
-                except Exception as error:
-                    logger.error(
-                        "Response logging failed type=%s",
-                        type(error).__name__,
-                    )
+                logger.info(
+                    "Upstream response status=%s content_length=%s",
+                    response.status_code,
+                    len(response.content),
+                )
 
             return response
 
@@ -1463,14 +1455,10 @@ class ProxyService:
 
             is_streaming = request_data.get('stream', False)
             logger.info(
-                "Together AI request provider=%s url=%s model=%s stream=%s headers=%s params=%s payload=%s",
+                "Together AI request provider=%s model=%s stream=%s",
                 "together",
-                url,
                 request_data.get("model"),
                 is_streaming,
-                redact_headers(headers),
-                redact_query_params(params),
-                redact_payload(request_data),
             )
 
             response = cls._make_base_request(
@@ -1485,10 +1473,9 @@ class ProxyService:
             )
 
             logger.info(
-                "Together AI response provider=%s status_code=%s headers=%s",
+                "Together AI response provider=%s status_code=%s",
                 "together",
                 response.status_code,
-                redact_headers(response.headers),
             )
 
             if response.status_code == 200:
@@ -1498,8 +1485,6 @@ class ProxyService:
                     else:
                         if response.content:
                             response_data = response.json()
-                            logger.info("Together AI parsed response: %s", redact_payload(response_data))
-
                             # If listing /models, do not attempt to parse choices
                             if url.endswith('/models'):
                                 return response
@@ -1711,7 +1696,7 @@ class ProxyService:
             data = json.dumps(chat_request).encode('utf-8')
 
             logger.info("Preparing Google AI chat request")
-            logger.debug("Google AI chat request data: %s", redact_payload(chat_request))
+            logger.debug("Google AI chat request prepared")
 
             # Ensure we have a valid token before making the request
             if 'Authorization' not in headers or not headers['Authorization'].startswith('Bearer '):
@@ -1734,7 +1719,6 @@ class ProxyService:
             )
 
             logger.info(f"Google AI raw response status: {response.status_code}")
-            logger.debug("Google AI raw response headers: %s", redact_headers(response.headers))
 
             if response.status_code == 200:
                 try:
@@ -1855,8 +1839,6 @@ class ProxyService:
                                 )
                                 response_data = {"error": "Invalid JSON response from Google AI"}
                             
-                        logger.debug("Google AI parsed response: %s", redact_payload(response_data))
-
                         # Create new Response to unify return type
                         response_json = json.dumps(response_data)
                         response_bytes = response_json.encode('utf-8')
@@ -1958,9 +1940,6 @@ class ProxyService:
                 "presence_penalty": request_data.get("presence_penalty", 0)
             }
 
-            logger.info("Original request data: %s", redact_payload(request_data))
-            logger.info("Completion data: %s", redact_payload(completion_data))
-
             # Update URL to use completions endpoint while maintaining the nineteen path
             completion_url = url.replace("/chat/completions", "/completions")
             
@@ -1968,10 +1947,6 @@ class ProxyService:
             completion_data_bytes = json.dumps(completion_data).encode('utf-8')
             headers["Content-Length"] = str(len(completion_data_bytes))
 
-            logger.info(
-                "Converted chat request to completion for Rogue Rose: %s",
-                redact_payload(completion_data),
-            )
             logger.info("Converted Rogue Rose request to the completions endpoint")
 
             # Make the request
@@ -2963,7 +2938,7 @@ class ProxyService:
         Handle OpenRouter specific request processing.
         OpenRouter provides access to hundreds of AI models through a single endpoint.
         """
-        logger.info(f"Handling OpenRouter request to {url}")
+        logger.info("Handling OpenRouter request")
         
         try:
             # Get the OpenRouter API key
@@ -2997,11 +2972,11 @@ class ProxyService:
             
             if site_url:
                 headers['HTTP-Referer'] = site_url
-                logger.debug(f"Added HTTP-Referer header: {site_url}")
+                logger.debug("Added configured HTTP-Referer header")
             
             if app_name:
                 headers['X-Title'] = app_name
-                logger.debug(f"Added X-Title header: {app_name}")
+                logger.debug("Added configured X-Title header")
             
             # Transform the URL to use OpenRouter's base URL
             # First extract the path portion from the URL
@@ -3024,13 +2999,7 @@ class ProxyService:
                 else:
                     openrouter_url = f"https://openrouter.ai/api/v1{path}"
             
-            logger.info(f"Transformed URL to OpenRouter: {openrouter_url}")
-            
-            # Log the request details
-            logger.info(f"Making OpenRouter request to: {openrouter_url}")
-            logger.debug("Headers: %s", redact_headers(headers))
-            if data:
-                logger.debug("Request data: %s", redact_payload(request_data))
+            logger.info("Prepared OpenRouter upstream request")
             
             # Make the request
             response = cls._make_base_request(
@@ -3424,7 +3393,7 @@ class ProxyService:
         if raw_passthrough:
             logger.info("Making raw request for %s with method %s", api_provider, method)
         else:
-            logger.info("Making request to %s with method %s", url, method)
+            logger.info("Making request for %s with method %s", api_provider, method)
         
         try:
             if raw_passthrough:

@@ -42,7 +42,6 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
-from services.redaction import redact_headers, redact_payload
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.upstream_errors import stream_error_event
 
@@ -236,7 +235,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             if raw_passthrough:
                 logger.info("Proxying raw request for %s", api_provider)
             else:
-                logger.info("Proxying request to: %s", url)
+                logger.info("Proxying request for %s", api_provider)
 
             if api_provider == "googleai":
                 auth_token = auth_service_cls.get_google_token()
@@ -637,10 +636,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     request_data["stream"] = bool(data["stream"])
                     logger.debug("Google AI stream parameter explicitly set to: %s", request_data["stream"])
 
-                logger.debug(
-                    "Prepared request data: %s",
-                    redact_payload(request_data),
-                )
+                logger.debug("Prepared Google AI request")
 
                 response = proxy_service.make_request(
                     method="POST",
@@ -678,9 +674,8 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
 
                 if request_data.get("stream", False):
                     logger.info(
-                        "Handling Google AI streaming response, status: %s, headers: %s",
+                        "Handling Google AI streaming response status=%s",
                         response.status_code,
-                        redact_headers(response.headers),
                     )
 
                     if response.status_code != 200:

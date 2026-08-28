@@ -172,6 +172,77 @@ class ProxyErrorSafetyTest(unittest.TestCase):
         self.assertEqual(raised.exception.message, "Together AI response processing failed")
         self.assertNotIn("secret-provider-key", "\n".join(captured.output))
 
+    def test_together_success_does_not_log_request_or_response_payloads(self):
+        upstream = requests.Response()
+        upstream.status_code = 200
+        upstream._content = json.dumps(
+            {
+                "choices": [{"message": {"content": "model reply"}}],
+                "diagnostic": "response-payload-secret",
+            }
+        ).encode("utf-8")
+        upstream.headers["Content-Type"] = "application/json"
+
+        with (
+            patch.object(
+                self.app_module.ProxyService,
+                "_make_base_request",
+                return_value=upstream,
+            ),
+            self.assertLogs("services.proxy_service", level="INFO") as captured,
+        ):
+            response = self.app_module.ProxyService._handle_together_request(
+                "POST",
+                "https://api.together.xyz/v1/chat/completions",
+                {"X-Debug": "request-header-secret"},
+                {"trace": "request-query-secret"},
+                b"{}",
+                {
+                    "model": "test-model",
+                    "metadata": {"tenant": "request-payload-secret"},
+                },
+            )
+
+        self.assertIs(response, upstream)
+        log_output = "\n".join(captured.output)
+        for secret in (
+            "request-header-secret",
+            "request-query-secret",
+            "request-payload-secret",
+            "response-payload-secret",
+        ):
+            self.assertNotIn(secret, log_output)
+
+    def test_google_route_does_not_log_request_metadata_or_response_headers(self):
+        upstream = requests.Response()
+        upstream.status_code = 200
+        upstream._content = b'{"choices": []}'
+        upstream.headers.update(
+            {
+                "Content-Type": "application/json",
+                "X-Debug": "response-header-secret",
+            }
+        )
+
+        with (
+            patch("app.AuthService.get_google_token", return_value="google-token"),
+            patch("app.ProxyService.make_request", return_value=upstream),
+            self.assertLogs("routes.proxy", level="DEBUG") as captured,
+        ):
+            response = self.client.post(
+                "/googleai/chat/completions",
+                headers=self.auth_headers,
+                json={
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "extra_body": {"metadata": "request-metadata-secret"},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        log_output = "\n".join(captured.output)
+        self.assertNotIn("request-metadata-secret", log_output)
+        self.assertNotIn("response-header-secret", log_output)
+
     def test_groq_processing_errors_do_not_reach_logs_or_exceptions(self):
         with (
             patch.object(

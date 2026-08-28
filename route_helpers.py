@@ -605,7 +605,11 @@ def check_provider(
         try:
             provider_stats = metrics_service.get_provider_stats(provider)
         except Exception as error:
-            logger.error("Error fetching provider stats for %s: %s", provider, error)
+            logger.error(
+                "Error fetching provider stats for %s type=%s",
+                provider,
+                type(error).__name__,
+            )
 
     circuit = ResilienceService.snapshot(provider)
     circuit["mode"] = provider_circuit_mode(provider)
