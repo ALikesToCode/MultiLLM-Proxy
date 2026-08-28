@@ -248,16 +248,43 @@ class RateLimitService:
         if not isinstance(payload, dict):
             return 0
 
+        requested_values: list[int] = []
         for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
-            value = payload.get(key)
-            if isinstance(value, int):
-                return value
+            if key not in payload or payload[key] is None:
+                continue
+            value = payload[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{key} must be a non-negative integer")
+            requested_values.append(value)
 
         generation_config = payload.get("generationConfig")
-        if isinstance(generation_config, dict) and isinstance(generation_config.get("maxOutputTokens"), int):
-            return generation_config["maxOutputTokens"]
+        if isinstance(generation_config, dict) and "maxOutputTokens" in generation_config:
+            value = generation_config["maxOutputTokens"]
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError(
+                    "generationConfig.maxOutputTokens must be a non-negative integer"
+                )
+            if value is not None:
+                requested_values.append(value)
 
-        return 0
+        return requested_values[0] if requested_values else 0
+
+    @classmethod
+    def _validated_output_tokens(
+        cls,
+        payload: Optional[Dict[str, Any]],
+    ) -> tuple[int, Optional[LimitDecision]]:
+        try:
+            return cls.requested_output_tokens(payload), None
+        except ValueError as error:
+            return 0, LimitDecision(
+                False,
+                status_code=400,
+                error="invalid_max_output_tokens",
+                message=str(error),
+            )
 
     @staticmethod
     def _identity_for_user(user: Optional[Dict[str, Any]], remote_addr: Optional[str]) -> tuple[str, Optional[str]]:
@@ -302,7 +329,9 @@ class RateLimitService:
         payload_json: Optional[Dict[str, Any]] = None,
     ) -> LimitDecision:
         """Atomically reserve RPM and daily capacity before expensive preprocessing."""
-        output_tokens = cls.requested_output_tokens(payload_json)
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         max_output_tokens = cls._provider_limit(
             provider,
             "MAX_OUTPUT_TOKENS",
@@ -443,7 +472,9 @@ class RateLimitService:
             return size_decision
 
         input_tokens = cls.estimate_input_tokens(payload_json)
-        output_tokens = cls.requested_output_tokens(payload_json)
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         estimated_tokens = input_tokens + output_tokens
         max_prompt_tokens = cls._provider_limit(
             provider,
@@ -651,7 +682,9 @@ class RateLimitService:
             return size_decision
 
         input_tokens = cls.estimate_input_tokens(payload_json)
-        output_tokens = cls.requested_output_tokens(payload_json)
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
             "0",
             "false",
