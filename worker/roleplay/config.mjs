@@ -152,10 +152,14 @@ function configuredProviderTokens(env, definition) {
       continue;
     }
     prefixes.forEach((prefix, prefixRank) => {
-      const match = name.match(new RegExp(`^${prefix}_(\\d+)$`));
-      if (match) {
+      const numberedPrefix = `${prefix}_`;
+      if (!name.startsWith(numberedPrefix)) {
+        return;
+      }
+      const indexText = name.slice(numberedPrefix.length);
+      if (/^\d+$/.test(indexText)) {
         numbered.push({
-          index: Number.parseInt(match[1], 10),
+          index: Number.parseInt(indexText, 10),
           prefixRank,
           token: value.trim(),
         });
