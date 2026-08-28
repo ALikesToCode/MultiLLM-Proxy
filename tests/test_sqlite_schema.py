@@ -100,6 +100,18 @@ class SQLiteSchemaTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(database_path.parent.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(database_path.stat().st_mode), 0o600)
 
+    def test_schema_validator_rejects_unknown_table_names(self):
+        validation_module = importlib.import_module(
+            "scripts.validate_sqlite_schema"
+        )
+        with sqlite3.connect(":memory:") as connection:
+            connection.row_factory = sqlite3.Row
+            with self.assertRaisesRegex(ValueError, "Unsupported"):
+                validation_module._index_names(
+                    connection,
+                    "users); DROP TABLE users; --",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,11 +9,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+INDEX_LIST_QUERIES = {
+    "users": "PRAGMA index_list(users)",
+    "request_usage": "PRAGMA index_list(request_usage)",
+}
+
 
 def _index_names(connection, table_name: str) -> set[str]:
+    try:
+        query = INDEX_LIST_QUERIES[table_name]
+    except KeyError as error:
+        raise ValueError("Unsupported schema-validation table") from error
     return {
         row["name"]
-        for row in connection.execute(f"PRAGMA index_list({table_name})").fetchall()  # nosec B608
+        for row in connection.execute(query).fetchall()
     }
 
 
