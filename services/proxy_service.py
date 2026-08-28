@@ -204,6 +204,16 @@ class ProxyService:
             return True
         return method.upper() in cls.SAFE_RETRY_METHODS and not data
 
+    @staticmethod
+    def _close_retry_response(response: requests.Response) -> None:
+        try:
+            response.close()
+        except Exception as error:
+            logger.warning(
+                "Retry response cleanup failed type=%s",
+                type(error).__name__,
+            )
+
     @classmethod
     def _circuit_open_response(cls, api_provider: str) -> Optional[requests.Response]:
         decision = ResilienceService.before_request(api_provider)
@@ -1281,7 +1291,7 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
-                response.close()
+                cls._close_retry_response(response)
                 time.sleep(RETRY_DELAY * (retry_count + 1))
                 return cls._make_base_request(
                     method=method,
@@ -1340,7 +1350,7 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
-                        response.close()
+                        cls._close_retry_response(response)
                         time.sleep(RETRY_DELAY * (retry_count + 1))
                         return cls._make_base_request(
                             method=method,
