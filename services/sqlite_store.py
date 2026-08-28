@@ -45,5 +45,8 @@ def connect(path: Path, *, wal: bool = True) -> sqlite3.Connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute("PRAGMA synchronous=NORMAL")
         except sqlite3.OperationalError as error:
-            logger.warning("Unable to enable WAL mode for %s: %s", path, error)
+            logger.warning(
+                "Unable to enable WAL mode type=%s",
+                type(error).__name__,
+            )
     return connection

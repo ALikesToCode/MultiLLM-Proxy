@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from error_handlers import APIError
 from services.auth_service import AuthService
 from services.proxy_service import ProxyService
 
@@ -56,6 +57,27 @@ class GoogleCliSecurityTest(unittest.TestCase):
             run.call_args.kwargs["env"]["GOOGLE_APPLICATION_CREDENTIALS"],
             str(credentials_path),
         )
+
+    def test_proxy_service_does_not_disclose_missing_credentials_path(self):
+        credentials_path = "/private/tenant/credential-secret.json"
+
+        with (
+            patch.dict(
+                os.environ,
+                {"GOOGLE_APPLICATION_CREDENTIALS": credentials_path},
+                clear=False,
+            ),
+            patch("services.proxy_service.os.path.exists", return_value=False),
+            self.assertLogs("services.proxy_service", level="ERROR") as captured,
+            self.assertRaisesRegex(
+                APIError,
+                "Unable to obtain a Google Cloud token",
+            ) as raised,
+        ):
+            ProxyService.get_google_access_token()
+
+        self.assertNotIn(credentials_path, str(raised.exception))
+        self.assertNotIn(credentials_path, "\n".join(captured.output))
 
 
 if __name__ == "__main__":

@@ -262,20 +262,26 @@ class ProxyService:
                         pass
                 
                 if not credentials_path:
-                    error_msg = "GOOGLE_APPLICATION_CREDENTIALS not configured in environment or app config"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                    logger.error("Google Cloud credentials are not configured")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 if not os.path.exists(credentials_path):
-                    error_msg = f"Google credentials file not found at {credentials_path}"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                    logger.error("Google Cloud credentials file was not found")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 gcloud_path = shutil.which('gcloud')
                 if not gcloud_path:
-                    error_msg = "gcloud CLI not found. Please install Google Cloud SDK"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                    logger.error("gcloud CLI is not available")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 gcloud_env = os.environ.copy()
                 gcloud_env['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
@@ -292,9 +298,11 @@ class ProxyService:
 
                 token = result.stdout.strip()
                 if not token:
-                    error_msg = "Empty token received from gcloud command. Please run 'gcloud auth login' first"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=401)
+                    logger.error("gcloud CLI returned an empty access token")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 logger.info("Successfully retrieved new Google Cloud access token")
                 cls._google_token = token
@@ -329,9 +337,11 @@ class ProxyService:
                 # Clear token cache on error
                 cls._google_token = None
                 cls._google_token_expiry = None
-                error_msg = "gcloud command not found. Please install Google Cloud SDK"
-                logger.error(error_msg)
-                raise APIError(error_msg, status_code=500)
+                logger.error("gcloud CLI disappeared before execution")
+                raise APIError(
+                    "Google Cloud authentication unavailable",
+                    status_code=500,
+                )
 
             except Exception as e:
                 # Clear token cache on error

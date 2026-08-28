@@ -132,5 +132,5 @@ if __name__ == "__main__":
             debug=False,
         )
     except Exception as error:
-        logger.error("Server failed to start: %s", error)
+        logger.error("Server failed to start type=%s", type(error).__name__)
         raise
