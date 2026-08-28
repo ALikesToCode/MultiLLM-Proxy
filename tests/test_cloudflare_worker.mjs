@@ -493,6 +493,13 @@ test("container envVars are derived from the live Durable Object env", () => {
       ADMIN_API_KEY: "admin-live-key",
       FLASK_SECRET_KEY: "flask-live-secret",
       JWT_SECRET: "jwt-live-secret",
+      A6API_API_KEY: "a6api-live-key",
+      AIMLAPI_API_KEY: "aimlapi-live-key",
+      EPHONE_API_KEY: "ephone-live-key",
+      LATIX_API_KEY: "latix-live-key",
+      IMAGE_RELAY_PROVIDERS_JSON:
+        '{"myrelay":{"base_url":"https://images.example.com","models":["gpt-image-2"]}}',
+      IMAGE_RELAY_API_KEYS_JSON: '{"myrelay":"myrelay-live-key"}',
       OPENCODE_GO_API_KEY: "opencode-go-live-key",
       OPENCODE_API_KEY: "opencode-live-key",
       OPENCODE_GO_BASE_URL: "https://opencode.ai/zen/go/v1",
@@ -548,6 +555,18 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.ADMIN_API_KEY, "admin-live-key");
   assert.equal(container.envVars.FLASK_SECRET_KEY, "flask-live-secret");
   assert.equal(container.envVars.JWT_SECRET, "jwt-live-secret");
+  assert.equal(container.envVars.A6API_API_KEY, "a6api-live-key");
+  assert.equal(container.envVars.AIMLAPI_API_KEY, "aimlapi-live-key");
+  assert.equal(container.envVars.EPHONE_API_KEY, "ephone-live-key");
+  assert.equal(container.envVars.LATIX_API_KEY, "latix-live-key");
+  assert.equal(
+    container.envVars.IMAGE_RELAY_PROVIDERS_JSON,
+    '{"myrelay":{"base_url":"https://images.example.com","models":["gpt-image-2"]}}',
+  );
+  assert.equal(
+    container.envVars.IMAGE_RELAY_API_KEYS_JSON,
+    '{"myrelay":"myrelay-live-key"}',
+  );
   assert.equal(container.envVars.OPENCODE_GO_API_KEY, "opencode-go-live-key");
   assert.equal(container.envVars.OPENCODE_API_KEY, "opencode-live-key");
   assert.equal(

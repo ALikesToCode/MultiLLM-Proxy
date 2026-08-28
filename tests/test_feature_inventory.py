@@ -1,6 +1,7 @@
 import unittest
 
 from config import Config
+from providers.image_relays import image_relay_specs
 from providers.registry import PROVIDER_SPECS, build_default_registry
 from proxy import PROVIDER_DETAILS
 from services.auth_service import AuthService
@@ -26,6 +27,7 @@ class FeatureInventoryTest(unittest.TestCase):
     def test_every_openai_compatible_provider_spec_builds_an_adapter(self):
         registry = build_default_registry(Config.API_BASE_URLS)
         expected = {provider for provider, _path, _capabilities in PROVIDER_SPECS}
+        expected.update(spec.provider for spec in image_relay_specs())
 
         self.assertEqual(set(registry), expected)
         for provider, adapter in registry.items():

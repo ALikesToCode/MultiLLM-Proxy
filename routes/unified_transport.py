@@ -101,6 +101,7 @@ def send_unified_image_request(
         "data": raw_body,
         "api_provider": provider,
         "use_cache": False,
+        "force_raw_passthrough": True,
     }
     return send_unified_provider_request(
         proxy_service_cls,

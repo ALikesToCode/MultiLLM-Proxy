@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 
 from providers.base import ProviderCapabilities
+from providers.image_relays import image_relay_specs
 from providers.openai_compatible import OpenAICompatibleAdapter
 
 
@@ -111,7 +112,11 @@ PROVIDER_SPECS = (
             supports_json_schema=True,
         ),
     ),
-    ("together", "v1/chat/completions", ProviderCapabilities()),
+    (
+        "together",
+        "v1/chat/completions",
+        ProviderCapabilities(supports_images=True),
+    ),
     ("chutes", "v1/chat/completions", ProviderCapabilities()),
     ("xai", "v1/chat/completions", ProviderCapabilities()),
     ("cerebras", "v1/chat/completions", ProviderCapabilities()),
@@ -133,6 +138,16 @@ def build_default_registry(base_urls: Mapping[str, str]) -> dict[str, OpenAIComp
             base_url=base_url,
             chat_path=chat_path,
             provider_capabilities=capabilities,
+        )
+    for spec in image_relay_specs():
+        base_url = base_urls.get(spec.provider)
+        if not base_url:
+            continue
+        registry[spec.provider] = OpenAICompatibleAdapter(
+            name=spec.provider,
+            base_url=base_url,
+            chat_path="v1/chat/completions",
+            provider_capabilities=spec.capabilities(),
         )
     return registry
 

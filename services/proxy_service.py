@@ -11,6 +11,7 @@ from services.auth_service import AuthService
 from services.resilience_service import ResilienceService
 from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from providers.image_relays import image_relay_spec
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -381,7 +382,10 @@ class ProxyService:
             )
             if upstream_path.strip("/").lower() == "v1/chat/completions":
                 header_whitelist["x-grok-conv-id"] = "X-Grok-Conv-Id"
-        elif api_provider == "aihubmix":
+        elif (
+            api_provider in {"aihubmix", "together"}
+            or image_relay_spec(api_provider)
+        ):
             header_whitelist.update(
                 {
                     "idempotency-key": "Idempotency-Key",

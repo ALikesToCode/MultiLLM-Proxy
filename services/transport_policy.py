@@ -1,5 +1,16 @@
+from providers.image_relays import image_relay_specs
+
+
 RAW_PASSTHROUGH_PROVIDERS = frozenset(
-    {"aihubmix", "codex-easy", "kimi-code", "linkapi", "nanogpt", "navyai"}
+    {
+        "aihubmix",
+        "codex-easy",
+        "kimi-code",
+        "linkapi",
+        "nanogpt",
+        "navyai",
+        *(spec.provider for spec in image_relay_specs()),
+    }
 )
 MIXED_PASSTHROUGH_PROVIDERS = frozenset({"opencode"})
 

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.image_relays import image_relay_specs
+
 from services.sqlite_store import connect, storage_path
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
@@ -52,6 +54,13 @@ PROVIDER_CATALOG_SPECS = {
     "together": ProviderCatalogSpec("v1/models", "/together/v1/models"),
     "xai": ProviderCatalogSpec("v1/models", "/xai/v1/models"),
     "cerebras": ProviderCatalogSpec("v1/models", "/cerebras/v1/models"),
+    **{
+        spec.provider: ProviderCatalogSpec(
+            "v1/models",
+            f"/{spec.provider}/v1/models",
+        )
+        for spec in image_relay_specs()
+    },
 }
 
 

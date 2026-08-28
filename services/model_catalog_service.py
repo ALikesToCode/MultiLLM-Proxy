@@ -5,11 +5,43 @@ from dataclasses import asdict
 from typing import Any
 
 from providers.aihubmix import is_aihubmix_image_model
+from providers.image_relays import is_image_relay_model
 from providers.opencode_go import opencode_go_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import ProviderCatalogService
+
+
+KNOWN_IMAGE_MODEL_IDS = {
+    "linkapi": frozenset({"gpt-image-2-c"}),
+    "together": frozenset({"openai/gpt-image-2"}),
+}
+
+
+def _model_supports_image_output(
+    provider: str,
+    model_id: str,
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if provider == "aihubmix":
+        return is_aihubmix_image_model(model_id)
+    if is_image_relay_model(provider, model_id):
+        return True
+    if model_id in KNOWN_IMAGE_MODEL_IDS.get(provider, frozenset()):
+        return True
+
+    provider_metadata = metadata or {}
+    explicit_support = provider_metadata.get("supports_image_output")
+    if isinstance(explicit_support, bool):
+        return explicit_support
+    output_modalities = provider_metadata.get("output_modalities")
+    if isinstance(output_modalities, list):
+        return any(
+            str(modality).strip().lower() in {"image", "images"}
+            for modality in output_modalities
+        )
+    return False
 
 
 def _add_source(
@@ -105,9 +137,11 @@ def build_model_catalog(
         entry = entries[model_id]
         adapter = adapters.get(entry["provider"])
         capabilities = asdict(adapter.capabilities()) if adapter else {}
-        if entry["provider"] == "aihubmix":
-            capabilities["supports_images"] = is_aihubmix_image_model(
-                entry["model"]
+        if "supports_images" in capabilities:
+            capabilities["supports_images"] = _model_supports_image_output(
+                entry["provider"],
+                entry["model"],
+                entry["provider_metadata"],
             )
         catalog.append(
             {

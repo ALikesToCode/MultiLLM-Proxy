@@ -18,6 +18,11 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import load_numbered_env_values
 from error_handlers import APIError
+from providers.image_relays import (
+    image_relay_api_key,
+    image_relay_credential_env_names,
+    image_relay_specs,
+)
 from services.nanogpt_key_pool import configured_nanogpt_keys
 from services.sqlite_store import connect, storage_path
 
@@ -40,6 +45,9 @@ PROVIDER_API_KEY_ENV_NAMES = {
 
 
 def _provider_api_key_env_names(provider: str) -> tuple[str, ...]:
+    relay_names = image_relay_credential_env_names(provider)
+    if relay_names:
+        return relay_names
     return PROVIDER_API_KEY_ENV_NAMES.get(
         provider,
         (f"{provider.upper()}_API_KEY",),
@@ -503,7 +511,7 @@ class AuthService:
         if admin_key:
             cls._api_keys["admin"] = admin_key
 
-        for provider in [
+        providers = [
             "openai",
             "cerebras",
             "xai",
@@ -523,7 +531,9 @@ class AuthService:
             "palm",
             "together",
             "nineteen",
-        ]:
+        ]
+        providers.extend(spec.provider for spec in image_relay_specs())
+        for provider in dict.fromkeys(providers):
             api_key = next(
                 (
                     os.environ[env_key]
@@ -532,6 +542,8 @@ class AuthService:
                 ),
                 None,
             )
+            if not api_key:
+                api_key = image_relay_api_key(provider)
             if api_key:
                 cls._api_keys[provider] = api_key
 
@@ -577,6 +589,9 @@ class AuthService:
             api_key = os.environ.get(env_key)
             if api_key:
                 return api_key
+        relay_key = image_relay_api_key(provider)
+        if relay_key:
+            return relay_key
         return cls._api_keys.get(provider)
 
     @classmethod

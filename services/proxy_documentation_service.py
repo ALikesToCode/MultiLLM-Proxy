@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.image_relays import image_relay_specs
 from providers.registry import get_registry
 from proxy import PROVIDER_DETAILS
 from services.auto_route_service import AutoRouteService
@@ -37,6 +38,7 @@ PROVIDER_DISPLAY_NAMES = {
     "scaleway": "Scaleway",
     "together": "Together AI",
     "xai": "xAI",
+    **{spec.provider: spec.display_name for spec in image_relay_specs()},
 }
 
 
@@ -200,7 +202,9 @@ def build_proxy_documentation(
                     and capabilities.supports_chat
                     and provider != "kimi-code"
                 ),
-                "unified_images": bool(capabilities and capabilities.supports_images),
+                "unified_images": bool(
+                    capabilities and capabilities.supports_images
+                ),
                 "native_images": any(
                     endpoint["kind"] == "Images" for endpoint in endpoints
                 ),

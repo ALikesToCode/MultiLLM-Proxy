@@ -1,5 +1,8 @@
 from config import Config
 
+from providers.image_relays import image_relay_specs
+
+
 PROVIDER_DETAILS = {
     'openai': {
         'description': 'OpenAI API for GPT models and embeddings',
@@ -470,7 +473,7 @@ PROVIDER_DETAILS = {
         'default_model': 'chat-bison-001'
     },
     'together': {
-        'description': 'Together AI for high-performance open LLMs',
+        'description': 'Together AI for high-performance open LLMs and OpenAI-compatible GPT Image 2 generation',
         'endpoints': [
             {
                 'url': '/v1/chat/completions',
@@ -481,6 +484,10 @@ PROVIDER_DETAILS = {
                 'curl': 'curl -X GET "http://localhost:1400/together/v1/models" -H "Authorization: Bearer $API_KEY"'
             },
             {
+                'url': '/v1/images/generations',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/together/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"openai/gpt-image-2\\", \\"prompt\\": \\"A cinematic lighthouse at dusk\\", \\"size\\": \\"1024x1024\\"}"'
+            },
+            {
                 'url': '/v1/completions',
                 'curl': 'curl -X POST "http://localhost:1400/together/v1/completions" -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo\\", \\"prompt\\": \\"Hello!\\"}"'
             }
@@ -488,6 +495,7 @@ PROVIDER_DETAILS = {
         'supported_features': {
             'streaming': True,
             'function_calling': True,
+            'images': True,
             'json_mode': True
         },
         'default_model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo'
@@ -546,4 +554,60 @@ PROVIDER_DETAILS = {
         },
         'default_model': 'gemma-4-26b-a4b-it'
     }
-} 
+}
+
+
+def _image_relay_provider_details(spec):
+    endpoints = [
+        {
+            'url': '/v1/models',
+            'curl': f'curl -X GET "$PROXY_BASE_URL/{spec.provider}/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"',
+        },
+        {
+            'url': '/v1/images/generations',
+            'curl': f'curl -X POST "$PROXY_BASE_URL/{spec.provider}/v1/images/generations" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{spec.models[0]}","prompt":"A cinematic lighthouse at dusk","size":"1024x1024"}}\'',
+        },
+    ]
+    if spec.supports_edits:
+        endpoints.append(
+            {
+                'url': '/v1/images/edits',
+                'curl': f'curl -X POST "$PROXY_BASE_URL/{spec.provider}/v1/images/edits" -H "Authorization: Bearer $ADMIN_API_KEY" -F "model={spec.models[0]}" -F "prompt=Add soft cinematic lighting" -F "image=@input.png"',
+            }
+        )
+    if spec.supports_chat:
+        endpoints.extend(
+            [
+                {
+                    'url': '/v1/chat/completions',
+                    'curl': f'curl -X POST "$PROXY_BASE_URL/{spec.provider}/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{spec.models[0]}","messages":[{{"role":"user","content":"Hello"}}]}}\'',
+                },
+                {
+                    'url': '/v1/responses',
+                    'curl': f'curl -X POST "$PROXY_BASE_URL/{spec.provider}/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{spec.models[0]}","input":"Hello"}}\'',
+                },
+            ]
+        )
+    return {
+        'description': (
+            f'{spec.display_name} credential-isolated OpenAI-compatible image relay. '
+            'Only model discovery, chat, Responses, and image generation/edit paths are exposed.'
+        ),
+        'endpoints': endpoints,
+        'supported_features': {
+            'streaming': spec.supports_chat,
+            'images': True,
+            'image_edits': spec.supports_edits,
+            'model_discovery': True,
+            'raw_passthrough': True,
+        },
+        'default_model': spec.models[0],
+    }
+
+
+PROVIDER_DETAILS.update(
+    {
+        spec.provider: _image_relay_provider_details(spec)
+        for spec in image_relay_specs()
+    }
+)

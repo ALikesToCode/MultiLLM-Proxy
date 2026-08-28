@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Optional
 from config import Config
 from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
 from providers.base import ModelInfo
+from providers.image_relays import image_relay_model_ids
 from providers.opencode_go import (
     OPENCODE_GO_LEGACY_MODEL_IDS,
     OPENCODE_GO_MODEL_IDS,
@@ -46,6 +47,7 @@ DEFAULT_MODEL_IDS = {
         "zai-org/glm-5.2:thinking",
     ],
     "mimo": ["mimo-v2.5-pro"],
+    "together": ["openai/gpt-image-2"],
     "kimi-code": ["k3"],
     "xai": ["grok-4"],
     "cerebras": ["llama3.1-8b"],
@@ -106,6 +108,7 @@ class ModelRegistry:
         if config_attr:
             yield from getattr(Config, config_attr, [])
         yield from DEFAULT_MODEL_IDS.get(provider, [])
+        yield from image_relay_model_ids(provider)
 
     @classmethod
     def _status_overrides(cls) -> Dict[str, str]:

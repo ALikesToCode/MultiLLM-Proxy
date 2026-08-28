@@ -33,6 +33,7 @@ from providers.opencode_go import (
     opencode_go_has_caller_auth,
 )
 from providers.registry import get_adapter
+from providers.image_relays import image_relay_spec, is_valid_image_relay_request
 from proxy import PROVIDER_DETAILS
 from route_helpers import (
     api_auth_required,
@@ -145,6 +146,16 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
             if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):
                 raise APIError("Invalid LinkAPI path", status_code=400)
+            relay_spec = image_relay_spec(api_provider)
+            if relay_spec and not is_valid_image_relay_request(
+                api_provider,
+                path,
+                request.method,
+            ):
+                raise APIError(
+                    f"Invalid {relay_spec.display_name} path",
+                    status_code=400,
+                )
             if api_provider == "aihubmix" and not is_valid_aihubmix_request(
                 path,
                 request.method,
@@ -184,6 +195,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 or (
                     api_provider == "opencode"
                     and is_opencode_go_native_request(path, request.method)
+                )
+                or (
+                    api_provider == "together"
+                    and path.strip("/") == "v1/images/generations"
+                    and request.method.upper() == "POST"
                 )
             )
 

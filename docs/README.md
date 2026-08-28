@@ -1,5 +1,7 @@
 # Documentation
 
+- [GPT Image 2 relay research and setup](gpt-image-2-reseller-research.md)
+
 - Live setup guide: sign in to a running proxy and open `/docs` for
   credential status, chat/image examples, provider-native routes, saved
   automatic priorities, and the combined runtime model catalog. `/docs.json`

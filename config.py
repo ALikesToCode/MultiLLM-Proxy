@@ -8,6 +8,7 @@ from providers.aihubmix import (
     AIHUBMIX_SECONDARY_BASE_URL,
     trusted_aihubmix_origin,
 )
+from providers.image_relays import image_relay_base_urls
 
 
 load_runtime_env()
@@ -162,7 +163,8 @@ class Config:
         'nineteen': 'https://api.nineteen.ai',
         'chutes': 'https://llm.chutes.ai',
         'gemini': 'https://generativelanguage.googleapis.com/v1beta',
-        'gemma': 'https://generativelanguage.googleapis.com/v1beta'
+        'gemma': 'https://generativelanguage.googleapis.com/v1beta',
+        **image_relay_base_urls(),
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
@@ -191,7 +193,11 @@ class Config:
         'chutes': (5, 120),  # Chutes API can take longer for larger models
         'gemini': (10, 120),  # Gemini API can be slow to respond
         'gemma': (10, 120),  # Gemma API can be slow to respond
-        'default': (5, 60)
+        'default': (5, 60),
+        **{
+            provider: (5, 600)
+            for provider in image_relay_base_urls()
+        },
     }
     
     # Provider-specific request retry settings
