@@ -42,6 +42,7 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.provider_access_policy import provider_route_scope
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.upstream_errors import stream_error_event
 
@@ -126,10 +127,18 @@ def _dashboard_chat_completions_url(app, provider):
 
 
 def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
+    def required_proxy_scope() -> str:
+        view_args = request.view_args or {}
+        return provider_route_scope(
+            str(view_args.get("api_provider") or ""),
+            str(view_args.get("path") or ""),
+            request.method,
+        )
+
     @app.route("/<api_provider>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
     @app.route("/<api_provider>/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
     @csrf.exempt
-    @api_auth_required
+    @api_auth_required(required_scope=required_proxy_scope)
     def proxy(api_provider: str, path: str = ""):
         """
         Proxy requests to the appropriate API provider.

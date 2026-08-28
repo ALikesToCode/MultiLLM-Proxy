@@ -511,10 +511,18 @@ def _authorize_api_scope(required_scope: str):
     ), 403
 
 
+def _resolve_required_scope(required_scope: str | Callable[[], str]) -> str:
+    resolved = required_scope() if callable(required_scope) else required_scope
+    if not isinstance(resolved, str) or not resolved.strip():
+        logger.error("API scope resolver returned an invalid value")
+        return "admin"
+    return resolved.strip().lower()
+
+
 def api_authenticate_only(
     func: Optional[Callable] = None,
     *,
-    required_scope: str = "chat",
+    required_scope: str | Callable[[], str] = "chat",
 ) -> Callable:
     """Authenticate a proxy request without reserving a rate-limit slot."""
 
@@ -527,7 +535,9 @@ def api_authenticate_only(
             authentication_error = _authenticate_api_request()
             if authentication_error is not None:
                 return authentication_error
-            authorization_error = _authorize_api_scope(required_scope)
+            authorization_error = _authorize_api_scope(
+                _resolve_required_scope(required_scope)
+            )
             if authorization_error is not None:
                 return authorization_error
             return target(*args, **kwargs)
@@ -542,7 +552,7 @@ def api_authenticate_only(
 def api_auth_required(
     func: Optional[Callable] = None,
     *,
-    required_scope: str = "chat",
+    required_scope: str | Callable[[], str] = "chat",
 ) -> Callable:
     """Authenticate a proxy request and reserve its provider rate budget."""
 
@@ -555,7 +565,9 @@ def api_auth_required(
             authentication_error = _authenticate_api_request()
             if authentication_error is not None:
                 return authentication_error
-            authorization_error = _authorize_api_scope(required_scope)
+            authorization_error = _authorize_api_scope(
+                _resolve_required_scope(required_scope)
+            )
             if authorization_error is not None:
                 return authorization_error
 
