@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
+GEMINI_MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -2422,6 +2423,19 @@ class ProxyService:
         return url.replace(":generateContent", ":countTokens", 1)
 
     @staticmethod
+    def _validated_gemini_model_id(value: Any) -> str:
+        """Return a bare Gemini model ID that cannot alter the request URL."""
+        if not isinstance(value, str):
+            raise APIError("Gemini model must be a string", status_code=400)
+
+        model_id = value.strip()
+        if model_id.startswith("models/"):
+            model_id = model_id.removeprefix("models/")
+        if not GEMINI_MODEL_ID_PATTERN.fullmatch(model_id):
+            raise APIError("Invalid Gemini model identifier", status_code=400)
+        return model_id
+
+    @staticmethod
     def _gemini_count_tokens_payload(request_data: Dict[str, Any]) -> Dict[str, Any]:
         count_payload = {
             "generateContentRequest": {
@@ -2636,7 +2650,9 @@ class ProxyService:
                 )
                 
                 # Get model from request data or use default
-                model = request_data.get('model', default_model)
+                model = cls._validated_gemini_model_id(
+                    request_data.get('model', default_model)
+                )
                 
                 # Check if model is appropriate for the provider
                 if api_provider == 'gemini' and model.startswith('gemma-'):

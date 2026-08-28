@@ -185,6 +185,80 @@ class GeminiProviderRequestTest(unittest.TestCase):
             ),
         )
 
+    def test_openai_style_model_cannot_change_the_gemini_request_path(self):
+        invalid_models = (
+            "../v1/models/gemini-2.0-flash",
+            "gemini-2.0-flash?key=attacker",
+            "gemini-2.0-flash#fragment",
+            "gemini-2.0-flash:countTokens",
+            "gemini-2.0-flash/other",
+            "",
+            42,
+        )
+
+        for model in invalid_models:
+            with self.subTest(model=model), patch.object(
+                self.proxy_module.ProxyService,
+                "_make_base_request",
+            ) as base_request:
+                with self.assertRaises(self.proxy_module.APIError) as raised:
+                    self.proxy_module.ProxyService.make_request(
+                        method="POST",
+                        url=(
+                            "https://generativelanguage.googleapis.com/v1beta/"
+                            "chat/completions"
+                        ),
+                        headers={"Authorization": "Bearer admin-test-key"},
+                        params={},
+                        data=json.dumps(
+                            {
+                                "model": model,
+                                "messages": [{"role": "user", "content": "Hello"}],
+                            }
+                        ).encode("utf-8"),
+                        api_provider="gemini",
+                        use_cache=False,
+                    )
+
+                self.assertEqual(raised.exception.status_code, 400)
+                base_request.assert_not_called()
+
+    def test_openai_style_accepts_a_models_resource_prefix(self):
+        upstream = requests.Response()
+        upstream.status_code = 200
+        upstream._content = json.dumps(
+            {"candidates": [{"content": {"parts": [{"text": "Hello"}]}}]}
+        ).encode("utf-8")
+        upstream.headers["Content-Type"] = "application/json"
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=upstream,
+        ) as base_request:
+            self.proxy_module.ProxyService.make_request(
+                method="POST",
+                url="https://generativelanguage.googleapis.com/v1beta/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                params={},
+                data=json.dumps(
+                    {
+                        "model": "models/gemini-2.0-flash",
+                        "messages": [{"role": "user", "content": "Hello"}],
+                    }
+                ).encode("utf-8"),
+                api_provider="gemini",
+                use_cache=False,
+            )
+
+        self.assertEqual(
+            base_request.call_args.kwargs["url"],
+            (
+                "https://generativelanguage.googleapis.com/v1beta/"
+                "models/gemini-2.0-flash:generateContent"
+            ),
+        )
+
     def test_latest_models_drop_rejected_sampling_parameters(self):
         request_data = {
             "model": "gemini-3.6-flash",
