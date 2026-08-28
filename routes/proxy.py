@@ -34,6 +34,7 @@ from providers.opencode_go import (
 )
 from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
+from request_validation import json_object_body
 from route_helpers import (
     api_auth_required,
     copy_upstream_response_headers,
@@ -486,9 +487,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         start_time = time.time()
         provider = None
         try:
-            data = request.get_json()
-            if not data:
-                raise APIError("No request data provided", status_code=400)
+            data = json_object_body()
 
             provider = data.get("provider", "").lower()
             if not provider:
@@ -572,9 +571,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         """
         start_time = time.time()
         try:
-            data = request.get_json()
-            if not data:
-                raise APIError("No request data provided")
+            data = json_object_body()
 
             if "messages" not in data:
                 raise APIError("Messages array is required", status_code=400)

@@ -15,6 +15,7 @@ from providers.nanogpt import (
 )
 from providers.opencode_go import build_opencode_go_url, opencode_go_model_endpoint
 from providers.registry import get_adapter
+from request_validation import json_object_body
 from route_helpers import (
     api_auth_required,
     copy_raw_provider_response_headers,
@@ -754,7 +755,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     def unified_chat_completions():
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_body()
         return dispatch_unified_chat_completion(
             app,
             auth_service_cls,
@@ -767,9 +768,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     def unified_image_generations():
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict):
-            raise APIError("Request body must be a JSON object", status_code=400)
+        payload = json_object_body()
         return dispatch_unified_image_generation(
             app,
             auth_service_cls,
@@ -785,7 +784,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
         start_time = time.time()
         provider = "unknown"
         try:
-            payload = request.get_json(silent=True) or {}
+            payload = json_object_body()
             requested_model = payload.get("model")
             if AutoRouteService.is_auto_route(requested_model):
                 raise APIError(

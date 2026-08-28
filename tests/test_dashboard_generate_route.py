@@ -111,6 +111,19 @@ class DashboardGenerateRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["message"], "Unsupported provider: not-real")
 
+    def test_dashboard_chat_generate_rejects_json_arrays(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/api/backends/chat-completions/generate",
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
+
     def test_dashboard_chat_generate_does_not_leak_internal_proxy_errors(self):
         self._set_admin_session()
         with patch(

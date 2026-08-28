@@ -12,6 +12,7 @@ from flask_wtf.csrf import CSRFError
 from config import Config
 from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
+from request_validation import json_object_body
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -277,7 +278,7 @@ def register_core_routes(app) -> None:
                 if not current_user or not current_user.get("is_admin", False):
                     raise APIError("Only admin users can create new users", status_code=403)
 
-                payload = request.get_json(silent=True) or {}
+                payload = json_object_body() if request.is_json else {}
                 username = payload.get("username") or request.form.get("username")
                 is_admin = (
                     parse_json_bool(payload.get("is_admin"), "is_admin")
@@ -620,7 +621,7 @@ def register_core_routes(app) -> None:
         Browser clients authenticate with the Flask session and never receive provider keys.
         """
         require_admin_dashboard_user()
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_body()
         if not payload.get("model"):
             raise APIError("Model is required", status_code=400)
         if not isinstance(payload.get("messages"), list) or not payload["messages"]:

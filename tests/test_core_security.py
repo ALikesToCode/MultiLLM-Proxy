@@ -288,6 +288,20 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("is_admin must be a boolean", response.get_json()["message"])
 
+    def test_user_create_rejects_json_arrays(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/users",
+            headers={"Accept": "application/json"},
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,7 +42,11 @@ class ProxyErrorSafetyTest(unittest.TestCase):
         for module_name in list(sys.modules):
             if module_name == "app" or module_name.startswith("routes."):
                 sys.modules.pop(module_name, None)
-        for module_name in ("services.auth_service", "services.proxy_service"):
+        for module_name in (
+            "route_helpers",
+            "services.auth_service",
+            "services.proxy_service",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
@@ -122,6 +126,19 @@ class ProxyErrorSafetyTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["message"], "An unexpected error occurred.")
         self.assertNotIn("secret-provider-key", response.get_data(as_text=True))
+
+    def test_google_chat_rejects_json_arrays(self):
+        response = self.client.post(
+            "/googleai/chat/completions",
+            headers=self.auth_headers,
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
 
 
 if __name__ == "__main__":

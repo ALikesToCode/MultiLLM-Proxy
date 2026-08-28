@@ -153,6 +153,18 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_dashboard_chat_completions_rejects_json_arrays(self):
+        response = self.client.post(
+            "/dashboard/openrouter/chat-completions",
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
+
     def test_openrouter_static_js_does_not_embed_browser_keys_or_authorization(self):
         script = Path("static/js/openrouter.js").read_text(encoding="utf-8")
 
