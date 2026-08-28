@@ -28,7 +28,12 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         )
         self.env_patch.start()
 
-        for module_name in ("app", "services.auth_service", "routes.core"):
+        for module_name in (
+            "app",
+            "route_helpers",
+            "services.auth_service",
+            "routes.core",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
@@ -64,7 +69,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
                 "session_id": "test-session",
             }

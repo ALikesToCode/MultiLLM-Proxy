@@ -14,7 +14,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_live_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
             }
 
@@ -146,7 +146,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_live_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
             }
 

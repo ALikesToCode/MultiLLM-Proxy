@@ -476,6 +476,7 @@ class AuthService:
             existing_user
             and check_password_hash(existing_user["api_key_hash"], default_api_key)
             and existing_user.get("is_admin")
+            and not existing_user.get("revoked_at")
         ):
             return
 
@@ -492,7 +493,7 @@ class AuthService:
             last_used_ip=existing_user.get("last_used_ip") if existing_user else None,
             created_by=existing_user.get("created_by") if existing_user else "system",
             rotated_at=existing_user.get("rotated_at") if existing_user else None,
-            revoked_at=existing_user.get("revoked_at") if existing_user else None,
+            revoked_at=None,
         )
         logger.info("Initialized default admin user")
 
@@ -726,14 +727,56 @@ class AuthService:
     @classmethod
     def is_authenticated(cls) -> bool:
         """Check if the current user is authenticated."""
-        return bool(session.get("authenticated") and session.get("user"))
+        return cls.get_current_user() is not None
 
     @classmethod
     def get_current_user(cls) -> Optional[Dict[str, Any]]:
-        """Get the current authenticated user."""
-        if not cls.is_authenticated():
+        """Revalidate the signed session against the persisted user record."""
+        session_user = session.get("user")
+        if session.get("authenticated") is not True or not isinstance(
+            session_user,
+            dict,
+        ):
             return None
-        return session.get("user")
+
+        username = session_user.get("username")
+        session_prefix = session_user.get("api_key_prefix")
+        if not isinstance(username, str) or not isinstance(session_prefix, str):
+            session.clear()
+            return None
+
+        try:
+            user = cls._load_user_by_username(username)
+        except Exception as error:
+            logger.error(
+                "Could not revalidate authenticated session (%s)",
+                type(error).__name__,
+            )
+            session.clear()
+            return None
+
+        if (
+            not user
+            or user.get("revoked_at")
+            or not hmac.compare_digest(
+                session_prefix,
+                str(user.get("api_key_prefix") or ""),
+            )
+        ):
+            session.clear()
+            return None
+
+        current_user = {
+            "username": username,
+            "is_admin": user.get("is_admin", False),
+            "api_key_prefix": user.get("api_key_prefix"),
+            "scopes": list(user.get("scopes") or []),
+            "session_id": session_user.get("session_id")
+            or secrets.token_urlsafe(16),
+        }
+        if session_user != current_user:
+            session["user"] = current_user
+        return current_user
 
     @classmethod
     def _public_user(cls, username: str, user: Dict[str, Any]) -> Dict[str, Any]:
@@ -807,12 +850,17 @@ class AuthService:
         default_username = os.environ.get("ADMIN_USERNAME", "admin")
         admin_api_key = os.environ.get("ADMIN_API_KEY")
         if admin_api_key and hmac.compare_digest(api_key, admin_api_key):
-            user = cls._users.get(default_username)
-            if user:
+            user = cls._load_user_by_username(default_username)
+            if (
+                user
+                and user.get("is_admin")
+                and not user.get("revoked_at")
+                and check_password_hash(user["api_key_hash"], api_key)
+            ):
                 cls._update_key_usage(default_username, remote_addr)
                 return cls._public_user(default_username, cls._users[default_username])
             logger.error(
-                "Default admin API key matched but persistent admin user is missing",
+                "Default admin API key matched but its persistent admin record is invalid",
                 extra={"username": default_username},
             )
             return None
@@ -828,7 +876,7 @@ class AuthService:
     def authenticate_user(cls, username: str, api_key: str) -> bool:
         """Authenticate a user with username and API key."""
         user = cls._load_user_by_username(username)
-        if not user:
+        if not user or user.get("revoked_at"):
             return False
 
         if not check_password_hash(user["api_key_hash"], api_key):
@@ -838,6 +886,7 @@ class AuthService:
         cls._update_login(username, last_login)
         user = cls._users[username]
 
+        session.clear()
         session["user"] = {
             "username": username,
             "is_admin": user.get("is_admin", False),
@@ -851,8 +900,7 @@ class AuthService:
     @classmethod
     def logout(cls) -> None:
         """Log out the current user."""
-        session.pop("user", None)
-        session.pop("authenticated", None)
+        session.clear()
 
     @classmethod
     def list_users(cls) -> List[Dict[str, Any]]:

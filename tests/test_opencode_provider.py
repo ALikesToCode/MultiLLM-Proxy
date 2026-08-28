@@ -344,7 +344,7 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key": "admin-test-key",
+                "api_key_prefix": "mllm_admin-te",
             }
 
         with patch("app.check_provider", side_effect=lambda provider, details, app_config: {
@@ -387,7 +387,7 @@ class OpenCodeProviderRouteTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_live_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
             }
 

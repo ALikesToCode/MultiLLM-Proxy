@@ -61,7 +61,7 @@ class KimiCodeMetadataTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "admin-test",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
                 "session_id": "kimi-code-dashboard-test",
             }
