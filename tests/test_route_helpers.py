@@ -109,13 +109,18 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
             ):
                 self.assertEqual(request_api_key(), "proxy-admin-key")
 
-    def test_copy_upstream_response_headers_drops_hop_by_hop_values(self):
+    def test_copy_upstream_response_headers_allows_only_provider_metadata(self):
         headers = copy_upstream_response_headers(
             {
                 "Content-Type": "application/json",
                 "Connection": "keep-alive",
                 "Transfer-Encoding": "chunked",
                 "X-Request-ID": "req_123",
+                "Set-Cookie": "session=provider-controlled",
+                "Content-Security-Policy": "default-src *",
+                "X-Frame-Options": "ALLOWALL",
+                "Access-Control-Allow-Origin": "https://provider.example",
+                "Location": "https://provider.example/account",
             }
         )
 

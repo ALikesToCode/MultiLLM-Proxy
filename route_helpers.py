@@ -99,11 +99,17 @@ RAW_PROVIDER_RESPONSE_HEADER_PREFIXES = (
 
 
 def copy_upstream_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
-    """Copy only response headers that are safe for Flask to emit downstream."""
+    """Copy only provider metadata that is safe for Flask to emit downstream."""
     return {
         key: value
         for key, value in upstream_headers.items()
-        if key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
+        if (
+            key.lower() not in HOP_BY_HOP_RESPONSE_HEADERS
+            and (
+                key.lower() in RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST
+                or key.lower().startswith(RAW_PROVIDER_RESPONSE_HEADER_PREFIXES)
+            )
+        )
     }
 
 
@@ -111,12 +117,7 @@ def copy_raw_provider_response_headers(
     upstream_headers: Mapping[str, Any],
 ) -> Dict[str, Any]:
     """Copy the explicit response-header surface safe for raw API passthrough."""
-    return {
-        key: value
-        for key, value in upstream_headers.items()
-        if key.lower() in RAW_PROVIDER_RESPONSE_HEADER_ALLOWLIST
-        or key.lower().startswith(RAW_PROVIDER_RESPONSE_HEADER_PREFIXES)
-    }
+    return copy_upstream_response_headers(upstream_headers)
 
 
 def copy_linkapi_response_headers(upstream_headers: Mapping[str, Any]) -> Dict[str, Any]:
