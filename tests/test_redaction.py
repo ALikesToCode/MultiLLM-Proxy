@@ -77,6 +77,15 @@ class RedactionTest(unittest.TestCase):
         self.assertNotIn("navy-ort-secret", redacted)
         self.assertIn(REDACTED, redacted)
 
+    def test_redact_text_neutralizes_log_control_characters(self):
+        redacted = redact_text("safe\nforged-entry\r\tend\u2028next")
+
+        self.assertNotIn("\n", redacted)
+        self.assertNotIn("\r", redacted)
+        self.assertNotIn("\t", redacted)
+        self.assertNotIn("\u2028", redacted)
+        self.assertEqual(redacted, "safe forged-entry  end next")
+
 
 if __name__ == "__main__":
     unittest.main()

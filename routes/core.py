@@ -27,7 +27,6 @@ from services.auth_service import AuthService
 from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
-from services.redaction import redact_text
 from services.resilience_service import ResilienceService
 from services.transport_policy import provider_circuit_mode
 
@@ -314,7 +313,7 @@ def register_core_routes(app) -> None:
             return render_template("error.html", error=error.client_message), status_code
 
         except Exception as error:
-            logger.error("Error in user management: %s", redact_text(error))
+            logger.error("User management failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -484,7 +483,7 @@ def register_core_routes(app) -> None:
             response.headers["Cache-Control"] = "no-store"
             return response, 200
         except Exception as error:
-            logger.error("Health check failed: %s", redact_text(error))
+            logger.error("Health check failed type=%s", type(error).__name__)
             return jsonify(internal_error_payload()), 500
 
     @app.route("/")
@@ -521,7 +520,11 @@ def register_core_routes(app) -> None:
                         provider_stats=provider_stats.get(provider, {}),
                     )
                 except Exception as error:
-                    logger.error("Failed to check %s: %s", provider, redact_text(error))
+                    logger.error(
+                        "Provider check failed provider=%s type=%s",
+                        provider,
+                        type(error).__name__,
+                    )
                     errors.append(f"Failed to check {provider}")
                     providers[provider] = {
                         "name": provider.upper(),
@@ -572,7 +575,7 @@ def register_core_routes(app) -> None:
                 user=AuthService.get_current_user(),
             )
         except Exception as error:
-            logger.error("Status page error: %s", redact_text(error))
+            logger.error("Status page failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -590,7 +593,7 @@ def register_core_routes(app) -> None:
         try:
             return render_template("openrouter.html", user=AuthService.get_current_user())
         except Exception as error:
-            logger.error("OpenRouter dashboard error: %s", redact_text(error))
+            logger.error("OpenRouter dashboard failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -734,10 +737,9 @@ def register_core_routes(app) -> None:
         """
         request_id = get_request_id()
         logger.error(
-            "Internal server error request_id=%s type=%s message=%s",
+            "Internal server error request_id=%s type=%s",
             request_id,
             type(error).__name__,
-            redact_text(error),
         )
         if request.is_json or "application/json" in request.headers.get("Accept", ""):
             return jsonify(internal_error_payload()), 500
@@ -790,9 +792,9 @@ def register_core_routes(app) -> None:
                                 )
                             except Exception as error:
                                 logger.error(
-                                    "Error checking provider %s: %s",
+                                    "Provider update failed provider=%s type=%s",
                                     provider,
-                                    redact_text(error),
+                                    type(error).__name__,
                                 )
                                 providers_info[provider] = {
                                     "active": False,
@@ -821,7 +823,10 @@ def register_core_routes(app) -> None:
                 except GeneratorExit:
                     break
                 except Exception as error:
-                    logger.error("Error generating status updates: %s", redact_text(error))
+                    logger.error(
+                        "Status update generation failed type=%s",
+                        type(error).__name__,
+                    )
                     yield (
                         "event: error\ndata: "
                         f"{json.dumps({'error': INTERNAL_ERROR_MESSAGE})}\n\n"

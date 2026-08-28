@@ -52,6 +52,7 @@ SENSITIVE_QUERY_KEYS = {
 
 REDACTED = "<redacted>"
 MAX_STRING_LENGTH = 256
+CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 SECRET_TEXT_PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
     re.compile(r"L402\s+[A-Za-z0-9._~+/=:-]+", re.IGNORECASE),
@@ -84,6 +85,7 @@ def redact_text(value: Any) -> str:
             text = pattern.sub(rf"\1{REDACTED}", text)
         else:
             text = pattern.sub(REDACTED, text)
+    text = CONTROL_CHARACTER_PATTERN.sub(" ", text)
     if len(text) <= MAX_STRING_LENGTH:
         return text
     return f"{text[:MAX_STRING_LENGTH]}...<truncated>"

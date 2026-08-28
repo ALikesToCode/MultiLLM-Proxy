@@ -178,13 +178,14 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
     def test_unexpected_errors_are_opaque_and_include_request_id(self):
         self._set_admin_session()
-        response = self.client.get(
-            "/test/unhandled-error",
-            headers={
-                "Accept": "application/json",
-                "X-Request-ID": "req-test-123",
-            },
-        )
+        with self.assertLogs("error_handlers", level="ERROR") as captured:
+            response = self.client.get(
+                "/test/unhandled-error",
+                headers={
+                    "Accept": "application/json",
+                    "X-Request-ID": "req-test-123",
+                },
+            )
 
         self.assertEqual(response.status_code, 500)
         payload = response.get_json()
@@ -195,6 +196,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         response_text = response.get_data(as_text=True)
         self.assertNotIn("MetricsService.track_request", response_text)
         self.assertNotIn("endpoint", response_text)
+        self.assertNotIn("MetricsService.track_request", "\n".join(captured.output))
 
     def test_expected_client_api_errors_keep_message(self):
         self._set_admin_session()
@@ -210,10 +212,11 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
     def test_server_api_errors_are_opaque(self):
         self._set_admin_session()
-        response = self.client.get(
-            "/test/server-api-error",
-            headers={"Accept": "application/json"},
-        )
+        with self.assertLogs("error_handlers", level="ERROR") as captured:
+            response = self.client.get(
+                "/test/server-api-error",
+                headers={"Accept": "application/json"},
+            )
 
         self.assertEqual(response.status_code, 500)
         payload = response.get_json()
@@ -221,6 +224,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(payload["message"], "An unexpected error occurred.")
         self.assertIn("request_id", payload)
         self.assertNotIn("sk-live", response.get_data(as_text=True))
+        self.assertNotIn("sk-live", "\n".join(captured.output))
 
     def test_json_errors_accept_wildcard_accept_header(self):
         self._set_admin_session()

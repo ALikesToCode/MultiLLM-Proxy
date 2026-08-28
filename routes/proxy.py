@@ -543,7 +543,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             )
 
         except APIError as error:
-            logger.error("API Error in chat completions: %s", error.message)
+            logger.error(
+                "Chat completions API error status=%s",
+                error.status_code,
+            )
             if provider:
                 metrics_service_cls.get_instance().track_request(
                     provider=provider,
@@ -553,7 +556,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             raise
 
         except Exception as error:
-            logger.exception("Unexpected error in chat completions")
+            logger.error(
+                "Unexpected chat completions error type=%s",
+                type(error).__name__,
+            )
             if provider:
                 metrics_service_cls.get_instance().track_request(
                     provider=provider,
@@ -747,13 +753,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
 
                                     return f"data: {json.dumps(openai_chunk)}\n\n"
                                 except Exception as error:
-                                    logger.error("Error standardizing chunk: %s", error)
-                                    fallback = {
-                                        "id": f"chatcmpl-{str(int(time.time()))[:10]}",
-                                        "object": "chat.completion.chunk",
-                                        "choices": [{"delta": {"content": str(chunk)}}],
-                                    }
-                                    return f"data: {json.dumps(fallback)}\n\n"
+                                    logger.error(
+                                        "Google AI chunk standardization failed type=%s",
+                                        type(error).__name__,
+                                    )
+                                    return stream_error_event(model="googleai-stream")
 
                             is_gzipped = response.headers.get("content-encoding", "").lower() == "gzip"
 
@@ -775,7 +779,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                                                     if line:
                                                         yield standardize_streaming_chunk(line, "googleai")
                                         except Exception as error:
-                                            logger.error("Error processing chunk: %s", error)
+                                            logger.error(
+                                                "Google AI chunk processing failed type=%s",
+                                                type(error).__name__,
+                                            )
                                             continue
 
                                 if is_gzipped:
@@ -788,7 +795,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                                                 if line:
                                                     yield standardize_streaming_chunk(line, "googleai")
                                     except Exception as error:
-                                        logger.error("Error decompressing gzipped response: %s", error)
+                                        logger.error(
+                                            "Google AI gzip decoding failed type=%s",
+                                            type(error).__name__,
+                                        )
                             else:
                                 for line in response.iter_lines(decode_unicode=True):
                                     if line:
@@ -830,7 +840,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     )
 
             except APIError as error:
-                logger.error("API Error in Google chat completions: %s", error.message)
+                logger.error(
+                    "Google chat completions API error status=%s",
+                    error.status_code,
+                )
                 response_time = (time.time() - start_time) * 1000
                 metrics_service_cls.get_instance().track_request(
                     provider="googleai",
@@ -859,7 +872,10 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 ), 500
 
         except APIError as error:
-            logger.error("API Error in Google chat completions: %s", error.message)
+            logger.error(
+                "Google chat completions API error status=%s",
+                error.status_code,
+            )
             response_time = (time.time() - start_time) * 1000
             metrics_service_cls.get_instance().track_request(
                 provider="googleai",

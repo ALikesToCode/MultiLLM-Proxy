@@ -22,8 +22,8 @@ class CacheService:
                     del cls._cache[key]
                     del cls._cache_times[key]
             return None
-        except Exception as e:
-            logger.error(f"Error getting cache value: {str(e)}")
+        except Exception as error:
+            logger.error("Cache read failed type=%s", type(error).__name__)
             return None
 
     @classmethod
@@ -32,8 +32,8 @@ class CacheService:
         try:
             cls._cache[key] = value
             cls._cache_times[key] = datetime.now() + ttl
-        except Exception as e:
-            logger.error(f"Error setting cache value: {str(e)}")
+        except Exception as error:
+            logger.error("Cache write failed type=%s", type(error).__name__)
 
     @classmethod
     def clear(cls):
@@ -41,8 +41,8 @@ class CacheService:
         try:
             cls._cache.clear()
             cls._cache_times.clear()
-        except Exception as e:
-            logger.error(f"Error clearing cache: {str(e)}")
+        except Exception as error:
+            logger.error("Cache clear failed type=%s", type(error).__name__)
 
     @staticmethod
     @lru_cache(maxsize=1000)
@@ -62,14 +62,17 @@ class CacheService:
                 if isinstance(body, (dict, list)):
                     try:
                         body = json.dumps(body, sort_keys=True)
-                    except (TypeError, ValueError) as e:
-                        logger.error(f"Error serializing body to JSON: {str(e)}")
+                    except (TypeError, ValueError) as error:
+                        logger.error(
+                            "Cache body serialization failed type=%s",
+                            type(error).__name__,
+                        )
                         body = str(body)
                 elif not isinstance(body, str):
                     body = str(body)
             
             return f"{method}:{url}:{body if body else ''}"
-        except Exception as e:
-            logger.error(f"Error generating cache key: {str(e)}")
+        except Exception as error:
+            logger.error("Cache key generation failed type=%s", type(error).__name__)
             # Return a safe fallback key
             return f"{method}:{url}:error-{hash(str(body) if body else '')}" 
