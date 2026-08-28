@@ -711,7 +711,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
     @app.route("/v1/models", methods=["GET", "OPTIONS"])
     @csrf.exempt
-    @api_auth_required
+    @api_auth_required(required_scope="models")
     def list_unified_models():
         models = [
             unified_model_payload(model)

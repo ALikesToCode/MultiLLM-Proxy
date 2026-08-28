@@ -474,59 +474,120 @@ def _authenticate_api_request():
     return None
 
 
-def api_authenticate_only(func: Callable) -> Callable:
+def _authorize_api_scope(required_scope: str):
+    """Return a 403 response unless the authenticated user has the scope."""
+    user = getattr(g, "authenticated_user", None)
+    if not isinstance(user, Mapping):
+        return jsonify(
+            {
+                "error": "insufficient_scope",
+                "message": "The authenticated key is not authorized for this operation",
+            }
+        ), 403
+
+    scopes_value = user.get("scopes")
+    scopes = (
+        {
+            str(scope).strip().lower()
+            for scope in scopes_value
+            if isinstance(scope, str) and scope.strip()
+        }
+        if isinstance(scopes_value, (list, tuple, set, frozenset))
+        else set()
+    )
+    normalized_scope = required_scope.strip().lower()
+    if user.get("is_admin") or "admin" in scopes or normalized_scope in scopes:
+        return None
+
+    logger.warning(
+        "Proxy API scope denied required_scope=%s",
+        normalized_scope,
+    )
+    return jsonify(
+        {
+            "error": "insufficient_scope",
+            "message": f"The authenticated key requires the {normalized_scope} scope",
+        }
+    ), 403
+
+
+def api_authenticate_only(
+    func: Optional[Callable] = None,
+    *,
+    required_scope: str = "chat",
+) -> Callable:
     """Authenticate a proxy request without reserving a rate-limit slot."""
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if request.method == "OPTIONS":
-            return build_cors_preflight_response()
+    def decorator(target: Callable) -> Callable:
+        @wraps(target)
+        def wrapper(*args, **kwargs):
+            if request.method == "OPTIONS":
+                return build_cors_preflight_response()
 
-        authentication_error = _authenticate_api_request()
-        if authentication_error is not None:
-            return authentication_error
-        return func(*args, **kwargs)
+            authentication_error = _authenticate_api_request()
+            if authentication_error is not None:
+                return authentication_error
+            authorization_error = _authorize_api_scope(required_scope)
+            if authorization_error is not None:
+                return authorization_error
+            return target(*args, **kwargs)
 
-    return wrapper
+        return wrapper
+
+    if func is None:
+        return decorator
+    return decorator(func)
 
 
-def api_auth_required(func: Callable) -> Callable:
+def api_auth_required(
+    func: Optional[Callable] = None,
+    *,
+    required_scope: str = "chat",
+) -> Callable:
     """Authenticate a proxy request and reserve its provider rate budget."""
 
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if request.method == "OPTIONS":
-            return build_cors_preflight_response()
+    def decorator(target: Callable) -> Callable:
+        @wraps(target)
+        def wrapper(*args, **kwargs):
+            if request.method == "OPTIONS":
+                return build_cors_preflight_response()
 
-        authentication_error = _authenticate_api_request()
-        if authentication_error is not None:
-            return authentication_error
+            authentication_error = _authenticate_api_request()
+            if authentication_error is not None:
+                return authentication_error
+            authorization_error = _authorize_api_scope(required_scope)
+            if authorization_error is not None:
+                return authorization_error
 
-        payload_bytes = request.get_data(cache=True) or b""
-        payload_json = request.get_json(silent=True) if request.is_json else None
-        provider = provider_from_request_path(request.path, payload_json)
-        authenticated_user = g.authenticated_user
-        limit_decision = RateLimitService.enforce_request(
-            provider=provider,
-            user=authenticated_user,
-            payload_bytes=payload_bytes,
-            payload_json=payload_json,
-            remote_addr=request.remote_addr,
-        )
-        g.rate_limit = limit_decision.metadata
-        if not limit_decision.allowed:
-            response = jsonify(
-                {
-                    "error": limit_decision.error,
-                    "message": limit_decision.message,
-                }
+            payload_bytes = request.get_data(cache=True) or b""
+            payload_json = request.get_json(silent=True) if request.is_json else None
+            provider = provider_from_request_path(request.path, payload_json)
+            authenticated_user = g.authenticated_user
+            limit_decision = RateLimitService.enforce_request(
+                provider=provider,
+                user=authenticated_user,
+                payload_bytes=payload_bytes,
+                payload_json=payload_json,
+                remote_addr=request.remote_addr,
             )
-            if limit_decision.retry_after:
-                response.headers["Retry-After"] = str(limit_decision.retry_after)
-            return response, limit_decision.status_code
-        return func(*args, **kwargs)
+            g.rate_limit = limit_decision.metadata
+            if not limit_decision.allowed:
+                response = jsonify(
+                    {
+                        "error": limit_decision.error,
+                        "message": limit_decision.message,
+                    }
+                )
+                if limit_decision.retry_after:
+                    response.headers["Retry-After"] = str(limit_decision.retry_after)
+                return response, limit_decision.status_code
+            return target(*args, **kwargs)
 
-    return wrapper
+        return wrapper
+
+    if func is None:
+        return decorator
+    return decorator(func)
 
 
 def check_provider(
