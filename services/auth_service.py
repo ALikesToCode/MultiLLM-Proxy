@@ -30,6 +30,8 @@ def _utcnow() -> datetime:
 
 DEFAULT_USER_SCOPES = ("chat", "models")
 DEFAULT_ADMIN_SCOPES = ("admin", "chat", "metrics", "models", "users")
+MAX_USERNAME_LENGTH = 128
+MAX_API_KEY_LENGTH = 1024
 PROVIDER_API_KEY_ENV_NAMES = {
     "opencode": ("OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"),
     "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
@@ -270,6 +272,31 @@ class AuthService:
     def _hash_api_key(api_key: str) -> str:
         return generate_password_hash(api_key)
 
+    @staticmethod
+    def _normalized_username(username: object) -> Optional[str]:
+        if not isinstance(username, str):
+            return None
+        normalized = username.strip()
+        if not normalized or len(normalized) > MAX_USERNAME_LENGTH:
+            return None
+        if any(
+            ord(character) < 32 or ord(character) == 127
+            for character in normalized
+        ):
+            return None
+        return normalized
+
+    @classmethod
+    def _require_valid_username(cls, username: object) -> str:
+        normalized = cls._normalized_username(username)
+        if normalized is None:
+            raise APIError(
+                f"Username must be 1 to {MAX_USERNAME_LENGTH} characters "
+                "and contain no control characters",
+                status_code=400,
+            )
+        return normalized
+
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
         return {
@@ -465,7 +492,14 @@ class AuthService:
 
     @classmethod
     def _ensure_default_admin_user(cls) -> None:
-        default_username = os.environ.get("ADMIN_USERNAME", "admin")
+        default_username = cls._normalized_username(
+            os.environ.get("ADMIN_USERNAME", "admin")
+        )
+        if default_username is None:
+            raise RuntimeError(
+                f"ADMIN_USERNAME must be 1 to {MAX_USERNAME_LENGTH} characters "
+                "and contain no control characters"
+            )
         default_api_key = os.environ.get("ADMIN_API_KEY")
         if not default_api_key:
             logger.warning("ADMIN_API_KEY is not set; default admin user was not initialized")
@@ -844,12 +878,22 @@ class AuthService:
     @classmethod
     def verify_api_key(cls, api_key: Optional[str], remote_addr: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Verify a bearer API key without storing or comparing plaintext user keys."""
-        if not api_key:
+        if (
+            not isinstance(api_key, str)
+            or not api_key
+            or len(api_key) > MAX_API_KEY_LENGTH
+        ):
             return None
 
-        default_username = os.environ.get("ADMIN_USERNAME", "admin")
+        default_username = cls._normalized_username(
+            os.environ.get("ADMIN_USERNAME", "admin")
+        )
         admin_api_key = os.environ.get("ADMIN_API_KEY")
-        if admin_api_key and hmac.compare_digest(api_key, admin_api_key):
+        if (
+            default_username
+            and admin_api_key
+            and hmac.compare_digest(api_key, admin_api_key)
+        ):
             user = cls._load_user_by_username(default_username)
             if (
                 user
@@ -875,6 +919,15 @@ class AuthService:
     @classmethod
     def authenticate_user(cls, username: str, api_key: str) -> bool:
         """Authenticate a user with username and API key."""
+        username = cls._normalized_username(username)
+        if (
+            username is None
+            or not isinstance(api_key, str)
+            or not api_key
+            or len(api_key) > MAX_API_KEY_LENGTH
+        ):
+            return False
+
         user = cls._load_user_by_username(username)
         if not user or user.get("revoked_at"):
             return False
@@ -919,8 +972,7 @@ class AuthService:
     def create_user(cls, username: str, is_admin: bool = False) -> Dict[str, Any]:
         """Create a new user and persist it."""
         cls._require_admin()
-        if not username:
-            raise APIError("Username is required", status_code=400)
+        username = cls._require_valid_username(username)
         if username in cls._users:
             raise APIError("User already exists", status_code=409)
 
@@ -953,9 +1005,17 @@ class AuthService:
     def delete_user(cls, username: str) -> None:
         """Delete an existing user."""
         current_user = cls._require_admin()
+        username = cls._require_valid_username(username)
         cls._load_user_by_username(username)
         if username not in cls._users:
             raise APIError("User not found", status_code=404)
+        if username == cls._normalized_username(
+            os.environ.get("ADMIN_USERNAME", "admin")
+        ):
+            raise APIError(
+                "The environment-managed default admin cannot be deleted",
+                status_code=400,
+            )
         if username == current_user.get("username"):
             raise APIError("You cannot delete the currently authenticated admin user", status_code=400)
         cls._delete_user_record(username)
@@ -964,10 +1024,18 @@ class AuthService:
     def rotate_api_key(cls, username: str) -> Dict[str, Any]:
         """Rotate a user's API key."""
         cls._require_admin()
+        username = cls._require_valid_username(username)
         cls._load_user_by_username(username)
         user = cls._users.get(username)
         if not user:
             raise APIError("User not found", status_code=404)
+        if username == cls._normalized_username(
+            os.environ.get("ADMIN_USERNAME", "admin")
+        ):
+            raise APIError(
+                "Update ADMIN_API_KEY and restart to rotate the default admin key",
+                status_code=400,
+            )
 
         new_api_key = cls._generate_api_key()
         rotated_at = _utcnow()

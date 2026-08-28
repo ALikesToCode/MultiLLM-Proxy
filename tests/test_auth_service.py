@@ -362,6 +362,79 @@ class AuthServicePersistenceTest(unittest.TestCase):
 
             self.assertFalse(self.auth_module.session)
 
+    def test_authentication_rejects_oversized_credentials_before_storage_lookup(self):
+        self.AuthService.initialize()
+        with patch.object(
+            self.AuthService,
+            "_load_user_by_username",
+            side_effect=AssertionError("storage lookup should not run"),
+        ):
+            self.assertFalse(
+                self._authenticate(
+                    "a" * (self.auth_module.MAX_USERNAME_LENGTH + 1),
+                    "key",
+                )
+            )
+            self.assertFalse(
+                self._authenticate(
+                    "admin",
+                    "k" * (self.auth_module.MAX_API_KEY_LENGTH + 1),
+                )
+            )
+
+    def test_api_key_verification_rejects_oversized_keys_before_storage_lookup(self):
+        self.AuthService.initialize()
+        with patch.object(
+            self.AuthService,
+            "_load_users_by_api_key_prefix",
+            side_effect=AssertionError("storage lookup should not run"),
+        ):
+            verified_user = self.AuthService.verify_api_key(
+                "k" * (self.auth_module.MAX_API_KEY_LENGTH + 1)
+            )
+
+        self.assertIsNone(verified_user)
+
+    def test_usernames_are_normalized_and_control_characters_are_rejected(self):
+        self.AuthService.initialize()
+        with patch.object(
+            self.AuthService,
+            "get_current_user",
+            return_value={"username": "admin", "is_admin": True},
+        ):
+            created_user = self.AuthService.create_user("  normalized-user  ")
+            with self.assertRaisesRegex(self.auth_module.APIError, "control"):
+                self.AuthService.create_user("bad\nuser")
+
+        self.assertEqual(created_user["username"], "normalized-user")
+
+    def test_environment_managed_admin_cannot_be_deleted_or_rotated(self):
+        self.AuthService.initialize()
+        with patch.object(
+            self.AuthService,
+            "get_current_user",
+            return_value={"username": "other-admin", "is_admin": True},
+        ):
+            with self.assertRaisesRegex(
+                self.auth_module.APIError,
+                "cannot be deleted",
+            ):
+                self.AuthService.delete_user("admin")
+            with self.assertRaisesRegex(
+                self.auth_module.APIError,
+                "ADMIN_API_KEY",
+            ):
+                self.AuthService.rotate_api_key("admin")
+
+    def test_invalid_default_admin_username_fails_initialization(self):
+        with patch.dict(
+            os.environ,
+            {"ADMIN_USERNAME": "bad\nadmin"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ADMIN_USERNAME"):
+                self.AuthService.initialize()
+
     def test_verify_default_admin_key_fails_closed_without_admin_row(self):
         self.AuthService._users = {}
 

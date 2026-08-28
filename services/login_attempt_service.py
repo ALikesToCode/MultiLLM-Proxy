@@ -15,6 +15,7 @@ DEFAULT_MAX_ATTEMPTS = 5
 DEFAULT_WINDOW_SECONDS = 5 * 60
 DEFAULT_LOCKOUT_SECONDS = 15 * 60
 DEFAULT_MAX_IDENTITIES = 10_000
+MAX_IDENTITY_COMPONENT_LENGTH = 256
 
 
 @dataclass(frozen=True)
@@ -65,8 +66,12 @@ class LoginAttemptService:
     @staticmethod
     def _identity_hash(remote_addr: Optional[str], username: Optional[str]) -> str:
         secret = (os.environ.get("JWT_SECRET") or "").encode("utf-8")
+        bounded_remote_addr = (remote_addr or "unknown")[
+            :MAX_IDENTITY_COMPONENT_LENGTH
+        ]
+        bounded_username = (username or "")[:MAX_IDENTITY_COMPONENT_LENGTH]
         normalized = (
-            f"{remote_addr or 'unknown'}\0{(username or '').strip().casefold()}"
+            f"{bounded_remote_addr}\0{bounded_username.strip().casefold()}"
         ).encode("utf-8")
         return hmac.new(secret, normalized, hashlib.sha256).hexdigest()
 
