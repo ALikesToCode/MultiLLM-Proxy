@@ -142,6 +142,21 @@ class ProxyErrorSafetyTest(unittest.TestCase):
             "Request body must be a JSON object",
         )
 
+    def test_generic_provider_route_rejects_json_arrays(self):
+        with patch("app.ProxyService.make_request") as make_request:
+            response = self.client.post(
+                "/openai/v1/chat/completions",
+                headers=self.auth_headers,
+                json=[],
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
+        make_request.assert_not_called()
+
     def test_together_processing_errors_do_not_reach_logs_or_exceptions(self):
         upstream = requests.Response()
         upstream.status_code = 200

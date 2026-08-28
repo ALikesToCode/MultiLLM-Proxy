@@ -313,11 +313,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
 
             is_streaming = False
             if request.is_json:
-                try:
-                    body = request.get_json()
+                body = request.get_json(silent=True)
+                if not raw_passthrough and not isinstance(body, dict):
+                    raise APIError("Request body must be a JSON object", status_code=400)
+                if isinstance(body, dict):
                     is_streaming = bool(body.get("stream", False))
-                except Exception:
-                    pass
 
             headers = proxy_service_cls.prepare_headers(
                 request.headers,
