@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,8 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.lock ./requirements.lock
 
-RUN pip install --upgrade pip && \
-    pip install -r requirements.lock
+RUN pip install --disable-pip-version-check --require-hashes -r requirements.lock
 
 COPY . .
 COPY --chmod=755 scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
