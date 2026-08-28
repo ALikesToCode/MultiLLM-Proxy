@@ -1,4 +1,4 @@
-const CACHE_NAME = 'multillm-proxy-v10';
+const CACHE_NAME = 'multillm-proxy-v11';
 const OFFLINE_URL = '/static/offline.html';
 const PRECACHE_URLS = [
   OFFLINE_URL,
