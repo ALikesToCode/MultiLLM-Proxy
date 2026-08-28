@@ -4,9 +4,11 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
+
+from error_handlers import APIError
 
 
 class FailingStreamResponse:
@@ -139,6 +141,100 @@ class ProxyErrorSafetyTest(unittest.TestCase):
             response.get_json()["message"],
             "Request body must be a JSON object",
         )
+
+    def test_together_processing_errors_do_not_reach_logs_or_exceptions(self):
+        upstream = requests.Response()
+        upstream.status_code = 200
+        upstream._content = b"{}"
+        upstream.headers["Content-Type"] = "application/json"
+        upstream.json = Mock(
+            side_effect=RuntimeError("failed with secret-provider-key")
+        )
+
+        with (
+            patch.object(
+                self.app_module.ProxyService,
+                "_make_base_request",
+                return_value=upstream,
+            ),
+            self.assertLogs("services.proxy_service", level="ERROR") as captured,
+            self.assertRaises(APIError) as raised,
+        ):
+            self.app_module.ProxyService._handle_together_request(
+                "POST",
+                "https://api.together.xyz/v1/chat/completions",
+                {},
+                {},
+                b"{}",
+                {"model": "test-model"},
+            )
+
+        self.assertEqual(raised.exception.message, "Together AI response processing failed")
+        self.assertNotIn("secret-provider-key", "\n".join(captured.output))
+
+    def test_groq_processing_errors_do_not_reach_logs_or_exceptions(self):
+        with (
+            patch.object(
+                self.app_module.ProxyService,
+                "_make_base_request",
+                side_effect=RuntimeError("failed with secret-provider-key"),
+            ),
+            self.assertLogs("services.proxy_service", level="ERROR") as captured,
+            self.assertRaises(APIError) as raised,
+        ):
+            self.app_module.ProxyService._handle_groq_request(
+                "POST",
+                "https://api.groq.com/openai/v1/chat/completions",
+                {},
+                {},
+                b"{}",
+                {"model": "test-model", "messages": [{"role": "user"}]},
+            )
+
+        self.assertEqual(raised.exception.message, "Groq request handling failed")
+        self.assertNotIn("secret-provider-key", "\n".join(captured.output))
+
+    def test_stream_standardizer_does_not_reflect_unexpected_objects(self):
+        secret_chunk = Mock()
+        secret_chunk.decode.return_value = secret_chunk
+        secret_chunk.strip.side_effect = RuntimeError("secret-provider-key")
+
+        with self.assertLogs("services.proxy_service", level="ERROR") as captured:
+            payload = self.app_module.ProxyService._standardize_streaming_chunk(
+                secret_chunk,
+                "test-provider",
+            )
+
+        self.assertIn("Upstream stream terminated unexpectedly.", payload)
+        self.assertNotIn("secret-provider-key", payload)
+        self.assertNotIn("secret-provider-key", "\n".join(captured.output))
+
+    def test_nineteen_stream_failure_is_opaque_and_closes_response(self):
+        upstream = FailingStreamResponse()
+        model = "TheBloke/Rogue-Rose-103b-v0.2-AWQ"
+
+        with patch.object(
+            self.app_module.ProxyService,
+            "_make_base_request",
+            return_value=upstream,
+        ):
+            response = self.app_module.ProxyService._handle_rogue_rose_request(
+                "POST",
+                "https://api.nineteen.ai/v1/chat/completions",
+                {},
+                {},
+                b"{}",
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "stream": True,
+                },
+            )
+            body = response.get_data(as_text=True)
+
+        self.assertIn("Upstream stream terminated unexpectedly.", body)
+        self.assertNotIn("secret-provider-key", body)
+        self.assertTrue(upstream.closed)
 
 
 if __name__ == "__main__":
