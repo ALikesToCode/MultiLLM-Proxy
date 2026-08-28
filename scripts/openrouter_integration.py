@@ -23,6 +23,24 @@ DEFAULT_PROMPT = "Write a short poem about artificial intelligence"
 DEFAULT_ADMIN_KEY = os.environ.get("ADMIN_API_KEY")
 
 
+def print_request_error(error):
+    """Print bounded diagnostics without exposing response bodies or credentials."""
+    print(f"❌ Error: {type(error).__name__}")
+    response = getattr(error, "response", None)
+    if response is None:
+        return
+
+    print(f"Status code: {response.status_code}")
+    try:
+        error_data = response.json()
+    except (TypeError, ValueError):
+        content = getattr(response, "content", b"") or b""
+        print(f"Response body length: {len(content)} bytes")
+        return
+
+    print(f"Structured error response: {type(error_data).__name__}")
+
+
 def resolve_api_key(args):
     """Resolve the API key from CLI flags or the environment."""
     if args.key:
@@ -76,15 +94,9 @@ def test_openrouter_non_streaming(host, model, prompt, api_key):
         
         print(f"\n⏱️ Request completed in {time.time() - start_time:.2f} seconds")
         return True
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print()
+        print_request_error(error)
         return False
 
 def test_openrouter_streaming(host, model, prompt, api_key):
@@ -140,15 +152,9 @@ def test_openrouter_streaming(host, model, prompt, api_key):
         print("\n" + "-" * 50)
         print(f"\n⏱️ Streaming completed in {time.time() - start_time:.2f} seconds")
         return True
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print()
+        print_request_error(error)
         return False
 
 def test_openrouter_credits(host, api_key):
@@ -175,15 +181,8 @@ def test_openrouter_credits(host, api_key):
             print(f"✅ Response: {json.dumps(data, indent=2)}")
         
         return True
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print_request_error(error)
         return False
 
 def main():

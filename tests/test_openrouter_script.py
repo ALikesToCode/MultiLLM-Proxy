@@ -1,9 +1,13 @@
 import importlib.util
+import io
 import os
 from pathlib import Path
 import unittest
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import requests
 
 
 class OpenRouterScriptConfigTest(unittest.TestCase):
@@ -77,6 +81,40 @@ class OpenRouterScriptConfigTest(unittest.TestCase):
             )
 
         self.assertEqual(get.call_args.kwargs["timeout"], (5, 30))
+
+    def test_request_errors_redact_structured_secret_fields(self):
+        response = requests.Response()
+        response.status_code = 401
+        response._content = b'{"api_key":"secret-provider-key","error":"denied"}'
+        response.headers["Content-Type"] = "application/json"
+        error = requests.HTTPError("request failed with secret-provider-key")
+        error.response = response
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.script_module.print_request_error(error)
+
+        diagnostics = output.getvalue()
+        self.assertIn("HTTPError", diagnostics)
+        self.assertIn("Status code: 401", diagnostics)
+        self.assertIn("Structured error response: dict", diagnostics)
+        self.assertNotIn("secret-provider-key", diagnostics)
+
+    def test_request_errors_do_not_print_unstructured_response_bodies(self):
+        response = requests.Response()
+        response.status_code = 502
+        response._content = b"upstream failed with secret-provider-key"
+        response.headers["Content-Type"] = "text/plain"
+        error = requests.HTTPError("request failed")
+        error.response = response
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            self.script_module.print_request_error(error)
+
+        diagnostics = output.getvalue()
+        self.assertIn("Response body length:", diagnostics)
+        self.assertNotIn("secret-provider-key", diagnostics)
 
 
 if __name__ == "__main__":
