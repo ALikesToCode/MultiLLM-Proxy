@@ -2509,9 +2509,7 @@ class ProxyService:
         api_provider: str,
         auth_token: Optional[str] = None,
     ) -> requests.Response:
-        """
-        Handle Gemini requests with safety settings disabled
-        """
+        """Handle Gemini requests while preserving caller safety settings."""
         logger.info("Handling %s request", api_provider)
         
         try:
@@ -2673,19 +2671,7 @@ class ProxyService:
                 params["alt"] = "sse"
                 logger.info("Using the Gemini streaming endpoint")
                 
-            # Process the request data to disable safety settings
             if request_data:
-                # Make sure we have safety settings that disable content filtering
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-                
-                # Overwrite any existing safety settings
-                request_data["safetySettings"] = safety_settings
-                
                 if enable_google_search and api_provider == 'gemini':
                     tools = request_data.get("tools")
                     if not isinstance(tools, list):
@@ -2733,7 +2719,7 @@ class ProxyService:
                 # Re-encode the modified data
                 data = json.dumps(request_data).encode('utf-8')
                 headers["Content-Length"] = str(len(data))
-                logger.info(f"Modified {api_provider} request data to disable safety settings")
+                logger.info("Prepared %s request data", api_provider)
             
             logger.info("Sending request to %s", api_provider)
             

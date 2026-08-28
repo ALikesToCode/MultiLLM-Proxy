@@ -403,6 +403,62 @@ class TransportResilienceTest(unittest.TestCase):
         self.assertIn("configured provider credential was rejected", response.text)
         self.assertEqual(upstream.close_calls, 1)
 
+    def test_gemini_preserves_caller_safety_settings(self):
+        safety_settings = [
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_LOW_AND_ABOVE",
+            }
+        ]
+
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=_json_response(200, {"candidates": []}),
+        ) as make_request:
+            self.proxy_module.ProxyService._handle_gemini_request(
+                method="POST",
+                url=(
+                    "https://generativelanguage.googleapis.com/v1beta/"
+                    "models/gemini-2.0-flash:generateContent"
+                ),
+                headers={},
+                params={"key": "AIza-provider-key"},
+                data=b"{}",
+                request_data={
+                    "contents": [{"parts": [{"text": "hello"}]}],
+                    "safetySettings": safety_settings,
+                },
+                use_cache=False,
+                api_provider="gemini",
+            )
+
+        payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual(payload["safetySettings"], safety_settings)
+
+    def test_gemini_does_not_inject_safety_settings(self):
+        with patch.object(
+            self.proxy_module.ProxyService,
+            "_make_base_request",
+            return_value=_json_response(200, {"candidates": []}),
+        ) as make_request:
+            self.proxy_module.ProxyService._handle_gemini_request(
+                method="POST",
+                url=(
+                    "https://generativelanguage.googleapis.com/v1beta/"
+                    "models/gemini-2.0-flash:generateContent"
+                ),
+                headers={},
+                params={"key": "AIza-provider-key"},
+                data=b"{}",
+                request_data={"contents": [{"parts": [{"text": "hello"}]}]},
+                use_cache=False,
+                api_provider="gemini",
+            )
+
+        payload = json.loads(make_request.call_args.kwargs["data"])
+        self.assertNotIn("safetySettings", payload)
+
     def test_openrouter_authentication_errors_do_not_reflect_upstream_body(self):
         upstream = _json_response(
             401,
