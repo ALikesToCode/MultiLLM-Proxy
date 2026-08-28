@@ -17,6 +17,7 @@ from route_helpers import (
     apply_operational_headers,
     check_provider,
     copy_upstream_response_headers,
+    is_api_request_path,
     login_required,
     request_api_key,
     stream_upstream_response,
@@ -423,7 +424,11 @@ def register_core_routes(app) -> None:
         if not AuthService.is_authenticated():
             if request.path == "/":
                 return redirect(url_for("login"))
-            if request.is_json:
+            if (
+                is_api_request_path(request.path)
+                or request.is_json
+                or "application/json" in request.headers.get("Accept", "")
+            ):
                 raise APIError("Authentication required", status_code=401)
             return redirect(url_for("login", next=request.url))
 
@@ -708,6 +713,17 @@ def register_core_routes(app) -> None:
         """
         if request.path == "/favicon.ico":
             return send_from_directory("static", "favicon.ico")
+        if (
+            is_api_request_path(request.path)
+            or request.is_json
+            or "application/json" in request.headers.get("Accept", "")
+        ):
+            return jsonify(
+                {
+                    "error": "Not found",
+                    "request_id": get_request_id(),
+                }
+            ), 404
         return render_template("404.html", request_id=get_request_id()), 404
 
     @app.errorhandler(500)

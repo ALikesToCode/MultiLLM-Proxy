@@ -61,6 +61,11 @@ def _select_request_id():
 def _wants_json_response():
     if request.is_json:
         return True
+    # Import lazily to avoid coupling error-handler initialization to route setup.
+    from route_helpers import is_api_request_path  # noqa: PLC0415
+
+    if is_api_request_path(request.path):
+        return True
     best_match = request.accept_mimetypes.best_match(
         ["application/json", "text/html"],
         default="text/html",

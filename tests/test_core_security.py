@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from flask import request
+from flask import abort, request
 
 
 class LoginRedirectSecurityTest(unittest.TestCase):
@@ -56,6 +56,10 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         @self.flask_app.route("/test/read-body", methods=["POST"])
         def read_body():
             return {"size": len(request.get_data())}
+
+        @self.flask_app.route("/v1/test/not-found")
+        def api_not_found():
+            abort(404)
 
         self.client = self.flask_app.test_client()
 
@@ -237,6 +241,30 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("req-missing-page", response.get_data(as_text=True))
+
+    def test_non_json_api_request_returns_authentication_error_not_redirect(self):
+        response = self.client.post(
+            "/v1/chat/completions",
+            data=b"not-json",
+            headers={"Content-Type": "application/octet-stream"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.content_type, "application/json")
+        self.assertEqual(response.get_json()["message"], "Authentication required")
+        self.assertNotIn("Location", response.headers)
+
+    def test_authenticated_unknown_api_route_returns_json_404(self):
+        response = self.client.get(
+            "/v1/test/not-found",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.content_type, "application/json")
+        self.assertEqual(response.get_json()["error"], "Not found")
+        self.assertIn("request_id", response.get_json())
 
     def test_json_user_create_parses_is_admin_strings_strictly(self):
         self._set_admin_session()
