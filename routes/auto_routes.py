@@ -289,6 +289,9 @@ def register_auto_route_admin_routes(
             app.config["API_BASE_URLS"],
             auth_service_cls,
             proxy_service_cls,
+            supplemental_base_urls={
+                "opencode": app.config["OPENCODE_ZEN_BASE_URL"],
+            },
         )
         payload = _admin_payload(app, auth_service_cls)
         payload["catalog_refresh"] = refresh_results

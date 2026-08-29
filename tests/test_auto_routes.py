@@ -616,6 +616,9 @@ class AutoRouteTest(UnifiedApiTestCase):
             self.app.config["API_BASE_URLS"],
             self.app_module.AuthService,
             self.app_module.ProxyService,
+            supplemental_base_urls={
+                "opencode": self.app.config["OPENCODE_ZEN_BASE_URL"],
+            },
         )
 
     def test_admin_auto_route_rejects_nested_or_duplicate_candidates(self):

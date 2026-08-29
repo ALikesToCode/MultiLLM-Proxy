@@ -13,6 +13,7 @@ from providers.image_relays import image_relay_model_ids
 from providers.opencode_go import (
     OPENCODE_GO_LEGACY_MODEL_IDS,
     OPENCODE_GO_MODEL_IDS,
+    OPENCODE_ZEN_FREE_MODEL_IDS,
 )
 from providers.registry import get_registry
 from services.provider_catalog_service import ProviderCatalogService
@@ -37,7 +38,11 @@ DEFAULT_MODEL_IDS = {
     "aihubmix": list(AIHUBMIX_BUILTIN_MODEL_IDS),
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],
-    "opencode": [*OPENCODE_GO_MODEL_IDS, *OPENCODE_GO_LEGACY_MODEL_IDS],
+    "opencode": [
+        *OPENCODE_GO_MODEL_IDS,
+        *OPENCODE_ZEN_FREE_MODEL_IDS,
+        *OPENCODE_GO_LEGACY_MODEL_IDS,
+    ],
     "nanogpt": [
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3-flash-uncensored",

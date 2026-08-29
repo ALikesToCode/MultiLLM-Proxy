@@ -1,6 +1,5 @@
 import json
 import time
-import uuid
 from collections.abc import Mapping
 
 import requests
@@ -13,7 +12,10 @@ from providers.nanogpt import (
     sanitize_nanogpt_subscription_headers,
     sanitize_nanogpt_subscription_payload,
 )
-from providers.opencode_go import build_opencode_go_url, opencode_go_model_endpoint
+from providers.opencode_go import (
+    build_opencode_model_url,
+    opencode_model_endpoint,
+)
 from providers.registry import get_adapter
 from request_validation import json_object_body
 from route_helpers import (
@@ -27,6 +29,10 @@ from routes.auto_routes import (
     dispatch_auto_route_chat_completion,
     openai_auto_route_models,
     register_auto_route_admin_routes,
+)
+from routes.responses_compat import (
+    chat_response_to_responses_payload,
+    responses_input_to_messages,
 )
 from routes.unified_transport import (
     normalized_aihubmix_image_response,
@@ -199,6 +205,23 @@ def _copy_request_payload(payload: dict, provider_model: str) -> dict:
     return upstream_payload
 
 
+def _provider_model_url(
+    app,
+    provider: str,
+    provider_model: str,
+    upstream_path: str,
+    default_url: str,
+) -> str:
+    if provider != "opencode":
+        return default_url
+    return build_opencode_model_url(
+        app.config["API_BASE_URLS"][provider],
+        app.config["OPENCODE_ZEN_BASE_URL"],
+        provider_model,
+        upstream_path,
+    )
+
+
 def serialize_unified_chat_payload(payload: dict) -> bytes:
     """Serialize the exact Chat Completions body used for limits and dispatch."""
     return json.dumps(
@@ -318,38 +341,6 @@ def _pass_through_response(response: requests.Response) -> Response:
     )
 
 
-def _chat_response_to_responses_payload(chat_payload: dict, requested_model: str) -> dict:
-    choices = chat_payload.get("choices") or []
-    first_choice = choices[0] if choices else {}
-    message = first_choice.get("message") or {}
-    text = message.get("content") or ""
-    now = int(time.time())
-    return {
-        "id": chat_payload.get("id", f"resp_{uuid.uuid4().hex}"),
-        "object": "response",
-        "created_at": now,
-        "status": "completed",
-        "model": requested_model,
-        "output": [
-            {
-                "id": f"msg_{uuid.uuid4().hex}",
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": text,
-                        "annotations": [],
-                    }
-                ],
-            }
-        ],
-        "output_text": text,
-        "usage": chat_payload.get("usage"),
-    }
-
-
 def _dispatch_unified_chat_candidate(
     app,
     auth_service_cls,
@@ -441,7 +432,13 @@ def _dispatch_unified_chat_candidate(
             )
             request_kwargs = {
                 "method": "POST",
-                "url": adapter.chat_completions_url(),
+                "url": _provider_model_url(
+                    app,
+                    provider,
+                    provider_model,
+                    upstream_path,
+                    adapter.chat_completions_url(),
+                ),
                 "headers": headers,
                 "params": params,
                 "data": request_data,
@@ -678,29 +675,6 @@ def dispatch_unified_image_generation(
         raise
 
 
-def _responses_input_to_messages(payload: dict) -> list[dict]:
-    messages: list[dict] = []
-    instructions = payload.get("instructions")
-    if instructions:
-        messages.append({"role": "system", "content": instructions})
-
-    input_value = payload.get("input", "")
-    if isinstance(input_value, str):
-        messages.append({"role": "user", "content": input_value})
-    elif isinstance(input_value, list):
-        for item in input_value:
-            if isinstance(item, dict) and item.get("role") and item.get("content") is not None:
-                messages.append({"role": item["role"], "content": item["content"]})
-            elif isinstance(item, dict) and item.get("type") in {"message", "input_text"}:
-                messages.append({"role": item.get("role", "user"), "content": item.get("content") or item.get("text", "")})
-            else:
-                messages.append({"role": "user", "content": str(item)})
-    else:
-        messages.append({"role": "user", "content": str(input_value)})
-
-    return messages
-
-
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
     register_auto_route_admin_routes(
         app,
@@ -810,7 +784,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
             native_responses = provider in NATIVE_RESPONSES_PROVIDERS and (
                 provider != "opencode"
-                or opencode_go_model_endpoint(provider_model) == "v1/responses"
+                or opencode_model_endpoint(provider_model) == "v1/responses"
             )
             if native_responses and not subscription_only:
                 upstream_path = "v1/responses"
@@ -840,16 +814,16 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                         upstream_path=upstream_path,
                     )
                     _merge_request_headers(headers, cache_decision.request_headers)
-                    upstream_url = (
-                        build_opencode_go_url(
-                            app.config["API_BASE_URLS"][provider],
-                            upstream_path,
-                        )
-                        if provider == "opencode"
-                        else (
-                            f"{app.config['API_BASE_URLS'][provider].rstrip('/')}"
-                            f"/{upstream_path}"
-                        )
+                    default_url = (
+                        f"{app.config['API_BASE_URLS'][provider].rstrip('/')}"
+                        f"/{upstream_path}"
+                    )
+                    upstream_url = _provider_model_url(
+                        app,
+                        provider,
+                        provider_model,
+                        upstream_path,
+                        default_url,
                     )
                     return proxy_service_cls.make_request(
                         method="POST",
@@ -898,7 +872,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
 
             chat_payload = {
                 "model": provider_model,
-                "messages": _responses_input_to_messages(payload),
+                "messages": responses_input_to_messages(payload),
             }
             for source_key, target_key in {
                 "max_output_tokens": "max_tokens",
@@ -942,7 +916,13 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 _merge_request_headers(headers, cache_decision.request_headers)
                 request_kwargs = {
                     "method": "POST",
-                    "url": adapter.chat_completions_url(),
+                    "url": _provider_model_url(
+                        app,
+                        provider,
+                        provider_model,
+                        upstream_path,
+                        adapter.chat_completions_url(),
+                    ),
                     "headers": headers,
                     "params": request.args,
                     "data": proxy_service_cls.filter_request_data(provider, raw_body),
@@ -991,7 +971,10 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 )
 
             chat_response = _decode_upstream_json(response)
-            responses_payload = _chat_response_to_responses_payload(chat_response, requested_model)
+            responses_payload = chat_response_to_responses_payload(
+                chat_response,
+                requested_model,
+            )
             downstream_response = jsonify(responses_payload)
             downstream_response.status_code = response.status_code
             return _add_credential_attempt_headers(

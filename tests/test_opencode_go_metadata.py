@@ -7,6 +7,10 @@ from providers.opencode_go import (
     OPENCODE_GO_MODEL_ENDPOINTS,
     OPENCODE_GO_MODEL_IDS,
     OPENCODE_GO_RESPONSES_MODEL_IDS,
+    OPENCODE_ZEN_FREE_CHAT_MODEL_IDS,
+    OPENCODE_ZEN_FREE_MODEL_ENDPOINTS,
+    OPENCODE_ZEN_FREE_MODEL_IDS,
+    OPENCODE_ZEN_FREE_RESPONSES_MODEL_IDS,
 )
 from proxy import PROVIDER_DETAILS
 from services.model_registry import DEFAULT_MODEL_IDS
@@ -56,6 +60,24 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
         for model_id in OPENCODE_GO_MESSAGES_MODEL_IDS:
             self.assertEqual(OPENCODE_GO_MODEL_ENDPOINTS[model_id], "v1/messages")
 
+    def test_current_free_zen_models_are_available_with_explicit_protocols(self):
+        model_ids = set(DEFAULT_MODEL_IDS["opencode"])
+
+        self.assertEqual(len(OPENCODE_ZEN_FREE_MODEL_IDS), 9)
+        for model_id in OPENCODE_ZEN_FREE_MODEL_IDS:
+            with self.subTest(model_id=model_id):
+                self.assertIn(model_id, model_ids)
+        for model_id in OPENCODE_ZEN_FREE_CHAT_MODEL_IDS:
+            self.assertEqual(
+                OPENCODE_ZEN_FREE_MODEL_ENDPOINTS[model_id],
+                "v1/chat/completions",
+            )
+        for model_id in OPENCODE_ZEN_FREE_RESPONSES_MODEL_IDS:
+            self.assertEqual(
+                OPENCODE_ZEN_FREE_MODEL_ENDPOINTS[model_id],
+                "v1/responses",
+            )
+
     def test_docs_configuration_and_dashboard_cover_native_routes(self):
         docs = (self.repo_root / "docs/opencode-go.md").read_text(encoding="utf-8")
         env_example = (self.repo_root / ".env.example").read_text(encoding="utf-8")
@@ -74,6 +96,7 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
             "OPENCODE_GO_API_KEY",
             "OPENCODE_API_KEY",
             "OPENCODE_GO_BASE_URL",
+            "OPENCODE_ZEN_BASE_URL",
             "/opencode/v1/chat/completions",
             "/opencode/v1/messages",
             "/opencode/v1/responses",
@@ -82,6 +105,8 @@ class OpenCodeGoMetadataTest(unittest.TestCase):
             "opencode:kimi-k3",
             "glm-5.3-flash",
             "gpt-5.6-luna",
+            "opencode:big-pickle",
+            "opencode:muse-spark-1.2-contributor-free",
             "X-MultiLLM-Api-Key",
         ):
             with self.subTest(value=value):

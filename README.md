@@ -119,6 +119,8 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 # OpenCode Go
 OPENCODE_GO_API_KEY=your-opencode-go-key
 # Optional compatibility alias: OPENCODE_API_KEY=your-opencode-go-key
+# Optional free-model catalog/inference override:
+# OPENCODE_ZEN_BASE_URL=https://opencode.ai/zen/v1
 
 # Xiaomi MiMo Token Plan
 MIMO_API_KEY=your-mimo-token-plan-api-key

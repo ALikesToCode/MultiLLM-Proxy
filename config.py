@@ -131,8 +131,12 @@ class Config:
     
     # Construct the base URL
     SERVER_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
-    
-    
+
+    OPENCODE_ZEN_BASE_URL = os.environ.get(
+        'OPENCODE_ZEN_BASE_URL',
+        'https://opencode.ai/zen/v1',
+    )
+
     API_BASE_URLS = {
         'openai': 'https://api.openai.com',
         'cerebras': 'https://api.cerebras.ai',

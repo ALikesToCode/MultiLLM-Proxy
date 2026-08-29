@@ -1,8 +1,11 @@
-# OpenCode Go integration
+# OpenCode Go and free Zen integration
 
 MultiLLM Proxy exposes the OpenCode Go subscription API under `/opencode/*`.
 The integration follows the live
 [OpenCode Go documentation](https://opencode.ai/docs/go).
+The unified catalog also includes free models from the standard
+[OpenCode Zen catalog](https://opencode.ai/zen/v1/models) without advertising
+paid Zen-only models.
 
 The canonical `/opencode/v1/*` routes preserve OpenAI and Anthropic request
 bodies, status codes, repeated query parameters, and safe rate-limit/request
@@ -27,6 +30,7 @@ OPENCODE_GO_API_KEY=your-opencode-go-api-key
 
 # Optional upstream override
 # OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+# OPENCODE_ZEN_BASE_URL=https://opencode.ai/zen/v1
 ```
 
 `OPENCODE_GO_API_KEY` takes precedence when both key names are set.
@@ -38,6 +42,11 @@ OPENCODE_GO_API_KEY=your-opencode-go-api-key
 | OpenAI-compatible SDK (Chat or Responses) | `$PROXY_BASE_URL/opencode/v1` |
 | Anthropic SDK | `$PROXY_BASE_URL/opencode` |
 | Direct HTTP | `$PROXY_BASE_URL/opencode` plus `/v1/...` |
+
+The provider-native `/opencode/v1/models` endpoint intentionally mirrors the
+Go catalog only. Use `GET /v1/models` for MultiLLM's combined OpenCode Go plus
+free Zen catalog. Unified requests use `opencode:<model-id>` and automatically
+select `/zen/go/v1` for Go models or `/zen/v1` for free models.
 
 OpenAI-compatible example:
 
@@ -126,6 +135,37 @@ advertises those compatibility IDs with their established protocol. Query
 `/opencode/v1/models` before relying on one because the current OpenCode
 endpoint table no longer gives those IDs individual rows.
 
+### Free Zen models
+
+These free models are advertised alongside the Go catalog. The proxy filters
+the live standard Zen catalog to `big-pickle` and model IDs ending in `-free`,
+so paid Zen-only entries are not added to the dashboard.
+
+| Model ID | Unified model ID | Protocol |
+| --- | --- | --- |
+| `big-pickle` | `opencode:big-pickle` | OpenAI Chat Completions |
+| `deepseek-v4-flash-free` | `opencode:deepseek-v4-flash-free` | OpenAI Chat Completions |
+| `hy3-free` | `opencode:hy3-free` | OpenAI Chat Completions |
+| `laguna-s-2.1-free` | `opencode:laguna-s-2.1-free` | OpenAI Chat Completions |
+| `ling-3.0-flash-fin-free` | `opencode:ling-3.0-flash-fin-free` | OpenAI Chat Completions |
+| `mimo-v2.5-free` | `opencode:mimo-v2.5-free` | OpenAI Chat Completions |
+| `nemotron-3-ultra-free` | `opencode:nemotron-3-ultra-free` | OpenAI Chat Completions |
+| `nemotron-3.5-lightning-free` | `opencode:nemotron-3.5-lightning-free` | OpenAI Chat Completions |
+| `muse-spark-1.2-contributor-free` | `opencode:muse-spark-1.2-contributor-free` | OpenAI Responses |
+
+For example, call a free Chat model through the unified route:
+
+```json
+{
+  "model": "opencode:big-pickle",
+  "messages": [{"role": "user", "content": "Hello"}]
+}
+```
+
+The configured `OPENCODE_GO_API_KEY` is used for both origins. A successful
+catalog refresh merges newly published free IDs while retaining the built-in
+list for startup and upstream catalog outages.
+
 OpenCode configuration uses `opencode-go/<model-id>`, for example
 `opencode-go/kimi-k3`. That prefix belongs to OpenCode's own configuration.
 Direct API requests through this proxy send only `kimi-k3`. MultiLLM's unified
@@ -143,7 +183,7 @@ but it is not part of the current Go catalog. Prefer a current catalog ID for
 new clients.
 
 `GET /v1/models` includes `provider_metadata.api_endpoint` and
-`provider_metadata.api_protocol` for each current built-in OpenCode model. A
+`provider_metadata.api_protocol` for built-in and live OpenCode models. A
 model on `/v1/messages` must be called with the Anthropic Messages contract; a
 model on `/v1/responses` must be called with the OpenAI Responses contract.
 Listing a model in the unified catalog does not change its upstream protocol.
@@ -227,3 +267,8 @@ zero-retention agreement is time-bounded in OpenCode's current documentation.
 Check the live [OpenCode Go privacy table](https://opencode.ai/docs/go#privacy)
 before sending sensitive data; MultiLLM cannot strengthen an upstream model's
 retention policy.
+
+Free Zen models have separate data-use terms. OpenCode states that free model
+requests may be used to improve its services, and individual trial providers
+can have additional logging terms. Do not assume the Go privacy table applies
+to a model merely because the proxy lists it under the same `opencode:` prefix.

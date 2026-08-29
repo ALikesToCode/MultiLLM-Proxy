@@ -10,13 +10,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from providers.image_relays import image_relay_specs
-
-from services.sqlite_store import connect, storage_path
+from providers.opencode_go import is_opencode_zen_free_model
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
     encode_provider_metadata,
     sanitize_provider_metadata,
 )
+from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
 MAX_MODELS_PER_PROVIDER = 5000
@@ -451,11 +451,66 @@ class ProviderCatalogService:
         }
 
     @classmethod
+    def _fetch_configured_provider(
+        cls,
+        provider: str,
+        spec: ProviderCatalogSpec,
+        base_url: str,
+        credentials: tuple[str | None, ...],
+        proxy_service_cls,
+        supplemental_base_url: str | None,
+    ) -> dict[str, Any]:
+        primary = cls._fetch_provider(
+            provider,
+            spec,
+            base_url,
+            credentials,
+            proxy_service_cls,
+        )
+        if (
+            primary["status"] != "updated"
+            or provider != "opencode"
+            or not supplemental_base_url
+        ):
+            return primary
+
+        supplemental = cls._fetch_provider(
+            provider,
+            spec,
+            supplemental_base_url,
+            credentials,
+            proxy_service_cls,
+        )
+        if supplemental["status"] != "updated":
+            logger.warning("OpenCode free Zen catalog refresh failed")
+            return primary
+
+        free_models = (
+            model
+            for model in supplemental["models"]
+            if is_opencode_zen_free_model(model.model_id)
+        )
+        merged = {
+            model.model_id: model
+            for model in (*primary["models"], *free_models)
+        }
+        all_models = tuple(merged[model_id] for model_id in sorted(merged))
+        primary["models"] = all_models[:MAX_MODELS_PER_PROVIDER]
+        primary["truncated"] = bool(
+            primary.get("truncated")
+            or supplemental.get("truncated")
+            or len(all_models) > MAX_MODELS_PER_PROVIDER
+        )
+        return primary
+
+    @classmethod
     def refresh_configured(
         cls,
         base_urls: Mapping[str, str],
         auth_service_cls,
         proxy_service_cls,
+        *,
+        supplemental_base_urls: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         refresh_targets = []
         results: list[dict[str, Any]] = []
@@ -473,21 +528,41 @@ class ProviderCatalogService:
                     }
                 )
                 continue
-            refresh_targets.append((provider, spec, str(base_url), credentials))
+            supplemental_base_url = (
+                supplemental_base_urls.get(provider)
+                if supplemental_base_urls
+                else None
+            )
+            refresh_targets.append(
+                (
+                    provider,
+                    spec,
+                    str(base_url),
+                    credentials,
+                    str(supplemental_base_url) if supplemental_base_url else None,
+                )
+            )
 
         if refresh_targets:
             max_workers = min(4, len(refresh_targets))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
                     executor.submit(
-                        cls._fetch_provider,
+                        cls._fetch_configured_provider,
                         provider,
                         spec,
                         base_url,
                         credentials,
                         proxy_service_cls,
+                        supplemental_base_url,
                     ): provider
-                    for provider, spec, base_url, credentials in refresh_targets
+                    for (
+                        provider,
+                        spec,
+                        base_url,
+                        credentials,
+                        supplemental_base_url,
+                    ) in refresh_targets
                 }
                 for future in as_completed(futures):
                     provider = futures[future]

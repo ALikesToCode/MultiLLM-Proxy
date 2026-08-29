@@ -31,6 +31,8 @@ class _FakeProxyService:
     status_code = 200
     status_codes: ClassVar[list[int]] = []
     authorizations: ClassVar[list[str | None]] = []
+    requested_urls: ClassVar[list[str]] = []
+    payloads_by_url: ClassVar[dict[str, dict]] = {}
 
     @classmethod
     def prepare_headers(cls, request_headers, provider, token, upstream_path=""):
@@ -46,7 +48,9 @@ class _FakeProxyService:
             cls.status_codes.pop(0) if cls.status_codes else cls.status_code
         )
         cls.authorizations.append(kwargs["headers"].get("Authorization"))
-        response._content = json.dumps(
+        cls.requested_urls.append(kwargs["url"])
+        payload = cls.payloads_by_url.get(
+            kwargs["url"],
             {
                 "object": "list",
                 "data": [
@@ -58,8 +62,9 @@ class _FakeProxyService:
                     {"id": "kimi-k3"},
                     {"id": "invalid model with spaces"},
                 ],
-            }
-        ).encode("utf-8")
+            },
+        )
+        response._content = json.dumps(payload).encode("utf-8")
         response._content_consumed = True
         response.headers["Content-Type"] = "application/json"
         return response
@@ -76,6 +81,8 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         _FakeProxyService.status_code = 200
         _FakeProxyService.status_codes = []
         _FakeProxyService.authorizations = []
+        _FakeProxyService.requested_urls = []
+        _FakeProxyService.payloads_by_url = {}
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -125,6 +132,63 @@ class ProviderCatalogServiceTest(unittest.TestCase):
         self.assertEqual(
             [model.model_id for model in ProviderCatalogService.list_models()],
             ["last-good-model"],
+        )
+
+    def test_opencode_refresh_merges_go_and_free_zen_models_only(self):
+        go_url = "https://opencode.example/zen/go/v1/models"
+        zen_url = "https://opencode.example/zen/v1/models"
+        _FakeProxyService.payloads_by_url = {
+            go_url: {
+                "object": "list",
+                "data": [{"id": "glm-5.3"}, {"id": "kimi-k3"}],
+            },
+            zen_url: {
+                "object": "list",
+                "data": [
+                    {"id": "big-pickle"},
+                    {"id": "future-trial-free"},
+                    {"id": "paid-zen-model"},
+                ],
+            },
+        }
+
+        results = ProviderCatalogService.refresh_configured(
+            {"opencode": "https://opencode.example/zen/go/v1"},
+            _FakeAuthService,
+            _FakeProxyService,
+            supplemental_base_urls={
+                "opencode": "https://opencode.example/zen/v1",
+            },
+        )
+
+        self.assertEqual(results[0]["status"], "updated")
+        self.assertEqual(results[0]["model_count"], 4)
+        self.assertEqual(
+            [model.model_id for model in ProviderCatalogService.list_models()],
+            ["big-pickle", "future-trial-free", "glm-5.3", "kimi-k3"],
+        )
+        self.assertEqual(
+            _FakeProxyService.requested_urls,
+            [go_url, zen_url],
+        )
+
+    def test_opencode_refresh_keeps_go_catalog_when_free_catalog_fails(self):
+        _FakeProxyService.status_codes = [200, 503]
+
+        results = ProviderCatalogService.refresh_configured(
+            {"opencode": "https://opencode.example/zen/go/v1"},
+            _FakeAuthService,
+            _FakeProxyService,
+            supplemental_base_urls={
+                "opencode": "https://opencode.example/zen/v1",
+            },
+        )
+
+        self.assertEqual(results[0]["status"], "updated")
+        self.assertEqual(results[0]["model_count"], 2)
+        self.assertEqual(
+            [model.model_id for model in ProviderCatalogService.list_models()],
+            ["glm-5.2", "kimi-k3"],
         )
 
     def test_nanogpt_catalog_tries_each_key_without_returning_credentials(self):

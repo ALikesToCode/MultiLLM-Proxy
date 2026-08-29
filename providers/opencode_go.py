@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Optional
 
-
 # OpenCode Go intentionally serves different models through different wire
 # protocols. Keep this mapping close to the native route allowlist so model
 # discovery and request routing cannot drift independently.
@@ -54,6 +53,24 @@ OPENCODE_GO_CATALOG_COMPATIBILITY_MODELS = {
 }
 OPENCODE_GO_LEGACY_MODEL_IDS = ("ox-alpha-free",)
 
+# OpenCode publishes free Zen models through the standard /zen/v1 origin,
+# separately from the Go subscription catalog. Keep the known IDs built in so
+# clients have a useful catalog before the first live refresh. Runtime catalog
+# discovery also accepts future "-free" IDs without exposing paid Zen models.
+OPENCODE_ZEN_FREE_RESPONSES_MODEL_IDS = (
+    "muse-spark-1.2-contributor-free",
+)
+OPENCODE_ZEN_FREE_CHAT_MODEL_IDS = (
+    "big-pickle",
+    "deepseek-v4-flash-free",
+    "hy3-free",
+    "laguna-s-2.1-free",
+    "ling-3.0-flash-fin-free",
+    "mimo-v2.5-free",
+    "nemotron-3-ultra-free",
+    "nemotron-3.5-lightning-free",
+)
+
 OPENCODE_GO_MODEL_ENDPOINTS = {
     **{model: "v1/responses" for model in OPENCODE_GO_RESPONSES_MODEL_IDS},
     **{model: "v1/chat/completions" for model in OPENCODE_GO_CHAT_MODEL_IDS},
@@ -61,6 +78,25 @@ OPENCODE_GO_MODEL_ENDPOINTS = {
     **OPENCODE_GO_CATALOG_COMPATIBILITY_MODELS,
 }
 OPENCODE_GO_MODEL_IDS = tuple(OPENCODE_GO_MODEL_ENDPOINTS)
+OPENCODE_ZEN_FREE_MODEL_ENDPOINTS = {
+    **{
+        model: "v1/responses"
+        for model in OPENCODE_ZEN_FREE_RESPONSES_MODEL_IDS
+    },
+    **{
+        model: "v1/chat/completions"
+        for model in OPENCODE_ZEN_FREE_CHAT_MODEL_IDS
+    },
+}
+OPENCODE_ZEN_FREE_MODEL_IDS = tuple(OPENCODE_ZEN_FREE_MODEL_ENDPOINTS)
+OPENCODE_MODEL_ENDPOINTS = {
+    **OPENCODE_GO_MODEL_ENDPOINTS,
+    **OPENCODE_ZEN_FREE_MODEL_ENDPOINTS,
+    **{
+        model: "v1/chat/completions"
+        for model in OPENCODE_GO_LEGACY_MODEL_IDS
+    },
+}
 
 
 OPENCODE_GO_REQUEST_HEADER_WHITELIST = {
@@ -140,6 +176,35 @@ def is_opencode_go_anthropic_request(path: str) -> bool:
 
 def opencode_go_model_endpoint(model_id: str) -> Optional[str]:
     return OPENCODE_GO_MODEL_ENDPOINTS.get(model_id.strip().lower())
+
+
+def is_opencode_zen_free_model(model_id: str) -> bool:
+    normalized_model = model_id.strip().lower()
+    return normalized_model == "big-pickle" or normalized_model.endswith("-free")
+
+
+def opencode_model_endpoint(model_id: str) -> Optional[str]:
+    normalized_model = model_id.strip().lower()
+    endpoint = OPENCODE_MODEL_ENDPOINTS.get(normalized_model)
+    if endpoint:
+        return endpoint
+    if is_opencode_zen_free_model(normalized_model):
+        return "v1/chat/completions"
+    return None
+
+
+def build_opencode_model_url(
+    go_base_url: str,
+    zen_base_url: str,
+    model_id: str,
+    path: str,
+) -> str:
+    base_url = (
+        zen_base_url
+        if is_opencode_zen_free_model(model_id)
+        else go_base_url
+    )
+    return build_opencode_go_url(base_url, path)
 
 
 def is_opencode_go_native_path(path: str) -> bool:

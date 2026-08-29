@@ -6,17 +6,38 @@ from typing import Any
 
 from providers.aihubmix import is_aihubmix_image_model
 from providers.image_relays import is_image_relay_model
-from providers.opencode_go import opencode_go_model_endpoint
+from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import ProviderCatalogService
 
-
 KNOWN_IMAGE_MODEL_IDS = {
     "linkapi": frozenset({"gpt-image-2-c"}),
     "together": frozenset({"openai/gpt-image-2"}),
 }
+OPENCODE_API_PROTOCOLS = {
+    "v1/chat/completions": "openai_chat_completions",
+    "v1/messages": "anthropic_messages",
+    "v1/responses": "openai_responses",
+}
+
+
+def _model_provider_metadata(
+    provider: str,
+    model_id: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    normalized = dict(metadata or {})
+    endpoint = opencode_model_endpoint(model_id) if provider == "opencode" else None
+    if endpoint:
+        normalized.update(
+            {
+                "api_endpoint": f"/{endpoint}",
+                "api_protocol": OPENCODE_API_PROTOCOLS[endpoint],
+            }
+        )
+    return normalized or None
 
 
 def _model_supports_image_output(
@@ -90,27 +111,14 @@ def build_model_catalog(
     """Combine built-in, discovered, and route-referenced model IDs."""
     entries: dict[str, dict[str, Any]] = {}
     for model in ModelRegistry.list_models(dict(base_urls)):
-        endpoint = (
-            opencode_go_model_endpoint(model.display_name)
-            if model.provider == "opencode"
-            else None
-        )
         _add_source(
             entries,
             model.provider,
             model.display_name,
             "built-in",
-            provider_metadata=(
-                {
-                    "api_endpoint": f"/{endpoint}",
-                    "api_protocol": {
-                        "v1/chat/completions": "openai_chat_completions",
-                        "v1/messages": "anthropic_messages",
-                        "v1/responses": "openai_responses",
-                    }[endpoint],
-                }
-                if endpoint
-                else None
+            provider_metadata=_model_provider_metadata(
+                model.provider,
+                model.display_name,
             ),
         )
 
@@ -122,7 +130,11 @@ def build_model_catalog(
             "live",
             context_window=model.context_window,
             max_output_tokens=model.max_output_tokens,
-            provider_metadata=model.metadata,
+            provider_metadata=_model_provider_metadata(
+                model.provider,
+                model.model_id,
+                model.metadata,
+            ),
         )
 
     for route in routes:

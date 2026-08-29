@@ -504,6 +504,7 @@ test("container envVars are derived from the live Durable Object env", () => {
       OPENCODE_GO_API_KEY: "opencode-go-live-key",
       OPENCODE_API_KEY: "opencode-live-key",
       OPENCODE_GO_BASE_URL: "https://opencode.ai/zen/go/v1",
+      OPENCODE_ZEN_BASE_URL: "https://opencode.ai/zen/v1",
       MIMO_API_KEY: "mimo-live-key",
       NANOGPT_API_KEY: "nanogpt-live-key",
       NANOGPT_API_KEY_1: "nanogpt-numbered-live-key",
@@ -574,6 +575,10 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(
     container.envVars.OPENCODE_GO_BASE_URL,
     "https://opencode.ai/zen/go/v1",
+  );
+  assert.equal(
+    container.envVars.OPENCODE_ZEN_BASE_URL,
+    "https://opencode.ai/zen/v1",
   );
   assert.equal(container.envVars.MIMO_API_KEY, "mimo-live-key");
   assert.equal(container.envVars.NANOGPT_API_KEY, "nanogpt-live-key");
