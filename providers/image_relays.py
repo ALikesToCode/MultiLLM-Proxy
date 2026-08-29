@@ -55,6 +55,7 @@ class ImageRelaySpec:
     base_url: str
     credential_env: str
     models: tuple[str, ...]
+    credential_env_aliases: tuple[str, ...] = ()
     backup_base_url: str | None = None
     supports_chat: bool = True
     supports_edits: bool = True
@@ -98,6 +99,7 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         base_url="https://gguuai.com",
         backup_base_url="https://api.aiaimax.com",
         credential_env="GGUU_API_KEY",
+        credential_env_aliases=("GGUUAI_API_KEY",),
         models=("gpt-image-2",),
         supports_chat=False,
     ),
@@ -289,7 +291,7 @@ def is_image_relay_model(provider: str, model_id: str) -> bool:
 
 def image_relay_credential_env_names(provider: str) -> tuple[str, ...]:
     spec = image_relay_spec(provider)
-    return (spec.credential_env,) if spec else ()
+    return (spec.credential_env, *spec.credential_env_aliases) if spec else ()
 
 
 @lru_cache(maxsize=8)

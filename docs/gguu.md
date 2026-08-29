@@ -11,7 +11,11 @@ Set the provider credential without committing it:
 
 ```dotenv
 GGUU_API_KEY=your-gguu-api-key
+# Optional compatibility alias: GGUUAI_API_KEY=your-gguu-api-key
 ```
+
+`GGUU_API_KEY` is preferred. Existing installations that use
+`GGUUAI_API_KEY` remain supported.
 
 The built-in primary origin is `https://gguuai.com`. The bounded backup origin
 is `https://api.aiaimax.com`. A safe `GET /v1/models` transport failure can use

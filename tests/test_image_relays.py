@@ -10,6 +10,7 @@ from providers.image_relays import (
     BUILTIN_IMAGE_RELAY_SPECS,
     clear_image_relay_caches,
     image_relay_api_key,
+    image_relay_credential_env_names,
     image_relay_spec,
     image_relay_specs,
     is_valid_image_relay_request,
@@ -190,6 +191,27 @@ class ImageRelayConfigurationTest(unittest.TestCase):
             clear_image_relay_caches()
             with self.assertRaisesRegex(ValueError, "cannot be overridden"):
                 image_relay_specs()
+
+    def test_gguu_legacy_key_name_is_loaded_when_primary_name_is_absent(self):
+        self.assertEqual(
+            image_relay_credential_env_names("gguu"),
+            ("GGUU_API_KEY", "GGUUAI_API_KEY"),
+        )
+
+        with patch.object(AuthService, "_api_keys", {}), patch.dict(
+            os.environ,
+            {
+                "GGUU_API_KEY": "",
+                "GGUUAI_API_KEY": "gguu-legacy-key",
+            },
+            clear=False,
+        ):
+            AuthService._load_provider_api_keys()
+
+            self.assertEqual(
+                AuthService.get_api_key("gguu"),
+                "gguu-legacy-key",
+            )
 
     def test_secret_map_accepts_known_relays_only(self):
         with patch.dict(
