@@ -191,6 +191,12 @@ caller's requested output limit; they are operational planning signals, not
 provider invoices. If no output limit is supplied, MultiLLM does not invent one.
 When no matching price is configured, the request remains visibly unpriced.
 
+Administrators can query `GET /admin/providers/usage` from an authenticated
+dashboard session to combine provider-account allowances with local request,
+latency, failure, and configured-cost telemetry. See
+[provider usage aggregation](docs/provider-usage.md) for the response contract,
+supported authoritative sources, caching, and privacy boundaries.
+
 5. Run the server:
 ```bash
 python app.py

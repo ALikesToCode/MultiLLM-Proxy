@@ -108,6 +108,12 @@ class Config:
     PROMPT_CACHE_MIN_TOKENS = load_bounded_env_integer(
         'PROMPT_CACHE_MIN_TOKENS', 1024, 1, 1000000
     )
+    PROVIDER_USAGE_CACHE_TTL_SECONDS = load_bounded_env_integer(
+        'PROVIDER_USAGE_CACHE_TTL_SECONDS', 60, 5, 3600
+    )
+    PROVIDER_USAGE_TIMEOUT_SECONDS = load_bounded_env_integer(
+        'PROVIDER_USAGE_TIMEOUT_SECONDS', 8, 1, 30
+    )
     AIHUBMIX_BASE_URL = trusted_aihubmix_origin(
         os.environ.get('AIHUBMIX_BASE_URL'),
         AIHUBMIX_PRIMARY_BASE_URL,

@@ -26,6 +26,7 @@ from route_helpers import (
 from services.auth_service import AuthService
 from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
+from services.provider_usage_service import ProviderUsageService
 from services.proxy_service import ProxyService
 from services.resilience_service import ResilienceService
 from services.transport_policy import provider_circuit_mode
@@ -43,6 +44,7 @@ PRIVATE_CACHE_ENDPOINTS = {
     "status_page",
     "openrouter_dashboard",
     "admin_request_metrics",
+    "admin_provider_usage",
     "dashboard_openrouter_chat_completions",
     "dashboard_openrouter_credits",
     "list_admin_models",
@@ -185,6 +187,13 @@ def apply_private_cache_headers(response: Response) -> Response:
 
 
 def register_core_routes(app) -> None:
+    provider_usage_service = ProviderUsageService(
+        config=app.config,
+        auth_service=AuthService,
+        metrics_service=MetricsService.get_instance(),
+        proxy_service=ProxyService,
+    )
+
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error: CSRFError):
         """
@@ -617,6 +626,13 @@ def register_core_routes(app) -> None:
                 "requests": MetricsService.get_instance().get_request_records(limit=limit),
             }
         )
+
+    @app.route("/admin/providers/usage")
+    @login_required
+    def admin_provider_usage():
+        """Return sanitized provider-account usage with local proxy telemetry."""
+        require_admin_dashboard_user()
+        return jsonify(provider_usage_service.snapshot(PROVIDER_DETAILS))
 
     @app.route("/dashboard/openrouter/chat-completions", methods=["POST"])
     @login_required
