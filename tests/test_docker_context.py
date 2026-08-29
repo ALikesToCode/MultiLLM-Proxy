@@ -25,3 +25,13 @@ def test_docker_context_excludes_runtime_state_and_local_tool_artifacts():
     }
 
     assert required_patterns <= dockerignore_lines
+
+
+def test_container_image_has_a_bounded_application_healthcheck():
+    repo_root = Path(__file__).resolve().parents[1]
+    dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "HEALTHCHECK --interval=30s --timeout=5s" in dockerfile
+    assert "--start-period=15s --retries=3" in dockerfile
+    assert "os.getenv('PORT') or os.getenv('SERVER_PORT') or '8080'" in dockerfile
+    assert "http://127.0.0.1:{port}/healthz" in dockerfile

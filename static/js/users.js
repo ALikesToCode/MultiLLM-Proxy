@@ -20,6 +20,12 @@
         }
     }
 
+    function clearSecret() {
+        if (secretValue) {
+            secretValue.textContent = '';
+        }
+    }
+
     function closeSecret() {
         if (!secretDialog) {
             return;
@@ -29,7 +35,10 @@
         } else {
             secretDialog.removeAttribute('open');
         }
+        clearSecret();
     }
+
+    secretDialog?.addEventListener('close', clearSecret);
 
     async function fetchJson(url, options) {
         const headers = new Headers(options.headers || {});

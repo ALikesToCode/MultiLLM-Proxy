@@ -12,11 +12,13 @@ from flask_wtf.csrf import CSRFError
 from config import Config
 from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
+from request_validation import json_object_body
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
     check_provider,
     copy_upstream_response_headers,
+    is_api_request_path,
     login_required,
     request_api_key,
     stream_upstream_response,
@@ -25,7 +27,6 @@ from services.auth_service import AuthService
 from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
-from services.redaction import redact_text
 from services.resilience_service import ResilienceService
 from services.transport_policy import provider_circuit_mode
 
@@ -223,7 +224,9 @@ def register_core_routes(app) -> None:
 
             if username and api_key and AuthService.authenticate_user(username, api_key):
                 LoginAttemptService.record_success(request.remote_addr, username)
-                next_page = request.args.get("next")
+                # The validator rejects schemes, hosts, protocol-relative paths,
+                # and backslashes before the value reaches redirect().
+                next_page = request.args.get("next")  # nosemgrep
                 if is_safe_redirect_target(next_page):
                     return redirect(next_page)
                 return redirect(url_for("status_page"))
@@ -276,7 +279,7 @@ def register_core_routes(app) -> None:
                 if not current_user or not current_user.get("is_admin", False):
                     raise APIError("Only admin users can create new users", status_code=403)
 
-                payload = request.get_json(silent=True) or {}
+                payload = json_object_body() if request.is_json else {}
                 username = payload.get("username") or request.form.get("username")
                 is_admin = (
                     parse_json_bool(payload.get("is_admin"), "is_admin")
@@ -312,7 +315,7 @@ def register_core_routes(app) -> None:
             return render_template("error.html", error=error.client_message), status_code
 
         except Exception as error:
-            logger.error("Error in user management: %s", redact_text(error))
+            logger.error("User management failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -423,7 +426,11 @@ def register_core_routes(app) -> None:
         if not AuthService.is_authenticated():
             if request.path == "/":
                 return redirect(url_for("login"))
-            if request.is_json:
+            if (
+                is_api_request_path(request.path)
+                or request.is_json
+                or "application/json" in request.headers.get("Accept", "")
+            ):
                 raise APIError("Authentication required", status_code=401)
             return redirect(url_for("login", next=request.url))
 
@@ -478,7 +485,7 @@ def register_core_routes(app) -> None:
             response.headers["Cache-Control"] = "no-store"
             return response, 200
         except Exception as error:
-            logger.error("Health check failed: %s", redact_text(error))
+            logger.error("Health check failed type=%s", type(error).__name__)
             return jsonify(internal_error_payload()), 500
 
     @app.route("/")
@@ -515,7 +522,11 @@ def register_core_routes(app) -> None:
                         provider_stats=provider_stats.get(provider, {}),
                     )
                 except Exception as error:
-                    logger.error("Failed to check %s: %s", provider, redact_text(error))
+                    logger.error(
+                        "Provider check failed provider=%s type=%s",
+                        provider,
+                        type(error).__name__,
+                    )
                     errors.append(f"Failed to check {provider}")
                     providers[provider] = {
                         "name": provider.upper(),
@@ -566,7 +577,7 @@ def register_core_routes(app) -> None:
                 user=AuthService.get_current_user(),
             )
         except Exception as error:
-            logger.error("Status page error: %s", redact_text(error))
+            logger.error("Status page failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -584,7 +595,7 @@ def register_core_routes(app) -> None:
         try:
             return render_template("openrouter.html", user=AuthService.get_current_user())
         except Exception as error:
-            logger.error("OpenRouter dashboard error: %s", redact_text(error))
+            logger.error("OpenRouter dashboard failed type=%s", type(error).__name__)
             if "application/json" in request.headers.get("Accept", ""):
                 return jsonify(internal_error_payload()), 500
             return render_template(
@@ -615,7 +626,7 @@ def register_core_routes(app) -> None:
         Browser clients authenticate with the Flask session and never receive provider keys.
         """
         require_admin_dashboard_user()
-        payload = request.get_json(silent=True) or {}
+        payload = json_object_body()
         if not payload.get("model"):
             raise APIError("Model is required", status_code=400)
         if not isinstance(payload.get("messages"), list) or not payload["messages"]:
@@ -708,6 +719,17 @@ def register_core_routes(app) -> None:
         """
         if request.path == "/favicon.ico":
             return send_from_directory("static", "favicon.ico")
+        if (
+            is_api_request_path(request.path)
+            or request.is_json
+            or "application/json" in request.headers.get("Accept", "")
+        ):
+            return jsonify(
+                {
+                    "error": "Not found",
+                    "request_id": get_request_id(),
+                }
+            ), 404
         return render_template("404.html", request_id=get_request_id()), 404
 
     @app.errorhandler(500)
@@ -717,10 +739,9 @@ def register_core_routes(app) -> None:
         """
         request_id = get_request_id()
         logger.error(
-            "Internal server error request_id=%s type=%s message=%s",
+            "Internal server error request_id=%s type=%s",
             request_id,
             type(error).__name__,
-            redact_text(error),
         )
         if request.is_json or "application/json" in request.headers.get("Accept", ""):
             return jsonify(internal_error_payload()), 500
@@ -773,9 +794,9 @@ def register_core_routes(app) -> None:
                                 )
                             except Exception as error:
                                 logger.error(
-                                    "Error checking provider %s: %s",
+                                    "Provider update failed provider=%s type=%s",
                                     provider,
-                                    redact_text(error),
+                                    type(error).__name__,
                                 )
                                 providers_info[provider] = {
                                     "active": False,
@@ -804,7 +825,10 @@ def register_core_routes(app) -> None:
                 except GeneratorExit:
                     break
                 except Exception as error:
-                    logger.error("Error generating status updates: %s", redact_text(error))
+                    logger.error(
+                        "Status update generation failed type=%s",
+                        type(error).__name__,
+                    )
                     yield (
                         "event: error\ndata: "
                         f"{json.dumps({'error': INTERNAL_ERROR_MESSAGE})}\n\n"

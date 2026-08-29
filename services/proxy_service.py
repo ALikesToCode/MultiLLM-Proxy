@@ -5,13 +5,20 @@ from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
 from error_handlers import APIError
 from config import Config
+from request_validation import decode_json_object_bytes, validated_gemini_model_id
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.resilience_service import ResilienceService
-from services.redaction import redact_headers, redact_payload, redact_query_params, redact_text
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.image_relays import image_relay_spec
+from services.upstream_errors import (
+    STREAM_FAILURE_MESSAGE,
+    UPSTREAM_FAILURE_MESSAGE,
+    authentication_error_response,
+    stream_error_event,
+)
+from services.upstream_transport import close_retry_response, iter_stream_lines
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -32,7 +39,6 @@ from providers.opencode_go import (
     opencode_go_caller_authorization,
 )
 from streaming.openai import sanitize_openai_stream_payload
-from streaming.sse import iter_sse_data
 import time
 import uuid
 import flask
@@ -46,8 +52,6 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-UPSTREAM_FAILURE_MESSAGE = "Upstream request could not be completed."
-STREAM_FAILURE_MESSAGE = "Upstream stream terminated unexpectedly."
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -259,36 +263,47 @@ class ProxyService:
                         pass
                 
                 if not credentials_path:
-                    error_msg = "GOOGLE_APPLICATION_CREDENTIALS not configured in environment or app config"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                    logger.error("Google Cloud credentials are not configured")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 if not os.path.exists(credentials_path):
-                    error_msg = f"Google credentials file not found at {credentials_path}"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                    logger.error("Google Cloud credentials file was not found")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
-                if not shutil.which('gcloud'):
-                    error_msg = "gcloud CLI not found. Please install Google Cloud SDK"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=500)
+                gcloud_path = shutil.which('gcloud')
+                if not gcloud_path:
+                    logger.error("gcloud CLI is not available")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
-                # Set credentials file for gcloud
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+                gcloud_env = os.environ.copy()
+                gcloud_env['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
 
                 # Add --quiet flag to avoid interactive prompts
                 result = subprocess.run(
-                    ['gcloud', 'auth', 'print-access-token', '--quiet'],
+                    [gcloud_path, 'auth', 'print-access-token', '--quiet'],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    timeout=30,
+                    env=gcloud_env,
                 )
 
                 token = result.stdout.strip()
                 if not token:
-                    error_msg = "Empty token received from gcloud command. Please run 'gcloud auth login' first"
-                    logger.error(error_msg)
-                    raise APIError(error_msg, status_code=401)
+                    logger.error("gcloud CLI returned an empty access token")
+                    raise APIError(
+                        "Google Cloud authentication unavailable",
+                        status_code=500,
+                    )
 
                 logger.info("Successfully retrieved new Google Cloud access token")
                 cls._google_token = token
@@ -323,9 +338,11 @@ class ProxyService:
                 # Clear token cache on error
                 cls._google_token = None
                 cls._google_token_expiry = None
-                error_msg = "gcloud command not found. Please install Google Cloud SDK"
-                logger.error(error_msg)
-                raise APIError(error_msg, status_code=500)
+                logger.error("gcloud CLI disappeared before execution")
+                raise APIError(
+                    "Google Cloud authentication unavailable",
+                    status_code=500,
+                )
 
             except Exception as e:
                 # Clear token cache on error
@@ -588,8 +605,11 @@ class ProxyService:
 
         try:
             data = json.loads(request_data) if isinstance(request_data, bytes) else request_data
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.error(f"Failed to parse request data as JSON: {str(e)}")
+        except (json.JSONDecodeError, TypeError) as error:
+            logger.error(
+                "Failed to parse request data as JSON type=%s",
+                type(error).__name__,
+            )
             return request_data
 
         unsupported_params = Config.UNSUPPORTED_PARAMS.get(api_provider, [])
@@ -608,12 +628,15 @@ class ProxyService:
                     "topK": data.get('top_k', 40)
                 }
                 data = formatted_data
-                logger.info("Formatted Google AI request data: %s", redact_payload(data))
+                logger.info("Formatted Google AI request data")
 
         try:
             return json.dumps(data).encode('utf-8')
-        except (TypeError, ValueError) as e:
-            logger.error(f"Failed to re-encode request data as JSON: {str(e)}")
+        except (TypeError, ValueError) as error:
+            logger.error(
+                "Failed to re-encode request data as JSON type=%s",
+                type(error).__name__,
+            )
             return request_data
 
     @classmethod
@@ -1162,22 +1185,18 @@ class ProxyService:
                 params=params,
                 data=data,
                 timeout=timeout,
-                allow_redirects=True,
+                allow_redirects=False,
                 verify=True,
                 stream=is_streaming
             )
 
             if not is_streaming:
                 _ = response.content
-                try:
-                    logger.info("Response status: %s", response.status_code)
-                    logger.info("Response headers: %s", redact_headers(response.headers))
-                    if response.headers.get('content-type', '').startswith('application/json'):
-                        logger.info("Response content: %s", redact_payload(response.json()))
-                    else:
-                        logger.info("Response content length: %s", len(response.content))
-                except Exception as e:
-                    logger.error(f"Error logging response: {str(e)}")
+                logger.info(
+                    "Upstream response status=%s content_length=%s",
+                    response.status_code,
+                    len(response.content),
+                )
 
             return response
 
@@ -1234,7 +1253,7 @@ class ProxyService:
                 data=data,
                 stream=True,  # always enable streaming
                 timeout=timeout,
-                allow_redirects=not raw_passthrough,
+                allow_redirects=False,
             )
 
             # Native/raw providers expose protocol-specific streams and binary
@@ -1266,6 +1285,7 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
+                close_retry_response(response)
                 time.sleep(RETRY_DELAY * (retry_count + 1))
                 return cls._make_base_request(
                     method=method,
@@ -1276,6 +1296,8 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     retry_count=retry_count + 1,
+                    timeout_override=timeout_override,
+                    force_raw_passthrough=force_raw_passthrough,
                     is_streaming=is_streaming,
                 )
 
@@ -1322,6 +1344,7 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
+                        close_retry_response(response)
                         time.sleep(RETRY_DELAY * (retry_count + 1))
                         return cls._make_base_request(
                             method=method,
@@ -1332,14 +1355,20 @@ class ProxyService:
                             api_provider=api_provider,
                             use_cache=use_cache,
                             retry_count=retry_count + 1,
+                            timeout_override=timeout_override,
+                            force_raw_passthrough=force_raw_passthrough,
                             is_streaming=is_streaming,
                         )
 
                     response._content = json.dumps(normalized_payload).encode('utf-8')
                     response.headers['Content-Type'] = 'application/json'
 
-                except Exception as e:
-                    logger.error(f"Error processing response: {str(e)}")
+                except Exception as error:
+                    logger.error(
+                        "Response normalization failed provider=%s type=%s",
+                        api_provider,
+                        type(error).__name__,
+                    )
                     cls._record_circuit_result(api_provider, response.status_code)
                     return response
 
@@ -1397,6 +1426,8 @@ class ProxyService:
                     api_provider=api_provider,
                     use_cache=use_cache,
                     retry_count=retry_count + 1,
+                    timeout_override=timeout_override,
+                    force_raw_passthrough=force_raw_passthrough,
                     is_streaming=is_streaming,
                 )
             if not raw_passthrough:
@@ -1438,14 +1469,10 @@ class ProxyService:
 
             is_streaming = request_data.get('stream', False)
             logger.info(
-                "Together AI request provider=%s url=%s model=%s stream=%s headers=%s params=%s payload=%s",
+                "Together AI request provider=%s model=%s stream=%s",
                 "together",
-                url,
                 request_data.get("model"),
                 is_streaming,
-                redact_headers(headers),
-                redact_query_params(params),
-                redact_payload(request_data),
             )
 
             response = cls._make_base_request(
@@ -1460,10 +1487,9 @@ class ProxyService:
             )
 
             logger.info(
-                "Together AI response provider=%s status_code=%s headers=%s",
+                "Together AI response provider=%s status_code=%s",
                 "together",
                 response.status_code,
-                redact_headers(response.headers),
             )
 
             if response.status_code == 200:
@@ -1473,8 +1499,6 @@ class ProxyService:
                     else:
                         if response.content:
                             response_data = response.json()
-                            logger.info("Together AI parsed response: %s", redact_payload(response_data))
-
                             # If listing /models, do not attempt to parse choices
                             if url.endswith('/models'):
                                 return response
@@ -1507,30 +1531,41 @@ class ProxyService:
                             logger.error("Empty response content from Together AI")
                             raise APIError("Empty response from Together AI", status_code=500)
                         return response
-                except json.JSONDecodeError as e:
-                    logger.error(f"JSON decode error: {str(e)}")
+                except json.JSONDecodeError as error:
+                    logger.error(
+                        "Together AI JSON decode failed line=%s column=%s",
+                        error.lineno,
+                        error.colno,
+                    )
                     logger.error("Together AI raw content length: %s", len(response.content))
                     raise APIError("Invalid JSON response from Together AI", status_code=500)
-                except Exception as e:
-                    logger.error(f"Error processing Together AI response: {str(e)}")
-                    raise APIError(f"Error processing Together AI response: {str(e)}", status_code=500)
+                except Exception as error:
+                    logger.error(
+                        "Together AI response processing failed type=%s",
+                        type(error).__name__,
+                    )
+                    raise APIError(
+                        "Together AI response processing failed",
+                        status_code=500,
+                    ) from error
             else:
-                # Log error response
-                try:
-                    error_content = response.content.decode('utf-8')
-                    logger.error("Together AI error response: %s", redact_text(error_content))
-                except Exception as e:
-                    logger.error(f"Error decoding error response: {str(e)}")
+                logger.error(
+                    "Together AI upstream error status=%s content_length=%s",
+                    response.status_code,
+                    len(response.content),
+                )
                 raise APIError(
                     f"Together AI request failed with status {response.status_code}",
                     status_code=response.status_code
                 )
-        except Exception as e:
-            error_msg = f"Error handling Together request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            logger.error(
+                "Together AI request handling failed type=%s",
+                type(error).__name__,
+            )
+            raise APIError("Together AI request handling failed", status_code=500) from error
 
     @classmethod
     def _handle_groq_request(
@@ -1600,9 +1635,14 @@ class ProxyService:
                 else:
                     raise
 
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            raise APIError(f"Unexpected error occurred: {str(e)}", status_code=500)
+        except APIError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Groq request handling failed type=%s",
+                type(error).__name__,
+            )
+            raise APIError("Groq request handling failed", status_code=500) from error
 
     @classmethod
     def _handle_googleai_request(
@@ -1669,8 +1709,8 @@ class ProxyService:
 
             data = json.dumps(chat_request).encode('utf-8')
 
-            logger.info(f"Google AI chat request URL: {url}")
-            logger.debug("Google AI chat request data: %s", redact_payload(chat_request))
+            logger.info("Preparing Google AI chat request")
+            logger.debug("Google AI chat request prepared")
 
             # Ensure we have a valid token before making the request
             if 'Authorization' not in headers or not headers['Authorization'].startswith('Bearer '):
@@ -1693,7 +1733,6 @@ class ProxyService:
             )
 
             logger.info(f"Google AI raw response status: {response.status_code}")
-            logger.debug("Google AI raw response headers: %s", redact_headers(response.headers))
 
             if response.status_code == 200:
                 try:
@@ -1814,8 +1853,6 @@ class ProxyService:
                                 )
                                 response_data = {"error": "Invalid JSON response from Google AI"}
                             
-                        logger.debug("Google AI parsed response: %s", redact_payload(response_data))
-
                         # Create new Response to unify return type
                         response_json = json.dumps(response_data)
                         response_bytes = response_json.encode('utf-8')
@@ -1829,9 +1866,15 @@ class ProxyService:
                         })
                         return new_response
 
-                except Exception as e:
-                    logger.error(f"Error processing response: {str(e)}")
-                    raise APIError(f"Error processing response: {str(e)}", status_code=500)
+                except Exception as error:
+                    logger.error(
+                        "Google AI response processing failed type=%s",
+                        type(error).__name__,
+                    )
+                    raise APIError(
+                        "Google AI response processing failed",
+                        status_code=500,
+                    ) from error
             else:
                 # Check for token-related errors (401 Unauthorized)
                 if response.status_code == 401:
@@ -1854,23 +1897,24 @@ class ProxyService:
                             retry_count=retry_count + 1
                         )
                 
-                # Log error response
-                try:
-                    error_content = response.content.decode('utf-8')
-                    logger.error("Google AI error response: %s", redact_text(error_content))
-                except Exception as e:
-                    logger.error(f"Error decoding error response: {str(e)}")
+                logger.error(
+                    "Google AI upstream error status=%s content_length=%s",
+                    response.status_code,
+                    len(response.content),
+                )
 
                 raise APIError(
                     f"Google AI request failed with status {response.status_code}",
                     status_code=response.status_code
                 )
-        except Exception as e:
-            error_msg = f"Error handling Google AI request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            logger.error(
+                "Google AI request handling failed type=%s",
+                type(error).__name__,
+            )
+            raise APIError("Google AI request handling failed", status_code=500) from error
 
     @classmethod
     def _handle_rogue_rose_request(
@@ -1910,9 +1954,6 @@ class ProxyService:
                 "presence_penalty": request_data.get("presence_penalty", 0)
             }
 
-            logger.info("Original request data: %s", redact_payload(request_data))
-            logger.info("Completion data: %s", redact_payload(completion_data))
-
             # Update URL to use completions endpoint while maintaining the nineteen path
             completion_url = url.replace("/chat/completions", "/completions")
             
@@ -1920,11 +1961,7 @@ class ProxyService:
             completion_data_bytes = json.dumps(completion_data).encode('utf-8')
             headers["Content-Length"] = str(len(completion_data_bytes))
 
-            logger.info(
-                "Converted chat request to completion for Rogue Rose: %s",
-                redact_payload(completion_data),
-            )
-            logger.info(f"New URL: {completion_url}")
+            logger.info("Converted Rogue Rose request to the completions endpoint")
 
             # Make the request
             response = cls._make_base_request(
@@ -1963,13 +2000,25 @@ class ProxyService:
                                         ]
                                     }
                                     yield f"data: {json.dumps(chat_chunk)}\n\n"
-                                except json.JSONDecodeError as e:
-                                    logger.error(f"Error parsing streaming response: {e}")
+                                except json.JSONDecodeError as error:
+                                    logger.error(
+                                        "Nineteen stream JSON decode failed line=%s column=%s",
+                                        error.lineno,
+                                        error.colno,
+                                    )
                                     continue
                         yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logger.error(f"Error in stream generation: {str(e)}")
-                        raise APIError(f"Error in stream generation: {str(e)}", status_code=500)
+                    except Exception as error:
+                        logger.error(
+                            "Nineteen stream generation failed type=%s",
+                            type(error).__name__,
+                        )
+                        yield stream_error_event(
+                            model=request_data.get("model", "nineteen-stream")
+                        )
+                        yield "data: [DONE]\n\n"
+                    finally:
+                        response.close()
 
                 return Response(
                     generate(),
@@ -2014,15 +2063,25 @@ class ProxyService:
                     })
 
                     return new_response
-                except Exception as e:
-                    logger.error(f"Error converting completion to chat response: {str(e)}")
-                    raise APIError(f"Error converting completion to chat response: {str(e)}", status_code=500)
+                except Exception as error:
+                    logger.error(
+                        "Nineteen response conversion failed type=%s",
+                        type(error).__name__,
+                    )
+                    raise APIError(
+                        "Nineteen response conversion failed",
+                        status_code=500,
+                    ) from error
 
             return response
-        except Exception as e:
-            error_msg = f"Error in Rogue Rose request handler: {str(e)}"
-            logger.error(error_msg)
-            raise APIError(error_msg, status_code=500)
+        except APIError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Rogue Rose request handling failed type=%s",
+                type(error).__name__,
+            )
+            raise APIError("Rogue Rose request handling failed", status_code=500) from error
 
     @staticmethod
     def _gemini_native_part(part: Dict[str, Any]) -> bool:
@@ -2431,10 +2490,8 @@ class ProxyService:
         api_provider: str,
         auth_token: Optional[str] = None,
     ) -> requests.Response:
-        """
-        Handle Gemini requests with safety settings disabled
-        """
-        logger.info(f"Handling {api_provider} request to {url}")
+        """Handle Gemini requests while preserving caller safety settings."""
+        logger.info("Handling %s request", api_provider)
         
         try:
             params = dict(params or {})
@@ -2547,9 +2604,12 @@ class ProxyService:
                     model_part = url.split('/models/')[1].split(':')[0]
                     if model_part:
                         model = model_part
-                        logger.info(f"Extracted model from URL path: {model}")
-                except Exception as e:
-                    logger.warning(f"Failed to extract model from URL: {str(e)}")
+                        logger.info("Extracted Gemini model from request URL")
+                except Exception as error:
+                    logger.warning(
+                        "Failed to extract Gemini model from URL type=%s",
+                        type(error).__name__,
+                    )
             
             # Transformation: Convert OpenAI-style endpoint to Google Generative Language API style
             if '/chat/completions' in url:
@@ -2564,17 +2624,23 @@ class ProxyService:
                 )
                 
                 # Get model from request data or use default
-                model = request_data.get('model', default_model)
+                model = validated_gemini_model_id(
+                    request_data.get('model', default_model)
+                )
                 
                 # Check if model is appropriate for the provider
                 if api_provider == 'gemini' and model.startswith('gemma-'):
-                    logger.warning(f"Using Gemma model ({model}) with Gemini API provider - this may cause auth issues")
+                    logger.warning(
+                        "A Gemma model was supplied to the Gemini provider"
+                    )
                 elif api_provider == 'gemma' and model.startswith('gemini-'):
-                    logger.warning(f"Using Gemini model ({model}) with Gemma API provider - this may cause auth issues")
+                    logger.warning(
+                        "A Gemini model was supplied to the Gemma provider"
+                    )
                 
                 # Build the correct endpoint URL for generateContent
                 url = f"{parsed_url}/v1beta/models/{model}:generateContent"
-                logger.info(f"Transformed URL to {url}")
+                logger.info("Transformed request to the Gemini generateContent endpoint")
                 
                 # Transform OpenAI-style request to Google Generative Language API format
                 if 'messages' in request_data:
@@ -2584,21 +2650,9 @@ class ProxyService:
                 if ":generateContent" in url:
                     url = url.replace(":generateContent", ":streamGenerateContent", 1)
                 params["alt"] = "sse"
-                logger.info(f"Using Gemini streaming endpoint: {url}")
+                logger.info("Using the Gemini streaming endpoint")
                 
-            # Process the request data to disable safety settings
             if request_data:
-                # Make sure we have safety settings that disable content filtering
-                safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
-                
-                # Overwrite any existing safety settings
-                request_data["safetySettings"] = safety_settings
-                
                 if enable_google_search and api_provider == 'gemini':
                     tools = request_data.get("tools")
                     if not isinstance(tools, list):
@@ -2607,7 +2661,7 @@ class ProxyService:
 
                     if not any(isinstance(tool, dict) and "google_search" in tool for tool in tools):
                         tools.append({"google_search": {}})
-                    logger.info(f"Enabled Google Search grounding for Gemini model: {model}")
+                    logger.info("Enabled Google Search grounding for the Gemini request")
 
                 if preflight_count_tokens and (
                     ":generateContent" in url or ":streamGenerateContent" in url
@@ -2636,9 +2690,8 @@ class ProxyService:
                     try:
                         token_count = count_response.json().get("totalTokens")
                         logger.info(
-                            "Gemini input preflight provider=%s model=%s input_units=%s",
+                            "Gemini input preflight provider=%s input_units=%s",
                             api_provider,
-                            model,
                             token_count,
                         )
                     except ValueError:
@@ -2647,14 +2700,9 @@ class ProxyService:
                 # Re-encode the modified data
                 data = json.dumps(request_data).encode('utf-8')
                 headers["Content-Length"] = str(len(data))
-                logger.info(f"Modified {api_provider} request data to disable safety settings")
+                logger.info("Prepared %s request data", api_provider)
             
-            # Log the final URL with params
-            full_url = url
-            if params:
-                param_str = '&'.join([f"{k}={v}" for k, v in params.items()])
-                full_url = f"{url}?{param_str}" if '?' not in url else f"{url}&{param_str}"
-            logger.info(f"Making {api_provider} request to: {full_url}")
+            logger.info("Sending request to %s", api_provider)
             
             # Make the request with the modified data
             response = cls._make_base_request(
@@ -2668,59 +2716,27 @@ class ProxyService:
                 is_streaming=is_streaming_request,
             )
             
-            # Handle authentication errors with more detailed logging
+            # Do not reflect provider error bodies: they may contain credential or
+            # account details that are not safe for downstream clients.
             if response.status_code == 401:
                 logger.error(
-                    "Authentication failed for %s status=%s response=%s",
+                    "Authentication failed for %s status=%s",
                     api_provider,
                     response.status_code,
-                    redact_text(response.text),
                 )
-                # Try to parse the error response for more details
-                try:
-                    error_data = response.json()
-                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
-                    logger.error(f"Detailed error: {error_message}")
-                    
-                    # Create a more informative error response
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model ({model}). Error: {error_message}",
-                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
-                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
-                except Exception as e:
-                    logger.error(
-                        "Could not parse error response: %s, %s",
-                        redact_text(response.text),
-                        str(e),
-                    )
-                    
-                    # Return a generic error
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for {api_provider}. The API key is invalid or does not have access to the requested model.",
-                            "solution": "Please create a valid API key from Google AI Studio (https://aistudio.google.com) and update your .env file with GEMINI_API_KEY=your-key",
-                            "details": "Gemini API keys should begin with 'AIza'. The admin API key cannot be used directly - you need to obtain a specific Gemini API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
+                response.close()
+                return authentication_error_response(
+                    api_provider,
+                    model=model,
+                    solution=(
+                        "Create a valid Google AI Studio API key and update "
+                        "GEMINI_API_KEY in the server environment."
+                    ),
+                    details=(
+                        "The admin API key cannot be used as a Gemini provider "
+                        "credential."
+                    ),
+                )
             
             # Process response to convert from Google's format to OpenAI compatible format
             if response.status_code == 200:
@@ -2801,16 +2817,22 @@ class ProxyService:
                                             len(line),
                                         )
                                         continue
-                                    except Exception as e:
-                                        logger.error(f"Error processing Gemini streaming chunk: {e}")
+                                    except Exception as error:
+                                        logger.error(
+                                            "Error processing Gemini streaming chunk (%s)",
+                                            type(error).__name__,
+                                        )
                                         continue
                             
                             # Make sure to send the final [DONE] marker
                             if not done_sent:
                                 yield "data: [DONE]\n\n"
-                        except Exception as e:
-                            logger.error(f"Error in Gemini streaming response: {str(e)}")
-                            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                        except Exception as error:
+                            logger.error(
+                                "Error in Gemini streaming response (%s)",
+                                type(error).__name__,
+                            )
+                            yield stream_error_event(model=model)
                             yield "data: [DONE]\n\n"
                         finally:
                             if hasattr(response, "close"):
@@ -2869,17 +2891,23 @@ class ProxyService:
                         })
                         
                         return new_response
-                    except Exception as e:
-                        logger.error(f"Error converting Google response to OpenAI format: {str(e)}")
+                    except Exception as error:
+                        logger.error(
+                            "Error converting Google response to OpenAI format (%s)",
+                            type(error).__name__,
+                        )
             
             return response
             
-        except Exception as e:
-            error_msg = f"Error in _handle_gemini_request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            logger.error(
+                "Gemini request handling failed for %s (%s)",
+                api_provider,
+                type(error).__name__,
+            )
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            raise APIError("Gemini request handling failed", status_code=500) from error
 
     @classmethod
     def _handle_openrouter_request(
@@ -2897,7 +2925,7 @@ class ProxyService:
         Handle OpenRouter specific request processing.
         OpenRouter provides access to hundreds of AI models through a single endpoint.
         """
-        logger.info(f"Handling OpenRouter request to {url}")
+        logger.info("Handling OpenRouter request")
         
         try:
             # Get the OpenRouter API key
@@ -2931,11 +2959,11 @@ class ProxyService:
             
             if site_url:
                 headers['HTTP-Referer'] = site_url
-                logger.debug(f"Added HTTP-Referer header: {site_url}")
+                logger.debug("Added configured HTTP-Referer header")
             
             if app_name:
                 headers['X-Title'] = app_name
-                logger.debug(f"Added X-Title header: {app_name}")
+                logger.debug("Added configured X-Title header")
             
             # Transform the URL to use OpenRouter's base URL
             # First extract the path portion from the URL
@@ -2958,13 +2986,7 @@ class ProxyService:
                 else:
                     openrouter_url = f"https://openrouter.ai/api/v1{path}"
             
-            logger.info(f"Transformed URL to OpenRouter: {openrouter_url}")
-            
-            # Log the request details
-            logger.info(f"Making OpenRouter request to: {openrouter_url}")
-            logger.debug("Headers: %s", redact_headers(headers))
-            if data:
-                logger.debug("Request data: %s", redact_payload(request_data))
+            logger.info("Prepared OpenRouter upstream request")
             
             # Make the request
             response = cls._make_base_request(
@@ -2977,39 +2999,25 @@ class ProxyService:
                 use_cache=use_cache
             )
             
-            # Handle authentication errors
+            # Do not reflect provider error bodies: they may contain credential or
+            # account details that are not safe for downstream clients.
             if response.status_code == 401:
                 logger.error(
-                    "Authentication failed for OpenRouter status=%s response=%s",
+                    "Authentication failed for OpenRouter status=%s",
                     response.status_code,
-                    redact_text(response.text),
                 )
-                try:
-                    error_data = response.json()
-                    error_message = error_data.get('error', {}).get('message', 'Unknown authentication error')
-                    logger.error(f"Detailed error: {error_message}")
-                    
-                    error_response = requests.Response()
-                    error_response.status_code = 401
-                    error_data = {
-                        "error": {
-                            "message": f"Authentication failed for OpenRouter: {error_message}",
-                            "solution": "Please create a valid API key from OpenRouter (https://openrouter.ai) and update your .env file with OPENROUTER_API_KEY=your-key",
-                            "details": "The admin API key cannot be used directly - you need to obtain a specific OpenRouter API key and add it to your .env file."
-                        }
-                    }
-                    error_response._content = json.dumps(error_data).encode('utf-8')
-                    error_response.headers.update({
-                        'Content-Type': 'application/json',
-                        'Content-Length': str(len(error_response._content))
-                    })
-                    return error_response
-                except Exception as e:
-                    logger.error(
-                        "Could not parse error response: %s, %s",
-                        redact_text(response.text),
-                        str(e),
-                    )
+                response.close()
+                return authentication_error_response(
+                    "OpenRouter",
+                    solution=(
+                        "Create a valid OpenRouter API key and update "
+                        "OPENROUTER_API_KEY in the server environment."
+                    ),
+                    details=(
+                        "The admin API key cannot be used as an OpenRouter "
+                        "provider credential."
+                    ),
+                )
             
             # Check for streaming response
             if request_data.get('stream', False) and response.status_code == 200:
@@ -3051,16 +3059,22 @@ class ProxyService:
                                         len(line),
                                     )
                                     continue
-                                except Exception as e:
-                                    logger.error(f"Error processing streaming chunk: {e}")
+                                except Exception as error:
+                                    logger.error(
+                                        "Error processing OpenRouter streaming chunk (%s)",
+                                        type(error).__name__,
+                                    )
                                     continue
                         
                         # Ensure final [DONE] marker
                         if not done_sent:
                             yield "data: [DONE]\n\n"
-                    except Exception as e:
-                        logger.error(f"Error in streaming generation: {str(e)}")
-                        yield f"data: {json.dumps({'choices': [{'delta': {'content': str(e)}}]})}\n\n"
+                    except Exception as error:
+                        logger.error(
+                            "Error in OpenRouter streaming response (%s)",
+                            type(error).__name__,
+                        )
+                        yield stream_error_event(model="openrouter")
                         yield 'data: [DONE]\n\n'
                     finally:
                         if hasattr(response, "close"):
@@ -3080,12 +3094,14 @@ class ProxyService:
             
             return response
             
-        except Exception as e:
-            error_msg = f"Error in _handle_openrouter_request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            logger.error(
+                "OpenRouter request handling failed (%s)",
+                type(error).__name__,
+            )
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
+            raise APIError("OpenRouter request handling failed", status_code=500) from error
 
     @classmethod
     def _standardize_streaming_chunk(
@@ -3242,40 +3258,13 @@ class ProxyService:
                 content = cls._repair_mojibake_text(content)
                 
             return f"{cls._close_visible_thinking_chunk(visible_thinking_state)}{cls._build_streaming_chunk(content)}"
-        except Exception as e:
-            logger.error(f"Error standardizing streaming chunk: {str(e)}")
-            # Return a safe fallback
-            return f"data: {json.dumps({'choices': [{'delta': {'content': chunk}}]})}\n\n"
-
-    @staticmethod
-    def _iter_stream_content(response: requests.Response) -> Generator[bytes, None, None]:
-        """Yield decoded upstream bytes as soon as the socket exposes them."""
-        raw_response = getattr(response, "raw", None)
-        raw_read1 = getattr(raw_response, "read1", None)
-        if callable(raw_read1):
-            while True:
-                chunk = raw_read1(64 * 1024, decode_content=True)
-                if not chunk:
-                    return
-                yield chunk
-
-        yield from response.iter_content(chunk_size=128)
-
-    @staticmethod
-    def _iter_stream_lines(response: requests.Response) -> Generator[str, None, None]:
-        content_type = response.headers.get("content-type", "").lower()
-        if content_type.startswith("text/event-stream") and hasattr(response, "iter_content"):
-            try:
-                for data_payload in iter_sse_data(
-                    ProxyService._iter_stream_content(response)
-                ):
-                    yield f"data: {data_payload}"
-                return
-            except Exception as error:
-                logger.warning("SSE parser failed, falling back to line iteration: %s", error)
-
-        for line in response.iter_lines(decode_unicode=True):
-            yield line
+        except Exception as error:
+            logger.error(
+                "Streaming chunk standardization failed provider=%s type=%s",
+                provider,
+                type(error).__name__,
+            )
+            return stream_error_event(model=f"{provider}-stream")
 
     @classmethod
     def _create_streaming_response(cls, response: requests.Response, provider: str) -> Generator:
@@ -3298,7 +3287,7 @@ class ProxyService:
             # yields bytes. Keep every encoded SSE response on the same
             # incremental path so the first complete event can be forwarded
             # without buffering the rest of the generation.
-            for line in cls._iter_stream_lines(response):
+            for line in iter_stream_lines(response):
                 if provider == "opencode":
                     line, inside_reasoning_block = cls._strip_reasoning_block_markup(
                         line,
@@ -3358,7 +3347,7 @@ class ProxyService:
         if raw_passthrough:
             logger.info("Making raw request for %s with method %s", api_provider, method)
         else:
-            logger.info("Making request to %s with method %s", url, method)
+            logger.info("Making request for %s with method %s", api_provider, method)
         
         try:
             if raw_passthrough:
@@ -3375,7 +3364,7 @@ class ProxyService:
                 )
 
             # Check if this is a streaming request
-            request_data = cls._decode_json_request_data(data)
+            request_data = decode_json_object_bytes(data)
             is_streaming = bool(request_data.get('stream', False))
             if api_provider == "nanogpt" and is_streaming:
                 headers["Accept"] = "text/event-stream"
@@ -3406,6 +3395,7 @@ class ProxyService:
                         data=data,
                         api_provider=api_provider,
                         use_cache=use_cache,
+                        timeout_override=timeout_override,
                     )
                 return cls._handle_googleai_request(
                     method, url, headers, params, data, request_data, use_cache
@@ -3437,6 +3427,7 @@ class ProxyService:
                 data=data,
                 api_provider=api_provider,
                 use_cache=use_cache,
+                timeout_override=timeout_override,
                 is_streaming=is_streaming,
             )
             
@@ -3453,25 +3444,15 @@ class ProxyService:
                 )
             
             return response
-        except Exception as e:
-            error_msg = f"Error in make_request: {str(e)}"
-            logger.error(error_msg)
-            if isinstance(e, APIError):
+        except Exception as error:
+            if isinstance(error, APIError):
                 raise
-            raise APIError(error_msg, status_code=500)
-
-    @staticmethod
-    def _decode_json_request_data(data: Optional[bytes]) -> Dict[str, Any]:
-        """
-        Decode an optional JSON request body for provider-specific dispatch.
-        """
-        if not data:
-            return {}
-
-        parsed = json.loads(data)
-        if isinstance(parsed, dict):
-            return parsed
-        return {}
+            logger.error(
+                "Provider request dispatch failed provider=%s type=%s",
+                api_provider,
+                type(error).__name__,
+            )
+            raise APIError("Provider request dispatch failed", status_code=500) from error
 
     @classmethod
     def shutdown(cls):

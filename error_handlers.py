@@ -61,6 +61,11 @@ def _select_request_id():
 def _wants_json_response():
     if request.is_json:
         return True
+    # Import lazily to avoid coupling error-handler initialization to route setup.
+    from route_helpers import is_api_request_path  # noqa: PLC0415
+
+    if is_api_request_path(request.path):
+        return True
     best_match = request.accept_mimetypes.best_match(
         ["application/json", "text/html"],
         default="text/html",
@@ -100,10 +105,10 @@ def init_error_handlers(app):
         request_id = get_request_id()
         if error.status_code >= 500:
             logger.error(
-                "API Error request_id=%s status=%s message=%s",
+                "API Error request_id=%s status=%s type=%s",
                 request_id,
                 error.status_code,
-                redact_text(error.message),
+                type(error).__name__,
             )
         else:
             logger.warning(
@@ -127,10 +132,9 @@ def init_error_handlers(app):
         """Handle unexpected errors without full traceback"""
         request_id = get_request_id()
         logger.error(
-            "Unexpected error request_id=%s type=%s message=%s",
+            "Unexpected error request_id=%s type=%s",
             request_id,
             type(error).__name__,
-            redact_text(error),
         )
         
         if _wants_json_response():
@@ -176,10 +180,9 @@ def init_error_handlers(app):
         """Handle 500 errors without recursion"""
         request_id = get_request_id()
         logger.error(
-            "Internal server error request_id=%s type=%s message=%s",
+            "Internal server error request_id=%s type=%s",
             request_id,
             type(error).__name__,
-            redact_text(error),
         )
         
         if _wants_json_response():

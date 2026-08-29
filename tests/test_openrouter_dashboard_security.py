@@ -39,7 +39,12 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         )
         self.env_patch.start()
 
-        for module_name in ("app", "services.auth_service", "routes.core"):
+        for module_name in (
+            "app",
+            "route_helpers",
+            "services.auth_service",
+            "routes.core",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
@@ -48,7 +53,12 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         self.client = self.flask_app.test_client()
         with self.client.session_transaction() as session:
             session["authenticated"] = True
-            session["user"] = {"username": "admin", "is_admin": True}
+            session["user"] = {
+                "username": "admin",
+                "is_admin": True,
+                "api_key_prefix": "mllm_admin-te",
+                "scopes": ["admin"],
+            }
 
     def tearDown(self):
         self.env_patch.stop()
@@ -121,8 +131,17 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         )
 
     def test_dashboard_chat_completions_requires_admin_session(self):
-        with self.client.session_transaction() as session:
-            session["user"] = {"username": "regular", "is_admin": False}
+        with patch.object(
+            self.app_module.AuthService,
+            "get_current_user",
+            return_value={"username": "admin", "is_admin": True},
+        ):
+            regular_user = self.app_module.AuthService.create_user("regular")
+        login_response = self.client.post(
+            "/login",
+            data={"username": "regular", "api_key": regular_user["api_key"]},
+        )
+        self.assertEqual(login_response.status_code, 302)
 
         response = self.client.post(
             "/dashboard/openrouter/chat-completions",
@@ -133,6 +152,18 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_dashboard_chat_completions_rejects_json_arrays(self):
+        response = self.client.post(
+            "/dashboard/openrouter/chat-completions",
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
 
     def test_openrouter_static_js_does_not_embed_browser_keys_or_authorization(self):
         script = Path("static/js/openrouter.js").read_text(encoding="utf-8")

@@ -4,7 +4,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 
 ## Features
 
-- 🔒 Secure authentication system with user management and JWT tokens
+- 🔒 Secure authentication system with user management and scoped API keys
 - 🔑 Universal API key support with provider-specific key management
 - 🔄 Automatic token-based rate limiting and request distribution
 - 🌐 Support for multiple LLM providers:
@@ -201,9 +201,9 @@ The server will start at `http://localhost:1400` (or your configured host/port).
 
 The proxy uses a secure authentication system with:
 - Session-based authentication for web dashboard
-- JWT token generation for API access
-- Universal API key system
-- Secure password hashing
+- Opaque, scoped API keys for API access
+- Hashed API-key storage with one-time key display
+- Immediate key revocation and rotation
 - CSRF protection
 
 ### API Endpoints

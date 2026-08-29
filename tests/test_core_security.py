@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from flask import request
+from flask import abort, request
 
 
 class LoginRedirectSecurityTest(unittest.TestCase):
@@ -28,7 +28,12 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         )
         self.env_patch.start()
 
-        for module_name in ("app", "services.auth_service", "routes.core"):
+        for module_name in (
+            "app",
+            "route_helpers",
+            "services.auth_service",
+            "routes.core",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
@@ -52,6 +57,10 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         def read_body():
             return {"size": len(request.get_data())}
 
+        @self.flask_app.route("/v1/test/not-found")
+        def api_not_found():
+            abort(404)
+
         self.client = self.flask_app.test_client()
 
     def tearDown(self):
@@ -64,7 +73,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin"],
                 "session_id": "test-session",
             }
@@ -169,13 +178,14 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
     def test_unexpected_errors_are_opaque_and_include_request_id(self):
         self._set_admin_session()
-        response = self.client.get(
-            "/test/unhandled-error",
-            headers={
-                "Accept": "application/json",
-                "X-Request-ID": "req-test-123",
-            },
-        )
+        with self.assertLogs("error_handlers", level="ERROR") as captured:
+            response = self.client.get(
+                "/test/unhandled-error",
+                headers={
+                    "Accept": "application/json",
+                    "X-Request-ID": "req-test-123",
+                },
+            )
 
         self.assertEqual(response.status_code, 500)
         payload = response.get_json()
@@ -186,6 +196,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         response_text = response.get_data(as_text=True)
         self.assertNotIn("MetricsService.track_request", response_text)
         self.assertNotIn("endpoint", response_text)
+        self.assertNotIn("MetricsService.track_request", "\n".join(captured.output))
 
     def test_expected_client_api_errors_keep_message(self):
         self._set_admin_session()
@@ -201,10 +212,11 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
     def test_server_api_errors_are_opaque(self):
         self._set_admin_session()
-        response = self.client.get(
-            "/test/server-api-error",
-            headers={"Accept": "application/json"},
-        )
+        with self.assertLogs("error_handlers", level="ERROR") as captured:
+            response = self.client.get(
+                "/test/server-api-error",
+                headers={"Accept": "application/json"},
+            )
 
         self.assertEqual(response.status_code, 500)
         payload = response.get_json()
@@ -212,6 +224,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(payload["message"], "An unexpected error occurred.")
         self.assertIn("request_id", payload)
         self.assertNotIn("sk-live", response.get_data(as_text=True))
+        self.assertNotIn("sk-live", "\n".join(captured.output))
 
     def test_json_errors_accept_wildcard_accept_header(self):
         self._set_admin_session()
@@ -232,6 +245,30 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("req-missing-page", response.get_data(as_text=True))
+
+    def test_non_json_api_request_returns_authentication_error_not_redirect(self):
+        response = self.client.post(
+            "/v1/chat/completions",
+            data=b"not-json",
+            headers={"Content-Type": "application/octet-stream"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.content_type, "application/json")
+        self.assertEqual(response.get_json()["message"], "Authentication required")
+        self.assertNotIn("Location", response.headers)
+
+    def test_authenticated_unknown_api_route_returns_json_404(self):
+        response = self.client.get(
+            "/v1/test/not-found",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.content_type, "application/json")
+        self.assertEqual(response.get_json()["error"], "Not found")
+        self.assertIn("request_id", response.get_json())
 
     def test_json_user_create_parses_is_admin_strings_strictly(self):
         self._set_admin_session()
@@ -254,6 +291,20 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("is_admin must be a boolean", response.get_json()["message"])
+
+    def test_user_create_rejects_json_arrays(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/users",
+            headers={"Accept": "application/json"},
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
 
 
 if __name__ == "__main__":

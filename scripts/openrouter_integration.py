@@ -23,6 +23,24 @@ DEFAULT_PROMPT = "Write a short poem about artificial intelligence"
 DEFAULT_ADMIN_KEY = os.environ.get("ADMIN_API_KEY")
 
 
+def print_request_error(error):
+    """Print bounded diagnostics without exposing response bodies or credentials."""
+    print(f"❌ Error: {type(error).__name__}")
+    response = getattr(error, "response", None)
+    if response is None:
+        return
+
+    print(f"Status code: {response.status_code}")
+    try:
+        error_data = response.json()
+    except (TypeError, ValueError):
+        content = getattr(response, "content", b"") or b""
+        print(f"Response body length: {len(content)} bytes")
+        return
+
+    print(f"Structured error response: {type(error_data).__name__}")
+
+
 def resolve_api_key(args):
     """Resolve the API key from CLI flags or the environment."""
     if args.key:
@@ -34,10 +52,13 @@ def resolve_api_key(args):
 
     raise ValueError("Provide --key or set ADMIN_API_KEY in the environment before running this script")
 
-def test_openrouter_non_streaming(host, model, prompt, api_key):
+def test_openrouter_non_streaming(host, model, prompt, api_key, show_content=False):
     """Test OpenRouter with a non-streaming request"""
     print(f"\n🔍 Testing OpenRouter non-streaming with model: {model}")
-    print(f"📝 Prompt: {prompt}")
+    if show_content:
+        print(f"📝 Prompt: {prompt}")
+    else:
+        print(f"📝 Prompt: [hidden, {len(prompt)} characters]")
     
     url = f"{host}/openrouter/chat/completions"
     headers = {
@@ -63,9 +84,12 @@ def test_openrouter_non_streaming(host, model, prompt, api_key):
         usage = data.get("usage", {})
         
         print("\n✅ Response received:")
-        print("-" * 50)
-        print(content)
-        print("-" * 50)
+        if show_content:
+            print("-" * 50)
+            print(content)
+            print("-" * 50)
+        else:
+            print(f"Response content: [hidden, {len(content)} characters]")
         
         # Print token usage
         if usage:
@@ -76,21 +100,18 @@ def test_openrouter_non_streaming(host, model, prompt, api_key):
         
         print(f"\n⏱️ Request completed in {time.time() - start_time:.2f} seconds")
         return True
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print()
+        print_request_error(error)
         return False
 
-def test_openrouter_streaming(host, model, prompt, api_key):
+def test_openrouter_streaming(host, model, prompt, api_key, show_content=False):
     """Test OpenRouter with a streaming request"""
     print(f"\n🔍 Testing OpenRouter streaming with model: {model}")
-    print(f"📝 Prompt: {prompt}")
+    if show_content:
+        print(f"📝 Prompt: {prompt}")
+    else:
+        print(f"📝 Prompt: [hidden, {len(prompt)} characters]")
     
     url = f"{host}/openrouter/chat/completions"
     headers = {
@@ -120,8 +141,9 @@ def test_openrouter_streaming(host, model, prompt, api_key):
         # Then use SSEClient to process the stream
         client = SSEClient(response)
         
-        print("\n✅ Streaming response:")
-        print("-" * 50)
+        print("\n✅ Streaming response received")
+        if show_content:
+            print("-" * 50)
         
         full_response = ""
         for event in client:
@@ -133,22 +155,20 @@ def test_openrouter_streaming(host, model, prompt, api_key):
                 if data.get("choices") and data["choices"][0].get("delta") and data["choices"][0]["delta"].get("content"):
                     content = data["choices"][0]["delta"]["content"]
                     full_response += content
-                    print(content, end="", flush=True)
+                    if show_content:
+                        print(content, end="", flush=True)
             except json.JSONDecodeError:
                 pass
         
-        print("\n" + "-" * 50)
+        if show_content:
+            print("\n" + "-" * 50)
+        else:
+            print(f"Response content: [hidden, {len(full_response)} characters]")
         print(f"\n⏱️ Streaming completed in {time.time() - start_time:.2f} seconds")
         return True
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print()
+        print_request_error(error)
         return False
 
 def test_openrouter_credits(host, api_key):
@@ -172,18 +192,11 @@ def test_openrouter_credits(host, api_key):
             print(f"✅ Credits used: ${used:.2f}")
             print(f"✅ Total allocation: ${credits + used:.2f}")
         else:
-            print(f"✅ Response: {json.dumps(data, indent=2)}")
+            print(f"✅ Structured response received: {type(data).__name__}")
         
         return True
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Status code: {e.response.status_code}")
-                print(f"Response text: {e.response.text}")
+    except Exception as error:
+        print_request_error(error)
         return False
 
 def main():
@@ -195,6 +208,11 @@ def main():
     parser.add_argument("--no-stream", action="store_true", help="Skip streaming test")
     parser.add_argument("--no-regular", action="store_true", help="Skip regular (non-streaming) test")
     parser.add_argument("--no-credits", action="store_true", help="Skip credits check")
+    parser.add_argument(
+        "--show-content",
+        action="store_true",
+        help="Print prompts and model output (hidden by default)",
+    )
     
     args = parser.parse_args()
     try:
@@ -215,12 +233,24 @@ def main():
     
     # Test non-streaming request
     if not args.no_regular:
-        if not test_openrouter_non_streaming(args.host, args.model, args.prompt, api_key):
+        if not test_openrouter_non_streaming(
+            args.host,
+            args.model,
+            args.prompt,
+            api_key,
+            show_content=args.show_content,
+        ):
             success = False
     
     # Test streaming request
     if not args.no_stream:
-        if not test_openrouter_streaming(args.host, args.model, args.prompt, api_key):
+        if not test_openrouter_streaming(
+            args.host,
+            args.model,
+            args.prompt,
+            api_key,
+            show_content=args.show_content,
+        ):
             success = False
     
     if success:

@@ -180,6 +180,120 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertEqual(decision.status_code, 400)
         self.assertEqual(decision.error, "max_output_too_large")
 
+    def test_rejects_largest_conflicting_output_token_limit(self):
+        os.environ["MAX_OUTPUT_TOKENS"] = "5"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={
+                "max_tokens": 1,
+                "max_completion_tokens": 6,
+                "generationConfig": {"maxOutputTokens": 4},
+            },
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 400)
+        self.assertEqual(decision.error, "max_output_too_large")
+
+    def test_rejects_invalid_output_token_counts_before_recording_usage(self):
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            RateLimitService._ensure_storage(connection)
+            connection.commit()
+
+        invalid_payloads = (
+            {"max_tokens": -1},
+            {"max_completion_tokens": True},
+            {"max_output_tokens": "128"},
+            {"generationConfig": {"maxOutputTokens": -1}},
+            {"max_tokens": 128, "max_completion_tokens": -1},
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                decision = RateLimitService.enforce_request(
+                    provider="openai",
+                    user={
+                        "username": "alice",
+                        "api_key_prefix": "mllm_live_alice",
+                    },
+                    payload_bytes=b"{}",
+                    payload_json=payload,
+                    remote_addr="203.0.113.10",
+                )
+
+                self.assertFalse(decision.allowed)
+                self.assertEqual(decision.status_code, 400)
+                self.assertEqual(decision.error, "invalid_max_output_tokens")
+
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            usage_count = connection.execute(
+                "SELECT COUNT(*) FROM request_usage"
+            ).fetchone()[0]
+        self.assertEqual(usage_count, 0)
+
+    def test_invalid_output_token_count_is_rejected_when_limits_are_disabled(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"max_tokens": -1},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.status_code, 400)
+        self.assertEqual(decision.error, "invalid_max_output_tokens")
+
+    def test_safety_token_caps_remain_active_when_rate_limits_are_disabled(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+        os.environ["MAX_PROMPT_TOKENS"] = "1"
+        os.environ["MAX_OUTPUT_TOKENS"] = "5"
+
+        prompt_decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"messages": [{"role": "user", "content": "12345678"}]},
+            remote_addr="203.0.113.10",
+        )
+        output_decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"max_tokens": 6},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(prompt_decision.allowed)
+        self.assertEqual(prompt_decision.error, "prompt_too_large")
+        self.assertFalse(output_decision.allowed)
+        self.assertEqual(output_decision.error, "max_output_too_large")
+
+    def test_reservation_rejects_invalid_output_token_count_without_writing(self):
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            RateLimitService._ensure_storage(connection)
+            connection.commit()
+
+        decision = RateLimitService.reserve_request_slot(
+            provider="kimi-code",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            remote_addr="203.0.113.10",
+            payload_json={"max_completion_tokens": -1},
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.error, "invalid_max_output_tokens")
+        with sqlite3.connect(os.environ["RATE_LIMIT_DB_PATH"]) as connection:
+            usage_count = connection.execute(
+                "SELECT COUNT(*) FROM request_usage"
+            ).fetchone()[0]
+        self.assertEqual(usage_count, 0)
+
     def test_mimo_defaults_allow_model_sized_prompt_and_output(self):
         os.environ["RATE_LIMIT_TPM"] = "2000000"
         payload = {
@@ -299,6 +413,35 @@ class RateLimitServiceTest(unittest.TestCase):
         self.assertFalse(decision.allowed)
         self.assertEqual(decision.status_code, 429)
         self.assertEqual(decision.error, "token_rate_limit_exceeded")
+
+    def test_reserves_output_budget_when_generation_limit_is_omitted(self):
+        os.environ["RATE_LIMIT_TPM"] = "1024"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"messages": [{"role": "user", "content": "hello"}]},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.error, "token_rate_limit_exceeded")
+        self.assertEqual(decision.metadata["output_tokens"], 1024)
+
+    def test_non_generation_payload_does_not_reserve_output_budget(self):
+        os.environ["RATE_LIMIT_ENABLED"] = "false"
+
+        decision = RateLimitService.enforce_request(
+            provider="openai",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json={"metadata": {"operation": "catalog"}},
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.metadata["output_tokens"], 0)
 
     def test_estimate_input_tokens_counts_message_text_not_metadata(self):
         payload = {

@@ -206,7 +206,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
     model_catalog = [
         {
             **model,
-            "configured": configured_by_provider[model["provider"]],
+            "configured": configured_by_provider.get(model["provider"], False),
         }
         for model in model_catalog
     ]
@@ -223,8 +223,11 @@ def _admin_payload(app, auth_service_cls) -> dict:
                     "provider": provider,
                     "model": provider_model,
                     "priority": priority,
-                    "configured": configured_by_provider[provider],
-                    "status": model_catalog_by_id[model_id]["status"],
+                    "configured": configured_by_provider.get(provider, False),
+                    "status": model_catalog_by_id.get(model_id, {}).get(
+                        "status",
+                        "unknown",
+                    ),
                 }
             )
         routes.append(

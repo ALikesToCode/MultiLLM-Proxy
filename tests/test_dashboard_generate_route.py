@@ -26,7 +26,14 @@ class DashboardGenerateRouteTest(unittest.TestCase):
         )
         self.env_patch.start()
 
-        for module_name in ("app", "services.auth_service", "routes.proxy"):
+        for module_name in list(sys.modules):
+            if module_name.startswith("routes."):
+                sys.modules.pop(module_name, None)
+        for module_name in (
+            "app",
+            "route_helpers",
+            "services.auth_service",
+        ):
             sys.modules.pop(module_name, None)
 
         self.app_module = importlib.import_module("app")
@@ -45,7 +52,7 @@ class DashboardGenerateRouteTest(unittest.TestCase):
             session["user"] = {
                 "username": "admin",
                 "is_admin": True,
-                "api_key_prefix": "mllm_admin",
+                "api_key_prefix": "mllm_admin-te",
                 "scopes": ["admin", "chat"],
                 "session_id": "test-session",
             }
@@ -103,6 +110,19 @@ class DashboardGenerateRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["message"], "Unsupported provider: not-real")
+
+    def test_dashboard_chat_generate_rejects_json_arrays(self):
+        self._set_admin_session()
+        response = self.client.post(
+            "/api/backends/chat-completions/generate",
+            json=[],
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["message"],
+            "Request body must be a JSON object",
+        )
 
     def test_dashboard_chat_generate_does_not_leak_internal_proxy_errors(self):
         self._set_admin_session()

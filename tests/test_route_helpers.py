@@ -109,13 +109,18 @@ class RouteHelperSecretMaskingTest(unittest.TestCase):
             ):
                 self.assertEqual(request_api_key(), "proxy-admin-key")
 
-    def test_copy_upstream_response_headers_drops_hop_by_hop_values(self):
+    def test_copy_upstream_response_headers_allows_only_provider_metadata(self):
         headers = copy_upstream_response_headers(
             {
                 "Content-Type": "application/json",
                 "Connection": "keep-alive",
                 "Transfer-Encoding": "chunked",
                 "X-Request-ID": "req_123",
+                "Set-Cookie": "session=provider-controlled",
+                "Content-Security-Policy": "default-src *",
+                "X-Frame-Options": "ALLOWALL",
+                "Access-Control-Allow-Origin": "https://provider.example",
+                "Location": "https://provider.example/account",
             }
         )
 
@@ -558,6 +563,57 @@ class RouteHelperRateLimitTest(unittest.TestCase):
         enforce_request.assert_called_once()
         self.assertEqual(enforce_request.call_args.kwargs["provider"], "openai")
 
+    def test_api_auth_required_rejects_keys_without_chat_scope(self):
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
+            return_value={
+                "username": "catalog-reader",
+                "api_key_prefix": "mllm_catalog",
+                "scopes": ["models"],
+            },
+        ), patch.object(rate_limit_service, "enforce_request") as enforce_request:
+            response = self.app.test_client().post(
+                "/openai/chat/completions",
+                headers={"Authorization": "Bearer user-key"},
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["error"], "insufficient_scope")
+        enforce_request.assert_not_called()
+
+    def test_admin_scope_authorizes_chat_operations(self):
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
+            return_value={
+                "username": "admin",
+                "api_key_prefix": "mllm_admin",
+                "scopes": ["admin"],
+            },
+        ), patch.object(
+            rate_limit_service,
+            "enforce_request",
+            return_value=LimitDecision(
+                allowed=True,
+                status_code=200,
+                error=None,
+                message=None,
+            ),
+        ):
+            response = self.app.test_client().post(
+                "/openai/chat/completions",
+                headers={"Authorization": "Bearer admin-key"},
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+
     def test_provider_from_v1_plain_model_uses_unified_bucket(self):
         provider = provider_from_request_path(
             "/v1/chat/completions",
@@ -602,6 +658,41 @@ class RouteHelperRateLimitTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"ok": True})
         enforce_request.assert_not_called()
+
+    def test_explicit_models_scope_accepts_catalog_keys(self):
+        app = Flask(__name__)
+
+        @app.route("/v1/models", methods=["GET"])
+        @api_auth_required(required_scope="models")
+        def models_route():
+            return {"ok": True}
+
+        auth_service = api_auth_required.__globals__["AuthService"]
+        rate_limit_service = api_auth_required.__globals__["RateLimitService"]
+        with patch.object(
+            auth_service,
+            "verify_api_key",
+            return_value={
+                "username": "catalog-reader",
+                "api_key_prefix": "mllm_catalog",
+                "scopes": ["models"],
+            },
+        ), patch.object(
+            rate_limit_service,
+            "enforce_request",
+            return_value=LimitDecision(
+                allowed=True,
+                status_code=200,
+                error=None,
+                message=None,
+            ),
+        ):
+            response = app.test_client().get(
+                "/v1/models",
+                headers={"Authorization": "Bearer catalog-key"},
+            )
+
+        self.assertEqual(response.status_code, 200)
 
 
 class LinkAPINativeProxyAuthenticationTest(unittest.TestCase):

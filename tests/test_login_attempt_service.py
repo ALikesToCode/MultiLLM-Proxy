@@ -5,7 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from services.login_attempt_service import LoginAttemptService
+from services.login_attempt_service import (
+    MAX_IDENTITY_COMPONENT_LENGTH,
+    LoginAttemptService,
+)
 
 
 class LoginAttemptServiceTest(unittest.TestCase):
@@ -71,6 +74,18 @@ class LoginAttemptServiceTest(unittest.TestCase):
 
         self.assertNotIn(b"203.0.113.99", database_bytes)
         self.assertNotIn(b"sensitive-user", database_bytes)
+
+    def test_identity_hash_input_is_bounded(self):
+        first = LoginAttemptService._identity_hash(
+            "192.0.2.1",
+            "a" * MAX_IDENTITY_COMPONENT_LENGTH + "first-tail",
+        )
+        second = LoginAttemptService._identity_hash(
+            "192.0.2.1",
+            "a" * MAX_IDENTITY_COMPONENT_LENGTH + "second-tail",
+        )
+
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

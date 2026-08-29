@@ -15,6 +15,7 @@ from config import Config
 from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
+DEFAULT_RESERVED_OUTPUT_TOKENS = 1024
 
 PROVIDER_LIMIT_DEFAULTS = {
     "mimo": {
@@ -244,20 +245,54 @@ class RateLimitService:
         return text_tokens + structured_tokens
 
     @staticmethod
-    def requested_output_tokens(payload: Optional[Dict[str, Any]]) -> int:
+    def requested_output_tokens(payload: Optional[Dict[str, Any]]) -> Optional[int]:
         if not isinstance(payload, dict):
-            return 0
+            return None
 
+        requested_values: list[int] = []
         for key in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
-            value = payload.get(key)
-            if isinstance(value, int):
-                return value
+            if key not in payload or payload[key] is None:
+                continue
+            value = payload[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{key} must be a non-negative integer")
+            requested_values.append(value)
 
         generation_config = payload.get("generationConfig")
-        if isinstance(generation_config, dict) and isinstance(generation_config.get("maxOutputTokens"), int):
-            return generation_config["maxOutputTokens"]
+        if isinstance(generation_config, dict) and "maxOutputTokens" in generation_config:
+            value = generation_config["maxOutputTokens"]
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ValueError(
+                    "generationConfig.maxOutputTokens must be a non-negative integer"
+                )
+            if value is not None:
+                requested_values.append(value)
 
-        return 0
+        return max(requested_values) if requested_values else None
+
+    @classmethod
+    def _validated_output_tokens(
+        cls,
+        payload: Optional[Dict[str, Any]],
+    ) -> tuple[int, Optional[LimitDecision]]:
+        try:
+            requested = cls.requested_output_tokens(payload)
+            if requested is not None:
+                return requested, None
+            if isinstance(payload, dict) and any(
+                key in payload for key in ("contents", "input", "messages", "prompt")
+            ):
+                return DEFAULT_RESERVED_OUTPUT_TOKENS, None
+            return 0, None
+        except ValueError as error:
+            return 0, LimitDecision(
+                False,
+                status_code=400,
+                error="invalid_max_output_tokens",
+                message=str(error),
+            )
 
     @staticmethod
     def _identity_for_user(user: Optional[Dict[str, Any]], remote_addr: Optional[str]) -> tuple[str, Optional[str]]:
@@ -302,7 +337,9 @@ class RateLimitService:
         payload_json: Optional[Dict[str, Any]] = None,
     ) -> LimitDecision:
         """Atomically reserve RPM and daily capacity before expensive preprocessing."""
-        output_tokens = cls.requested_output_tokens(payload_json)
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         max_output_tokens = cls._provider_limit(
             provider,
             "MAX_OUTPUT_TOKENS",
@@ -443,7 +480,9 @@ class RateLimitService:
             return size_decision
 
         input_tokens = cls.estimate_input_tokens(payload_json)
-        output_tokens = cls.requested_output_tokens(payload_json)
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         estimated_tokens = input_tokens + output_tokens
         max_prompt_tokens = cls._provider_limit(
             provider,
@@ -651,23 +690,9 @@ class RateLimitService:
             return size_decision
 
         input_tokens = cls.estimate_input_tokens(payload_json)
-        output_tokens = cls.requested_output_tokens(payload_json)
-        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
-            "0",
-            "false",
-            "no",
-        }:
-            return LimitDecision(
-                True,
-                metadata={
-                    **size_decision.metadata,
-                    "provider": provider,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "estimated_tokens": input_tokens + output_tokens,
-                },
-            )
-
+        output_tokens, invalid_output = cls._validated_output_tokens(payload_json)
+        if invalid_output is not None:
+            return invalid_output
         max_prompt_tokens = cls._provider_limit(provider, "MAX_PROMPT_TOKENS", 128000)
         max_output_tokens = cls._provider_limit(provider, "MAX_OUTPUT_TOKENS", 8192)
         if input_tokens > max_prompt_tokens:
@@ -685,6 +710,22 @@ class RateLimitService:
                 error="max_output_too_large",
                 message="Requested output token count exceeds the configured maximum.",
                 metadata={"output_tokens": output_tokens, "max_output_tokens": max_output_tokens},
+            )
+
+        if os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in {
+            "0",
+            "false",
+            "no",
+        }:
+            return LimitDecision(
+                True,
+                metadata={
+                    **size_decision.metadata,
+                    "provider": provider,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "estimated_tokens": input_tokens + output_tokens,
+                },
             )
 
         identity, key_prefix = cls._identity_for_user(user, remote_addr)

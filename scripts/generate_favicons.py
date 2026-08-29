@@ -18,7 +18,7 @@ def generate_favicons():
         # Check if source SVG exists
         svg_path = os.path.join(static_dir, 'favicon.svg')
         if not os.path.exists(svg_path):
-            logger.error(f"Source favicon.svg not found at {svg_path}")
+            logger.error("Source favicon.svg was not found")
             # Generate a default favicon if SVG is missing
             generate_default_favicon()
             return
@@ -73,8 +73,8 @@ def generate_favicons():
         import json
         with open(os.path.join(static_dir, 'site.webmanifest'), 'w') as f:
             json.dump(manifest, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error generating favicons: {str(e)}")
+    except Exception as error:
+        logger.error("Favicon generation failed type=%s", type(error).__name__)
         # Generate a default favicon on error
         generate_default_favicon()
 
@@ -89,4 +89,4 @@ def generate_default_favicon():
     img.save(os.path.join(static_dir, 'favicon.ico'))
 
 if __name__ == '__main__':
-    generate_favicons() 
+    generate_favicons()

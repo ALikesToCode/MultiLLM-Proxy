@@ -72,7 +72,7 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v10", worker)
+        self.assertIn("multillm-proxy-v11", worker)
         for asset in (
             "/static/css/shell.css",
             "/static/css/auto-routes.css?v=7",
@@ -88,6 +88,16 @@ class ControlPlaneUiTest(unittest.TestCase):
         ):
             self.assertIn(asset, worker)
         self.assertNotIn("/static/css/openrouter.css", worker)
+
+    def test_one_time_api_key_is_removed_from_the_dom_when_closed(self):
+        users_script = self.read("static/js/users.js")
+
+        self.assertIn(
+            "secretDialog?.addEventListener('close', clearSecret)",
+            users_script,
+        )
+        self.assertIn("secretValue.textContent = '';", users_script)
+        self.assertIn("clearSecret();", users_script)
 
     def test_live_documentation_is_linked_and_uses_safe_external_rendering(self):
         base = self.read("templates/base.html")

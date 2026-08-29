@@ -35,9 +35,9 @@ def _handle_gemini_request(
     api_provider: str,
 ) -> requests.Response:
     """
-    Handle Gemini requests with safety settings disabled
+    Handle Gemini requests while preserving caller safety settings
     """
-    logger.info(f"Handling {api_provider} request to {url}")
+    logger.info("Handling %s request", api_provider)
     
     try:
         # Extract API key from URL parameters and rebuild the URL without it
@@ -73,33 +73,15 @@ def _handle_gemini_request(
                 raise APIError(f"No API key found for {api_provider}", status_code=401)
             logger.info(f"Using API key from AuthService for {api_provider}")
         
-        # Add API key to params
-        if not params:
-            params = {}
-        params['key'] = api_key
-            
-        # Process the request data to disable safety settings
+        # Keep credentials out of URLs and preserve any caller-provided
+        # safetySettings instead of weakening them inside the proxy.
+        headers["x-goog-api-key"] = api_key
+
         if request_data:
-            # Make sure we have safety settings that disable content filtering
-            safety_settings = [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ]
-            
-            # Overwrite any existing safety settings
-            request_data["safetySettings"] = safety_settings
-            
-            # Add web search capability if needed
-            if 'webSearch' not in request_data and api_provider == 'gemini':
-                request_data["webSearch"] = True
-                request_data["webSearchSpec"] = {"disableSearch": False}
-            
-            # Re-encode the modified data
+            # Re-encode the caller's request without changing its safety policy.
             data = json.dumps(request_data).encode('utf-8')
             headers["Content-Length"] = str(len(data))
-            logger.info(f"Modified {api_provider} request data to disable safety settings")
+            logger.info("Prepared %s request data", api_provider)
         
         # Make the request with the modified data
         return cls._make_base_request(
@@ -112,12 +94,14 @@ def _handle_gemini_request(
             use_cache=use_cache
         )
         
-    except Exception as e:
-        error_msg = f"Error in _handle_gemini_request: {str(e)}"
-        logger.error(error_msg)
-        if isinstance(e, APIError):
+    except Exception as error:
+        logger.error(
+            "Gemini request failed (%s)",
+            type(error).__name__,
+        )
+        if isinstance(error, APIError):
             raise
-        raise APIError(error_msg, status_code=500)
+        raise APIError("Gemini request failed", status_code=500)
 ```
 
 ## 2. Testing the Integration
@@ -150,6 +134,6 @@ curl -X POST "http://localhost:1400/gemma/models/gemma-2-9b:generateContent" \
 
 - Support for Gemini models via the Generative Language API
 - Support for Gemma models via the Generative Language API
-- Automatic disabling of safety settings to prevent content filtering
-- Web search capability for Gemini models
-- API key management through environment variables 
+- Preservation of caller-provided safety settings
+- Opt-in web search capability for Gemini models
+- API key management through environment variables
