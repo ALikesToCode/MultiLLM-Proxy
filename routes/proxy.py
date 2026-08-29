@@ -12,7 +12,7 @@ from error_handlers import INTERNAL_ERROR_MESSAGE, APIError
 from providers.aihubmix import (
     build_aihubmix_url,
     is_valid_aihubmix_request,
-    request_with_aihubmix_origin_fallback,
+    request_with_origin_fallback,
 )
 from providers.nanogpt import (
     build_nanogpt_url,
@@ -33,7 +33,11 @@ from providers.opencode_go import (
     opencode_go_has_caller_auth,
 )
 from providers.registry import get_adapter
-from providers.image_relays import image_relay_spec, is_valid_image_relay_request
+from providers.image_relays import (
+    image_relay_backup_base_url,
+    image_relay_spec,
+    is_valid_image_relay_request,
+)
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from route_helpers import (
@@ -380,11 +384,16 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     force_raw_passthrough=raw_passthrough,
                 )
 
-            if api_provider == "aihubmix":
-                response = request_with_aihubmix_origin_fallback(
+            backup_origin = (
+                app.config["AIHUBMIX_BACKUP_BASE_URL"]
+                if api_provider == "aihubmix"
+                else image_relay_backup_base_url(api_provider)
+            )
+            if backup_origin:
+                response = request_with_origin_fallback(
                     lambda origin: send_to_url(build_aihubmix_url(origin, path)),
                     primary_origin=base_url,
-                    secondary_origin=app.config["AIHUBMIX_BACKUP_BASE_URL"],
+                    secondary_origin=backup_origin,
                     method=request.method,
                     request_headers=request.headers,
                 )

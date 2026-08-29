@@ -55,6 +55,7 @@ class ImageRelaySpec:
     base_url: str
     credential_env: str
     models: tuple[str, ...]
+    backup_base_url: str | None = None
     supports_chat: bool = True
     supports_edits: bool = True
 
@@ -71,6 +72,7 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         provider="a6api",
         display_name="A6api",
         base_url="https://api.a6api.com",
+        backup_base_url=None,
         credential_env="A6API_API_KEY",
         models=("gpt-image-2",),
     ),
@@ -78,6 +80,7 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         provider="aimlapi",
         display_name="AI/ML API",
         base_url="https://api.aimlapi.com",
+        backup_base_url=None,
         credential_env="AIMLAPI_API_KEY",
         models=("openai/gpt-image-2",),
     ),
@@ -85,13 +88,24 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         provider="ephone",
         display_name="ePhone AI",
         base_url="https://api.ephone.ai",
+        backup_base_url=None,
         credential_env="EPHONE_API_KEY",
         models=("gpt-image-2",),
+    ),
+    ImageRelaySpec(
+        provider="gguu",
+        display_name="GGUU AI",
+        base_url="https://gguuai.com",
+        backup_base_url="https://api.aiaimax.com",
+        credential_env="GGUU_API_KEY",
+        models=("gpt-image-2",),
+        supports_chat=False,
     ),
     ImageRelaySpec(
         provider="latix",
         display_name="Latix",
         base_url="https://api.latix.ai",
+        backup_base_url=None,
         credential_env="LATIX_API_KEY",
         models=("gpt-image-2",),
     ),
@@ -150,6 +164,13 @@ def _validated_credential_env(value: Any, provider: str) -> str:
     return candidate
 
 
+def _validated_optional_base_url(value: Any, primary: str) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    backup = _validated_base_url(value)
+    return None if backup == primary else backup
+
+
 def _validated_models(value: Any, provider: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise ValueError(f"Image relay {provider} must declare at least one model")
@@ -180,10 +201,15 @@ def _custom_spec(provider: str, raw: Any) -> ImageRelaySpec:
     if not isinstance(raw, dict):
         raise ValueError(f"Image relay {provider} must be a JSON object")
     display_name = str(raw.get("display_name") or provider).strip()[:80]
+    base_url = _validated_base_url(raw.get("base_url"))
     return ImageRelaySpec(
         provider=provider,
         display_name=display_name or provider,
-        base_url=_validated_base_url(raw.get("base_url")),
+        base_url=base_url,
+        backup_base_url=_validated_optional_base_url(
+            raw.get("backup_base_url"),
+            base_url,
+        ),
         credential_env=_validated_credential_env(
             raw.get("credential_env"),
             provider,
@@ -245,6 +271,11 @@ def image_relay_spec(provider: str) -> ImageRelaySpec | None:
 
 def image_relay_base_urls() -> dict[str, str]:
     return {spec.provider: spec.base_url for spec in image_relay_specs()}
+
+
+def image_relay_backup_base_url(provider: str) -> str | None:
+    spec = image_relay_spec(provider)
+    return spec.backup_base_url if spec else None
 
 
 def image_relay_model_ids(provider: str) -> tuple[str, ...]:

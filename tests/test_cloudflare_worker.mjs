@@ -496,6 +496,7 @@ test("container envVars are derived from the live Durable Object env", () => {
       A6API_API_KEY: "a6api-live-key",
       AIMLAPI_API_KEY: "aimlapi-live-key",
       EPHONE_API_KEY: "ephone-live-key",
+      GGUU_API_KEY: "gguu-live-key",
       LATIX_API_KEY: "latix-live-key",
       IMAGE_RELAY_PROVIDERS_JSON:
         '{"myrelay":{"base_url":"https://images.example.com","models":["gpt-image-2"]}}',
@@ -558,6 +559,7 @@ test("container envVars are derived from the live Durable Object env", () => {
   assert.equal(container.envVars.A6API_API_KEY, "a6api-live-key");
   assert.equal(container.envVars.AIMLAPI_API_KEY, "aimlapi-live-key");
   assert.equal(container.envVars.EPHONE_API_KEY, "ephone-live-key");
+  assert.equal(container.envVars.GGUU_API_KEY, "gguu-live-key");
   assert.equal(container.envVars.LATIX_API_KEY, "latix-live-key");
   assert.equal(
     container.envVars.IMAGE_RELAY_PROVIDERS_JSON,

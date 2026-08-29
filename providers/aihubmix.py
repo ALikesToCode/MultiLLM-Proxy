@@ -356,7 +356,7 @@ def _is_transport_failure_response(response: Any) -> bool:
     return isinstance(error, Mapping) and error.get("type") == "upstream_transport_error"
 
 
-def request_with_aihubmix_origin_fallback(
+def request_with_origin_fallback(
     send_request: Callable[[str], _ResponseT],
     *,
     primary_origin: str,
@@ -364,7 +364,7 @@ def request_with_aihubmix_origin_fallback(
     method: str,
     request_headers: Mapping[str, Any],
 ) -> _ResponseT:
-    """Try the secondary origin only after a definite replay-safe transport failure."""
+    """Try a secondary origin only after a definite replay-safe transport failure."""
     response = send_request(primary_origin)
     replay_safe = (
         method.upper() in _SAFE_FAILOVER_METHODS
@@ -381,3 +381,21 @@ def request_with_aihubmix_origin_fallback(
     if callable(close):
         close()
     return send_request(secondary_origin)
+
+
+def request_with_aihubmix_origin_fallback(
+    send_request: Callable[[str], _ResponseT],
+    *,
+    primary_origin: str,
+    secondary_origin: str,
+    method: str,
+    request_headers: Mapping[str, Any],
+) -> _ResponseT:
+    """Backward-compatible AIHubMix wrapper around bounded origin failover."""
+    return request_with_origin_fallback(
+        send_request,
+        primary_origin=primary_origin,
+        secondary_origin=secondary_origin,
+        method=method,
+        request_headers=request_headers,
+    )

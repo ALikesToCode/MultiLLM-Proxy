@@ -27,12 +27,20 @@ class FeatureInventoryTest(unittest.TestCase):
     def test_every_openai_compatible_provider_spec_builds_an_adapter(self):
         registry = build_default_registry(Config.API_BASE_URLS)
         expected = {provider for provider, _path, _capabilities in PROVIDER_SPECS}
-        expected.update(spec.provider for spec in image_relay_specs())
+        relay_specs = {spec.provider: spec for spec in image_relay_specs()}
+        expected.update(relay_specs)
 
         self.assertEqual(set(registry), expected)
         for provider, adapter in registry.items():
             with self.subTest(provider=provider):
-                self.assertTrue(adapter.capabilities().supports_chat)
+                if relay_spec := relay_specs.get(provider):
+                    self.assertEqual(
+                        adapter.capabilities().supports_chat,
+                        relay_spec.supports_chat,
+                    )
+                    self.assertTrue(adapter.capabilities().supports_images)
+                else:
+                    self.assertTrue(adapter.capabilities().supports_chat)
                 self.assertTrue(adapter.chat_completions_url().startswith("https://"))
 
 

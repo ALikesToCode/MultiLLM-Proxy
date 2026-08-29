@@ -10,8 +10,9 @@ from error_handlers import APIError
 from providers.aihubmix import (
     build_aihubmix_url,
     normalize_aihubmix_image_response,
-    request_with_aihubmix_origin_fallback,
+    request_with_origin_fallback,
 )
+from providers.image_relays import image_relay_backup_base_url
 from route_helpers import copy_raw_provider_response_headers
 
 
@@ -25,13 +26,14 @@ def send_unified_provider_request(
     upstream_path: str,
     request_headers: Mapping[str, Any],
 ):
-    """Send one unified request with AIHubMix's bounded origin fallback."""
-    if provider != "aihubmix":
+    """Send one unified request with bounded, replay-safe origin fallback."""
+    secondary_origin = secondary_origin or image_relay_backup_base_url(provider)
+    if secondary_origin is None and provider != "aihubmix":
         return proxy_service_cls.make_request(**request_kwargs)
     if secondary_origin is None:
         raise APIError("AIHubMix backup origin is not configured", status_code=500)
 
-    return request_with_aihubmix_origin_fallback(
+    return request_with_origin_fallback(
         lambda origin: proxy_service_cls.make_request(
             **{
                 **request_kwargs,

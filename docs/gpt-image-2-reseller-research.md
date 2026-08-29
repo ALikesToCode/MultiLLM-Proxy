@@ -1,16 +1,17 @@
 # GPT Image 2 relay research
 
-Verified against public provider pages on 2026-08-28. Prices, model routes, and retention terms can change without notice. Treat the entries below as a qualification snapshot, then re-check the provider dashboard before adding funds.
+Verified against public provider pages on 2026-08-29. Prices, model routes, and retention terms can change without notice. Treat the entries below as a qualification snapshot, then re-check the provider dashboard before adding funds.
 
 ## Recommendation
 
 Use the routes in this order:
 
 1. **AIHubMix free** for zero-cost validation while the free model remains available.
-2. **Together AI** for a conventional OpenAI-compatible production route with an explicit account privacy control.
-3. **Latix** for low-risk testing after confirming the current dashboard price and the exact debug-log retention period.
-4. **AIMLAPI, A6api, or ePhone** only for non-sensitive workloads until their API-data retention terms are made precise.
-5. **Replicate, fal, Runware, Cloudflare Workers AI, or Vercel AI Gateway** through dedicated adapters, not the generic OpenAI-compatible relay configuration.
+2. **GGUU AI** for the funded low-cost trial: its live catalog and guide advertise one flat ¥0.04 price across 1K, 2K, and 4K with `quality=high` supported.
+3. **Together AI** for a conventional OpenAI-compatible production route with an explicit account privacy control.
+4. **Latix** for low-risk testing after confirming the current dashboard price and the exact debug-log retention period.
+5. **AIMLAPI, A6api, or ePhone** only for non-sensitive workloads until their API-data retention terms are made precise.
+6. **Replicate, fal, Runware, Cloudflare Workers AI, or Vercel AI Gateway** through dedicated adapters, not the generic OpenAI-compatible relay configuration.
 
 Do not pre-fund an opaque relay based only on a comparison-table price. Run the same 20–50 prompts and measure successful-generation cost, latency, edit fidelity, refusals, output provenance, and support responsiveness first.
 
@@ -19,6 +20,7 @@ Do not pre-fund an opaque relay based only on a comparison-table price. Run the 
 | Provider | Observed GPT Image 2 route | Protocol | Observed price | API-data posture | MultiLLM support |
 | --- | --- | --- | --- | --- | --- |
 | [AIHubMix](https://aihubmix.com/model/gpt-image-2-free/llms.txt) | `gpt-image-2-free` | OpenAI Images | Free route advertised | Review current account terms before sensitive use | First-class `aihubmix:gpt-image-2-free` |
+| [GGUU AI](https://gguuai.com) | `gpt-image-2` | OpenAI-compatible generation/edit | Live catalog showed ¥0.04/image with 1K/2K/4K at the same price; current guide supports `quality=high` | Precise API payload-retention terms were not established; keep sensitive workloads out until verified | First-class `gguu:gpt-image-2` with bounded `api.aiaimax.com` backup |
 | [Together AI](https://www.together.ai/models/gpt-image-2) | `openai/gpt-image-2` | OpenAI-compatible Images | $0.053/image on the inspected model page | Account setting can disable storage/training; verify it after signup | First-class `together:openai/gpt-image-2` |
 | [Latix](https://api.latix.ai) | `gpt-image-2` | OpenAI-compatible Images | Dashboard verification required | Public material says prompts/outputs are not persistently stored, with short debugging logs; duration was not precise | First-class `latix:gpt-image-2` |
 | [A6api](https://a6api.com) | `gpt-image-2` | OpenAI-compatible generation/edit | Dashboard verification required | Terms describe forwarding and necessary retention without a precise API payload period | First-class `a6api:gpt-image-2` |
@@ -38,6 +40,7 @@ No passwords, OAuth tokens, API keys, or mailbox identifiers are stored in this 
 
 | Provider | Status | Next manual step |
 | --- | --- | --- |
+| GGUU AI | Funded trial account | Create an image-group API token and run a small high-quality 4K smoke test |
 | Together AI | Google OAuth initiated | Select the already signed-in account and approve Google consent in the visible browser |
 | Latix | Not started | Complete its Google OAuth flow after Together is finished |
 | A6api | Not started | Complete Google OAuth, then inspect terms and pricing before funding |
@@ -69,6 +72,7 @@ TOGETHER_API_KEY=...
 A6API_API_KEY=...
 AIMLAPI_API_KEY=...
 EPHONE_API_KEY=...
+GGUU_API_KEY=...
 LATIX_API_KEY=...
 ```
 
@@ -88,7 +92,7 @@ curl "$PROXY_BASE_URL/latix/v1/images/edits" \
 Set a public, credential-free HTTPS origin and declare only the models that actually generate images:
 
 ```dotenv
-IMAGE_RELAY_PROVIDERS_JSON='{"myrelay":{"display_name":"My Relay","base_url":"https://api.example.com","credential_env":"MYRELAY_API_KEY","models":["gpt-image-2"],"supports_chat":true,"supports_edits":true}}'
+IMAGE_RELAY_PROVIDERS_JSON='{"myrelay":{"display_name":"My Relay","base_url":"https://api.example.com","backup_base_url":"https://api-backup.example.com","credential_env":"MYRELAY_API_KEY","models":["gpt-image-2"],"supports_chat":true,"supports_edits":true}}'
 MYRELAY_API_KEY=...
 ```
 

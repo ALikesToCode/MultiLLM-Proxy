@@ -25,6 +25,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - NanoGPT
   - NavyAI
   - AIHubMix
+  - GGUU AI image generation
   - Codex Everywhere
   - Kimi Code
   - LinkAPI
