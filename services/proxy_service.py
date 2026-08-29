@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
 from error_handlers import APIError
 from config import Config
+from request_validation import decode_json_object_bytes, validated_gemini_model_id
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
@@ -16,6 +17,7 @@ from services.upstream_errors import (
     authentication_error_response,
     stream_error_event,
 )
+from services.upstream_transport import close_retry_response, iter_stream_lines
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -36,7 +38,6 @@ from providers.opencode_go import (
     opencode_go_caller_authorization,
 )
 from streaming.openai import sanitize_openai_stream_payload
-from streaming.sse import iter_sse_data
 import time
 import uuid
 import flask
@@ -50,7 +51,6 @@ logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # Seconds
-GEMINI_MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class _RejectAllCookiesPolicy(DefaultCookiePolicy):
@@ -203,16 +203,6 @@ class ProxyService:
         if isinstance(error, requests.exceptions.ConnectTimeout):
             return True
         return method.upper() in cls.SAFE_RETRY_METHODS and not data
-
-    @staticmethod
-    def _close_retry_response(response: requests.Response) -> None:
-        try:
-            response.close()
-        except Exception as error:
-            logger.warning(
-                "Retry response cleanup failed type=%s",
-                type(error).__name__,
-            )
 
     @classmethod
     def _circuit_open_response(cls, api_provider: str) -> Optional[requests.Response]:
@@ -1291,7 +1281,7 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
-                cls._close_retry_response(response)
+                close_retry_response(response)
                 time.sleep(RETRY_DELAY * (retry_count + 1))
                 return cls._make_base_request(
                     method=method,
@@ -1350,7 +1340,7 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
-                        cls._close_retry_response(response)
+                        close_retry_response(response)
                         time.sleep(RETRY_DELAY * (retry_count + 1))
                         return cls._make_base_request(
                             method=method,
@@ -2418,19 +2408,6 @@ class ProxyService:
         return url.replace(":generateContent", ":countTokens", 1)
 
     @staticmethod
-    def _validated_gemini_model_id(value: Any) -> str:
-        """Return a bare Gemini model ID that cannot alter the request URL."""
-        if not isinstance(value, str):
-            raise APIError("Gemini model must be a string", status_code=400)
-
-        model_id = value.strip()
-        if model_id.startswith("models/"):
-            model_id = model_id.removeprefix("models/")
-        if not GEMINI_MODEL_ID_PATTERN.fullmatch(model_id):
-            raise APIError("Invalid Gemini model identifier", status_code=400)
-        return model_id
-
-    @staticmethod
     def _gemini_count_tokens_payload(request_data: Dict[str, Any]) -> Dict[str, Any]:
         count_payload = {
             "generateContentRequest": {
@@ -2643,7 +2620,7 @@ class ProxyService:
                 )
                 
                 # Get model from request data or use default
-                model = cls._validated_gemini_model_id(
+                model = validated_gemini_model_id(
                     request_data.get('model', default_model)
                 )
                 
@@ -3285,39 +3262,6 @@ class ProxyService:
             )
             return stream_error_event(model=f"{provider}-stream")
 
-    @staticmethod
-    def _iter_stream_content(response: requests.Response) -> Generator[bytes, None, None]:
-        """Yield decoded upstream bytes as soon as the socket exposes them."""
-        raw_response = getattr(response, "raw", None)
-        raw_read1 = getattr(raw_response, "read1", None)
-        if callable(raw_read1):
-            while True:
-                chunk = raw_read1(64 * 1024, decode_content=True)
-                if not chunk:
-                    return
-                yield chunk
-
-        yield from response.iter_content(chunk_size=128)
-
-    @staticmethod
-    def _iter_stream_lines(response: requests.Response) -> Generator[str, None, None]:
-        content_type = response.headers.get("content-type", "").lower()
-        if content_type.startswith("text/event-stream") and hasattr(response, "iter_content"):
-            try:
-                for data_payload in iter_sse_data(
-                    ProxyService._iter_stream_content(response)
-                ):
-                    yield f"data: {data_payload}"
-                return
-            except Exception as error:
-                logger.warning(
-                    "SSE parser failed; falling back to line iteration type=%s",
-                    type(error).__name__,
-                )
-
-        for line in response.iter_lines(decode_unicode=True):
-            yield line
-
     @classmethod
     def _create_streaming_response(cls, response: requests.Response, provider: str) -> Generator:
         """
@@ -3339,7 +3283,7 @@ class ProxyService:
             # yields bytes. Keep every encoded SSE response on the same
             # incremental path so the first complete event can be forwarded
             # without buffering the rest of the generation.
-            for line in cls._iter_stream_lines(response):
+            for line in iter_stream_lines(response):
                 if provider == "opencode":
                     line, inside_reasoning_block = cls._strip_reasoning_block_markup(
                         line,
@@ -3416,7 +3360,7 @@ class ProxyService:
                 )
 
             # Check if this is a streaming request
-            request_data = cls._decode_json_request_data(data)
+            request_data = decode_json_object_bytes(data)
             is_streaming = bool(request_data.get('stream', False))
             if api_provider == "nanogpt" and is_streaming:
                 headers["Accept"] = "text/event-stream"
@@ -3505,19 +3449,6 @@ class ProxyService:
                 type(error).__name__,
             )
             raise APIError("Provider request dispatch failed", status_code=500) from error
-
-    @staticmethod
-    def _decode_json_request_data(data: Optional[bytes]) -> Dict[str, Any]:
-        """
-        Decode an optional JSON request body for provider-specific dispatch.
-        """
-        if not data:
-            return {}
-
-        parsed = json.loads(data)
-        if isinstance(parsed, dict):
-            return parsed
-        return {}
 
     @classmethod
     def shutdown(cls):
