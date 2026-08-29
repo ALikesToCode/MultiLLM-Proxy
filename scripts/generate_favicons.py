@@ -89,4 +89,4 @@ def generate_default_favicon():
     img.save(os.path.join(static_dir, 'favicon.ico'))
 
 if __name__ == '__main__':
-    generate_favicons() 
+    generate_favicons()

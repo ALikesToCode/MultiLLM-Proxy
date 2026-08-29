@@ -136,4 +136,4 @@ curl -X POST "http://localhost:1400/gemma/models/gemma-2-9b:generateContent" \
 - Support for Gemma models via the Generative Language API
 - Preservation of caller-provided safety settings
 - Opt-in web search capability for Gemini models
-- API key management through environment variables 
+- API key management through environment variables

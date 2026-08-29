@@ -75,4 +75,4 @@ class CacheService:
         except Exception as error:
             logger.error("Cache key generation failed type=%s", type(error).__name__)
             # Return a safe fallback key
-            return f"{method}:{url}:error-{hash(str(body) if body else '')}" 
+            return f"{method}:{url}:error-{hash(str(body) if body else '')}"
