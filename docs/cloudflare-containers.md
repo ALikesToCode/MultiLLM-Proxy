@@ -128,7 +128,12 @@ Kimi Code generation is Chat Completions only in this integration. Use model `k3
 
 The Worker authenticates the caller with `ADMIN_API_KEY` before forwarding valid chat requests to Flask. Flask replaces the caller credential with `KIMI_CODE_API_KEY` and preserves the OpenAI-compatible request/response stream. The raw route bypasses unified request-size checks, rate limits, and accounting; use `/v1/chat/completions` with model `kimi-code:k3` when those controls are required. Chat generation is single-attempt to avoid duplicated work and billing.
 
-`LINKAPI_KEY` is used both by the direct Worker fast path and the Container fallback. `LINKAPI_API_KEY` is supported as an alias, but `LINKAPI_KEY` is preferred. The optional, non-secret `LINKAPI_BASE_URL` variable defaults to `https://api.linkapi.ai` and is restricted to the Worker's allowlist of official LinkAPI hosts; arbitrary HTTPS origins are rejected.
+`LINKAPI_KEY` is used both by the direct Worker fast path and the Container
+fallback. `LINKAPI_API_KEY` is supported as an alias, but `LINKAPI_KEY` is
+preferred. The optional, non-secret `LINKAPI_BASE_URL` variable defaults to
+LinkAPI's HK direct origin, `https://hk.linkapi.ai`, and is restricted to the
+Worker's allowlist of official LinkAPI hosts; arbitrary HTTPS origins are
+rejected.
 
 ### LinkAPI native routes
 

@@ -1511,7 +1511,7 @@ test("worker deploy config keeps LinkAPI secrets private and samples observabili
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  assert.equal(config.vars?.LINKAPI_BASE_URL, "https://api.linkapi.ai");
+  assert.equal(config.vars?.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
   assert.equal(config.vars?.LINKAPI_KEY, undefined);
   assert.equal(config.vars?.LINKAPI_API_KEY, undefined);
   assert.equal(config.compatibility_flags?.includes("nodejs_compat"), true);

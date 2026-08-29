@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,8 +16,24 @@ from services.proxy_service import ProxyService
 
 class LinkAPIProviderRegistrationTest(unittest.TestCase):
     def test_linkapi_uses_official_base_url_and_long_running_timeout(self):
-        self.assertEqual(Config.API_BASE_URLS["linkapi"], "https://api.linkapi.ai")
+        self.assertEqual(Config.API_BASE_URLS["linkapi"], "https://hk.linkapi.ai")
         self.assertEqual(Config.API_TIMEOUTS["linkapi"], (5, 600))
+
+    def test_linkapi_base_url_override_reaches_flask_transport(self):
+        environment = {**os.environ, "LINKAPI_BASE_URL": "https://jp.linkapi.ai"}
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from config import Config; print(Config.API_BASE_URLS['linkapi'])",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+        self.assertEqual(result.stdout.strip(), "https://jp.linkapi.ai")
 
     def test_linkapi_adapter_exposes_openai_compatible_chat_metadata(self):
         adapter = get_adapter("linkapi", Config.API_BASE_URLS)
@@ -23,7 +41,7 @@ class LinkAPIProviderRegistrationTest(unittest.TestCase):
         self.assertIsNotNone(adapter)
         self.assertEqual(
             adapter.chat_completions_url(),
-            "https://api.linkapi.ai/v1/chat/completions",
+            "https://hk.linkapi.ai/v1/chat/completions",
         )
         capabilities = adapter.capabilities()
         self.assertTrue(capabilities.supports_chat)

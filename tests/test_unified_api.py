@@ -269,7 +269,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(request_kwargs["api_provider"], "linkapi")
         self.assertEqual(
             request_kwargs["url"],
-            "https://api.linkapi.ai/v1/images/generations",
+            "https://hk.linkapi.ai/v1/images/generations",
         )
         self.assertEqual(request_kwargs["params"], [("trace", "image")])
         self.assertFalse(request_kwargs["use_cache"])
@@ -566,7 +566,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.headers["Request-ID"], "req_linkapi")
         request_kwargs = make_request.call_args.kwargs
         self.assertEqual(request_kwargs["api_provider"], "linkapi")
-        self.assertEqual(request_kwargs["url"], "https://api.linkapi.ai/v1/responses")
+        self.assertEqual(request_kwargs["url"], "https://hk.linkapi.ai/v1/responses")
         self.assertEqual(
             request_kwargs["params"],
             [("include", "usage"), ("include", "output_text")],
@@ -615,7 +615,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(request_kwargs["api_provider"], "linkapi")
         self.assertEqual(
             request_kwargs["url"],
-            "https://api.linkapi.ai/v1/chat/completions",
+            "https://hk.linkapi.ai/v1/chat/completions",
         )
         self.assertEqual(
             request_kwargs["params"],
@@ -862,7 +862,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         request_kwargs = make_request.call_args.kwargs
         self.assertEqual(
             request_kwargs["url"],
-            "https://api.linkapi.ai/v1/images/generations",
+            "https://hk.linkapi.ai/v1/images/generations",
         )
         self.assertEqual(request_kwargs["data"], native_request)
         self.assertEqual(
@@ -906,7 +906,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         request_kwargs = make_request.call_args.kwargs
         self.assertEqual(
             request_kwargs["url"],
-            "https://api.linkapi.ai/v1/images/edits",
+            "https://hk.linkapi.ai/v1/images/edits",
         )
         self.assertEqual(request_kwargs["data"], native_request)
         self.assertEqual(

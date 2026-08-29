@@ -114,7 +114,11 @@ Configure the upstream credential as a Worker secret:
 npx wrangler secret put LINKAPI_KEY
 ```
 
-`LINKAPI_BASE_URL` is an optional, non-secret Worker variable. It defaults to `https://api.linkapi.ai` and is restricted to the Worker's allowlist of official LinkAPI hosts; arbitrary HTTPS origins are rejected. `LINKAPI_API_KEY` remains a compatibility alias, but `LINKAPI_KEY` is the preferred name.
+`LINKAPI_BASE_URL` is an optional, non-secret Worker variable. It defaults to
+LinkAPI's HK direct origin, `https://hk.linkapi.ai`, for both Worker and
+Container requests. It is restricted to the Worker's allowlist of official
+LinkAPI hosts; arbitrary HTTPS origins are rejected. `LINKAPI_API_KEY` remains
+a compatibility alias, but `LINKAPI_KEY` is the preferred name.
 
 Native routes keep their upstream protocol shape:
 

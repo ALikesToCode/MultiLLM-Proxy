@@ -9,6 +9,11 @@ Official references:
 - [LinkAPI documentation](https://docs.linkapi.ai/)
 - [Live model catalog and pricing](https://linkapi.ai/pricing)
 
+The deployed default is LinkAPI's HK direct origin,
+`https://hk.linkapi.ai`. Set `LINKAPI_BASE_URL` to another allowlisted official
+origin only when regional measurements justify it; both the direct Worker path
+and controlled Flask path use the same configured origin.
+
 ## Configuration
 
 Set the upstream LinkAPI credential as `LINKAPI_KEY`. `LINKAPI_API_KEY` remains

@@ -159,7 +159,10 @@ class Config:
         'mimo': 'https://token-plan-sgp.xiaomimimo.com/v1',
         'nanogpt': NANOGPT_TEXT_BASE_URL,
         'navyai': os.environ.get('NAVYAI_BASE_URL', 'https://api.navy'),
-        'linkapi': 'https://api.linkapi.ai',
+        'linkapi': os.environ.get(
+            'LINKAPI_BASE_URL',
+            'https://hk.linkapi.ai',
+        ),
         'aihubmix': AIHUBMIX_BASE_URL,
         'codex-easy': 'https://codex-easy.ai',
         'kimi-code': 'https://api.kimi.com/coding/v1',

@@ -150,8 +150,8 @@ KIMI_CODE_API_KEY=your-kimi-code-key
 # LinkAPI (preferred key name)
 LINKAPI_KEY=your-linkapi-key
 
-# Optional Cloudflare Worker fast-path override; Flask uses the global endpoint
-LINKAPI_BASE_URL=https://api.linkapi.ai
+# Optional official-origin override used by both Worker and Flask paths
+LINKAPI_BASE_URL=https://hk.linkapi.ai
 
 # PaLM API
 PALM_API_KEY=your-palm-api-key
