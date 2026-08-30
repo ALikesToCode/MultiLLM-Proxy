@@ -47,7 +47,10 @@ const FIELD_ALIASES = Object.freeze([
   ["Pose", ["pose"], "current"],
   ["Setting", ["setting"], "current"],
   ["Secondary subjects", ["secondary_subjects"], "current"],
+  ["Camera and composition", ["camera", "composition"], "current"],
   ["Composition", ["composition"], "current"],
+  ["Lighting and rendering", ["lighting", "rendering"], "current"],
+  ["Rendering and lighting", ["rendering", "lighting"], "current"],
   ["Rendering", ["rendering"], "current"],
   ["Background/setting", ["setting"], "legacy"],
   ["Main character focus", ["primary_subject"], "legacy"],
@@ -62,7 +65,11 @@ const FIELD_ALIASES = Object.freeze([
 ]);
 
 function normalizedLabel(value) {
-  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s*(?:&|\/|\+)\s*/g, " and ")
+    .replace(/\s+/g, " ");
 }
 
 const ALIAS_BY_LABEL = new Map(

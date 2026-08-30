@@ -240,14 +240,22 @@ export function createObservedStream({
             if (!completedLeg) {
               const collected = collector.finish(decoder.decode());
               const outputLimited = collected.finishReason === "length";
+              const assistantAddition =
+                activeContinuationReason === "output_contract"
+                  ? collected.assistant.trimStart()
+                  : collected.assistant;
               let candidateAssistant = joinContinuationText(
                 assistant,
-                collected.assistant,
+                assistantAddition,
                 activeContinuationReason,
               );
+              const clientAddition =
+                activeContinuationReason === "output_contract"
+                  ? assistantAddition
+                  : collected.clientContent;
               let candidateClientContent = joinContinuationText(
                 clientContent,
-                collected.clientContent,
+                clientAddition,
                 activeContinuationReason,
               );
               let decision = typeof assessCompletion === "function"

@@ -90,6 +90,28 @@ test("legacy schema maps combined and renamed canonical fields", () => {
   assert.deepEqual(analysis.missingFields, []);
 });
 
+test("combined camera and lighting labels map to canonical fields", () => {
+  for (const cameraLabel of [
+    "Camera & Composition",
+    "Camera and Composition",
+    "Camera / Composition",
+    "Composition & Camera",
+  ]) {
+    const analysis = analyzeRoleplayOutputContract(
+      output([
+        `${cameraLabel}: first-person medium shot, subject centered.`,
+        "Primary subject: young adult woman with dark hair.",
+        "Setting: old library.",
+        "Lighting and rendering: warm sunset with soft shadows.",
+      ]),
+      REQUIRED_CONTRACT,
+    );
+
+    assert.equal(analysis.satisfied, true, cameraLabel);
+    assert.deepEqual(analysis.missingFields, [], cameraLabel);
+  }
+});
+
 test("mixed current and legacy aliases satisfy one canonical contract", () => {
   const analysis = analyzeRoleplayOutputContract(
     output([

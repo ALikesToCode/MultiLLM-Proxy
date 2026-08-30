@@ -142,14 +142,22 @@ export async function repairNonStreamingCompletion({
     }
 
     const leg = normalizedLeg(nextPayload, metadata);
+    const assistantAddition =
+      terminalReason === "output_contract"
+        ? leg.assistant.trimStart()
+        : leg.assistant;
     let candidateAssistant = joinContinuationText(
       assistant,
-      leg.assistant,
+      assistantAddition,
       terminalReason,
     );
+    const clientAddition =
+      terminalReason === "output_contract"
+        ? assistantAddition
+        : leg.clientContent;
     let candidateClientContent = joinContinuationText(
       clientContent,
-      leg.clientContent,
+      clientAddition,
       terminalReason,
     );
     const nextDecision = continuation.assess({

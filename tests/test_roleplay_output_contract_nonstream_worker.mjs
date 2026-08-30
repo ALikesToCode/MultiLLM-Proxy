@@ -36,6 +36,28 @@ function janitorJsonRequest(sessionId) {
   );
 }
 
+function completionWithReasoning(model, reasoning, content) {
+  return new Response(
+    JSON.stringify({
+      id: "chatcmpl-roleplay-reasoning",
+      object: "chat.completion",
+      model,
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content,
+            reasoning_content: reasoning,
+          },
+          finish_reason: "stop",
+        },
+      ],
+    }),
+    { headers: { "Content-Type": "application/json" } },
+  );
+}
+
 test("non-streaming completion repairs only missing canonical fields", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",
@@ -87,6 +109,69 @@ test("non-streaming completion repairs only missing canonical fields", async () 
         message.content.includes("Supply only these missing IMAGE PROMPT fields"),
     ),
   );
+});
+
+test("non-streaming contract repair hides continuation reasoning", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3-flash"] },
+    }),
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const initial = [
+    "*Mira points toward the marked shelf.*",
+    "",
+    "IMAGE PROMPT:",
+    "Camera: first-person medium shot.",
+    "Primary subject: young adult woman with dark hair.",
+    "Setting: old library at sunset.",
+  ].join("\n");
+  const repair = [
+    "Lighting: warm window light.",
+    "Composition: Mira centered beyond a foreground table.",
+  ].join("\n");
+  let calls = 0;
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    calls += 1;
+    const payload = JSON.parse(init.body);
+    return calls === 1
+      ? completionWithReasoning(
+          payload.model,
+          "Plan the visible scene.",
+          initial,
+        )
+      : completionWithReasoning(
+          payload.model,
+          "Identify the missing fields.",
+          repair,
+        );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      janitorJsonRequest("session-nonstream-hides-repair-reasoning"),
+      fixture.env,
+    ),
+  );
+  await fixture.waitForBackgroundWork();
+
+  const result = await response.json();
+  const content = result.choices[0].message.content;
+  assert.equal(response.status, 200);
+  assert.equal(calls, 2);
+  assert.equal(content.match(/<think>/g)?.length, 1);
+  assert.equal(content.match(/<\/think>/g)?.length, 1);
+  assert.equal(content.match(/\[provider:/g)?.length, 1);
+  assert.doesNotMatch(content, /Identify the missing fields/);
+  assert.match(content, /Mira points toward the marked shelf/);
+  assert.match(content, /Lighting: warm window light/);
+  assert.match(content, /Composition: Mira centered/);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  const assistant = messages.findLast((message) => message.role === "assistant");
+  assert.equal(assistant?.content, `${initial}\n${repair}`);
 });
 
 test("non-streaming no-progress repair is omitted from response and storage", async () => {

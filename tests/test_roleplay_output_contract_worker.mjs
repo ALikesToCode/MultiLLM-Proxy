@@ -83,6 +83,17 @@ function streamingStory(content, finishReason = "stop") {
   );
 }
 
+function streamingReasoningStory(reasoning, content, finishReason = "stop") {
+  return new Response(
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: reasoning }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: finishReason }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""),
+    { headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
 function reasoningOnlyEof() {
   return new Response(
     [
@@ -581,6 +592,129 @@ test("Janitor unlimited stream accepts stop after the required image prompt is c
   assert.match(body, /Mood: long shadows/);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+});
+
+test("combined image labels complete without a repair continuation", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3-flash"] },
+    }),
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const combined = [
+    "*Mira closes the book.*",
+    "",
+    "IMAGE PROMPT:",
+    "Camera & Composition: first-person medium shot, subject centered.",
+    "Primary subject: young adult woman with dark braids and a closed book.",
+    "Setting: old library beside a tall window.",
+    "Lighting and rendering: warm sunset with soft shadows.",
+  ].join("\n");
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return streamingReasoningStory("Plan the visible scene.", combined);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-combined-image-labels",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Close the book." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  const content = streamedContent(body);
+  assert.equal(calls, 1);
+  assert.equal(content.match(/<think>/g)?.length, 1);
+  assert.equal(content.match(/<\/think>/g)?.length, 1);
+  assert.equal(content.match(/\[provider:/g)?.length, 1);
+  assert.equal(content.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.match(content, /Camera & Composition:/);
+  assert.match(content, /Lighting and rendering:/);
+  assert.doesNotMatch(content, /\nCamera:|\nComposition:/);
+});
+
+test("contract repair hides second-leg reasoning and preserves the story", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      opencode: { glm: ["glm-5.3-flash"] },
+    }),
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const incomplete = [
+    "*Mira closes the book.*",
+    "",
+    "IMAGE PROMPT:",
+    "Camera: first-person medium shot.",
+    "Primary subject: young adult woman with dark braids.",
+    "Setting: old library beside a tall window.",
+  ].join("\n");
+  const repair = [
+    "Lighting: warm sunset with soft shadows.",
+    "Composition: Mira centered beyond a foreground table.",
+  ].join("\n");
+  let calls = 0;
+  let body;
+
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return calls === 1
+      ? streamingReasoningStory("Plan the visible scene.", incomplete)
+      : streamingReasoningStory("Identify the missing fields.", repair);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-repair-hides-reasoning",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Close the book." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  const content = streamedContent(body);
+  assert.equal(calls, 2);
+  assert.equal(content.match(/<think>/g)?.length, 1);
+  assert.equal(content.match(/<\/think>/g)?.length, 1);
+  assert.equal(content.match(/\[provider:/g)?.length, 1);
+  assert.doesNotMatch(content, /Identify the missing fields/);
+  assert.equal(content.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.match(content, /\*Mira closes the book\.\*/);
+  assert.match(content, /Lighting: warm sunset/);
+  assert.match(content, /Composition: Mira centered/);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  const assistant = messages.findLast((message) => message.role === "assistant");
+  assert.equal(assistant?.content, `${incomplete}\n${repair}`);
 });
 
 test("current image schema remains complete when a legacy contract is retained", async () => {
