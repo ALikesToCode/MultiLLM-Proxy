@@ -922,7 +922,7 @@ test("worker preserves native LinkAPI request and SSE bytes for OpenAI, Claude, 
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker preserves LinkAPI image generation request and response bytes", async () => {
+test("worker defaults LinkAPI image moderation and preserves response bytes", async () => {
   const requestBytes =
     '{"model":"gpt-image-2-c","prompt":"A lighthouse at dusk","size":"1024x1024","quality":"standard","style":"vivid","n":1,"response_format":"url"}';
   const responseBytes = new Uint8Array([0, 1, 2, 127, 128, 255]);
@@ -948,7 +948,16 @@ test("worker preserves LinkAPI image generation request and response bytes", asy
       assert.equal(upstreamRequest.headers.get("Idempotency-Key"), "image-request-123");
       assert.equal(upstreamRequest.headers.has("x-api-key"), false);
       assert.equal(upstreamRequest.headers.has("x-goog-api-key"), false);
-      assert.equal(await upstreamRequest.text(), requestBytes);
+      assert.deepEqual(await upstreamRequest.json(), {
+        model: "gpt-image-2-c",
+        prompt: "A lighthouse at dusk",
+        size: "1024x1024",
+        quality: "standard",
+        style: "vivid",
+        n: 1,
+        response_format: "url",
+        moderation: "low",
+      });
       return new Response(responseBytes, {
         status: 201,
         headers: {

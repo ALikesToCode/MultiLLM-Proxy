@@ -275,6 +275,12 @@ See [AIHubMix free models and image generation](docs/aihubmix.md) for the
 current seeded free catalog, model-specific payloads, response normalization,
 and backup-origin behavior.
 
+GPT Image generation defaults to `moderation: "low"` when the caller omits the
+field. Explicit `auto` or `low` values are preserved across unified, native,
+and Cloudflare fast-path requests. See
+[GPT Image moderation defaults](docs/gpt-image-moderation.md) for supported
+model families and route boundaries.
+
 Quick reference for all provider endpoint URLs:
 
 ```plaintext
@@ -583,7 +589,7 @@ curl "$PROXY_BASE_URL/codex-easy/v1/chat/completions" \
   -d '{"model":"grok-4.5","reasoning_effort":"high","messages":[{"role":"user","content":"Explain this repository"}],"stream":true}'
 ```
 
-Request and response bytes are passed through unchanged, including native SSE and multipart/image bodies. The Codex Everywhere and LinkAPI raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, preserve a Responses `prompt_cache_key` in the request body and forward the Chat `X-Grok-Conv-Id` header. For Grok requests, [xAI's prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) recommends a stable `prompt_cache_key` for Responses or `x-grok-conv-id` for Chat to improve cache routing. These fields do not guarantee a cache hit; caching remains an upstream behavior and stable request prefixes still matter.
+Request and response bytes are passed through unchanged, including native SSE and multipart/image bodies, except that a JSON GPT Image generation missing `moderation` is normalized once to insert `"low"`. The Codex Everywhere and LinkAPI raw OpenAI fast paths, `/codex-easy/v1/*` and `/linkapi/v1/*`, preserve a Responses `prompt_cache_key` in the request body and forward the Chat `X-Grok-Conv-Id` header. For Grok requests, [xAI's prompt-caching guidance](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) recommends a stable `prompt_cache_key` for Responses or `x-grok-conv-id` for Chat to improve cache routing. These fields do not guarantee a cache hit; caching remains an upstream behavior and stable request prefixes still matter.
 
 `/v1/images/*` works only for image-generation key groups. Generation POSTs are single-attempt: the proxy never retries them and does not provide idempotency. Retry only when the selected upstream endpoint explicitly documents an idempotency guarantee.
 

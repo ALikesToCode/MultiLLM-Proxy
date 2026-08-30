@@ -1,6 +1,7 @@
 # Documentation
 
 - [GPT Image 2 relay research and setup](gpt-image-2-reseller-research.md)
+- [GPT Image moderation defaults](gpt-image-moderation.md)
 - [GGUU AI GPT Image 2 generation and editing](gguu.md)
 
 - Live setup guide: sign in to a running proxy and open `/docs` for

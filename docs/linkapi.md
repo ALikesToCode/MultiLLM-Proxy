@@ -54,6 +54,7 @@ curl -X POST "$PROXY_BASE_URL/v1/images/generations" \
     "prompt": "A navy command room at dusk, cinematic lighting",
     "size": "1024x1024",
     "quality": "standard",
+    "moderation": "low",
     "style": "vivid",
     "n": 1,
     "response_format": "url"
@@ -71,6 +72,7 @@ curl -X POST "$PROXY_BASE_URL/linkapi/v1/images/generations" \
     "prompt": "A navy command room at dusk, cinematic lighting",
     "size": "1024x1024",
     "quality": "standard",
+    "moderation": "low",
     "style": "vivid",
     "n": 1,
     "response_format": "url"
@@ -80,6 +82,10 @@ curl -X POST "$PROXY_BASE_URL/linkapi/v1/images/generations" \
 LinkAPI's live model detail shows `response_format` with `url` as the default.
 The proxy preserves the selected upstream-supported format and all safe response
 metadata.
+
+For GPT Image generation, `moderation` accepts `low` or `auto`; MultiLLM
+inserts `low` when the field is omitted. This default is identical on the
+unified Container route and the direct Worker route.
 
 Image editing is available on the direct multipart route:
 

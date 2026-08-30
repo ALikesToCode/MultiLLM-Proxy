@@ -286,6 +286,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
             {
                 "model": "gpt-image-2-c",
                 "prompt": "A lighthouse at dusk",
+                "moderation": "low",
                 "size": "1024x1024",
                 "quality": "standard",
                 "style": "vivid",
@@ -308,6 +309,25 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn(
             "Image generation is not supported for provider: opencode",
+            response.get_json()["message"],
+        )
+        make_request.assert_not_called()
+
+    def test_v1_image_generations_rejects_unknown_gpt_image_moderation(self):
+        with patch("app.ProxyService.make_request") as make_request:
+            response = self.client.post(
+                "/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "linkapi:gpt-image-2-c",
+                    "prompt": "A lighthouse at dusk",
+                    "moderation": "disabled",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "GPT Image moderation must be one of: auto, low",
             response.get_json()["message"],
         )
         make_request.assert_not_called()
@@ -835,7 +855,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         )
         self.assertNotIn("Authorization", request_kwargs["headers"])
 
-    def test_linkapi_native_image_generation_preserves_json_bytes(self):
+    def test_linkapi_native_image_generation_defaults_moderation_to_low(self):
         native_request = (
             b'{"model":"gpt-image-2-c","prompt":"A lighthouse",'
             b'"size":"1024x1024","response_format":"url"}'
@@ -864,12 +884,45 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
             request_kwargs["url"],
             "https://hk.linkapi.ai/v1/images/generations",
         )
-        self.assertEqual(request_kwargs["data"], native_request)
+        self.assertEqual(
+            json.loads(request_kwargs["data"]),
+            {
+                "model": "gpt-image-2-c",
+                "prompt": "A lighthouse",
+                "size": "1024x1024",
+                "response_format": "url",
+                "moderation": "low",
+            },
+        )
         self.assertEqual(
             request_kwargs["headers"]["Authorization"],
             "Bearer linkapi-provider-key",
         )
         self.assertTrue(request_kwargs["force_raw_passthrough"])
+
+    def test_linkapi_native_image_generation_preserves_explicit_auto_bytes(self):
+        native_request = (
+            b'{"model":"gpt-image-2-c","prompt":"A lighthouse",'
+            b'"moderation":"auto"}'
+        )
+        upstream_response = requests.Response()
+        upstream_response.status_code = 200
+        upstream_response.raw = io.BytesIO(b'{"data":[]}')
+        upstream_response.headers["Content-Type"] = "application/json"
+
+        with patch(
+            "app.ProxyService.make_request",
+            return_value=upstream_response,
+        ) as make_request:
+            response = self.client.post(
+                "/linkapi/v1/images/generations",
+                headers={"Authorization": "Bearer admin-test-key"},
+                data=native_request,
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_args.kwargs["data"], native_request)
 
     def test_linkapi_native_image_edit_preserves_multipart_bytes(self):
         boundary = "----linkapi-test-boundary"

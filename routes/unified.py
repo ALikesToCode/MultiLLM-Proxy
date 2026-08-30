@@ -7,6 +7,7 @@ from flask import Response, jsonify, request
 
 from error_handlers import APIError
 from providers.aihubmix import build_aihubmix_image_request
+from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.nanogpt import (
     nanogpt_subscription_only,
     sanitize_nanogpt_subscription_headers,
@@ -599,6 +600,8 @@ def dispatch_unified_image_generation(
                 f"Image generation is not supported for provider: {provider}",
                 status_code=400,
             )
+
+        payload, _ = apply_gpt_image_moderation_default(payload, model_id=provider_model)
 
         response_kind = "openai"
         if provider == "aihubmix":

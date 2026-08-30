@@ -14,6 +14,12 @@ from providers.aihubmix import (
     is_valid_aihubmix_request,
     request_with_origin_fallback,
 )
+from providers.gpt_image_moderation import apply_gpt_image_moderation_default
+from providers.image_relays import (
+    image_relay_backup_base_url,
+    image_relay_spec,
+    is_valid_image_relay_request,
+)
 from providers.nanogpt import (
     build_nanogpt_url,
     is_nanogpt_accountless_request,
@@ -33,11 +39,6 @@ from providers.opencode_go import (
     opencode_go_has_caller_auth,
 )
 from providers.registry import get_adapter
-from providers.image_relays import (
-    image_relay_backup_base_url,
-    image_relay_spec,
-    is_valid_image_relay_request,
-)
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from route_helpers import (
@@ -332,6 +333,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 raise APIError(f"API key not configured for {api_provider}", status_code=503)
 
             is_streaming = False
+            body = None
             if request.is_json:
                 body = request.get_json(silent=True)
                 if not raw_passthrough and not isinstance(body, dict):
@@ -362,6 +364,20 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 else request.args
             )
             raw_request_data = request.get_data()
+            if (
+                request.method.upper() == "POST"
+                and path.strip("/") == "v1/images/generations"
+                and isinstance(body, dict)
+            ):
+                try:
+                    image_payload, changed = apply_gpt_image_moderation_default(body)
+                except ValueError as error:
+                    raise APIError(str(error), status_code=400) from error
+                if changed:
+                    raw_request_data = json.dumps(
+                        image_payload,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
             request_data = (
                 raw_request_data
                 if raw_passthrough

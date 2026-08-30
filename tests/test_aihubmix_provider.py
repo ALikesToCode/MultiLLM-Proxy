@@ -509,6 +509,10 @@ class AIHubMixUnifiedRouteTest(UnifiedApiTestCase):
             json.loads(request_kwargs["data"])["model"],
             "gpt-image-2-free",
         )
+        self.assertEqual(
+            json.loads(request_kwargs["data"])["moderation"],
+            "low",
+        )
 
     def test_unified_gemini_image_normalizes_chat_response(self):
         upstream_response = _response(

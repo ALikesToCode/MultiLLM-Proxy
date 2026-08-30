@@ -8,6 +8,10 @@ import {
   normalizeOpencodeChatResponse,
   resolveOpencodeChatMetadata,
 } from "./worker/opencode/reasoning-response.mjs";
+import {
+  GPTImageModerationError,
+  withDefaultGptImageModeration,
+} from "./worker/gpt-image-moderation.mjs";
 
 export { RoleplaySession };
 
@@ -1754,14 +1758,39 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
 
   const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env);
   const protocol = getLinkApiProtocol(upstreamUrl.pathname);
-  const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
+  let normalizedRequest;
+  try {
+    normalizedRequest = await withDefaultGptImageModeration(
+      request,
+      upstreamUrl.pathname,
+    );
+  } catch (error) {
+    if (!(error instanceof GPTImageModerationError)) {
+      throw error;
+    }
+    return applyCorsHeaders(
+      request,
+      jsonResponse(
+        { error: "invalid_request", message: error.message },
+        { status: 400 },
+      ),
+      env,
+    );
+  }
+  const bodyAllowed =
+    normalizedRequest.method !== "GET" && normalizedRequest.method !== "HEAD";
   const upstreamRequest = new Request(upstreamUrl, {
-    method: request.method,
-    headers: buildLinkApiUpstreamHeaders(request, protocol, upstreamUrl.pathname, upstreamToken),
-    body: bodyAllowed ? request.body : undefined,
+    method: normalizedRequest.method,
+    headers: buildLinkApiUpstreamHeaders(
+      normalizedRequest,
+      protocol,
+      upstreamUrl.pathname,
+      upstreamToken,
+    ),
+    body: bodyAllowed ? normalizedRequest.body : undefined,
     redirect: "manual",
-    signal: request.signal,
-    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
+    signal: normalizedRequest.signal,
+    ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await fetch(upstreamRequest);
 
@@ -1792,14 +1821,31 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
     return applyCorsHeaders(request, buildMissingCodexEasyKeyResponse(), env);
   }
 
-  const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
+  let normalizedRequest;
+  try {
+    normalizedRequest = await withDefaultGptImageModeration(request, upstreamPath);
+  } catch (error) {
+    if (!(error instanceof GPTImageModerationError)) {
+      throw error;
+    }
+    return applyCorsHeaders(
+      request,
+      jsonResponse(
+        { error: "invalid_request", message: error.message },
+        { status: 400 },
+      ),
+      env,
+    );
+  }
+  const bodyAllowed =
+    normalizedRequest.method !== "GET" && normalizedRequest.method !== "HEAD";
   const upstreamRequest = new Request(buildCodexEasyUpstreamUrl(requestUrl, upstreamPath), {
-    method: request.method,
-    headers: buildCodexEasyUpstreamHeaders(request, upstreamToken),
-    body: bodyAllowed ? request.body : undefined,
+    method: normalizedRequest.method,
+    headers: buildCodexEasyUpstreamHeaders(normalizedRequest, upstreamToken),
+    body: bodyAllowed ? normalizedRequest.body : undefined,
     redirect: "manual",
-    signal: request.signal,
-    ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
+    signal: normalizedRequest.signal,
+    ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await fetch(upstreamRequest);
 

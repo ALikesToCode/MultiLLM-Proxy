@@ -74,6 +74,7 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
     "n": 1,
     "size": "1024x1024",
     "quality": "low",
+    "moderation": "low",
     "output_format": "png"
   }'
 ```
@@ -82,6 +83,9 @@ The response remains OpenAI-compatible, including `data[].b64_json` and any
 provider-supplied `usage` object. Provider-side free-channel availability can
 change; a structured `no_available_channel` response is passed through rather
 than hidden or retried as another model.
+
+`moderation` accepts `low` or `auto`. MultiLLM inserts `low` when it is omitted.
+The setting applies to GPT Image generation only, not the multipart edit route.
 
 Image editing uses the native multipart route so file bytes remain unchanged:
 

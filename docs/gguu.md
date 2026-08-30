@@ -45,6 +45,7 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
     "prompt": "An orange cat wearing sunglasses, cyberpunk style",
     "size": "3840x2160",
     "quality": "high",
+    "moderation": "low",
     "output_format": "png",
     "response_format": "url",
     "n": 1
@@ -73,6 +74,7 @@ curl "$PROXY_BASE_URL/gguu/v1/images/generations" \
     "prompt": "A glass observatory at sunrise",
     "size": "2048x2048",
     "quality": "high",
+    "moderation": "low",
     "output_format": "png",
     "response_format": "b64_json",
     "n": 1
@@ -105,6 +107,7 @@ normalization.
   multiples of 16, total pixels must be between 655,360 and 8,294,400, and the
   longest-to-shortest-side ratio must not exceed 3:1.
 - `quality` accepts `low`, `medium`, `high`, or `auto`.
+- `moderation` accepts `low` or `auto`; MultiLLM defaults it to `low`.
 - `response_format` accepts `url` or `b64_json`.
 - `output_format` should be `png` or `jpeg`.
 - Image edits accept one image, an optional PNG mask, and optional
