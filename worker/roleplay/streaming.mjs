@@ -323,14 +323,16 @@ export function createObservedStream({
                 });
               }
 
-              const discardEmptyEof = decision.reason === "empty_eof";
-              if (discardEmptyEof) {
+              const discardForFreshRetry =
+                decision.reason === "empty_eof" ||
+                decision.reason === "empty_story";
+              if (discardForFreshRetry) {
                 continuationDiagnostics.push({
-                  reason: "empty_eof",
-                  charactersDiscarded: candidateClientContent.length,
+                  reason: decision.reason,
+                  charactersDiscarded: collected.clientContent.length,
                   accepted: false,
                 });
-                if (!collected.assistant.trim()) {
+                if (decision.reason === "empty_eof") {
                   // Reasoning frames may already be visible downstream. Flush
                   // the leg's normalizer output so its <think> envelope closes
                   // before a retry starts, while still discarding it from the

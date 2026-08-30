@@ -142,12 +142,20 @@ export async function repairNonStreamingCompletion({
     }
 
     const leg = normalizedLeg(nextPayload, metadata);
+    const replaceResponse = terminalReason === "empty_story";
+    if (replaceResponse) {
+      continuationDiagnostics.push({
+        reason: terminalReason,
+        charactersDiscarded: clientContent.length,
+        accepted: false,
+      });
+    }
     const assistantAddition =
       terminalReason === "output_contract"
         ? leg.assistant.trimStart()
         : leg.assistant;
     let candidateAssistant = joinContinuationText(
-      assistant,
+      replaceResponse ? "" : assistant,
       assistantAddition,
       terminalReason,
     );
@@ -156,7 +164,7 @@ export async function repairNonStreamingCompletion({
         ? assistantAddition
         : leg.clientContent;
     let candidateClientContent = joinContinuationText(
-      clientContent,
+      replaceResponse ? "" : clientContent,
       clientAddition,
       terminalReason,
     );

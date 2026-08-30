@@ -20,6 +20,21 @@ const CURRENT_CONTRACT = [
   "Composition:",
 ].join("\n");
 
+const COMPLETE_STORY = [
+  "*Mira opens the marked shelf.*",
+  "",
+  "IMAGE PROMPT:",
+  "Camera: first-person medium shot.",
+  "Primary subject: young adult woman with dark hair.",
+  "Setting: old library at sunset.",
+  "Lighting: warm window light.",
+  "Composition: Mira centered beyond a foreground table.",
+].join("\n");
+
+const COMPLETE_IMAGE_PROMPT_ONLY = COMPLETE_STORY.slice(
+  COMPLETE_STORY.indexOf("IMAGE PROMPT:"),
+);
+
 function janitorJsonRequest(sessionId) {
   return roleplayRequest(
     {
@@ -108,6 +123,55 @@ test("non-streaming completion repairs only missing canonical fields", async () 
         message.role === "system" &&
         message.content.includes("Supply only these missing IMAGE PROMPT fields"),
     ),
+  );
+});
+
+test("non-streaming completion replaces an image-only response with a complete story", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const payloads = [];
+
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    payloads.push(payload);
+    return completionResponse(
+      payload.model,
+      payloads.length === 1
+        ? COMPLETE_IMAGE_PROMPT_ONLY
+        : COMPLETE_STORY,
+    );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      janitorJsonRequest("session-nonstream-image-only-response"),
+      fixture.env,
+    ),
+  );
+  await fixture.waitForBackgroundWork();
+
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payloads.length, 2);
+  assert.equal(
+    payloads[1].messages.some((message) => message.role === "assistant"),
+    false,
+  );
+  assert.equal(
+    payloads[1].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("no visible story content"),
+    ),
+    true,
+  );
+  assert.equal(result.choices[0].message.content, COMPLETE_STORY);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  assert.equal(
+    messages.findLast((message) => message.role === "assistant")?.content,
+    COMPLETE_STORY,
   );
 });
 

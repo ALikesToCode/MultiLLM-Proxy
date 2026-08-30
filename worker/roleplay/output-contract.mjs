@@ -196,6 +196,9 @@ export function analyzeRoleplayOutputContract(content, contract) {
   const markers = imagePromptMarkers(value);
   const markerCount = markers.length;
   const marker = markers.at(-1);
+  const story = marker
+    ? value.slice(0, marker.index ?? 0).trim()
+    : value.trim();
   const block = marker
     ? value.slice((marker.index ?? 0) + marker[0].length)
     : "";
@@ -211,12 +214,17 @@ export function analyzeRoleplayOutputContract(content, contract) {
     : false;
   const blockFinal = Boolean(marker && block.trim() && !metaAfterMarker);
   const required = Boolean(contract?.imagePromptRequired);
+  const storyPresent = Boolean(story);
 
   return {
     satisfied:
       !required ||
-      (markerCount === 1 && blockFinal && missingFields.length === 0),
+      (storyPresent &&
+        markerCount === 1 &&
+        blockFinal &&
+        missingFields.length === 0),
     required,
+    storyPresent,
     missingFields,
     missingFieldLabels: missingFields.map(
       (field) => CANONICAL_FIELD_LABELS[field] ?? field,

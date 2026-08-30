@@ -5,6 +5,7 @@ function contractTelemetry(outputContract, analysis) {
     outputContractMissingFields: analysis?.missingFields ?? [],
     outputContractMarkerCount: analysis?.markerCount ?? 0,
     outputContractBlockFinal: analysis?.blockFinal ?? false,
+    outputContractStoryPresent: analysis?.storyPresent ?? false,
   };
 }
 
@@ -27,6 +28,8 @@ export function roleplayCompletionDisposition({
         ? "output_limited"
         : reason === "output_contract"
           ? "output_contract_incomplete"
+          : reason === "empty_story"
+            ? "output_contract_story_missing"
           : reason === "output_contract_no_progress"
             ? "output_contract_no_progress"
             : failureStatus,

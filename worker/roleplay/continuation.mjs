@@ -29,6 +29,15 @@ const EMPTY_EOF_RETRY_INSTRUCTION = [
   "Output only the finished response.",
 ];
 
+const EMPTY_STORY_RETRY_INSTRUCTION = [
+  "[Automatic retry after an image-only response]",
+  "The previous provider attempt produced no visible story content before its IMAGE PROMPT block.",
+  "Generate the complete response from the beginning using the conversation above.",
+  "Include the story response first and exactly one complete IMAGE PROMPT block at the end.",
+  "Do not mention the failed attempt, this retry, or any internal reasoning.",
+  "Output only the finished response.",
+];
+
 function contractRepairInstruction(analysis) {
   const missing = analysis?.missingFieldLabels?.length
     ? analysis.missingFieldLabels.join(", ")
@@ -43,12 +52,15 @@ function contractRepairInstruction(analysis) {
 }
 
 function continuationMessages(messages, assistant, reason, analysis) {
-  if (reason === "empty_eof") {
+  if (reason === "empty_eof" || reason === "empty_story") {
     return [
       ...messages,
       {
         role: "system",
-        content: EMPTY_EOF_RETRY_INSTRUCTION.join("\n"),
+        content: (reason === "empty_story"
+          ? EMPTY_STORY_RETRY_INSTRUCTION
+          : EMPTY_EOF_RETRY_INSTRUCTION
+        ).join("\n"),
       },
     ];
   }
@@ -113,6 +125,18 @@ export function createRoleplayContinuation({
         cleaned,
       };
     }
+    if (
+      finishReason === "stop" &&
+      contractAnalysis.required &&
+      !contractAnalysis.storyPresent
+    ) {
+      return {
+        reason: "empty_story",
+        limit: settings.maxOutputContractRepairs,
+        contractAnalysis,
+        cleaned,
+      };
+    }
     if (finishReason === "stop" && !contractAnalysis.satisfied) {
       return {
         reason: "output_contract",
@@ -130,7 +154,9 @@ export function createRoleplayContinuation({
     reason,
     contractAnalysis,
   }) => {
-    if (!enabled || (!assistant.trim() && reason !== "empty_eof")) {
+    const retriesFromBeginning =
+      reason === "empty_eof" || reason === "empty_story";
+    if (!enabled || (!assistant.trim() && !retriesFromBeginning)) {
       return null;
     }
     const nextMessages = continuationMessages(

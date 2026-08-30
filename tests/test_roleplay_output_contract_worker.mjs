@@ -73,6 +73,10 @@ const STORY_WITH_CURRENT_IMAGE_PROMPT = [
   "Composition: Mira centered beyond a foreground table, shallow depth of field.",
 ].join("\n");
 
+const CURRENT_IMAGE_PROMPT_ONLY = STORY_WITH_CURRENT_IMAGE_PROMPT.slice(
+  STORY_WITH_CURRENT_IMAGE_PROMPT.indexOf("IMAGE PROMPT:"),
+);
+
 function streamingStory(content, finishReason = "stop") {
   return new Response(
     [
@@ -439,6 +443,81 @@ test("reasoning-only provider EOF streams immediately before a clean retry", asy
   );
   assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+
+  const stored = [...fixture.storageBySession.values()][0]?.storage;
+  const messages = (await stored?.get("roleplay-messages")) ?? [];
+  assert.equal(
+    messages.findLast((message) => message.role === "assistant")?.content,
+    STORY_WITH_CURRENT_IMAGE_PROMPT,
+  );
+});
+
+test("an image-only retry is discarded before regenerating the complete story", async () => {
+  const fixture = makeRoleplayEnv({
+    ROLEPLAY_PROVIDER_ORDER: "opencode",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "8",
+    ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS: "1",
+  });
+  const upstreamPayloads = [];
+  let body;
+
+  await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    upstreamPayloads.push(payload);
+    if (upstreamPayloads.length === 1) {
+      return reasoningOnlyEof();
+    }
+    return upstreamPayloads.length === 2
+      ? streamingStory(CURRENT_IMAGE_PROMPT_ONLY)
+      : streamingStory(STORY_WITH_CURRENT_IMAGE_PROMPT);
+  }, async () => {
+    const response = await handleRoleplayEdgeRequest(
+      roleplayRequest(
+        {
+          session_id: "session-retry-image-only-response",
+          messages: [
+            { role: "system", content: CURRENT_IMAGE_CONTRACT },
+            { role: "user", content: "Open the marked shelf." },
+          ],
+          stream: true,
+          max_tokens: 0,
+        },
+        { Origin: "https://janitorai.com" },
+        "/roleplay/v1/chat/completions",
+      ),
+      fixture.env,
+    );
+    body = await response.text();
+    await fixture.waitForBackgroundWork();
+  });
+
+  assert.equal(upstreamPayloads.length, 3);
+  assert.equal(
+    upstreamPayloads[2].messages.some(
+      (message) => message.role === "assistant",
+    ),
+    false,
+  );
+  assert.equal(
+    upstreamPayloads[2].messages.some(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("no visible story content"),
+    ),
+    true,
+  );
+  assert.equal(
+    streamedContent(body),
+    [
+      "<think>[provider: opencode | model: kimi-k2.6]\n",
+      "provider planning from the empty attempt",
+      "</think>\n\n",
+      STORY_WITH_CURRENT_IMAGE_PROMPT,
+    ].join(""),
+  );
+  assert.equal(body.match(/IMAGE PROMPT:/g)?.length, 1);
+  assert.equal(body.match(/\"finish_reason\":\"stop\"/g)?.length, 1);
   assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
 
   const stored = [...fixture.storageBySession.values()][0]?.storage;

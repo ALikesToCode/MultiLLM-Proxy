@@ -512,7 +512,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
-| `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with an incomplete required image-prompt contract; no-progress repairs stop immediately |
+| `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with a missing story or incomplete required image-prompt contract; image-only responses regenerate from the beginning and no-progress repairs stop immediately |
 | `ROLEPLAY_SESSION_TTL_SECONDS` | `2592000` | Inactivity retention |
 
 Provider catalogs can use namespaced IDs or expose multiple generations of a
@@ -556,7 +556,9 @@ streaming after a `length` finish. Set `ROLEPLAY_MAX_AUTO_CONTINUATIONS=0` to
 disable output-limit continuation stitching without changing provider-capacity
 selection. Image-prompt contract repair has its own smaller bound,
 `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` (one by default), and is disabled by
-setting that value to zero.
+setting that value to zero. A complete image block without preceding visible
+story content is not a successful response: that leg is discarded and the
+Worker regenerates the full story and final image block from the beginning.
 
 Override a gateway only when its live catalog or an exercised request proves a
 different limit:

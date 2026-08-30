@@ -74,6 +74,26 @@ test("current schema accepts required fields with optional fields omitted", () =
   assert.equal(analysis.blockFinal, true);
 });
 
+test("a complete image prompt without story content does not satisfy the contract", () => {
+  const analysis = analyzeRoleplayOutputContract(
+    [
+      "IMAGE PROMPT:",
+      "Camera: first-person medium shot.",
+      "Primary subject: young adult woman with dark hair.",
+      "Setting: old library.",
+      "Lighting: warm sunset.",
+      "Composition: subject centered beyond a desk.",
+    ].join("\n"),
+    REQUIRED_CONTRACT,
+  );
+
+  assert.equal(analysis.satisfied, false);
+  assert.equal(analysis.storyPresent, false);
+  assert.deepEqual(analysis.missingFields, []);
+  assert.equal(analysis.markerCount, 1);
+  assert.equal(analysis.blockFinal, true);
+});
+
 test("legacy schema maps combined and renamed canonical fields", () => {
   const analysis = analyzeRoleplayOutputContract(
     output([
