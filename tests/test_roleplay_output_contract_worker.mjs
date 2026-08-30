@@ -96,10 +96,7 @@ function streamingReasoningStory(reasoning, content, finishReason = "stop") {
 
 function reasoningOnlyEof() {
   return new Response(
-    [
-      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "provider planning from the empty attempt" }, finish_reason: null }] })}\n\n`,
-      `data: ${JSON.stringify({ choices: [{ delta: { content: "  " }, finish_reason: null }] })}\n\n`,
-    ].join(""),
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "provider planning from the empty attempt" }, finish_reason: null }] })}\n\n`,
     { headers: { "Content-Type": "text/event-stream" } },
   );
 }
@@ -486,6 +483,7 @@ test("repeated empty provider EOF streams each attempt but stores nothing", asyn
 
   assert.equal(calls, 2);
   assert.equal(streamedContent(body).match(/<think>/g)?.length, 2);
+  assert.equal(streamedContent(body).match(/<\/think>/g)?.length, 2);
   assert.equal(streamedContent(body).match(/provider planning from the empty attempt/g)?.length, 2);
   assert.doesNotMatch(body, /IMAGE PROMPT:/i);
   assert.equal(body.match(/"finish_reason":"stop"/g)?.length, 1);

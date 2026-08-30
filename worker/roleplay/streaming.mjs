@@ -330,6 +330,13 @@ export function createObservedStream({
                   charactersDiscarded: candidateClientContent.length,
                   accepted: false,
                 });
+                if (!collected.assistant.trim()) {
+                  // Reasoning frames may already be visible downstream. Flush
+                  // the leg's normalizer output so its <think> envelope closes
+                  // before a retry starts, while still discarding it from the
+                  // validated response and persisted assistant content.
+                  enqueueFrames(controller, collected.output);
+                }
                 validationGate.discardLeg();
                 template = collected.template ?? template;
                 terminalFrames = [];
