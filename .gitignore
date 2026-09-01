@@ -144,3 +144,6 @@ credentials/
 api_keys.json
 user_data.json 
 .vercel
+
+# Local secret-bearing API profile export
+/example.json
