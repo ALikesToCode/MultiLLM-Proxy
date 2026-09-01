@@ -133,6 +133,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/reasoning-output.mjs",
     import.meta.url,
   );
+  const refusalFallbackUrl = new URL(
+    "../../worker/roleplay/refusal-fallback.mjs",
+    import.meta.url,
+  );
   const [
     compatibilitySource,
     checkpointSource,
@@ -162,6 +166,7 @@ export async function roleplayModuleUrl() {
     validationSource,
     transportSource,
     reasoningOutputSource,
+    refusalFallbackSource,
     sseCollectorSource,
     streamValidationGateSource,
     streamingSource,
@@ -196,13 +201,13 @@ export async function roleplayModuleUrl() {
       readFile(validationUrl, "utf8"),
       readFile(transportUrl, "utf8"),
       readFile(reasoningOutputUrl, "utf8"),
+      readFile(refusalFallbackUrl, "utf8"),
       readFile(sseCollectorUrl, "utf8"),
       readFile(streamValidationGateUrl, "utf8"),
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
-  const completionResultDataUrl = dataModuleUrl(completionResultSource);
   const capacityDataUrl = dataModuleUrl(capacitySource);
   const validationDataUrl = dataModuleUrl(validationSource);
   const modelSelectionDataUrl = dataModuleUrl(
@@ -247,6 +252,17 @@ export async function roleplayModuleUrl() {
     compactionPolicySource,
   );
   const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
+  const refusalFallbackDataUrl = dataModuleUrl(
+    refusalFallbackSource
+      .replace(
+        'from "./model-selection.mjs";',
+        `from "${modelSelectionDataUrl}";`,
+      )
+      .replace(
+        'from "./reasoning-output.mjs";',
+        `from "${reasoningOutputDataUrl}";`,
+      ),
+  );
   const sseCollectorDataUrl = dataModuleUrl(
     sseCollectorSource.replace(
       'from "./reasoning-output.mjs";',
@@ -269,6 +285,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./stream-validation-gate.mjs";',
         `from "${streamValidationGateDataUrl}";`,
+      )
+      .replace(
+        'from "./refusal-fallback.mjs";',
+        `from "${refusalFallbackDataUrl}";`,
       ),
   );
   const directivesDataUrl = dataModuleUrl(directivesSource);
@@ -361,6 +381,22 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./model-performance.mjs";',
         `from "${modelPerformanceDataUrl}";`,
+      )
+      .replace(
+        'from "./refusal-fallback.mjs";',
+        `from "${refusalFallbackDataUrl}";`,
+      ),
+  );
+  const completionResultDataUrl = dataModuleUrl(
+    completionResultSource
+      .replace('from "./memory.mjs";', `from "${memoryDataUrl}";`)
+      .replace(
+        'from "./state-runtime.mjs";',
+        `from "${stateRuntimeDataUrl}";`,
+      )
+      .replace(
+        'from "./transport.mjs";',
+        `from "${transportDataUrl}";`,
       ),
   );
   const sessionMetricsDataUrl = dataModuleUrl(
@@ -389,6 +425,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./transport.mjs";',
         `from "${transportDataUrl}";`,
+      )
+      .replace(
+        'from "./refusal-fallback.mjs";',
+        `from "${refusalFallbackDataUrl}";`,
       ),
   );
   const continuationDataUrl = dataModuleUrl(
@@ -409,6 +449,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./transport.mjs";',
         `from "${transportDataUrl}";`,
+      )
+      .replace(
+        'from "./refusal-fallback.mjs";',
+        `from "${refusalFallbackDataUrl}";`,
       ),
   );
   const patchedEndpoint = endpointSource
@@ -508,18 +552,54 @@ export async function loadRoleplayStreamingModule() {
     "../../worker/roleplay/stream-validation-gate.mjs",
     import.meta.url,
   );
+  const validationUrl = new URL(
+    "../../worker/roleplay/validation.mjs",
+    import.meta.url,
+  );
+  const modelSelectionUrl = new URL(
+    "../../worker/roleplay/model-selection.mjs",
+    import.meta.url,
+  );
+  const refusalFallbackUrl = new URL(
+    "../../worker/roleplay/refusal-fallback.mjs",
+    import.meta.url,
+  );
   const [
     streamingSource,
     reasoningOutputSource,
     sseCollectorSource,
     streamValidationGateSource,
+    validationSource,
+    modelSelectionSource,
+    refusalFallbackSource,
   ] = await Promise.all([
     readFile(streamingUrl, "utf8"),
     readFile(reasoningOutputUrl, "utf8"),
     readFile(sseCollectorUrl, "utf8"),
     readFile(streamValidationGateUrl, "utf8"),
+    readFile(validationUrl, "utf8"),
+    readFile(modelSelectionUrl, "utf8"),
+    readFile(refusalFallbackUrl, "utf8"),
   ]);
+  const validationDataUrl = dataModuleUrl(validationSource);
+  const modelSelectionDataUrl = dataModuleUrl(
+    modelSelectionSource.replace(
+      'from "./validation.mjs";',
+      `from "${validationDataUrl}";`,
+    ),
+  );
   const reasoningOutputDataUrl = dataModuleUrl(reasoningOutputSource);
+  const refusalFallbackDataUrl = dataModuleUrl(
+    refusalFallbackSource
+      .replace(
+        'from "./model-selection.mjs";',
+        `from "${modelSelectionDataUrl}";`,
+      )
+      .replace(
+        'from "./reasoning-output.mjs";',
+        `from "${reasoningOutputDataUrl}";`,
+      ),
+  );
   const sseCollectorDataUrl = dataModuleUrl(
     sseCollectorSource.replace(
       'from "./reasoning-output.mjs";',
@@ -543,6 +623,10 @@ export async function loadRoleplayStreamingModule() {
         .replace(
           'from "./stream-validation-gate.mjs";',
           `from "${streamValidationGateDataUrl}";`,
+        )
+        .replace(
+          'from "./refusal-fallback.mjs";',
+          `from "${refusalFallbackDataUrl}";`,
         ),
     )
   );

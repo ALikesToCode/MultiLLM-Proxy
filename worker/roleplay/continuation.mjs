@@ -11,7 +11,9 @@ import {
 import {
   attemptRoleplayCandidates,
   logRoleplayError,
+  recordModelRefusal,
 } from "./transport.mjs";
+import { classifyRoleplayRefusal } from "./refusal-fallback.mjs";
 
 const LENGTH_CONTINUATION_INSTRUCTION = [
   "[Automatic continuation of an incomplete response]",
@@ -100,13 +102,21 @@ export function createRoleplayContinuation({
   settings,
   signal,
   idempotencyKey,
+  refusalFallbackCandidates = [],
 }) {
   let currentState = state;
+  let currentCandidate = candidate;
+  let remainingRefusalFallbackCandidates = settings.refusalFallbackEnabled
+    ? [...refusalFallbackCandidates]
+    : [];
+  let refusalFallbackCount = 0;
   let upstreamCallCount = 1;
   const enabled =
     parsed.outputMode === "unlimited" &&
     (settings.maxAutoContinuations > 0 ||
       settings.maxOutputContractRepairs > 0);
+  const canOpen =
+    enabled || remainingRefusalFallbackCandidates.length > 0;
 
   const assess = ({ assistant, finishReason }) => {
     const cleaned = cleanRoleplayOutput(
@@ -154,31 +164,48 @@ export function createRoleplayContinuation({
     reason,
     contractAnalysis,
   }) => {
+    const semanticRefusal = reason === "semantic_refusal";
     const retriesFromBeginning =
       reason === "empty_eof" || reason === "empty_story";
-    if (!enabled || (!assistant.trim() && !retriesFromBeginning)) {
+    if (
+      semanticRefusal
+        ? !remainingRefusalFallbackCandidates.length
+        : !enabled || (!assistant.trim() && !retriesFromBeginning)
+    ) {
       return null;
     }
-    const nextMessages = continuationMessages(
-      messages,
-      assistant,
-      reason,
-      contractAnalysis,
-    );
+    const nextMessages = semanticRefusal
+      ? messages
+      : continuationMessages(
+          messages,
+          assistant,
+          reason,
+          contractAnalysis,
+        );
     const nextEstimatedInputTokens = estimateTokens(nextMessages);
-    const [nextCandidate] = prepareRoleplayCandidates(
-      [candidate],
+    const nextCandidates = prepareRoleplayCandidates(
+      semanticRefusal
+        ? remainingRefusalFallbackCandidates
+        : [currentCandidate],
       nextEstimatedInputTokens,
-      null,
+      semanticRefusal ? parsed.maxTokens : null,
       settings,
     );
-    if (!nextCandidate) {
+    if (semanticRefusal) {
+      currentState = recordModelRefusal(
+        currentState,
+        currentCandidate,
+      );
+      remainingRefusalFallbackCandidates = [];
+      refusalFallbackCount += 1;
+    }
+    if (!nextCandidates.length) {
       logRoleplayError(
         "roleplay_continuation_context_exhausted",
         new Error("Continuation no longer fits the selected context"),
         {
-          provider: candidate.provider,
-          model: candidate.model,
+          provider: currentCandidate.provider,
+          model: currentCandidate.model,
           continuationCount,
           continuationReason: reason,
         },
@@ -186,21 +213,21 @@ export function createRoleplayContinuation({
       return null;
     }
 
-    const prepared = applyRoleplayPromptCache(
-      buildUpstreamPayload(parsed, nextCandidate, nextMessages),
-      nextCandidate,
-      nextMessages,
-      settings,
-      parsed.promptCache,
-      nextEstimatedInputTokens,
-    );
     let attempted;
     try {
       upstreamCallCount += 1;
       attempted = await attemptRoleplayCandidates(
         currentState,
-        [nextCandidate],
-        () => prepared,
+        nextCandidates,
+        (nextCandidate) =>
+          applyRoleplayPromptCache(
+            buildUpstreamPayload(parsed, nextCandidate, nextMessages),
+            nextCandidate,
+            nextMessages,
+            settings,
+            parsed.promptCache,
+            nextEstimatedInputTokens,
+          ),
         env,
         settings,
         signal,
@@ -211,14 +238,18 @@ export function createRoleplayContinuation({
         throw error;
       }
       logRoleplayError("roleplay_continuation_fetch_failed", error, {
-        provider: candidate.provider,
-        model: candidate.model,
+        provider: currentCandidate.provider,
+        model: currentCandidate.model,
         continuationCount,
         continuationReason: reason,
       });
       return null;
     }
     currentState = attempted.state;
+    upstreamCallCount += attempted.fallbackCount ?? 0;
+    if (semanticRefusal) {
+      refusalFallbackCount += attempted.fallbackCount ?? 0;
+    }
 
     if (attempted.terminalResponse) {
       const status = attempted.terminalResponse.status;
@@ -227,8 +258,8 @@ export function createRoleplayContinuation({
         "roleplay_continuation_provider_rejected",
         new Error("Continuation provider did not return a usable response"),
         {
-          provider: candidate.provider,
-          model: candidate.model,
+          provider: currentCandidate.provider,
+          model: currentCandidate.model,
           continuationCount,
           continuationReason: reason,
           status,
@@ -236,13 +267,24 @@ export function createRoleplayContinuation({
       );
       return null;
     }
+    currentCandidate = attempted.candidate;
     return attempted;
   };
 
   return {
     enabled,
+    canOpen,
     get state() {
       return currentState;
+    },
+    get candidate() {
+      return currentCandidate;
+    },
+    get refusalFallbackCount() {
+      return refusalFallbackCount;
+    },
+    get refusalFallbackEnabled() {
+      return remainingRefusalFallbackCandidates.length > 0;
     },
     get upstreamCallCount() {
       return upstreamCallCount;
@@ -254,6 +296,7 @@ export function createRoleplayContinuation({
     incompleteReason(input) {
       return assess(input).reason;
     },
+    classifyRefusal: classifyRoleplayRefusal,
     openResponse,
     async open(input) {
       const attempted = await openResponse(input);
@@ -272,8 +315,8 @@ export function createRoleplayContinuation({
           "roleplay_continuation_invalid_response",
           new Error("Continuation response was not an SSE stream"),
           {
-            provider: candidate.provider,
-            model: candidate.model,
+            provider: currentCandidate.provider,
+            model: currentCandidate.model,
             continuationCount: input.continuationCount,
             continuationReason: input.reason,
             status: attempted.response.status,
@@ -285,6 +328,11 @@ export function createRoleplayContinuation({
         upstreamBody: attempted.response.body,
         upstreamController: attempted.controller,
         cleanup: attempted.cleanup,
+        reasoningMetadata: {
+          provider: attempted.candidate.provider,
+          model: attempted.candidate.model,
+        },
+        refusalFallbackEnabled: true,
       };
     },
   };

@@ -3,6 +3,7 @@ import {
   extractFinishReason,
 } from "./memory.mjs";
 import { normalizeRoleplayCompletionPayload } from "./reasoning-output.mjs";
+import { ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE } from "./refusal-fallback.mjs";
 import {
   MAX_RESPONSE_BYTES,
   logRoleplayError,
@@ -55,11 +56,17 @@ function completionPayload(payload, content, finishReason) {
   const message = first.message && typeof first.message === "object"
     ? { ...first.message }
     : { role: "assistant" };
+  delete message.refusal;
   message.content = content;
   first.message = message;
   first.finish_reason = finishReason || "stop";
   choices[0] = first;
   return { ...payload, choices };
+}
+
+function completionRefusal(payload) {
+  const refusal = payload?.choices?.[0]?.message?.refusal;
+  return typeof refusal === "string" ? refusal : "";
 }
 
 async function readContinuationPayload(attempted, signal) {
@@ -93,12 +100,12 @@ export async function repairNonStreamingCompletion({
   settings,
   signal,
 }) {
-  const metadata = {
+  let metadata = {
     provider: candidate.provider,
     model: candidate.model,
   };
-  const initial = normalizedLeg(initialPayload, metadata);
-  const basePayload = initial.payload;
+  let initial = normalizedLeg(initialPayload, metadata);
+  let basePayload = initial.payload;
   let assistant = initial.assistant;
   let clientContent = initial.clientContent;
   let finishReason = initial.finishReason;
@@ -107,8 +114,62 @@ export async function repairNonStreamingCompletion({
   const continuationDiagnostics = [];
   let terminalReason = "";
   let contractAnalysis = null;
+  let refusalFallbackFailed = false;
 
-  while (true) {
+  const refusal = continuation.classifyRefusal({
+    assistant,
+    refusal: completionRefusal(initialPayload),
+    finishReason,
+  });
+  if (refusal.refused) {
+    continuationDiagnostics.push({
+      reason: "semantic_refusal",
+      refusalKind: refusal.reason,
+      charactersDiscarded: clientContent.length,
+      accepted: false,
+    });
+    const attempted = await continuation.openResponse({
+      assistant,
+      continuationCount: 1,
+      reason: "semantic_refusal",
+      contractAnalysis: null,
+    });
+    const fallbackPayload = attempted
+      ? await readContinuationPayload(attempted, signal)
+      : null;
+    if (fallbackPayload) {
+      metadata = {
+        provider: continuation.candidate.provider,
+        model: continuation.candidate.model,
+      };
+      initial = normalizedLeg(fallbackPayload, metadata);
+      const fallbackRefusal = continuation.classifyRefusal({
+        assistant: initial.assistant,
+        refusal: completionRefusal(fallbackPayload),
+        finishReason: initial.finishReason,
+      });
+      if (!fallbackRefusal.refused) {
+        basePayload = initial.payload;
+        assistant = initial.assistant;
+        clientContent = initial.clientContent;
+        finishReason = initial.finishReason;
+        continuationCount = 1;
+        continuationsByReason.semantic_refusal = 1;
+      } else {
+        refusalFallbackFailed = true;
+      }
+    } else {
+      refusalFallbackFailed = true;
+    }
+    if (refusalFallbackFailed) {
+      assistant = "";
+      clientContent = ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE;
+      finishReason = "stop";
+      terminalReason = "refusal_fallback_failed";
+    }
+  }
+
+  while (!refusalFallbackFailed) {
     let decision = continuation.assess({ assistant, finishReason });
     assistant = decision.cleaned?.content ?? assistant;
     clientContent = continuation.cleanOutput(clientContent).content;
@@ -213,7 +274,10 @@ export async function repairNonStreamingCompletion({
   }
 
   const finalDecision = continuation.assess({ assistant, finishReason });
-  if (!terminalReason || finalDecision.reason === "") {
+  if (
+    !refusalFallbackFailed &&
+    (!terminalReason || finalDecision.reason === "")
+  ) {
     terminalReason = finalDecision.reason;
     contractAnalysis = finalDecision.contractAnalysis;
   }
@@ -233,6 +297,7 @@ export async function repairNonStreamingCompletion({
     reason: terminalReason || "complete",
     continuationCount,
     upstreamCallCount: continuation.upstreamCallCount,
+    refusalFallbackCount: continuation.refusalFallbackCount,
     continuationDiagnostics,
     contractAnalysis,
   };

@@ -181,12 +181,19 @@ test("Janitor long system prompts reach NanoGPT without truncation", async () =>
   const systemChunks = upstreamPayload.messages
     .filter(({ role }) => role === "system")
     .map(({ content }) => content);
-  assert.equal(systemChunks.join(""), systemPrompt);
+  const roleplayControl = systemChunks.filter((content) =>
+    content.includes("[Private roleplay compliance control]"),
+  );
+  const promptChunks = systemChunks.filter(
+    (content) => !roleplayControl.includes(content),
+  );
+  assert.equal(roleplayControl.length, 1);
+  assert.equal(promptChunks.join(""), systemPrompt);
   assert.equal(
-    systemChunks.every((content) => content.length <= 128_000),
+    promptChunks.every((content) => content.length <= 128_000),
     true,
   );
-  for (const chunk of systemChunks) {
+  for (const chunk of promptChunks) {
     assert.equal(/[\uD800-\uDBFF]$/.test(chunk), false);
     assert.equal(/^[\uDC00-\uDFFF]/.test(chunk), false);
   }

@@ -381,6 +381,10 @@ export function getRoleplaySettings(env) {
       env.ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED,
       true,
     ),
+    refusalFallbackEnabled: booleanSetting(
+      env.ROLEPLAY_REFUSAL_FALLBACK_ENABLED,
+      true,
+    ),
     promptCacheMinTokens: boundedInteger(
       env.PROMPT_CACHE_MIN_TOKENS,
       1_024,

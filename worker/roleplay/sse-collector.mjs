@@ -108,6 +108,7 @@ export function createSseAssistantCollector({
   let buffered = "";
   let assistant = "";
   let clientContent = "";
+  let refusal = "";
   let terminated = false;
   let finishReason = "";
   let withheld = [];
@@ -171,6 +172,7 @@ export function createSseAssistantCollector({
     }
     template = parsed.payload;
     appendContent(choice?.delta?.content);
+    refusal = appendBounded(refusal, choice?.delta?.refusal);
     const terminal =
       typeof choice.finish_reason === "string"
         ? choice.finish_reason
@@ -227,6 +229,7 @@ export function createSseAssistantCollector({
       return {
         assistant,
         clientContent,
+        refusal,
         finishReason,
         terminated,
         truncated,

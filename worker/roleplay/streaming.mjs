@@ -3,6 +3,10 @@ import {
   createSseAssistantCollector as createLegCollector,
 } from "./sse-collector.mjs";
 import { createRoleplayStreamValidationGate } from "./stream-validation-gate.mjs";
+import {
+  createRoleplayRefusalStreamGate,
+  ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE,
+} from "./refusal-fallback.mjs";
 
 const SSE_ENCODER = new TextEncoder();
 const HEARTBEAT_COMMENT = SSE_ENCODER.encode(
@@ -75,9 +79,12 @@ export function createObservedStream({
   assessCompletion = null,
   cleanOutput = null,
   getUpstreamCallCount = null,
+  getRefusalFallbackCount = null,
   bufferUntilValidated = false,
   maxContinuations = 0,
   reasoningMetadata = null,
+  detectRefusal = null,
+  refusalFallbackEnabled = false,
 }) {
   let resolveCompletion;
   const completion = new Promise((resolve) => {
@@ -87,16 +94,20 @@ export function createObservedStream({
   let activeController = upstreamController;
   let activeCleanup = cleanup;
   let decoder = new TextDecoder();
+  let currentReasoningMetadata = reasoningMetadata;
   const newCollector = () =>
     createLegCollector({
       maximumCharacters: MAX_COLLECTED_ASSISTANT_CHARACTERS,
       deferTerminalFrames:
         typeof openContinuation === "function" || bufferUntilValidated,
-      reasoningMetadata,
+      reasoningMetadata: currentReasoningMetadata,
     });
   let collector = newCollector();
   const validationGate = createRoleplayStreamValidationGate(
     bufferUntilValidated,
+  );
+  const refusalGate = createRoleplayRefusalStreamGate(
+    refusalFallbackEnabled,
   );
   let settled = false;
   let released = false;
@@ -137,7 +148,10 @@ export function createObservedStream({
     activeController = next.upstreamController;
     activeCleanup = next.cleanup ?? (() => {});
     decoder = new TextDecoder();
+    currentReasoningMetadata =
+      next.reasoningMetadata ?? currentReasoningMetadata;
     collector = newCollector();
+    refusalGate.reset(Boolean(next.refusalFallbackEnabled));
     released = false;
     pendingRead = null;
     pendingContinuation = null;
@@ -160,6 +174,10 @@ export function createObservedStream({
         typeof getUpstreamCallCount === "function"
           ? getUpstreamCallCount()
           : continuationCount + 1,
+      refusalFallbackCount:
+        typeof getRefusalFallbackCount === "function"
+          ? getRefusalFallbackCount()
+          : 0,
       continuationDiagnostics,
       streamMs: performance.now() - streamStartedAt,
       ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
@@ -256,6 +274,18 @@ export function createObservedStream({
                   performance.now() - legFirstByteAt,
                 );
               }
+              const refusal = typeof detectRefusal === "function"
+                ? detectRefusal({
+                    assistant: collected.assistant,
+                    refusal: collected.refusal,
+                    finishReason: collected.finishReason,
+                  })
+                : { refused: false, reason: "" };
+              const semanticRefusal = refusal.refused === true;
+              const completedOutputFrames = [
+                ...refusalGate.consume(collected.output),
+                ...refusalGate.complete(semanticRefusal),
+              ];
               const outputLimited = collected.finishReason === "length";
               const assistantAddition =
                 activeContinuationReason === "output_contract"
@@ -298,7 +328,14 @@ export function createObservedStream({
                 candidateClientContent =
                   cleanOutput(candidateClientContent).content;
               }
-              if (outputLimited) {
+              if (semanticRefusal) {
+                decision = {
+                  reason: "semantic_refusal",
+                  limit: 1,
+                  contractAnalysis: null,
+                  cleaned: { content: assistant },
+                };
+              } else if (outputLimited) {
                 decision = {
                   ...decision,
                   reason: "output_limit",
@@ -342,10 +379,15 @@ export function createObservedStream({
 
               const discardForFreshRetry =
                 decision.reason === "empty_eof" ||
-                decision.reason === "empty_story";
+                decision.reason === "empty_story" ||
+                decision.reason === "semantic_refusal";
               if (discardForFreshRetry) {
                 continuationDiagnostics.push({
                   reason: decision.reason,
+                  refusalKind:
+                    decision.reason === "semantic_refusal"
+                      ? refusal.reason
+                      : undefined,
                   charactersDiscarded: collected.clientContent.length,
                   accepted: false,
                 });
@@ -354,8 +396,9 @@ export function createObservedStream({
                   // the leg's normalizer output so its <think> envelope closes
                   // before a retry starts, while still discarding it from the
                   // validated response and persisted assistant content.
-                  enqueueFrames(controller, collected.output);
+                  enqueueFrames(controller, completedOutputFrames);
                 }
+                refusalGate.discardLeg();
                 validationGate.discardLeg();
                 template = collected.template ?? template;
                 terminalFrames = [];
@@ -366,7 +409,7 @@ export function createObservedStream({
                 terminalFrames = collected.withheld;
                 enqueueFrames(
                   controller,
-                  validationGate.consume(collected.output, {
+                  validationGate.consume(completedOutputFrames, {
                     hold: activeContinuationReason === "output_contract",
                   }),
                 );
@@ -449,7 +492,18 @@ export function createObservedStream({
                 continue;
               }
             }
-            if (bufferUntilValidated) {
+            const refusalFallbackFailed =
+              incompleteReason === "semantic_refusal";
+            if (refusalFallbackFailed) {
+              enqueueFrames(
+                controller,
+                bufferedCompletionFrames(
+                  template ?? collected.template,
+                  ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE,
+                  "stop",
+                ),
+              );
+            } else if (bufferUntilValidated) {
               enqueueFrames(
                 controller,
                 bufferedCompletionFrames(
@@ -465,14 +519,19 @@ export function createObservedStream({
             cleanupLeg();
             controller.close();
             void settle({
-              success: collected.terminated && !incompleteReason,
+              success:
+                collected.terminated &&
+                !incompleteReason &&
+                !refusalFallbackFailed,
               assistant,
               finishReason: collected.finishReason,
-              reason: incompleteReason
-                ? incompleteReason
-                : collected.terminated
-                  ? "complete"
-                  : "incomplete_eof",
+              reason: refusalFallbackFailed
+                ? "refusal_fallback_failed"
+                : incompleteReason
+                  ? incompleteReason
+                  : collected.terminated
+                    ? "complete"
+                    : "incomplete_eof",
               contractAnalysis: decision.contractAnalysis,
             });
             return;
@@ -492,9 +551,13 @@ export function createObservedStream({
           if (!frames.length) {
             continue;
           }
-          const releasableFrames = validationGate.consume(frames, {
-            hold: activeContinuationReason === "output_contract",
-          });
+          const refusalCheckedFrames = refusalGate.consume(frames);
+          const releasableFrames = validationGate.consume(
+            refusalCheckedFrames,
+            {
+              hold: activeContinuationReason === "output_contract",
+            },
+          );
           if (!releasableFrames.length) {
             continue;
           }

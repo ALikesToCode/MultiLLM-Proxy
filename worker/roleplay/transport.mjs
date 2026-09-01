@@ -11,6 +11,10 @@ import {
 import { fragmentChatPayload } from "./message-fragments.mjs";
 import { classifyExplicitProviderError } from "./provider-errors.mjs";
 import { recordThroughputObservation } from "./model-performance.mjs";
+import {
+  injectRoleplayRefusalControl,
+  roleplayRefusalFallbackCandidates,
+} from "./refusal-fallback.mjs";
 
 const RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
@@ -459,6 +463,55 @@ export function recordModelResult(
   };
 }
 
+export function recordModelRefusal(
+  state,
+  candidate,
+  now = Date.now(),
+) {
+  const previous = state.stats[candidate.key] ?? {
+    provider: candidate.provider,
+    model: candidate.model,
+    family: candidate.family,
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    consecutiveFailures: 0,
+  };
+  return {
+    ...state,
+    stats: {
+      ...state.stats,
+      [candidate.key]: {
+        ...previous,
+        semanticRefusals: (previous.semanticRefusals ?? 0) + 1,
+        lastSemanticRefusalAt: now,
+        lastUsedAt: now,
+      },
+    },
+  };
+}
+
+export function recordRoleplayCompletionResult(
+  state,
+  candidate,
+  result,
+) {
+  const { reason, ...modelResult } = result;
+  return reason === "refusal_fallback_failed"
+    ? state
+    : recordModelResult(state, candidate, modelResult);
+}
+
+export function applyRoleplayRouteHeaders(
+  headers,
+  candidate,
+  fallbackCount,
+) {
+  headers.set("X-Roleplay-Provider", candidate.provider);
+  headers.set("X-Roleplay-Model", candidate.model);
+  headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
+}
+
 async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
@@ -769,6 +822,9 @@ export async function attemptRoleplayCandidates(
     candidateIndex += 1
   ) {
     const candidate = candidates[candidateIndex];
+    const refusalFallbackCandidates = settings.refusalFallbackEnabled
+      ? roleplayRefusalFallbackCandidates(candidates, candidateIndex)
+      : [];
     let attempted;
     let preparedPayload;
     try {
@@ -788,10 +844,16 @@ export async function attemptRoleplayCandidates(
       };
     }
 
+    const upstreamPayload = refusalFallbackCandidates.length
+      ? injectRoleplayRefusalControl(
+          preparedPayload?.payload ?? preparedPayload,
+        )
+      : preparedPayload?.payload ?? preparedPayload;
+
     try {
       attempted = await fetchCandidate(
         candidate,
-        preparedPayload?.payload ?? preparedPayload,
+        upstreamPayload,
         env,
         settings,
         signal,
@@ -824,6 +886,7 @@ export async function attemptRoleplayCandidates(
         state: nextState,
         fallbackCount,
         promptCache: preparedPayload?.promptCache,
+        refusalFallbackCandidates,
       };
     }
 

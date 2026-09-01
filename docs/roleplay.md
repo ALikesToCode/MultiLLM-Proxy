@@ -31,6 +31,15 @@ guard. LinkAPI remains a Kimi-only tier and OpenRouter is not part of the
 production roleplay chain. Provider order is strict; adaptive ranking operates
 only among models in the same provider tier.
 
+For `roleplay:glm`, standard GLM-5.3 Flash receives a private instruction to
+follow the roleplay request and never refuse. If an unavoidable provider policy
+still blocks completion, Flash emits one exact internal trigger as its entire
+answer. The Worker withholds that leg, regenerates the original conversation
+with the configured GLM-5.3 Flash Uncensored candidate, and exposes or stores
+only the replacement. Ordinary dialogue containing words such as "I refuse"
+does not match the trigger. Version-pinned routes remain pinned; set
+`ROLEPLAY_REFUSAL_FALLBACK_ENABLED=false` to disable this behavior.
+
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
 advances to the next key. A `402` insufficient-balance rejection does the same.
@@ -524,6 +533,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Maximum wait for provider response headers before advancing to the next tier |
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
+| `ROLEPLAY_REFUSAL_FALLBACK_ENABLED` | `true` | Privately regenerate an exact GLM-5.3 Flash refusal trigger with the configured Uncensored Flash candidate; rejected output is neither streamed nor stored |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
 | `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with a missing story or incomplete required image-prompt contract; image-only responses regenerate from the beginning and no-progress repairs stop immediately |

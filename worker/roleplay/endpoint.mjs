@@ -31,6 +31,7 @@ import {
 import { prepareProtectedContext } from "./directives.mjs";
 import { revalidateNanoCredential } from "./credential-health.mjs";
 import {
+  applyRoleplayCompletionState,
   logRoleplayNonStreamCompletion,
   logRoleplayStreamCompletion,
   roleplayCompletionDisposition,
@@ -48,7 +49,6 @@ import {
 import {
   RoleplayRequestError,
   assistantStorageReserveBytes,
-  appendAssistantMessage,
   applyCompaction,
   buildRoleplayMessages,
   buildUpstreamPayload,
@@ -71,6 +71,7 @@ import {
 } from "./state-runtime.mjs";
 import {
   MAX_RESPONSE_BYTES,
+  applyRoleplayRouteHeaders,
   attemptRoleplayCandidates,
   copyUpstreamResponseHeaders,
   createRoleplayTimingSummary,
@@ -79,7 +80,6 @@ import {
   jsonResponse,
   logRoleplayError,
   readBoundedBytes,
-  recordModelResult,
   requestCompaction,
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
@@ -749,6 +749,7 @@ export class RoleplaySession extends DurableObject {
       controller,
       cleanup,
       promptCache,
+      refusalFallbackCandidates,
     } = attempted;
     const continuation = createRoleplayContinuation({
       state,
@@ -759,6 +760,7 @@ export class RoleplaySession extends DurableObject {
       settings,
       signal: request.signal,
       idempotencyKey,
+      refusalFallbackCandidates,
     });
     const selectionReason =
       (state.stats[candidate.key]?.successes ?? 0) < 2
@@ -808,7 +810,7 @@ export class RoleplaySession extends DurableObject {
         upstreamController: controller,
         heartbeatMs: settings.streamHeartbeatMs,
         cleanup,
-        openContinuation: continuation.enabled
+        openContinuation: continuation.canOpen
           ? continuation.open.bind(continuation)
           : null,
         getIncompleteReason: continuation.enabled
@@ -817,6 +819,8 @@ export class RoleplaySession extends DurableObject {
         assessCompletion: continuation.assess.bind(continuation),
         cleanOutput: continuation.cleanOutput.bind(continuation),
         getUpstreamCallCount: () => continuation.upstreamCallCount,
+        getRefusalFallbackCount: () =>
+          continuation.refusalFallbackCount,
         bufferUntilValidated:
           parsed.outputContract?.imagePromptRequired === true,
         maxContinuations: settings.maxAutoContinuations,
@@ -824,6 +828,8 @@ export class RoleplaySession extends DurableObject {
           provider: candidate.provider,
           model: candidate.model,
         },
+        detectRefusal: continuation.classifyRefusal,
+        refusalFallbackEnabled: continuation.refusalFallbackEnabled,
         onComplete: async (completion) => {
           const {
             success,
@@ -832,8 +838,9 @@ export class RoleplaySession extends DurableObject {
             ttfbMs,
           } = completion;
           state = continuation.state;
+          const finalCandidate = continuation.candidate;
           logRoleplayStreamCompletion({
-            candidate,
+            candidate: finalCandidate,
             parsed,
             completion,
             headerMs,
@@ -845,8 +852,8 @@ export class RoleplaySession extends DurableObject {
               "roleplay_stream_incomplete",
               new Error("Provider stream ended without a terminal event"),
               {
-                provider: candidate.provider,
-                model: candidate.model,
+                provider: finalCandidate.provider,
+                model: finalCandidate.model,
                 assistantCharacters: assistant.length,
               },
             );
@@ -858,34 +865,24 @@ export class RoleplaySession extends DurableObject {
             memoryEnabled,
             failureStatus: "stream_failed",
           });
-          let nextState = recordModelResult(state, candidate, {
-            success: disposition.modelSucceeded,
-            ttfbMs: headerMs + ttfbMs,
-            totalMs: performance.now() - startedAt,
-            status: disposition.modelSucceeded ? response.status : 0,
-            performance: completion,
-          });
-          nextState = {
-            ...nextState,
-            inputTokensSaved:
-              (nextState.inputTokensSaved ?? 0) + inputTokensSaved,
-          };
-          if (disposition.persistAssistant) {
-            nextState = appendAssistantMessage(
-              nextState,
-              persistedConversation,
-              assistant,
-              settings,
-            );
-          } else {
-            nextState = { ...nextState, updatedAt: Date.now() };
-          }
-          nextState = markRoleplayRequest(
-            nextState,
+          state = applyRoleplayCompletionState({
+            state,
+            candidate: finalCandidate,
+            completion,
+            disposition,
+            modelResult: {
+              success: disposition.modelSucceeded,
+              ttfbMs: headerMs + ttfbMs,
+              totalMs: performance.now() - startedAt,
+              status: disposition.modelSucceeded ? response.status : 0,
+              performance: completion,
+            },
+            inputTokensSaved,
+            persistedConversation,
+            settings,
             idempotencyKey,
-            disposition.requestStatus,
-          );
-          await this.stateRepository.save(nextState);
+          });
+          await this.stateRepository.save(state);
         },
       });
       return {
@@ -933,6 +930,11 @@ export class RoleplaySession extends DurableObject {
           signal: request.signal,
         });
         state = continuation.state;
+        applyRoleplayRouteHeaders(
+          responseHeaders,
+          continuation.candidate,
+          fallbackCount + continuation.refusalFallbackCount,
+        );
         responseBytes = new TextEncoder().encode(
           JSON.stringify(completionResult.payload),
         );
@@ -955,38 +957,29 @@ export class RoleplaySession extends DurableObject {
       memoryEnabled,
       failureStatus: "completion_failed",
     });
-    state = recordModelResult(state, candidate, {
-      success: disposition.modelSucceeded,
-      ttfbMs: headerMs + firstByteMs,
-      totalMs: performance.now() - startedAt,
-      status: disposition.modelSucceeded ? response.status : 0,
+    const finalCandidate = continuation.candidate;
+    state = applyRoleplayCompletionState({
+      state,
+      candidate: finalCandidate,
+      completion: completionResult,
+      disposition,
+      modelResult: {
+        success: disposition.modelSucceeded,
+        ttfbMs: headerMs + firstByteMs,
+        totalMs: performance.now() - startedAt,
+        status: disposition.modelSucceeded ? response.status : 0,
+      },
+      inputTokensSaved,
+      persistedConversation,
+      settings,
+      idempotencyKey,
     });
-    state = {
-      ...state,
-      inputTokensSaved:
-        (state.inputTokensSaved ?? 0) + inputTokensSaved,
-    };
     logRoleplayNonStreamCompletion({
-      candidate,
+      candidate: finalCandidate,
       parsed,
       completion: completionResult,
       timings,
     });
-    if (disposition.persistAssistant) {
-      state = appendAssistantMessage(
-        state,
-        persistedConversation,
-        completionResult.assistant,
-        settings,
-      );
-    } else {
-      state = { ...state, updatedAt: Date.now() };
-    }
-    state = markRoleplayRequest(
-      state,
-      idempotencyKey,
-      disposition.requestStatus,
-    );
     await this.stateRepository.save(state);
     return {
       response: new Response(responseBytes, {

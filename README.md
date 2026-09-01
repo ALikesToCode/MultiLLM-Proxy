@@ -460,6 +460,9 @@ Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
 Automatic fallback handles explicit model, capacity, authentication,
 rate-limit, and service-unavailable rejections. Ambiguous transport and
 gateway failures stop to avoid duplicate generation.
+On `roleplay:glm`, an exact private refusal trigger from GLM-5.3-Flash is
+discarded and regenerated with GLM-5.3-Flash Uncensored; normal roleplay text
+never activates this semantic fallback.
 Each route carries its own context/output limits. The Worker filters out routes
 that cannot fit the current input, so a larger NavyAI or NanoGPT GLM context can
 be selected without assuming every gateway exposes the same capacity.

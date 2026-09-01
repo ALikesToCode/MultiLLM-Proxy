@@ -1,3 +1,43 @@
+import { appendAssistantMessage } from "./memory.mjs";
+import { markRoleplayRequest } from "./state-runtime.mjs";
+import { recordRoleplayCompletionResult } from "./transport.mjs";
+
+export function applyRoleplayCompletionState({
+  state,
+  candidate,
+  completion,
+  disposition,
+  modelResult,
+  inputTokensSaved,
+  persistedConversation,
+  settings,
+  idempotencyKey,
+}) {
+  let nextState = recordRoleplayCompletionResult(
+    state,
+    candidate,
+    { reason: completion.reason, ...modelResult },
+  );
+  nextState = {
+    ...nextState,
+    inputTokensSaved:
+      (nextState.inputTokensSaved ?? 0) + inputTokensSaved,
+  };
+  nextState = disposition.persistAssistant
+    ? appendAssistantMessage(
+        nextState,
+        persistedConversation,
+        completion.assistant,
+        settings,
+      )
+    : { ...nextState, updatedAt: Date.now() };
+  return markRoleplayRequest(
+    nextState,
+    idempotencyKey,
+    disposition.requestStatus,
+  );
+}
+
 function contractTelemetry(outputContract, analysis) {
   return {
     outputContractDeclaredSchema: outputContract?.schema ?? "unknown",
@@ -71,6 +111,7 @@ export function logRoleplayStreamCompletion({
         : undefined,
       heartbeatCount: completion.heartbeatCount,
       continuationCount: completion.continuationCount,
+      refusalFallbackCount: completion.refusalFallbackCount,
       upstreamCallCount: completion.upstreamCallCount,
       ...contractTelemetry(
         parsed.outputContract,
@@ -101,6 +142,7 @@ export function logRoleplayNonStreamCompletion({
       reason: completion.reason,
       finishReason: completion.finishReason || undefined,
       continuationCount: completion.continuationCount,
+      refusalFallbackCount: completion.refusalFallbackCount,
       upstreamCallCount: completion.upstreamCallCount,
       queueMs: Math.round(timings.queueMs ?? 0),
       stateLoadMs: Math.round(timings.stateLoadMs ?? 0),

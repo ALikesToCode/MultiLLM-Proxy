@@ -197,6 +197,16 @@ test("roleplay enables explicit provider-error fallback by default", () => {
   );
 });
 
+test("roleplay enables model-triggered refusal fallback by default", () => {
+  assert.equal(getRoleplaySettings({}).refusalFallbackEnabled, true);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_REFUSAL_FALLBACK_ENABLED: "false",
+    }).refusalFallbackEnabled,
+    false,
+  );
+});
+
 test("Cloudflare forwards NanoGPT key preference into the container", () => {
   const container = new MultiLLMProxyContainer(
     {},
@@ -247,6 +257,10 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
   assert.equal(config.vars?.ROLEPLAY_COMPACT_TRIGGER_TOKENS, "128000");
   assert.equal(config.vars?.ROLEPLAY_KEEP_RECENT_MESSAGES, "32");
   assert.equal(config.vars?.ROLEPLAY_MAX_STORED_BYTES, "640000");
+  assert.equal(
+    config.vars?.ROLEPLAY_REFUSAL_FALLBACK_ENABLED,
+    "true",
+  );
   assert.equal(
     config.vars?.ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS,
     "1",
