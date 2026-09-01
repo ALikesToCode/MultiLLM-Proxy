@@ -113,6 +113,7 @@ export function createSseAssistantCollector({
   let withheld = [];
   let truncated = false;
   let template = null;
+  let completionTokens = 0;
   const reasoningNormalizer = reasoningMetadata
     ? createRoleplayReasoningFrameNormalizer(reasoningMetadata)
     : null;
@@ -153,6 +154,16 @@ export function createSseAssistantCollector({
         return [];
       }
       return [frame];
+    }
+    const reportedCompletionTokens = Number(
+      parsed.payload?.usage?.completion_tokens ??
+        parsed.payload?.usage?.output_tokens,
+    );
+    if (
+      Number.isFinite(reportedCompletionTokens) &&
+      reportedCompletionTokens > completionTokens
+    ) {
+      completionTokens = reportedCompletionTokens;
     }
     const choice = parsed.payload?.choices?.[0];
     if (!choice) {
@@ -220,6 +231,7 @@ export function createSseAssistantCollector({
         terminated,
         truncated,
         template,
+        completionTokens,
         output,
         withheld: [...withheld],
       };

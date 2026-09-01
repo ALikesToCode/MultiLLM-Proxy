@@ -44,7 +44,15 @@ export function applyGlmQualityLatencyGuard(
   preference,
   { premiumPercent = 20, minimumSamples = 3 } = {},
 ) {
-  if (String(preference).toLowerCase() !== "glm") {
+  const normalizedPreference = String(preference).toLowerCase();
+  if (normalizedPreference === "glm-speed") {
+    return candidates.map((candidate) => ({
+      ...candidate,
+      routingRank: 0,
+      qualityPromoted: false,
+    }));
+  }
+  if (normalizedPreference !== "glm") {
     return candidates.map((candidate) => ({
       ...candidate,
       routingRank: candidate.modelRank,

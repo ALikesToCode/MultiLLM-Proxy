@@ -92,8 +92,16 @@ catalog refresh:
 
 - `z-ai/glm-5.3-flash`
 - `z-ai/glm-5.3-flash-uncensored`
-- `zai-org/glm-5.3` and `zai-org/glm-5.3:thinking`
+- `z-ai/glm-5.3` plus the legacy `zai-org/glm-5.3` identifiers
 - `zai-org/glm-5.2` and `zai-org/glm-5.2:thinking`
+
+In subscription roleplay routing, the automatic order is
+`z-ai/glm-5.3-flash`, `z-ai/glm-5.3-flash-uncensored`, then
+`zai-org/glm-5.2:thinking`. Full `z-ai/glm-5.3` remains selectable with
+`roleplay:5.3` but is excluded from automatic subscription routing because it
+uses the plan's 2x request multiplier. `roleplay:glm-speed` measures delivered
+streaming tokens per second for the three 1x choices instead of trusting a
+catalog snapshot.
 
 Standard GLM-5.x variants accept semantic `max` reasoning. The uncensored
 Flash variant's published ceiling is `high`, so the proxy maps a default or

@@ -5,6 +5,11 @@ import {
   compactionPlan,
 } from "../worker/roleplay/memory.mjs";
 import { applyRoleplayPromptCache } from "../worker/roleplay/prompt-cache.mjs";
+import { createSseAssistantCollector } from "../worker/roleplay/sse-collector.mjs";
+import {
+  modelThroughputMetrics,
+  recordThroughputObservation,
+} from "../worker/roleplay/model-performance.mjs";
 
 import {
   completionResponse,
@@ -20,6 +25,44 @@ function opencodeOnlyFixture() {
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
   });
 }
+
+test("roleplay throughput metrics retain bounded observed TPS", () => {
+  const first = recordThroughputObservation(
+    {},
+    { completionTokens: 1_000, generationMs: 10_000 },
+  );
+  const second = {
+    ...first,
+    ...recordThroughputObservation(first, {
+      completionTokens: 1_000,
+      generationMs: 5_000,
+    }),
+  };
+  const metrics = modelThroughputMetrics(second);
+
+  assert.equal(metrics.sample_count, 2);
+  assert.deepEqual(metrics.tokens_per_second, {
+    ewma: 125,
+    p50: 100,
+    p95: 200,
+  });
+  assert.equal(metrics.last_completion_tokens, 1_000);
+  assert.equal(metrics.last_generation_ms, 5_000);
+});
+
+test("roleplay captures completion tokens from a final usage-only SSE frame", () => {
+  const collector = createSseAssistantCollector();
+  collector.consume(
+    'data: {"choices":[{"delta":{"content":"Measured."},"finish_reason":"stop"}]}\n\n',
+  );
+  const completed = collector.finish(
+    'data: {"choices":[],"usage":{"completion_tokens":321}}\n\ndata: [DONE]\n\n',
+  );
+
+  assert.equal(completed.assistant, "Measured.");
+  assert.equal(completed.completionTokens, 321);
+  assert.equal(completed.terminated, true);
+});
 
 test("roleplay compaction planning exposes reusable hot-path analysis", () => {
   const state = {
@@ -245,6 +288,7 @@ test("roleplay SSE disables intermediary response transformation", async () => {
     const chunk = JSON.stringify({
       id: "chatcmpl-performance-stream",
       model: payload.model,
+      usage: { completion_tokens: 240 },
       choices: [
         {
           index: 0,
@@ -296,7 +340,77 @@ test("roleplay SSE disables intermediary response transformation", async () => {
     ),
     fixture.env,
   );
-  assert.equal((await completedMetrics.json()).pending_turns, 0);
+  const completedPayload = await completedMetrics.json();
+  assert.equal(completedPayload.pending_turns, 0);
+  const throughput =
+    completedPayload.models["opencode:glm-5.2"].throughput;
+  assert.equal(throughput.sample_count, 1);
+  assert.equal(throughput.last_completion_tokens, 240);
+  assert.ok(throughput.tokens_per_second.ewma > 0);
+});
+
+test("NanoGPT streaming requests ask for the final usage frame", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+  });
+  let upstreamPayload;
+  const response = await withGlobalFetch(async (_input, init) => {
+    upstreamPayload = JSON.parse(init.body);
+    return new Response(
+      'data: {"choices":[{"delta":{"content":"Measured."},"finish_reason":"stop"}],"usage":{"completion_tokens":12}}\n\ndata: [DONE]\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-performance-nanogpt-usage",
+        model: "roleplay:5.3-flash",
+        stream: true,
+        input: "Begin.",
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(upstreamPayload.stream_options, { include_usage: true });
+  assert.match(await response.text(), /Measured\./);
+  await fixture.waitForBackgroundWork();
+});
+
+test("roleplay accepts the exact NanoGPT uncensored Flash model ID", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nanogpt-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+  });
+  let requestedModel = "";
+  const response = await withGlobalFetch(async (_input, init) => {
+    const payload = JSON.parse(init.body);
+    requestedModel = payload.model;
+    return completionResponse(payload.model, "Pinned uncensored reply.");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: "session-exact-nanogpt-uncensored",
+        model: "z-ai/glm-5.3-flash-uncensored",
+        stream: false,
+        input: "Begin.",
+      }),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(requestedModel, "z-ai/glm-5.3-flash-uncensored");
+  assert.equal(
+    response.headers.get("X-Roleplay-Model"),
+    "z-ai/glm-5.3-flash-uncensored",
+  );
 });
 
 test("roleplay streams story text before validating the final image prompt", async () => {

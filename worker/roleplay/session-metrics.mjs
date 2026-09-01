@@ -1,6 +1,7 @@
 import { estimateTokens } from "./memory.mjs";
 import { roleplayStateCacheMetrics } from "./state-runtime.mjs";
 import { modelLatencyPercentiles } from "./transport.mjs";
+import { modelThroughputMetrics } from "./model-performance.mjs";
 
 function modelMetrics(stats) {
   return Object.fromEntries(
@@ -17,6 +18,7 @@ function modelMetrics(stats) {
         ewma_ttfb_ms: value.ewmaTtfbMs,
         ewma_total_ms: value.ewmaTotalMs,
         latency: modelLatencyPercentiles(value),
+        throughput: modelThroughputMetrics(value),
         cooldown_until: value.cooldownUntil,
         last_status: value.lastStatus,
         last_used_at: value.lastUsedAt,

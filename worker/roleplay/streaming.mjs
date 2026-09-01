@@ -102,6 +102,9 @@ export function createObservedStream({
   let released = false;
   let pendingRead = null;
   let firstByteAt = 0;
+  let legFirstByteAt = 0;
+  let completionTokens = 0;
+  let generationMs = 0;
   let heartbeatCount = 0;
   let continuationCount = 0;
   const continuationsByReason = {};
@@ -139,6 +142,7 @@ export function createObservedStream({
     pendingRead = null;
     pendingContinuation = null;
     completedLeg = null;
+    legFirstByteAt = 0;
     activeContinuationReason = decision.reason;
     repairBaseline = decision.contractAnalysis ?? null;
   };
@@ -159,6 +163,12 @@ export function createObservedStream({
       continuationDiagnostics,
       streamMs: performance.now() - streamStartedAt,
       ttfbMs: firstByteAt ? firstByteAt - streamStartedAt : 0,
+      completionTokens,
+      generationMs,
+      tokensPerSecond:
+        completionTokens > 0 && generationMs > 0
+          ? completionTokens / (generationMs / 1_000)
+          : null,
     };
     try {
       await onComplete(completed);
@@ -239,6 +249,13 @@ export function createObservedStream({
           if (done) {
             if (!completedLeg) {
               const collected = collector.finish(decoder.decode());
+              if (collected.completionTokens > 0 && legFirstByteAt) {
+                completionTokens += collected.completionTokens;
+                generationMs += Math.max(
+                  0,
+                  performance.now() - legFirstByteAt,
+                );
+              }
               const outputLimited = collected.finishReason === "length";
               const assistantAddition =
                 activeContinuationReason === "output_contract"
@@ -466,6 +483,9 @@ export function createObservedStream({
           const now = performance.now();
           if (!firstByteAt) {
             firstByteAt = now;
+          }
+          if (!legFirstByteAt) {
+            legFirstByteAt = now;
           }
           const decoded = decoder.decode(value, { stream: true });
           const frames = collector.consume(decoded);

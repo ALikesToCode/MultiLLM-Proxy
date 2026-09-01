@@ -10,6 +10,7 @@ import {
 } from "./memory.mjs";
 import { fragmentChatPayload } from "./message-fragments.mjs";
 import { classifyExplicitProviderError } from "./provider-errors.mjs";
+import { recordThroughputObservation } from "./model-performance.mjs";
 
 const RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
@@ -375,7 +376,7 @@ export function modelLatencyPercentiles(stats) {
 export function recordModelResult(
   state,
   candidate,
-  { success, ttfbMs, totalMs, status, now = Date.now() },
+  { success, ttfbMs, totalMs, status, performance, now = Date.now() },
 ) {
   const previous = state.stats[candidate.key] ?? {
     provider: candidate.provider,
@@ -431,6 +432,9 @@ export function recordModelResult(
       ...state.stats,
       [candidate.key]: {
         ...previous,
+        ...(success
+          ? recordThroughputObservation(previous, performance)
+          : {}),
         attempts,
         successes,
         failures,

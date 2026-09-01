@@ -211,10 +211,12 @@ export async function handleRoleplayEdgeRequest(request, env) {
       data: roleplayCatalog(env, settings),
       selection: {
         provider_order: settings.providerOrder,
-        policy: "strict_provider_p95_quality_guard",
+        policy: "strict_provider_subscription_safe_with_optional_tps_ranking",
         quality_latency_premium_percent:
           settings.qualityLatencyPremiumPercent,
         quality_minimum_samples: settings.qualityMinimumSamples,
+        speed_reference_output_tokens:
+          settings.speedReferenceOutputTokens,
         safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
         model_aliases: ROLEPLAY_PUBLIC_MODEL_ALIASES,
       },
@@ -481,6 +483,7 @@ export class RoleplaySession extends DurableObject {
       {
         premiumPercent: settings.qualityLatencyPremiumPercent,
         minimumSamples: settings.qualityMinimumSamples,
+        referenceOutputTokens: settings.speedReferenceOutputTokens,
       },
     );
     if (!candidates.length) {
@@ -860,6 +863,7 @@ export class RoleplaySession extends DurableObject {
             ttfbMs: headerMs + ttfbMs,
             totalMs: performance.now() - startedAt,
             status: disposition.modelSucceeded ? response.status : 0,
+            performance: completion,
           });
           nextState = {
             ...nextState,

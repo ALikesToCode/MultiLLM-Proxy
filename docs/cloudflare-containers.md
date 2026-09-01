@@ -83,11 +83,11 @@ binding. One object per session serializes turns without creating a global
 bottleneck. It stores bounded continuity memory, idempotency guards, and
 Kimi/GLM latency and reliability statistics.
 
-NanoGPT subscription GLM-5.3-Flash is the first production GLM tier. OpenCode
-Go `glm-5.3-flash` follows, with full GLM-5.3 eligible only when its measured
-p95 TTFB and total latency stay within the configured 20% premium. GLM-5.2 and
-NavyAI remain fallback choices; versioned and uncensored routes can also be
-selected explicitly. LinkAPI is Kimi-only and OpenRouter is omitted from roleplay. See
+NanoGPT subscription GLM-5.3-Flash is the first production GLM choice,
+followed by uncensored Flash and GLM-5.2 in the 1x pool. Full GLM-5.3 remains
+an explicit 2x selector. `roleplay:glm-speed` ranks the 1x choices using
+same-session streaming TPS; OpenCode and NavyAI remain later provider tiers.
+LinkAPI is Kimi-only and OpenRouter is omitted from roleplay. See
 [the roleplay guide](roleplay.md) for the request schema, compaction policy,
 safe fallback boundary, metrics route, and all `ROLEPLAY_*` variables.
 

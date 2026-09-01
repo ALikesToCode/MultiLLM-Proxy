@@ -57,6 +57,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/model-selection.mjs",
     import.meta.url,
   );
+  const modelPerformanceUrl = new URL(
+    "../../worker/roleplay/model-performance.mjs",
+    import.meta.url,
+  );
   const qualityRoutingUrl = new URL(
     "../../worker/roleplay/quality-routing.mjs",
     import.meta.url,
@@ -143,6 +147,7 @@ export async function roleplayModuleUrl() {
     memorySource,
     messageFragmentsSource,
     modelSelectionSource,
+    modelPerformanceSource,
     qualityRoutingSource,
     nonstreamRepairSource,
     outputContractSource,
@@ -176,6 +181,7 @@ export async function roleplayModuleUrl() {
       readFile(memoryUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
       readFile(modelSelectionUrl, "utf8"),
+      readFile(modelPerformanceUrl, "utf8"),
       readFile(qualityRoutingUrl, "utf8"),
       readFile(nonstreamRepairUrl, "utf8"),
       readFile(outputContractUrl, "utf8"),
@@ -211,6 +217,7 @@ export async function roleplayModuleUrl() {
       `from "${modelSelectionDataUrl}";`,
     ),
   );
+  const modelPerformanceDataUrl = dataModuleUrl(modelPerformanceSource);
   const configDataUrl = dataModuleUrl(
     configSource
       .replace(
@@ -224,6 +231,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./quality-routing.mjs";',
         `from "${qualityRoutingDataUrl}";`,
+      )
+      .replace(
+        'from "./model-performance.mjs";',
+        `from "${modelPerformanceDataUrl}";`,
       ),
   );
   const credentialHealthDataUrl = dataModuleUrl(
@@ -346,6 +357,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./provider-errors.mjs";',
         `from "${providerErrorsDataUrl}";`,
+      )
+      .replace(
+        'from "./model-performance.mjs";',
+        `from "${modelPerformanceDataUrl}";`,
       ),
   );
   const sessionMetricsDataUrl = dataModuleUrl(
@@ -358,6 +373,10 @@ export async function roleplayModuleUrl() {
       .replace(
         'from "./transport.mjs";',
         `from "${transportDataUrl}";`,
+      )
+      .replace(
+        'from "./model-performance.mjs";',
+        `from "${modelPerformanceDataUrl}";`,
       ),
   );
   const nonstreamRepairDataUrl = dataModuleUrl(

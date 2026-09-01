@@ -5,8 +5,10 @@ const MODEL_PREFERENCES = new Set([
   "speed",
   "kimi",
   "glm",
+  "glm-speed",
   "glm-5.2",
   "glm-5.3-flash",
+  "glm-5.3-flash-uncensored",
   "glm-5.3",
   "uncensored",
 ]);
@@ -21,14 +23,22 @@ const REQUEST_MODEL_ALIASES = Object.freeze({
   "roleplay:speed": "speed",
   "roleplay:kimi": "kimi",
   "roleplay:glm": "glm",
+  "roleplay:glm-speed": "glm-speed",
   "roleplay:5.2": "glm-5.2",
   "roleplay:glm-5.2": "glm-5.2",
   "roleplay:5.3-flash": "glm-5.3-flash",
   "roleplay:glm-5.3-flash": "glm-5.3-flash",
+  "roleplay:5.3-flash-uncensored": "glm-5.3-flash-uncensored",
+  "roleplay:glm-5.3-flash-uncensored": "glm-5.3-flash-uncensored",
   "roleplay:5.3": "glm-5.3",
   "roleplay:glm-5.3": "glm-5.3",
   "roleplay:uncensored": "uncensored",
   "kimi-k2.6": "kimi",
+  "z-ai/glm-5.3-flash": "glm-5.3-flash",
+  "z-ai/glm-5.3-flash-uncensored": "glm-5.3-flash-uncensored",
+  "z-ai/glm-5.3": "glm-5.3",
+  "zai-org/glm-5.2": "glm-5.2",
+  "zai-org/glm-5.2:thinking": "glm-5.2",
   "glm-5.2": "glm-5.2",
   "glm-5.3-flash": "glm-5.3-flash",
   "glm-5.3": "glm-5.3",
@@ -38,8 +48,10 @@ export const ROLEPLAY_PUBLIC_MODEL_ALIASES = Object.freeze({
   "roleplay:auto": "adaptive stable models",
   "roleplay:speed": "adaptive stable models",
   "roleplay:kimi": "Kimi family",
-  "roleplay:glm": "GLM-5.3-Flash with a measured 20% full-model latency guard",
+  "roleplay:glm": "subscription-safe GLM quality order: 5.3 Flash, uncensored Flash, then 5.2",
+  "roleplay:glm-speed": "subscription-safe GLM pool ranked by measured streaming TPS",
   "roleplay:5.3-flash": "GLM-5.3-Flash only",
+  "roleplay:5.3-flash-uncensored": "GLM-5.3-Flash Uncensored only",
   "roleplay:5.3": "full GLM-5.3 only",
   "roleplay:5.2": "GLM-5.2 only",
   "roleplay:uncensored": "uncensored GLM route with GLM-5.2 Venice fallback",
@@ -59,7 +71,7 @@ export function parseRoleplayModelPreference(payload) {
   if (explicit) {
     if (!MODEL_PREFERENCES.has(explicit)) {
       throw new RoleplayRequestError(
-        "model_preference must be auto, speed, kimi, glm, glm-5.3-flash, glm-5.3, glm-5.2, or uncensored",
+        "model_preference must be auto, speed, kimi, glm, glm-speed, glm-5.3-flash, glm-5.3-flash-uncensored, glm-5.3, glm-5.2, or uncensored",
       );
     }
     return explicit;
@@ -71,7 +83,7 @@ export function parseRoleplayModelPreference(payload) {
   }
   if (model.startsWith("roleplay:")) {
     throw new RoleplayRequestError(
-      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, roleplay:glm, roleplay:5.3-flash, roleplay:5.3, roleplay:5.2, or roleplay:uncensored",
+      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, roleplay:glm, roleplay:glm-speed, roleplay:5.3-flash, roleplay:5.3-flash-uncensored, roleplay:5.3, roleplay:5.2, or roleplay:uncensored",
     );
   }
   return "auto";
@@ -106,7 +118,9 @@ export function roleplayCandidateMatchesPreference(candidate, preference) {
   }
   if (
     normalized === "glm" ||
+    normalized === "glm-speed" ||
     normalized === "glm-5.3-flash" ||
+    normalized === "glm-5.3-flash-uncensored" ||
     normalized === "uncensored" ||
     explicitGlmVersion
   ) {
@@ -124,17 +138,35 @@ export function roleplayCandidateMatchesPreference(candidate, preference) {
   if (normalized === "uncensored") {
     return variant.uncensored;
   }
-  if (variant.explicitUncensored) {
-    return false;
-  }
   if (normalized === "glm-5.3-flash") {
-    return variant.version === "5.3" && variant.flash;
+    return variant.version === "5.3" && variant.flash && !variant.uncensored;
+  }
+  if (normalized === "glm-5.3-flash-uncensored") {
+    return (
+      variant.version === "5.3" &&
+      variant.flash &&
+      variant.explicitUncensored
+    );
   }
   if (explicitGlmVersion) {
     return (
       variant.version === explicitGlmVersion &&
       (explicitGlmVersion !== "5.3" || !variant.flash)
     );
+  }
+  if (normalized === "glm-speed") {
+    return (
+      variant.explicitUncensored ||
+      variant.version === "5.2" ||
+      (variant.version === "5.3" && variant.flash)
+    );
+  }
+  if (
+    candidate.subscriptionOnly &&
+    variant.version === "5.3" &&
+    !variant.flash
+  ) {
+    return false;
   }
   return !variant.version || ["5.3", "5.2"].includes(variant.version);
 }

@@ -4,6 +4,7 @@ import {
 } from "./capacity.mjs";
 import { roleplayCandidateMatchesPreference } from "./model-selection.mjs";
 import { applyGlmQualityLatencyGuard } from "./quality-routing.mjs";
+import { estimatedGenerationMs } from "./model-performance.mjs";
 
 const DEFAULT_PROVIDER_ORDER = [
   "nanogpt",
@@ -76,13 +77,13 @@ const PROVIDER_DEFAULT_MODELS = {
   nanogpt: {
     glm: [
       "z-ai/glm-5.3-flash",
-      "zai-org/glm-5.3",
-      "zai-org/glm-5.2:thinking",
       "z-ai/glm-5.3-flash-uncensored",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3",
     ],
   },
   opencode: {
-    glm: ["glm-5.3-flash", "glm-5.3", "glm-5.2"],
+    glm: ["glm-5.3-flash", "glm-5.2", "glm-5.3"],
   },
   navyai: {
     glm: "glm-5.2-venice",
@@ -494,6 +495,12 @@ export function getRoleplaySettings(env) {
       1,
       100,
     ),
+    speedReferenceOutputTokens: boundedInteger(
+      env.ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS,
+      1_024,
+      128,
+      131_072,
+    ),
     sessionTtlSeconds: boundedInteger(
       env.ROLEPLAY_SESSION_TTL_SECONDS,
       2_592_000,
@@ -606,7 +613,7 @@ function successRate(stats) {
   return (stats.successes ?? 0) / stats.attempts;
 }
 
-function candidateScore(candidate, stats, now) {
+function candidateScore(candidate, stats, now, routingPolicy = {}) {
   if ((stats?.cooldownUntil ?? 0) > now) {
     return Number.POSITIVE_INFINITY;
   }
@@ -623,6 +630,15 @@ function candidateScore(candidate, stats, now) {
   const total = stats.ewmaTotalMs ?? ttfb * 2;
   const failurePenalty = (1 - successRate(stats)) * 12_000;
   const recentFailurePenalty = (stats.consecutiveFailures ?? 0) * 4_000;
+  if (routingPolicy.throughputAware) {
+    const generationMs = estimatedGenerationMs(
+      stats,
+      routingPolicy.referenceOutputTokens ?? 1_024,
+    );
+    if (generationMs !== null) {
+      return ttfb + generationMs + failurePenalty + recentFailurePenalty;
+    }
+  }
   return ttfb * 0.72 + total * 0.28 + failurePenalty + recentFailurePenalty;
 }
 
@@ -654,7 +670,12 @@ export function rankRoleplayCandidates(
         return {
           ...candidate,
           key,
-          score: candidateScore(candidate, modelStats[key], now),
+          score: candidateScore(candidate, modelStats[key], now, {
+            throughputAware: ["speed", "glm-speed"].includes(
+              normalizedPreference,
+            ),
+            referenceOutputTokens: qualityPolicy.referenceOutputTokens,
+          }),
           cooldownUntil: modelStats[key]?.cooldownUntil ?? 0,
           activeCredential:
             activeCredentials[candidate.provider] === candidate.credentialId,
@@ -671,6 +692,7 @@ export function rankRoleplayCandidates(
           left.routingRank - right.routingRank ||
           Number(right.activeCredential) - Number(left.activeCredential) ||
           left.score - right.score ||
+          left.modelRank - right.modelRank ||
           left.credentialRank - right.credentialRank ||
           left.familyRank - right.familyRank ||
           left.model.localeCompare(right.model),

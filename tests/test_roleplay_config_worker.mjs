@@ -55,6 +55,13 @@ test("roleplay guards full GLM quality routing with measured p95 latency", () =>
     }).qualityLatencyPremiumPercent,
     25,
   );
+  assert.equal(settings.speedReferenceOutputTokens, 1_024);
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS: "2048",
+    }).speedReferenceOutputTokens,
+    2_048,
+  );
 });
 
 test("roleplay defaults NanoGPT GLM to Flash with explicit quality fallbacks", () => {
@@ -69,12 +76,14 @@ test("roleplay defaults NanoGPT GLM to Flash with explicit quality fallbacks", (
     candidates.map((candidate) => candidate.model),
     [
       "z-ai/glm-5.3-flash",
-      "zai-org/glm-5.3",
-      "zai-org/glm-5.2:thinking",
       "z-ai/glm-5.3-flash-uncensored",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3",
     ],
   );
-  const uncensored = candidates.at(-1);
+  const uncensored = candidates.find((candidate) =>
+    candidate.model.includes("uncensored"),
+  );
   assert.equal(uncensored.contextWindow, 262_144);
   assert.equal(uncensored.maxOutputTokens, 32_768);
 });
@@ -222,14 +231,14 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).nanogpt.glm,
     [
       "z-ai/glm-5.3-flash",
-      "zai-org/glm-5.3",
-      "zai-org/glm-5.2:thinking",
       "z-ai/glm-5.3-flash-uncensored",
+      "zai-org/glm-5.2:thinking",
+      "z-ai/glm-5.3",
     ],
   );
   assert.deepEqual(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode.glm,
-    ["glm-5.3-flash", "glm-5.3", "glm-5.2"],
+    ["glm-5.3-flash", "glm-5.2", "glm-5.3"],
   );
   assert.equal(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,

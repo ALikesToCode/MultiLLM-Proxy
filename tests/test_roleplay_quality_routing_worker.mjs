@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { roleplayCandidateMatchesPreference } from "../worker/roleplay/model-selection.mjs";
+import {
+  parseRoleplayModelPreference,
+  roleplayCandidateMatchesPreference,
+} from "../worker/roleplay/model-selection.mjs";
+import { rankRoleplayCandidates } from "../worker/roleplay/config.mjs";
 import { applyGlmQualityLatencyGuard } from "../worker/roleplay/quality-routing.mjs";
 import { maximumReasoningProfile } from "../worker/roleplay/reasoning.mjs";
 
@@ -91,10 +95,66 @@ test("explicit full-model selection bypasses the adaptive guard", () => {
   assert.equal(candidates[0].routingRank, full.modelRank);
 });
 
-test("uncensored routing is explicit and accepts the GLM-5.2 Venice fallback", () => {
+test("GLM speed routing compares every eligible model in the provider tier", () => {
+  const candidates = applyGlmQualityLatencyGuard(
+    [flash, full, stable],
+    {},
+    "glm-speed",
+  );
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.routingRank),
+    [0, 0, 0],
+  );
+});
+
+test("GLM speed routing prefers measured generation throughput", () => {
+  const candidates = [flash, stable].map((candidate) => ({
+    ...candidate,
+    providerRank: 0,
+    familyRank: 0,
+    credentialRank: 0,
+    subscriptionOnly: true,
+  }));
+  const modelStats = {
+    [flash.key]: {
+      attempts: 2,
+      successes: 2,
+      ewmaTtfbMs: 100,
+      ewmaTotalMs: 10_000,
+      ewmaTokensPerSecond: 100,
+    },
+    [stable.key]: {
+      attempts: 2,
+      successes: 2,
+      ewmaTtfbMs: 150,
+      ewmaTotalMs: 8_000,
+      ewmaTokensPerSecond: 200,
+    },
+  };
+
+  const ranked = rankRoleplayCandidates(
+    candidates,
+    modelStats,
+    "glm-speed",
+    Date.now(),
+    {},
+    { referenceOutputTokens: 1_024 },
+  );
+
+  assert.equal(ranked[0].model, "glm-5.2");
+});
+
+test("subscription-safe GLM includes uncensored Flash but excludes full 5.3", () => {
   const nanoUncensored = {
     family: "glm",
     model: "z-ai/glm-5.3-flash-uncensored",
+    subscriptionOnly: true,
+  };
+  const nanoFull = {
+    family: "glm",
+    model: "z-ai/glm-5.3",
+    subscriptionOnly: true,
   };
   const navyVenice = { family: "glm", model: "glm-5.2-venice" };
 
@@ -106,9 +166,41 @@ test("uncensored routing is explicit and accepts the GLM-5.2 Venice fallback", (
     roleplayCandidateMatchesPreference(navyVenice, "uncensored"),
     true,
   );
-  assert.equal(roleplayCandidateMatchesPreference(nanoUncensored, "glm"), false);
+  assert.equal(roleplayCandidateMatchesPreference(nanoUncensored, "glm"), true);
+  assert.equal(roleplayCandidateMatchesPreference(nanoFull, "glm"), false);
+  assert.equal(
+    roleplayCandidateMatchesPreference(nanoFull, "glm-5.3"),
+    true,
+  );
+  assert.equal(
+    roleplayCandidateMatchesPreference(
+      nanoUncensored,
+      "glm-5.3-flash-uncensored",
+    ),
+    true,
+  );
   assert.equal(roleplayCandidateMatchesPreference(navyVenice, "glm"), true);
   assert.equal(roleplayCandidateMatchesPreference(navyVenice, "glm-5.2"), true);
+  assert.equal(
+    parseRoleplayModelPreference({
+      model: "roleplay:5.3-flash-uncensored",
+    }),
+    "glm-5.3-flash-uncensored",
+  );
+  assert.equal(
+    parseRoleplayModelPreference({
+      model: "z-ai/glm-5.3-flash-uncensored",
+    }),
+    "glm-5.3-flash-uncensored",
+  );
+  assert.equal(
+    parseRoleplayModelPreference({ model: "z-ai/glm-5.3" }),
+    "glm-5.3",
+  );
+  assert.equal(
+    parseRoleplayModelPreference({ model: "zai-org/glm-5.2:thinking" }),
+    "glm-5.2",
+  );
 });
 
 test("NanoGPT uncensored Flash respects its high reasoning ceiling", () => {

@@ -39,8 +39,8 @@ test("roleplay model catalog exposes configured adaptive tiers without secrets",
     [
       { provider: "opencode", family: "kimi", model: "kimi-k2.6" },
       { provider: "opencode", family: "glm", model: "glm-5.3-flash" },
-      { provider: "opencode", family: "glm", model: "glm-5.3" },
       { provider: "opencode", family: "glm", model: "glm-5.2" },
+      { provider: "opencode", family: "glm", model: "glm-5.3" },
       { provider: "navyai", family: "kimi", model: "kimi-k2.6" },
       { provider: "navyai", family: "glm", model: "glm-5.2-venice" },
     ],
@@ -51,7 +51,11 @@ test("roleplay model catalog exposes configured adaptive tiers without secrets",
   assert.equal(payload.data[5].max_output_tokens, 131_072);
   assert.equal(
     payload.selection.model_aliases["roleplay:glm"],
-    "GLM-5.3-Flash with a measured 20% full-model latency guard",
+    "subscription-safe GLM quality order: 5.3 Flash, uncensored Flash, then 5.2",
+  );
+  assert.match(
+    payload.selection.model_aliases["roleplay:glm-speed"],
+    /measured streaming TPS/,
   );
   assert.equal(
     payload.selection.model_aliases["roleplay:5.3"],

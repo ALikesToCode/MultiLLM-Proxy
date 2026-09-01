@@ -64,6 +64,11 @@ export function logRoleplayStreamCompletion({
       ),
       ttfbMs: Math.round(completion.ttfbMs),
       streamMs: Math.round(completion.streamMs),
+      completionTokens: completion.completionTokens || undefined,
+      generationMs: Math.round(completion.generationMs || 0) || undefined,
+      tokensPerSecond: Number.isFinite(completion.tokensPerSecond)
+        ? Math.round(completion.tokensPerSecond * 100) / 100
+        : undefined,
       heartbeatCount: completion.heartbeatCount,
       continuationCount: completion.continuationCount,
       upstreamCallCount: completion.upstreamCallCount,

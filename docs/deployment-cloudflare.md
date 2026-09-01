@@ -34,11 +34,11 @@ stores recent dialogue, a compact continuity digest, idempotency keys, and
 per-model EWMA latency/reliability statistics.
 
 Production GLM routing starts generic requests on NanoGPT
-`z-ai/glm-5.3-flash`, then OpenCode `glm-5.3-flash`, with GLM-5.2 and NavyAI
-`glm-5.2-venice` retained as later fallbacks. Full GLM-5.3 can lead its Flash
-counterpart only after both have enough same-session samples and both its p95
-time-to-first-byte and p95 total latency are within the configured 20% premium.
-The versioned and uncensored aliases remain explicitly selectable. LinkAPI is
+`z-ai/glm-5.3-flash`, followed by uncensored Flash and GLM-5.2 inside the 1x
+subscription pool. Full GLM-5.3 is excluded from automatic subscription
+routing and remains available through the explicit `roleplay:5.3` selector.
+`roleplay:glm-speed` ranks the 1x pool by observed streaming TPS after bounded
+exploration. OpenCode and NavyAI remain later provider tiers. LinkAPI is
 Kimi-only and OpenRouter is omitted from the roleplay chain. Explicit `400`,
 `401`, `402`, `403`, `404`, `413`,
 `415`, `422`, `429`, and `503` responses trigger automatic fallback.

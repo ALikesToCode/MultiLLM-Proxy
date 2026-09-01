@@ -451,12 +451,12 @@ stores bounded continuity memory, and records per-model latency and
 reliability. OpenCode generations use Container egress because OpenCode rejects
 Worker-origin HTTP signatures.
 
-The production policy starts GLM on NanoGPT `z-ai/glm-5.3-flash`, then
-OpenCode Go `glm-5.3-flash`, while retaining full GLM-5.3 and GLM-5.2
-fallbacks. Full GLM-5.3 leads Flash only after same-session p95 TTFB and total
-latency measurements are both within the configured 20% premium. Explicit
-Flash, full 5.3, 5.2, and uncensored aliases remain available. LinkAPI remains
-a Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
+NanoGPT subscription GLM routing prioritizes the 1x models in this order:
+GLM-5.3-Flash, GLM-5.3-Flash Uncensored, then GLM-5.2. Full GLM-5.3 is an
+explicit 2x choice. `roleplay:glm-speed` measures streaming tokens per second
+and ranks that 1x pool for the current session; versioned aliases pin an exact
+variant. OpenCode Go and NavyAI remain later provider tiers. LinkAPI remains a
+Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
 Automatic fallback handles explicit model, capacity, authentication,
 rate-limit, and service-unavailable rejections. Ambiguous transport and
 gateway failures stop to avoid duplicate generation.

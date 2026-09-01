@@ -907,6 +907,12 @@ export function buildUpstreamPayload(parsed, candidate, messages) {
   if (Number.isSafeInteger(candidate.resolvedMaxOutputTokens)) {
     payload.max_tokens = candidate.resolvedMaxOutputTokens;
   }
+  if (candidate.provider === "nanogpt" && parsed.stream) {
+    payload.stream_options = {
+      ...(payload.stream_options ?? {}),
+      include_usage: true,
+    };
+  }
   return applyReasoningPolicy(payload, candidate);
 }
 

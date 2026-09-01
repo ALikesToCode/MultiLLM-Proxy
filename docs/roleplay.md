@@ -14,20 +14,22 @@ The production model policy uses NanoGPT first and learns between:
 - Kimi K2.6: `kimi-k2.6`
 - fast GLM-5.3: NanoGPT `z-ai/glm-5.3-flash`, then OpenCode
   `glm-5.3-flash`
-- full GLM-5.3: NanoGPT `zai-org/glm-5.3`, then OpenCode `glm-5.3`
+- uncensored GLM-5.3 Flash: NanoGPT
+  `z-ai/glm-5.3-flash-uncensored`
 - GLM-5.2 fallback: NanoGPT `zai-org/glm-5.2:thinking`, OpenCode
   `glm-5.2`, and NavyAI `glm-5.2-venice`
-- explicit uncensored route: NanoGPT `z-ai/glm-5.3-flash-uncensored`, with
-  NavyAI `glm-5.2-venice` as its final fallback
+- full GLM-5.3: explicit NanoGPT `z-ai/glm-5.3` or OpenCode `glm-5.3`
 
-The generic GLM route starts with GLM-5.3-Flash. Full GLM-5.3 can move ahead of
-Flash only after the same session has at least three successful samples for
-both variants and the full model's p95 time-to-first-byte and p95 total latency
-are each no more than 20% above Flash. With insufficient evidence, Flash stays
-first. An explicit `roleplay:5.3` request bypasses that adaptive guard. LinkAPI
-remains a Kimi-only tier and OpenRouter is not part of the production roleplay
-chain. Provider order is strict; latency and reliability operate only among
-each tier's eligible models.
+In NanoGPT subscription mode, the generic GLM route uses the configured 1x
+order: GLM-5.3-Flash, GLM-5.3-Flash Uncensored, then GLM-5.2. Full GLM-5.3 is
+excluded from automatic subscription selection because it consumes 2x plan
+tokens; `roleplay:5.3` remains available when that tradeoff is intentional.
+`roleplay:glm-speed` explores the same 1x pool and then ranks it using observed
+streaming time to first byte, provider-reported completion tokens per second,
+and failures. Non-subscription GLM tiers retain the measured full-model quality
+guard. LinkAPI remains a Kimi-only tier and OpenRouter is not part of the
+production roleplay chain. Provider order is strict; adaptive ranking operates
+only among models in the same provider tier.
 
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
@@ -111,15 +113,21 @@ one-to-one tool-call association.
 request-scoped; only entries marked `always` or whose keys match recent text
 are injected, which keeps each request bounded.
 
-`model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-5.3-flash`,
-`glm-5.3`, `glm-5.2`, or `uncensored`. OpenAI-compatible clients can instead
+`model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-speed`,
+`glm-5.3-flash`, `glm-5.3-flash-uncensored`, `glm-5.3`, `glm-5.2`, or
+`uncensored`. OpenAI-compatible clients can instead
 set `model` to `roleplay:auto`, `roleplay:speed`, `roleplay:kimi`,
-`roleplay:glm`, `roleplay:5.3-flash`, `roleplay:5.3`, `roleplay:5.2`, or
-`roleplay:uncensored`. `roleplay:glm` starts on GLM-5.3-Flash and applies the
-measured 20% full-model guard. The versioned aliases pin their named variant.
-`roleplay:uncensored` is the only alias that selects NanoGPT's explicitly
-uncensored model. Concrete `kimi-k2.6`, `glm-5.3-flash`, `glm-5.3`, and
-`glm-5.2` values are also accepted.
+`roleplay:glm`, `roleplay:glm-speed`, `roleplay:5.3-flash`,
+`roleplay:5.3-flash-uncensored`, `roleplay:5.3`, `roleplay:5.2`, or
+`roleplay:uncensored`. `roleplay:glm` uses the quality-first subscription-safe
+order; `roleplay:glm-speed` learns the fastest observed 1x GLM route. The
+versioned aliases pin their named variant. `roleplay:uncensored` can fall back
+to GLM-5.2 Venice, while `roleplay:5.3-flash-uncensored` pins the NanoGPT
+uncensored Flash variant. Concrete `kimi-k2.6`, `glm-5.3-flash`, `glm-5.3`,
+and `glm-5.2` values are also accepted. NanoGPT's exact
+`z-ai/glm-5.3-flash`, `z-ai/glm-5.3-flash-uncensored`, `z-ai/glm-5.3`,
+`zai-org/glm-5.2`, and `zai-org/glm-5.2:thinking` IDs map to the same pinned
+variants.
 
 Every roleplay generation defaults to the strongest provider-compatible
 reasoning mode. Callers can lower generation effort with `reasoning_effort`;
@@ -213,11 +221,12 @@ The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
 
-Use `roleplay:glm` for the GLM-5.3-Flash default with the measured quality
-guard. Use `roleplay:5.3-flash`, `roleplay:5.3`, or `roleplay:5.2` to pin a
-variant across eligible providers. Use `roleplay:uncensored` only when the
-explicitly uncensored NanoGPT route is intended; it can fall back to NavyAI's
-GLM-5.2 Venice model.
+Use `roleplay:glm` for the quality-first 1x subscription order. Use
+`roleplay:glm-speed` when observed throughput should decide among those models.
+Use `roleplay:5.3-flash`, `roleplay:5.3-flash-uncensored`, `roleplay:5.3`, or
+`roleplay:5.2` to pin a variant. `roleplay:5.3` deliberately opts into the 2x
+NanoGPT subscription model. The shorter `roleplay:uncensored` selector can
+fall back to NavyAI's GLM-5.2 Venice model.
 
 JanitorAI's public help pages do not specify the JSON sentinel used by its
 **Unlimited** control. MultiLLM does not depend on that implementation detail:
@@ -256,10 +265,14 @@ directives present in that request.
 ## Adaptive selection and fallback
 
 Every session records attempts, successes, failures, EWMA time to first byte,
-and EWMA total time for each provider/model pair. New sessions explore both
-Kimi and GLM, then prefer the faster reliable model. Per-session learning
-avoids a global Durable Object bottleneck and keeps regional behavior local to
-the conversation.
+and EWMA total time for each provider/model pair. Streaming NanoGPT requests
+also request a final usage frame. When the provider reports completion tokens,
+the session records observed generation duration plus EWMA, p50, and p95 tokens
+per second. `roleplay:glm-speed` samples each eligible model twice before using
+that throughput for a reference 1,024-token response. This is delivered-stream
+performance for the current client path, not a guarantee from a model-card TPS
+snapshot. Per-session learning avoids a global Durable Object bottleneck and
+keeps regional behavior local to the conversation.
 
 Automatic fallback occurs only after a response that clearly rejected work:
 `400`, `401`, `402`, `403`, `404`, `413`, `415`, `422`, `429`, or an explicit
@@ -493,6 +506,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT` | `20` | Largest allowed full GLM-5.3 p95 TTFB and total-latency premium over Flash |
 | `ROLEPLAY_QUALITY_MIN_SAMPLES` | `3` | Successful samples required for both full and Flash before promotion |
+| `ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS` | `1024` | Output length used to combine observed TTFB and TPS for speed ranking |
 | `NANOGPT_PREFERRED_KEY_INDEX` | unset | Numbered NanoGPT key attempted first for a fresh session |
 | `NANOGPT_KEY_CHECK_EVERY_REQUESTS` | `50` | Successful uses before the remembered NanoGPT key is catalog-revalidated |
 | `ROLEPLAY_COMPACT_TRIGGER_TOKENS` | `128000` | Raw-dialogue threshold that forces continuity compaction; `0` derives it from provider capacity |
@@ -524,13 +538,13 @@ candidates eligible for the requested variant. Generic GLM begins with Flash:
   "nanogpt": {
     "glm": [
       "z-ai/glm-5.3-flash",
-      "zai-org/glm-5.3",
+      "z-ai/glm-5.3-flash-uncensored",
       "zai-org/glm-5.2:thinking",
-      "z-ai/glm-5.3-flash-uncensored"
+      "z-ai/glm-5.3"
     ]
   },
   "opencode": {
-    "glm": ["glm-5.3-flash", "glm-5.3", "glm-5.2"]
+    "glm": ["glm-5.3-flash", "glm-5.2", "glm-5.3"]
   },
   "navyai": {
     "glm": "glm-5.2-venice"
