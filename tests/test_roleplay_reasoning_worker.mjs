@@ -10,12 +10,11 @@ import {
 
 const JANITOR_PATH = "/roleplay/v1/chat/completions";
 
-test("roleplay deployment can lower default generation reasoning effort", async () => {
+test("roleplay defaults generation to max and honors an explicit override", async () => {
   const fixture = makeRoleplayEnv({
     NANOGPT_API_KEY: "nano-key",
     ROLEPLAY_PROVIDER_ORDER: "nanogpt",
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
-    ROLEPLAY_DEFAULT_REASONING_EFFORT: "low",
   });
   const efforts = [];
 
@@ -38,7 +37,7 @@ test("roleplay deployment can lower default generation reasoning effort", async 
       const defaultResponse = await handleRoleplayEdgeRequest(
         roleplayRequest(
           {
-            session_id: "session-low-default-reasoning",
+            session_id: "session-max-default-reasoning",
             model: "roleplay:glm",
             messages: [{ role: "user", content: "Continue." }],
             stream: false,
@@ -53,10 +52,10 @@ test("roleplay deployment can lower default generation reasoning effort", async 
       const overrideResponse = await handleRoleplayEdgeRequest(
         roleplayRequest(
           {
-            session_id: "session-explicit-high-reasoning",
+            session_id: "session-explicit-low-reasoning",
             model: "roleplay:glm",
             messages: [{ role: "user", content: "Continue." }],
-            reasoning_effort: "high",
+            reasoning_effort: "low",
             stream: false,
           },
           { Origin: "https://janitorai.com" },
@@ -68,7 +67,7 @@ test("roleplay deployment can lower default generation reasoning effort", async 
     },
   );
 
-  assert.deepEqual(efforts, ["low", "high"]);
+  assert.deepEqual(efforts, ["max", "low"]);
 });
 
 function visibleContent(streamBody) {

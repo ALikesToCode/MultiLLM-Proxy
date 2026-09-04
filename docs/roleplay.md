@@ -139,7 +139,8 @@ and `glm-5.2` values are also accepted. NanoGPT's exact
 variants.
 
 Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployed
-default is `low` to reduce the delay before visible story text. Callers can
+default is `max` so each selected model can use its strongest supported
+reasoning profile. Callers can
 override generation effort per turn with `reasoning_effort`; semantic `max`
 maps to the selected provider's real ceiling. Model-backed memory compaction
 remains at maximum reasoning. OpenCode Kimi K2.6 keeps its fixed native
@@ -541,7 +542,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
 | `ROLEPLAY_REFUSAL_FALLBACK_ENABLED` | `true` | Privately regenerate an exact GLM-5.3 Flash refusal trigger with the configured Uncensored Flash candidate; rejected output is neither streamed nor stored |
-| `ROLEPLAY_DEFAULT_REASONING_EFFORT` | `low` | Default reasoning effort for generation; callers can override it per turn, while compaction stays at maximum reasoning |
+| `ROLEPLAY_DEFAULT_REASONING_EFFORT` | `max` | Default reasoning effort for generation; maps to each provider's strongest supported profile, while callers can still override it per turn |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
 | `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with a missing story or incomplete required image-prompt contract; image-only responses regenerate from the beginning and no-progress repairs stop immediately |
