@@ -239,11 +239,11 @@ test("deployment prefers NanoGPT key index one", async () => {
   assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "1");
 });
 
-test("deployment defaults roleplay generation to maximum reasoning", async () => {
+test("deployment defaults roleplay generation to high reasoning", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "max");
+  assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
 test("deployment routes GLM through OpenCode before NavyAI", async () => {
