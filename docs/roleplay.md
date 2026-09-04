@@ -231,8 +231,11 @@ JanitorAI before selecting it.
 If Worker logs show `POST /v1/chat/completions`, the selected JanitorAI
 configuration is bypassing the native roleplay route. Re-enter the full proxy
 URL above and keep **Add `/chat/completions`** disabled. Refusal fallback,
-reasoning normalization, continuation repair, and roleplay memory apply only
-to the native roleplay endpoints.
+continuation repair, and roleplay memory apply only to the native roleplay
+endpoints. As a defensive compatibility measure, authenticated JanitorAI GLM
+streams that still reach the generic route receive balanced reasoning markup
+and expose `X-MultiLLM-Reasoning-Normalized: janitor-glm`; they do not gain the
+other native roleplay behaviors.
 
 Use `roleplay:glm` for the quality-first 1x subscription order. Use
 `roleplay:glm-speed` when observed throughput should decide among those models.

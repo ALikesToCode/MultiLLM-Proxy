@@ -16,6 +16,7 @@ import {
   resolveSseHeartbeatMs,
   withSseHeartbeat,
 } from "./worker/sse-heartbeat.mjs";
+import { withJanitorGlmReasoningNormalization } from "./worker/janitor-reasoning-response.mjs";
 
 export { RoleplaySession };
 
@@ -52,7 +53,7 @@ const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, X-Roleplay-Session-ID, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
 const CORS_EXPOSE_HEADERS =
-  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-Roleplay-Session-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-MultiLLM-Reasoning-Normalized, X-Roleplay-Session-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -1975,6 +1976,7 @@ export class MultiLLMProxyContainer extends Container {
 
 export default {
   async fetch(request, env) {
+    const requestStartedAt = performance.now();
     const requestUrl = new URL(request.url);
     if (requestUrl.protocol === "http:") {
       requestUrl.protocol = "https:";
@@ -2167,9 +2169,13 @@ export default {
             await opencodeReasoningMetadataPromise,
           )
         : response;
+      const reasoningNormalizedResponse =
+        withJanitorGlmReasoningNormalization(request, downstreamResponse, {
+          startedAt: requestStartedAt,
+        });
       return applyCorsHeaders(
         request,
-        withSseHeartbeat(downstreamResponse, {
+        withSseHeartbeat(reasoningNormalizedResponse, {
           heartbeatMs: resolveSseHeartbeatMs(env.SSE_STREAM_HEARTBEAT_MS),
           requestSignal: request.signal,
         }),

@@ -57,6 +57,30 @@ function gatedEventStream() {
   };
 }
 
+function chunkedEventStream(chunks) {
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+  return body;
+}
+
+function streamedContent(streamBody) {
+  return streamBody
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+    .flatMap((line) => {
+      const content = JSON.parse(line.slice("data: ".length))
+        ?.choices?.[0]?.delta?.content;
+      return typeof content === "string" ? [content] : [];
+    })
+    .join("");
+}
+
 test("SSE heartbeat preserves chunks and fills an idle interval", async () => {
   const upstream = gatedEventStream();
   const response = withSseHeartbeat(
@@ -161,4 +185,121 @@ test("generic Container route applies heartbeat and CORS to SSE", async () => {
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
   assert.equal(response.headers.get("X-Accel-Buffering"), "no");
   assert.match(await response.text(), /data: \{"chunk":2\}\n\n/);
+});
+
+test("generic Janitor GLM stream suppresses tokenized reasoning replay", async () => {
+  const worker = (await loadWorkerModule()).default;
+  const reasoning = [
+    "Let me think about the current state. ",
+    "Mira asked what chewed him. ",
+    "Mysterious says: a dragon. ",
+    "Her reaction should be grounded and practical.",
+  ].join("");
+  const replayChunks = [
+    "Mysterious",
+    " says",
+    ": a",
+    " dragon",
+    ". ",
+    "Her reaction",
+    " should be grounded",
+    " and practical.",
+    "</",
+    "think>",
+  ];
+  const upstreamFrames = [
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `<think>${reasoning}</think>\n\n` }, finish_reason: null }] })}\n\n`,
+    ...replayChunks.map(
+      (content) =>
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`,
+    ),
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "*Mira's laugh dies halfway.*" }, finish_reason: null }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ];
+  const env = {
+    SSE_STREAM_HEARTBEAT_MS: "0",
+    MULTILLM_PROXY_CONTAINER: {
+      getByName() {
+        return {
+          async fetch() {
+            return new Response(chunkedEventStream(upstreamFrames), {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "X-MultiLLM-Provider": "nanogpt",
+                "X-MultiLLM-Model": "nanogpt:z-ai/glm-5.3-flash",
+              },
+            });
+          },
+        };
+      },
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request("https://proxy.example/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Origin: "https://janitorai.com",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "nanogpt:z-ai/glm-5.3-flash",
+        messages: [{ role: "user", content: "A dragon." }],
+        stream: true,
+      }),
+    }),
+    env,
+  );
+
+  const body = await response.text();
+  assert.equal(
+    streamedContent(body),
+    `<think>[provider: nanogpt | model: z-ai/glm-5.3-flash]\n${reasoning}</think>\n\n*Mira's laugh dies halfway.*`,
+  );
+  assert.equal(body.match(/<think>/g)?.length, 1);
+  assert.equal(body.match(/<\/think>/g)?.length, 1);
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.equal(response.headers.get("X-MultiLLM-Reasoning-Normalized"), "janitor-glm");
+});
+
+test("generic GLM stream remains raw for non-Janitor clients", async () => {
+  const worker = (await loadWorkerModule()).default;
+  const rawBody = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "<think>raw</think>raw" } }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ].join("");
+  const env = {
+    SSE_STREAM_HEARTBEAT_MS: "0",
+    MULTILLM_PROXY_CONTAINER: {
+      getByName() {
+        return {
+          async fetch() {
+            return new Response(rawBody, {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "X-MultiLLM-Provider": "nanogpt",
+                "X-MultiLLM-Model": "nanogpt:z-ai/glm-5.3-flash",
+              },
+            });
+          },
+        };
+      },
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request("https://proxy.example/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Origin: "https://client.example",
+        "Content-Type": "application/json",
+      },
+      body: '{"model":"nanogpt:z-ai/glm-5.3-flash","stream":true}',
+    }),
+    env,
+  );
+
+  assert.equal(await response.text(), rawBody);
+  assert.equal(response.headers.get("X-MultiLLM-Reasoning-Normalized"), null);
 });
