@@ -202,6 +202,91 @@ test("roleplay keeps duplicated provider reasoning inside one labelled think blo
   assert.equal(storedMessages.at(-1).content, "*Holly turns in her seat.*");
 });
 
+test("roleplay buffers tokenized reasoning replay until its stray closing tag", async () => {
+  const fixture = makeRoleplayEnv({
+    NANOGPT_API_KEY: "nano-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      nanogpt: { glm: ["z-ai/glm-5.3-flash"] },
+    }),
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+  });
+  const reasoning = [
+    "Mysterious claims he defeated twenty dragons. ",
+    "Mira should stay practical.",
+  ].join("");
+  const contentChunks = [
+    "<think>",
+    "Mysterious claims he defeated twenty dragons. ",
+    "Mira should stay practical.",
+    "</think>",
+    "\n\n",
+    "M",
+    "ysterious",
+    " claims",
+    " he defeated twenty dragons. ",
+    "Mira should stay practical.",
+    "</",
+    "think>",
+    "\n\n",
+    "*Mira keeps the treatment brisk and clinical.*",
+  ];
+  const upstreamEvents = [
+    ...contentChunks.map((content, index) => {
+      const finishReason =
+        index === contentChunks.length - 1 ? "stop" : null;
+      return `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: finishReason }] })}\n\n`;
+    }),
+    "data: [DONE]\n\n",
+  ].join("");
+
+  const response = await withGlobalFetch(
+    async () =>
+      new Response(upstreamEvents, {
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    () =>
+      handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-tokenized-reasoning-replay",
+            model: "roleplay:5.3-flash",
+            messages: [{ role: "user", content: "Continue." }],
+            max_tokens: 512,
+            stream: true,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      ),
+  );
+
+  const body = await response.text();
+  const content = visibleContent(body);
+  await fixture.waitForBackgroundWork();
+
+  assert.equal(body.match(/data: \[DONE\]/g)?.length, 1);
+  assert.equal(content.match(/<think>/g)?.length, 1);
+  assert.equal(content.match(/<\/think>/g)?.length, 1);
+  assert.equal(
+    content,
+    [
+      "<think>[provider: nanogpt | model: z-ai/glm-5.3-flash]\n",
+      reasoning,
+      "</think>\n\n",
+      "*Mira keeps the treatment brisk and clinical.*",
+    ].join(""),
+  );
+  const [{ storage }] = [...fixture.storageBySession.values()];
+  const storedMessages = storage.values.get("roleplay-messages");
+  assert.equal(
+    storedMessages.at(-1).content,
+    "*Mira keeps the treatment brisk and clinical.*",
+  );
+});
+
 test("roleplay preserves leading spaces in visible stream chunks after reasoning", async () => {
   const fixture = makeRoleplayEnv({
     ROLEPLAY_PROVIDER_ORDER: "opencode",

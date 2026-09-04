@@ -228,6 +228,12 @@ The proxy URL is already the full Chat Completions endpoint, so leave
 **Add `/chat/completions`** disabled. Save the configuration and hard-refresh
 JanitorAI before selecting it.
 
+If Worker logs show `POST /v1/chat/completions`, the selected JanitorAI
+configuration is bypassing the native roleplay route. Re-enter the full proxy
+URL above and keep **Add `/chat/completions`** disabled. Refusal fallback,
+reasoning normalization, continuation repair, and roleplay memory apply only
+to the native roleplay endpoints.
+
 Use `roleplay:glm` for the quality-first 1x subscription order. Use
 `roleplay:glm-speed` when observed throughput should decide among those models.
 Use `roleplay:5.3-flash`, `roleplay:5.3-flash-uncensored`, `roleplay:5.3`, or

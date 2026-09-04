@@ -306,6 +306,17 @@ function looksLikeReasoningReplay(state, value) {
   return candidate.length >= 24 && state.reasoningComparable.includes(candidate);
 }
 
+function couldBecomeReasoningReplay(state, value) {
+  if (!state.reasoningComparable || state.visibleStarted) {
+    return false;
+  }
+  const candidate = comparable(value);
+  if (!candidate) {
+    return /^\s*$/.test(value);
+  }
+  return state.reasoningComparable.includes(candidate);
+}
+
 function consumePendingContent(state, { flush = false } = {}) {
   const value = state.pendingContent;
   if (!value) {
@@ -329,8 +340,8 @@ function consumePendingContent(state, { flush = false } = {}) {
     !flush &&
     !containsMarkup &&
     !continuingInlineReasoning &&
-    looksLikeReasoningReplay(state, value) &&
-    value.length < MAX_PENDING_MARKUP_CHARACTERS
+    couldBecomeReasoningReplay(state, processable) &&
+    processable.length < MAX_PENDING_MARKUP_CHARACTERS
   ) {
     return "";
   }
