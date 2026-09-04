@@ -138,15 +138,13 @@ and `glm-5.2` values are also accepted. NanoGPT's exact
 `zai-org/glm-5.2`, and `zai-org/glm-5.2:thinking` IDs map to the same pinned
 variants.
 
-Every roleplay generation defaults to the strongest provider-compatible
-reasoning mode. Callers can lower generation effort with `reasoning_effort`;
-semantic `max` maps to the selected provider's real ceiling. Model-backed
-memory compaction remains at maximum reasoning. NavyAI receives `max`;
-NanoGPT receives `max` for GLM and `xhigh` for Kimi; LinkAPI receives `high`;
-OpenRouter receives `reasoning.effort` set to
-`high` for Kimi and `xhigh` for GLM; OpenCode GLM-5.x receives `max`.
-OpenCode Kimi K2.6 keeps its fixed native thinking mode because that transport
-does not expose a supported effort overlay for that model.
+Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployed
+default is `low` to reduce the delay before visible story text. Callers can
+override generation effort per turn with `reasoning_effort`; semantic `max`
+maps to the selected provider's real ceiling. Model-backed memory compaction
+remains at maximum reasoning. OpenCode Kimi K2.6 keeps its fixed native
+thinking mode because that transport does not expose a supported effort
+overlay for that model.
 
 Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
 input tokens by default). NanoGPT receives its `caching: true` routing hint only
@@ -534,6 +532,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
 | `ROLEPLAY_REFUSAL_FALLBACK_ENABLED` | `true` | Privately regenerate an exact GLM-5.3 Flash refusal trigger with the configured Uncensored Flash candidate; rejected output is neither streamed nor stored |
+| `ROLEPLAY_DEFAULT_REASONING_EFFORT` | `low` | Default reasoning effort for generation; callers can override it per turn, while compaction stays at maximum reasoning |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |
 | `ROLEPLAY_MAX_AUTO_CONTINUATIONS` | `8` | Maximum hidden continuation legs after genuine provider output limits or truncated EOFs |
 | `ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS` | `1` | Separate maximum repairs for a stopped response with a missing story or incomplete required image-prompt contract; image-only responses regenerate from the beginning and no-progress repairs stop immediately |

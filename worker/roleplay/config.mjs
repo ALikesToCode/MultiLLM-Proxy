@@ -68,6 +68,15 @@ export const ROLEPLAY_SAFE_FALLBACK_STATUSES = Object.freeze([
 ]);
 const SAFE_FALLBACK_STATUSES = new Set(ROLEPLAY_SAFE_FALLBACK_STATUSES);
 const MODEL_FAMILIES = ["kimi", "glm"];
+const REASONING_EFFORTS = new Set([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 const MAX_PROVIDER_MODELS_PER_FAMILY = 8;
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",
@@ -210,6 +219,11 @@ function nanogptBillingMode(value) {
   return String(value ?? "subscription").trim().toLowerCase() === "standard"
     ? "standard"
     : "subscription";
+}
+
+function defaultReasoningEffort(value) {
+  const normalized = String(value ?? "max").trim().toLowerCase();
+  return REASONING_EFFORTS.has(normalized) ? normalized : "max";
 }
 
 function parseProviderOrder(value) {
@@ -372,6 +386,9 @@ function configuredModelsFor(env, overrides, provider, family) {
 
 export function getRoleplaySettings(env) {
   return {
+    defaultReasoningEffort: defaultReasoningEffort(
+      env.ROLEPLAY_DEFAULT_REASONING_EFFORT,
+    ),
     promptCacheEnabled: booleanSetting(env.PROMPT_CACHE_ENABLED, true),
     preResponseFallbackEnabled: booleanSetting(
       env.ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED,

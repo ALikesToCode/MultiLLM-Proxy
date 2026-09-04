@@ -32,6 +32,22 @@ test("roleplay defaults to a 128k raw history window", () => {
   assert.equal(settings.maxStoredBytes, 640_000);
 });
 
+test("roleplay accepts a bounded default generation reasoning effort", () => {
+  assert.equal(getRoleplaySettings({}).defaultReasoningEffort, "max");
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_DEFAULT_REASONING_EFFORT: "low",
+    }).defaultReasoningEffort,
+    "low",
+  );
+  assert.equal(
+    getRoleplaySettings({
+      ROLEPLAY_DEFAULT_REASONING_EFFORT: "unsupported",
+    }).defaultReasoningEffort,
+    "max",
+  );
+});
+
 test("output-contract repair has an independent bounded retry limit", () => {
   assert.equal(getRoleplaySettings({}).maxAutoContinuations, 8);
   assert.equal(getRoleplaySettings({}).maxOutputContractRepairs, 1);

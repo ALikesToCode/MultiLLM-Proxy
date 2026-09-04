@@ -98,9 +98,13 @@ function reasoningFields(candidate, effort) {
   return { reasoning_effort: mappedEffort };
 }
 
-export function applyReasoningPolicy(payload, candidate) {
+export function applyReasoningPolicy(
+  payload,
+  candidate,
+  { defaultEffort } = {},
+) {
   const normalized = { ...payload };
-  const explicitEffort = normalized.reasoning_effort;
+  const explicitEffort = normalized.reasoning_effort ?? defaultEffort;
   if (
     explicitEffort !== undefined &&
     !REASONING_EFFORT_ORDER.includes(explicitEffort)

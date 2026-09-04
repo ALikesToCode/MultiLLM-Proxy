@@ -897,7 +897,12 @@ export function applyCompaction(
   };
 }
 
-export function buildUpstreamPayload(parsed, candidate, messages) {
+export function buildUpstreamPayload(
+  parsed,
+  candidate,
+  messages,
+  settings = {},
+) {
   const payload = {
     model: candidate.model,
     messages,
@@ -913,7 +918,9 @@ export function buildUpstreamPayload(parsed, candidate, messages) {
       include_usage: true,
     };
   }
-  return applyReasoningPolicy(payload, candidate);
+  return applyReasoningPolicy(payload, candidate, {
+    defaultEffort: settings.defaultReasoningEffort,
+  });
 }
 
 export function extractAssistantContent(payload) {

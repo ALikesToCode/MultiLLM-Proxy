@@ -719,7 +719,12 @@ export class RoleplaySession extends DurableObject {
       generationCandidates,
       (candidate) =>
         applyRoleplayPromptCache(
-          buildUpstreamPayload(parsed, candidate, roleplayMessages),
+          buildUpstreamPayload(
+            parsed,
+            candidate,
+            roleplayMessages,
+            settings,
+          ),
           candidate,
           roleplayMessages,
           settings,

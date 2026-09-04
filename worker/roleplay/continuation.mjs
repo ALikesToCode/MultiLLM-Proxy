@@ -221,7 +221,12 @@ export function createRoleplayContinuation({
         nextCandidates,
         (nextCandidate) =>
           applyRoleplayPromptCache(
-            buildUpstreamPayload(parsed, nextCandidate, nextMessages),
+            buildUpstreamPayload(
+              parsed,
+              nextCandidate,
+              nextMessages,
+              settings,
+            ),
             nextCandidate,
             nextMessages,
             settings,

@@ -10,6 +10,67 @@ import {
 
 const JANITOR_PATH = "/roleplay/v1/chat/completions";
 
+test("roleplay deployment can lower default generation reasoning effort", async () => {
+  const fixture = makeRoleplayEnv({
+    NANOGPT_API_KEY: "nano-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+    ROLEPLAY_DEFAULT_REASONING_EFFORT: "low",
+  });
+  const efforts = [];
+
+  await withGlobalFetch(
+    async (_input, init) => {
+      efforts.push(JSON.parse(init.body).reasoning_effort);
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: { role: "assistant", content: "*Brooke answers.*" },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    },
+    async () => {
+      const defaultResponse = await handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-low-default-reasoning",
+            model: "roleplay:glm",
+            messages: [{ role: "user", content: "Continue." }],
+            stream: false,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      );
+      assert.equal(defaultResponse.status, 200);
+
+      const overrideResponse = await handleRoleplayEdgeRequest(
+        roleplayRequest(
+          {
+            session_id: "session-explicit-high-reasoning",
+            model: "roleplay:glm",
+            messages: [{ role: "user", content: "Continue." }],
+            reasoning_effort: "high",
+            stream: false,
+          },
+          { Origin: "https://janitorai.com" },
+          JANITOR_PATH,
+        ),
+        fixture.env,
+      );
+      assert.equal(overrideResponse.status, 200);
+    },
+  );
+
+  assert.deepEqual(efforts, ["low", "high"]);
+});
+
 function visibleContent(streamBody) {
   return streamBody
     .split(/\r?\n/)
