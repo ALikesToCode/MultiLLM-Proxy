@@ -7,6 +7,7 @@ import {
   handleRoleplayEdgeRequest,
   makeRoleplayEnv,
   roleplayRequest,
+  scopePublicRoleplaySessionId,
   withGlobalFetch,
 } from "./helpers/roleplay_fixture.mjs";
 
@@ -197,6 +198,79 @@ test("Janitor long system prompts reach NanoGPT without truncation", async () =>
     assert.equal(/[\uD800-\uDBFF]$/.test(chunk), false);
     assert.equal(/^[\uDC00-\uDFFF]/.test(chunk), false);
   }
+});
+
+test("Janitor never forwards empty legacy session messages to NanoGPT", async () => {
+  const fixture = makeRoleplayEnv({
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_API_KEY: "nano-roleplay-key",
+    ROLEPLAY_PROVIDER_ORDER: "nanogpt",
+    ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ nanogpt: ["glm"] }),
+    ROLEPLAY_PROVIDER_MODELS: JSON.stringify({
+      nanogpt: { glm: ["z-ai/glm-5.3-flash"] },
+    }),
+  });
+  const publicSessionId = "session-legacy-empty-message";
+  const storageSessionId = await scopePublicRoleplaySessionId(
+    publicSessionId,
+    "janitor-roleplay-key",
+  );
+  fixture.env.ROLEPLAY_SESSION.getByName(storageSessionId);
+  const { storage } = fixture.storageBySession.get(storageSessionId);
+  storage.values.set("roleplay-directives", [
+    { role: "system", content: "   " },
+  ]);
+  storage.values.set("roleplay-messages", [
+    { role: "assistant", content: "" },
+    { role: "user", content: "The bridge was already damaged." },
+  ]);
+
+  const upstreamPayloads = [];
+  const response = await withGlobalFetch(async (_input, init) => {
+    const upstreamPayload = JSON.parse(init.body);
+    upstreamPayloads.push(upstreamPayload);
+    if (!upstreamPayload.messages[0]?.content?.trim()) {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "invalid_request",
+            message: "messages[0].content must not be empty",
+            type: "invalid_request_error",
+          },
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+    return completionResponse(upstreamPayload.model, "Mira continues.");
+  }, () =>
+    worker.fetch(
+      roleplayRequest(
+        {
+          session_id: publicSessionId,
+          model: "roleplay:5.3-flash",
+          history_mode: "append",
+          messages: [{ role: "user", content: "Inspect it again." }],
+          stream: false,
+        },
+        janitorHeaders({ Origin: "https://janitorai.com" }),
+        JANITOR_PATH,
+      ),
+      fixture.env,
+    ),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(upstreamPayloads.length, 1);
+  assert.equal(
+    upstreamPayloads[0].messages.every(
+      (message) =>
+        typeof message.content === "string" && Boolean(message.content.trim()),
+    ),
+    true,
+  );
 });
 
 test("both roleplay Chat Completions aliases reject invalid input at the edge", async () => {

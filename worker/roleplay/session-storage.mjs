@@ -8,9 +8,57 @@ const DIRECTIVE_SHARD_FORMAT = "message-shards-v1";
 const MAX_INLINE_DIRECTIVE_BYTES = 1_500_000;
 const MAX_DIRECTIVE_FRAGMENT_BYTES = 240_000;
 const MAX_DIRECTIVE_SHARDS = 64;
+const STORED_MESSAGE_ROLES = new Set([
+  "system",
+  "developer",
+  "user",
+  "assistant",
+  "tool",
+]);
+const STORED_DIRECTIVE_ROLES = new Set(["system", "developer"]);
 
 function encodedBytes(value) {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function normalizeStoredMessage(message, allowedRoles) {
+  if (
+    !message ||
+    typeof message !== "object" ||
+    Array.isArray(message) ||
+    typeof message.role !== "string" ||
+    typeof message.content !== "string" ||
+    !message.content.trim()
+  ) {
+    return null;
+  }
+  const role = message.role.trim().toLowerCase();
+  if (!allowedRoles.has(role)) {
+    return null;
+  }
+  const normalized = { role, content: message.content };
+  if (typeof message.name === "string" && message.name.trim()) {
+    normalized.name = message.name.trim().slice(0, 100);
+  }
+  if (role === "tool") {
+    if (
+      typeof message.tool_call_id !== "string" ||
+      !message.tool_call_id.trim()
+    ) {
+      return null;
+    }
+    normalized.tool_call_id = message.tool_call_id.trim().slice(0, 200);
+  }
+  return normalized;
+}
+
+function normalizeStoredMessages(value, allowedRoles) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((message) => normalizeStoredMessage(message, allowedRoles))
+    .filter(Boolean);
 }
 
 export function createInitialRoleplayState() {
@@ -47,8 +95,11 @@ function normalizeState(value) {
     ...createInitialRoleplayState(),
     ...value,
     version: 2,
-    messages: Array.isArray(value.messages) ? value.messages : [],
-    directives: Array.isArray(value.directives) ? value.directives : [],
+    messages: normalizeStoredMessages(value.messages, STORED_MESSAGE_ROLES),
+    directives: normalizeStoredMessages(
+      value.directives,
+      STORED_DIRECTIVE_ROLES,
+    ),
     compactionCheckpoint:
       value.compactionCheckpoint &&
       typeof value.compactionCheckpoint === "object" &&

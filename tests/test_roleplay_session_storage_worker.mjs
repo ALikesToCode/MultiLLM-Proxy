@@ -88,3 +88,27 @@ test("an explicit empty directive array overrides legacy core directives", async
 
   assert.deepEqual(loaded.directives, []);
 });
+
+test("legacy empty session messages are removed while valid history is preserved", async () => {
+  const storage = new SizeBoundStorage();
+  storage.values.set("roleplay-session", {});
+  storage.values.set("roleplay-messages", [
+    { role: "assistant", content: "" },
+    { role: "user", content: "   " },
+    { role: "user", content: "Keep this history." },
+  ]);
+  storage.values.set("roleplay-directives", [
+    { role: "system", content: "\n\t" },
+    { role: "system", content: "Keep this directive." },
+    { role: "user", content: "Not a directive." },
+  ]);
+
+  const loaded = await loadRoleplayState(storage);
+
+  assert.deepEqual(loaded.messages, [
+    { role: "user", content: "Keep this history." },
+  ]);
+  assert.deepEqual(loaded.directives, [
+    { role: "system", content: "Keep this directive." },
+  ]);
+});

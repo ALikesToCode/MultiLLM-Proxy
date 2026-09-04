@@ -6,7 +6,8 @@ function isMessage(value) {
       typeof value === "object" &&
       !Array.isArray(value) &&
       typeof value.role === "string" &&
-      typeof value.content === "string",
+      typeof value.content === "string" &&
+      Boolean(value.content.trim()),
   );
 }
 
