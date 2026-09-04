@@ -12,6 +12,10 @@ import {
   GPTImageModerationError,
   withDefaultGptImageModeration,
 } from "./worker/gpt-image-moderation.mjs";
+import {
+  resolveSseHeartbeatMs,
+  withSseHeartbeat,
+} from "./worker/sse-heartbeat.mjs";
 
 export { RoleplaySession };
 
@@ -2163,7 +2167,14 @@ export default {
             await opencodeReasoningMetadataPromise,
           )
         : response;
-      return applyCorsHeaders(request, downstreamResponse, env);
+      return applyCorsHeaders(
+        request,
+        withSseHeartbeat(downstreamResponse, {
+          heartbeatMs: resolveSseHeartbeatMs(env.SSE_STREAM_HEARTBEAT_MS),
+          requestSignal: request.signal,
+        }),
+        env,
+      );
     } catch (error) {
       if (rootPath) {
         logStructuredError("container_fetch_failed", error);

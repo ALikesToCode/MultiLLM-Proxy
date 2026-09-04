@@ -642,6 +642,10 @@ export async function loadWorkerModule() {
     "../../worker/gpt-image-moderation.mjs",
     import.meta.url,
   );
+  const sseHeartbeatUrl = new URL(
+    "../../worker/sse-heartbeat.mjs",
+    import.meta.url,
+  );
   const reasoningOutputUrl = new URL(
     "../../worker/roleplay/reasoning-output.mjs",
     import.meta.url,
@@ -650,11 +654,13 @@ export async function loadWorkerModule() {
     source,
     opencodeReasoningSource,
     gptImageModerationSource,
+    sseHeartbeatSource,
     reasoningOutputSource,
   ] = await Promise.all([
       readFile(workerUrl, "utf8"),
       readFile(opencodeReasoningUrl, "utf8"),
       readFile(gptImageModerationUrl, "utf8"),
+      readFile(sseHeartbeatUrl, "utf8"),
       readFile(reasoningOutputUrl, "utf8"),
     ]);
   const endpointDataUrl = await roleplayModuleUrl();
@@ -680,6 +686,10 @@ export async function loadWorkerModule() {
     .replace(
       'from "./worker/gpt-image-moderation.mjs";',
       `from "${dataModuleUrl(gptImageModerationSource)}";`,
+    )
+    .replace(
+      'from "./worker/sse-heartbeat.mjs";',
+      `from "${dataModuleUrl(sseHeartbeatSource)}";`,
     );
 
   return import(dataModuleUrl(patchedSource));
