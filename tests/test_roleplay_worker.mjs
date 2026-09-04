@@ -195,7 +195,7 @@ test("roleplay defaults to maximum reasoning for every provider and model family
     ["linkapi", "LINKAPI_KEY", "kimi", "high", undefined],
     ["linkapi", "LINKAPI_KEY", "glm", "high", undefined],
     ["nanogpt", "NANOGPT_API_KEY", "kimi", "xhigh", undefined],
-    ["nanogpt", "NANOGPT_API_KEY", "glm", "max", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "glm", "xhigh", undefined],
     ["openrouter", "OPENROUTER_API_KEY", "kimi", undefined, "high"],
     ["openrouter", "OPENROUTER_API_KEY", "glm", undefined, "xhigh"],
   ];
@@ -271,7 +271,7 @@ test("roleplay preserves an explicit GLM reasoning override for every provider",
     ["opencode", "OPENCODE_GO_API_KEY", "max", undefined],
     ["navyai", "NAVYAI_API_KEY", "max", undefined],
     ["linkapi", "LINKAPI_KEY", "high", undefined],
-    ["nanogpt", "NANOGPT_API_KEY", "max", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "xhigh", undefined],
     ["openrouter", "OPENROUTER_API_KEY", undefined, "xhigh"],
   ];
 
@@ -1067,7 +1067,7 @@ test("roleplay maps NanoGPT GLM to GLM-5.3-Flash", async () => {
     const payload = JSON.parse(init.body);
     requestedModel = payload.model;
     requestedMaxTokens = payload.max_tokens;
-    assert.equal(payload.reasoning_effort, "max");
+    assert.equal(payload.reasoning_effort, "xhigh");
     return completionResponse(payload.model);
   }, () =>
     handleRoleplayEdgeRequest(

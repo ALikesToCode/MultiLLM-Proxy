@@ -52,11 +52,13 @@ export function maximumReasoningProfile(candidate) {
   }
 
   if (provider === "nanogpt") {
+    // NanoGPT names its strongest documented Chat Completions effort `xhigh`.
+    // Keep the uncensored fine-tune at its narrower supported ceiling.
     const effort =
       family === "glm"
         ? model.includes("glm-5.3-flash-uncensored")
           ? "high"
-          : "max"
+          : "xhigh"
         : "xhigh";
     return {
       mode: "max",

@@ -67,7 +67,7 @@ test("roleplay defaults generation to max and honors an explicit override", asyn
     },
   );
 
-  assert.deepEqual(efforts, ["max", "low"]);
+  assert.deepEqual(efforts, ["xhigh", "low"]);
 });
 
 function visibleContent(streamBody) {

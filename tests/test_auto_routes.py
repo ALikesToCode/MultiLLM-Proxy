@@ -234,7 +234,7 @@ class AutoRouteTest(UnifiedApiTestCase):
         )
         nano_payload = json.loads(make_request.call_args_list[0].kwargs["data"])
         self.assertEqual(nano_payload["model"], "zai-org/glm-5.2:thinking")
-        self.assertEqual(nano_payload["reasoning_effort"], "max")
+        self.assertEqual(nano_payload["reasoning_effort"], "xhigh")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
         self.assertEqual(
             response.headers["X-MultiLLM-Auto-Selected-Model"],

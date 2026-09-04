@@ -141,7 +141,7 @@ test("roleplay GLM prefers Flash and remembers failed provider tiers", async () 
     {
       host: "nano-gpt.com",
       model: "z-ai/glm-5.3-flash",
-      reasoningEffort: "max",
+      reasoningEffort: "xhigh",
     },
     {
       host: "roleplay.internal",

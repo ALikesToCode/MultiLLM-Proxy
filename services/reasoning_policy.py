@@ -14,7 +14,7 @@ REASONING_EFFORT_ORDER = (
 )
 GLM_52_MAX_REASONING_EFFORTS = {
     "linkapi": "high",
-    "nanogpt": "max",
+    "nanogpt": "xhigh",
     "navyai": "max",
     "opencode": "max",
     "openrouter": "xhigh",

@@ -49,9 +49,10 @@ Fresh sessions begin with `NANOGPT_PREFERRED_KEY_INDEX` when it is configured;
 they do not delay generation with a separate catalog probe. Definite
 generation rejections still rotate immediately, and the remembered key is
 revalidated after `NANOGPT_KEY_CHECK_EVERY_REQUESTS` successful uses.
-NanoGPT GLM-5.3-Flash and standard GLM-5.x requests use `max` reasoning. The
-explicit uncensored Flash variant exposes `high` as its strongest supported
-effort, so semantic `max` is safely clamped to `high` for that one model.
+NanoGPT GLM-5.3-Flash and standard GLM-5.x requests use semantic `max`
+reasoning, mapped to NanoGPT's documented `xhigh` wire value. The explicit
+uncensored Flash variant exposes `high` as its strongest supported effort, so
+semantic `max` is safely clamped to `high` for that one model.
 
 ## Request
 

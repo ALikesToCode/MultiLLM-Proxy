@@ -7,7 +7,7 @@ class ReasoningPolicyTest(unittest.TestCase):
     def test_omitted_effort_maps_to_each_providers_maximum(self):
         cases = {
             "opencode": {"reasoning_effort": "max"},
-            "nanogpt": {"reasoning_effort": "max"},
+            "nanogpt": {"reasoning_effort": "xhigh"},
             "navyai": {"reasoning_effort": "max"},
             "linkapi": {"reasoning_effort": "high"},
             "openrouter": {"reasoning": {"effort": "xhigh"}},
@@ -31,7 +31,7 @@ class ReasoningPolicyTest(unittest.TestCase):
                 "nanogpt",
                 "glm-5.2",
             )["reasoning_effort"],
-            "max",
+            "xhigh",
         )
         self.assertEqual(
             apply_glm_52_reasoning_policy(
@@ -49,7 +49,7 @@ class ReasoningPolicyTest(unittest.TestCase):
             "zai-org/glm-5.2:thinking",
         )
 
-        self.assertEqual(result["reasoning_effort"], "max")
+        self.assertEqual(result["reasoning_effort"], "xhigh")
 
     def test_glm_53_variants_default_to_their_supported_maximum(self):
         full = apply_glm_52_reasoning_policy(
@@ -68,7 +68,7 @@ class ReasoningPolicyTest(unittest.TestCase):
             "z-ai/glm-5.3-flash-uncensored",
         )
 
-        self.assertEqual(full["reasoning_effort"], "max")
+        self.assertEqual(full["reasoning_effort"], "xhigh")
         self.assertEqual(flash["reasoning_effort"], "max")
         self.assertEqual(uncensored["reasoning_effort"], "high")
 
@@ -90,8 +90,13 @@ class ReasoningPolicyTest(unittest.TestCase):
             "high",
         )
 
-    def test_xhigh_alias_maps_to_max_for_direct_glm_providers(self):
-        for provider in ("opencode", "nanogpt", "navyai"):
+    def test_xhigh_alias_maps_to_each_direct_providers_maximum(self):
+        expected_efforts = {
+            "opencode": "max",
+            "nanogpt": "xhigh",
+            "navyai": "max",
+        }
+        for provider, expected_effort in expected_efforts.items():
             with self.subTest(provider=provider):
                 result = apply_glm_52_reasoning_policy(
                     {"reasoning_effort": "xhigh"},
@@ -99,7 +104,7 @@ class ReasoningPolicyTest(unittest.TestCase):
                     "glm-5.2",
                 )
 
-                self.assertEqual(result["reasoning_effort"], "max")
+                self.assertEqual(result["reasoning_effort"], expected_effort)
 
     def test_openrouter_uses_nested_reasoning_and_preserves_other_options(self):
         result = apply_glm_52_reasoning_policy(

@@ -107,7 +107,7 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertNotIn("X-Billing-Mode", request_kwargs["headers"])
         self.assertNotIn("X-Provider", request_kwargs["headers"])
         upstream_payload = json.loads(make_request.call_args.kwargs["data"])
-        self.assertEqual(upstream_payload["reasoning_effort"], "max")
+        self.assertEqual(upstream_payload["reasoning_effort"], "xhigh")
         self.assertNotIn("billing_mode", upstream_payload)
         self.assertNotIn("caching", upstream_payload)
         self.assertNotIn("provider", upstream_payload)
