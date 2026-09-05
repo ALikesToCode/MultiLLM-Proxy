@@ -36,5 +36,6 @@ progress.md
 task_plan.md
 /example.json
 *.control-plane-backup
+.container-build-id
 test_*.py
 test_*.sh

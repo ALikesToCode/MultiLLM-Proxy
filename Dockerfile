@@ -15,6 +15,7 @@ COPY requirements.lock ./requirements.lock
 RUN pip install --disable-pip-version-check --require-hashes -r requirements.lock
 
 COPY . .
+RUN python scripts/build_release_metadata.py
 COPY --chmod=755 scripts/cloudflare-entrypoint.sh /usr/local/bin/cloudflare-entrypoint.sh
 
 RUN addgroup --system multillm && \
