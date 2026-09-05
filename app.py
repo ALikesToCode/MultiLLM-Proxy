@@ -23,6 +23,7 @@ from routes.documentation import register_documentation_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.unified import register_unified_routes
+from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
@@ -111,6 +112,7 @@ def create_app() -> Flask:
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_core_routes(app)
+    register_workbench_routes(app)
     register_documentation_routes(app, AuthService)
 
     return app

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Workbench · MultiLLM Proxy{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/workbench.css') }}">{% endblock %}
+{% block content %}
+<div class="workbench" id="workbench">
+  <header class="workbench-heading"><div><p class="eyebrow">Operator tools</p><h1>Find a route that works for you.</h1><p>Measure real delivery, compare answers, and keep connection settings clear.</p></div><a class="button button--quiet" href="#session-panel">Inspect a session</a></header>
+  <p id="workbench-status" role="status" aria-live="polite">Loading saved settings…</p>
+  <section class="wb-panel" aria-labelledby="release-title"><div class="wb-heading"><div><h2 id="release-title">Deployment & compatibility</h2><p>Independent build evidence. Health alone does not prove a matching rollout.</p></div><button id="check-deployment" class="button" type="button">Check readiness & CORS</button></div><pre id="deployment-result">Not checked. This check makes no model-generation requests.</pre></section>
+  <div class="wb-grid">
+    <section class="wb-panel" aria-labelledby="profiles-title"><h2 id="profiles-title">Connection profiles</h2><p>Saved on the server. Exports contain settings only—supply your proxy key separately.</p>
+      <label>Saved profile<select id="saved-profile"><option value="">New profile</option></select></label>
+      <form id="profile-form" class="wb-form">
+        <label>Name<input name="name" value="GLM Flash - high" maxlength="64" required></label>
+        <label>Connection<select name="kind"><option value="roleplay">Roleplay + session tools</option><option value="direct">Direct provider endpoint</option></select></label>
+        <label>Provider<select name="provider"><option value="">All configured providers</option>{% for provider in ['nanogpt', 'opencode', 'openrouter', 'linkapi', 'navyai'] %}<option value="{{ provider }}">{{ provider }}</option>{% endfor %}</select></label>
+        <label>Exact model (optional for automatic routing)<input name="model" list="model-catalog" maxlength="200" placeholder="z-ai/glm-5.3-flash"></label>
+        <datalist id="model-catalog"></datalist>
+        <label>Routing<select name="mode"><option value="provider-priority">Provider priority</option><option value="fastest-eligible">Fastest eligible · measured</option><option value="quality">Quality · model priority</option><option value="pinned">Pin provider + model</option></select></label>
+        <label>Reasoning effort<select name="effort">{% for effort in ['high', 'xhigh', 'max', 'medium', 'low', 'minimal', 'none'] %}<option value="{{ effort }}">{{ effort }}</option>{% endfor %}</select></label>
+        <label>Billing restriction<select name="billing"><option value="configured">Configured provider billing</option><option value="subscription-only">NanoGPT subscription-only</option></select></label>
+        <label>Fallback<select name="fallback"><option value="safe">Configured safe fallback</option><option value="none">None · one generation attempt</option></select></label>
+        <label>Memory<select name="memory"><option value="auto">Automatic continuity</option><option value="off">Off</option></select></label>
+        <label>Recovery snapshot<select name="recovery"><option value="off">Off · do not retain partials</option><option value="on">Opt in · last failed turn, 24h access</option></select></label>
+        <div class="wb-actions"><button class="button" type="submit">Save as new profile</button><button class="button button--quiet" id="preview-profile" type="button">Validate & preview</button><button class="button button--quiet" id="export-profile" type="button" disabled>Export settings</button></div>
+      </form><pre id="profile-preview">Preview makes no generation call. A mapped effort is not proof that the provider honored it.</pre>
+    </section>
+    <section class="wb-panel" aria-labelledby="lab-title"><h2 id="lab-title">Blind comparison lab</h2><p>Choose 2–4 configured routes. Each receives the same synthetic conversation. Answers stay in this tab; saved reports contain measurements and ratings only.</p>
+      <label>Routes (select 2–4)<select id="lab-candidates" multiple size="6" aria-describedby="lab-candidate-help"></select></label><p id="lab-candidate-help">Use Ctrl/Command or Shift to select multiple routes.</p>
+      <div class="wb-form"><label>Scene<select id="lab-case">{% for key, scene in scenes.items() %}<option value="{{ key }}">{{ scene.label }}</option>{% endfor %}</select></label>
+      <label>Effort<select id="lab-effort"><option>high</option><option>xhigh</option><option>max</option></select></label>
+      <label>Runs per route<select id="lab-repeats"><option>1</option><option>2</option><option>3</option></select></label></div>
+      <label class="wb-check"><input type="checkbox" id="lab-confirm">I approve these potentially billed calls (maximum 12), each capped at 2,048 output tokens, and 24-hour recovery access to failed synthetic turns. No automatic retries.</label>
+      <div class="wb-actions"><button id="lab-start" class="button" type="button">Start comparison</button><button id="lab-stop" class="button button--quiet" type="button" disabled>Stop</button><button id="lab-reveal" class="button button--quiet" type="button" disabled>Reveal & save ratings</button><button id="lab-export" class="button button--quiet" type="button" disabled>Export report</button></div>
+      <p id="lab-status" role="status">Load the configured catalog to begin.</p><div id="lab-results" class="wb-results"></div>
+      <details><summary>Saved comparison history</summary><button id="lab-history" class="button button--quiet" type="button">Load history</button><pre id="lab-history-result">No history loaded.</pre></details>
+    </section>
+  </div>
+  <section class="wb-panel" id="session-panel" aria-labelledby="session-title"><h2 id="session-title">Session timeline, memory & recovery</h2><p>Use the session ID returned by the proxy. Diagnostics do not expose chat content. Memory and recovery content load only when you explicitly inspect them.</p>
+    <div class="wb-form"><label>Session ID<input id="session-id" placeholder="X-Roleplay-Session-ID" minlength="8" maxlength="128"></label><label>Original connection credential scope<select id="session-scope"><option value="roleplay">Roleplay key</option><option value="admin">Admin key / comparison lab</option></select></label></div>
+    <div class="wb-actions"><button id="timeline-start" class="button" type="button">Monitor / reconnect diagnostics</button><button id="timeline-stop" class="button button--quiet" type="button">Stop monitoring</button></div><p id="timeline-status" role="status">Not monitoring. Reconnecting never starts a generation.</p><div id="timeline-result"></div>
+    <div class="wb-grid">
+      <div><h3>Continuity editor</h3><label class="wb-check"><input id="include-context" type="checkbox">Also load private retained messages and protected directives</label><button id="memory-inspect" class="button button--quiet" type="button">Inspect memory</button>
+        <div id="memory-editor" hidden><p id="memory-revision"></p><label>Corrected summary<textarea id="memory-summary" maxlength="4000" rows="5"></textarea></label><label>Pinned facts · one per line, up to 24<textarea id="memory-pins" rows="5" placeholder="Neri wears a brass watch."></textarea></label><button id="memory-save" class="button" type="button">Save corrections</button><pre id="retained-context"></pre>
+          <label>New branch label<input id="branch-label" maxlength="64" placeholder="Alternate scene"></label><button id="branch-create" class="button button--quiet" type="button">Copy retained context to new branch</button><p id="branch-result"></p></div>
+      </div>
+      <div><h3>Interrupted response recovery</h3><p>Available only for opt-in, size-limited snapshots. Continue/regenerate consumes the snapshot once and opens a separate session. It is a new billed generation, not transport resumption.</p><button id="recovery-inspect" class="button button--quiet" type="button">Inspect last failed partial</button><pre id="recovery-output">No private content loaded.</pre><div class="wb-actions"><button id="recovery-continue" class="button" type="button" disabled>Continue · new generation</button><button id="recovery-regenerate" class="button button--quiet" type="button" disabled>Regenerate · new generation</button><button id="recovery-stop" class="button button--quiet" type="button" disabled>Stop generation</button></div><p id="recovery-status" role="status"></p></div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='js/workbench/main.mjs') }}"></script>{% endblock %}

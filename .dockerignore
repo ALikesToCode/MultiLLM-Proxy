@@ -39,3 +39,4 @@ task_plan.md
 .container-build-id
 test_*.py
 test_*.sh
+tests/helpers/workbench_preview.py

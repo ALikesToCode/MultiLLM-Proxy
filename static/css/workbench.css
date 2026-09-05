@@ -1,0 +1,25 @@
+.workbench { max-width: 92rem; margin: 0 auto; padding: 1rem; }
+.workbench h1 { font-size: clamp(1.7rem, 3vw, 2.5rem); margin: .3rem 0; line-height: 1.2; }
+.workbench h2 { font-size: 1.25rem; margin: 0 0 .5rem; font-weight: 700; }
+.workbench h3 { font-weight: 700; margin: 1rem 0 .5rem; }
+.workbench p { color: var(--ink-600); margin: .5rem 0 1rem; max-width: 75ch; }
+.workbench-heading, .wb-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.wb-panel { background: var(--white); border: 1px solid var(--ink-200); border-radius: var(--radius-lg); padding: 1.4rem; margin: 1rem 0; min-width: 0; box-shadow: var(--shadow-sm); }
+.wb-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
+.wb-grid > .wb-panel { margin: 0; }
+.wb-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: 1rem 0; }
+.workbench label { display: flex; flex-direction: column; gap: .35rem; font-size: .87rem; font-weight: 600; margin: .65rem 0; }
+.workbench input, .workbench textarea, .workbench select { width: 100%; padding: .65rem; border: 1px solid var(--ink-300); border-radius: .4rem; background: var(--white); color: var(--ink-950); min-width: 0; }
+.workbench textarea { resize: vertical; }
+.workbench .wb-check { flex-direction: row; align-items: flex-start; gap: .7rem; line-height: 1.5; font-weight: 400; }
+.wb-check input { width: auto; margin-top: .35rem; }
+.wb-actions { display: flex; flex-wrap: wrap; gap: .65rem; grid-column: 1 / -1; margin: 1rem 0; }
+.workbench pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 25rem; overflow-y: auto; background: var(--ink-50); border: 1px solid var(--ink-100); padding: 1rem; border-radius: .5rem; font: .8rem/1.6 ui-monospace, monospace; }
+.wb-answer { margin-top: 1rem; padding: 1rem; border: 1px solid var(--ink-200); border-radius: .5rem; }
+.wb-answer pre { max-height: 20rem; }
+.wb-timeline { border-left: 3px solid var(--cyan-600); padding-left: 1rem; margin: 1rem 0; }
+.wb-timeline[data-phase="interrupted"] { border-color: var(--rose-700); }
+.workbench button:disabled { opacity: .5; cursor: not-allowed; }
+.workbench [hidden] { display: none !important; }
+@media (max-width: 900px) { .wb-grid { grid-template-columns: 1fr; } .workbench-heading, .wb-heading { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 480px) { .wb-form { grid-template-columns: 1fr; } .wb-panel { padding: 1rem; } .workbench { padding: .5rem; } }

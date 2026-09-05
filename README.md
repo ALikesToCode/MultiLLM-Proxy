@@ -45,6 +45,12 @@ The rationale for selectively adopting OmniRoute-style operational features
 without replacing MultiLLM's provider adapters is documented in
 [the OmniRoute assessment](docs/omniroute-assessment.md).
 
+The [operator workbench](docs/workbench.md) adds saved connection profiles, blind
+synthetic comparisons, private session timelines, continuity editing, independent
+branches, explicit interrupted-response recovery, and Worker/Container release
+checks. [External PostgreSQL and encrypted backups](docs/control-plane-storage.md)
+keep control-plane settings independent of ephemeral Container storage.
+
 ## Setup
 
 1. Clone the repository:

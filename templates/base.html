@@ -34,6 +34,7 @@
             </a>
 
             <nav class="primary-nav" aria-label="Primary">
+                {% if session.get('user').get('is_admin') %}<a href="{{ url_for('workbench') }}" class="primary-nav__link {% if request.endpoint == 'workbench' %}is-active{% endif %}">Workbench</a>{% endif %}
                 <a href="{{ url_for('status_page') }}" class="primary-nav__link {% if request.endpoint == 'status_page' %}is-active{% endif %}">
                     Operations
                 </a>
@@ -72,6 +73,7 @@
         </div>
 
         <nav class="mobile-nav" id="mobile-menu" aria-label="Mobile" hidden>
+            {% if session.get('user').get('is_admin') %}<a href="{{ url_for('workbench') }}">Workbench</a>{% endif %}
             <a href="{{ url_for('status_page') }}" class="{% if request.endpoint == 'status_page' %}is-active{% endif %}">Operations</a>
             <a href="{{ url_for('proxy_documentation') }}" class="{% if request.endpoint == 'proxy_documentation' %}is-active{% endif %}">Setup guide</a>
             <a href="{{ url_for('manage_users') }}" class="{% if request.endpoint == 'manage_users' %}is-active{% endif %}">Access</a>
