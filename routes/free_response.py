@@ -8,6 +8,7 @@ import requests
 from flask import Response
 
 from route_helpers import copy_raw_provider_response_headers, stream_upstream_response
+from services.free_json_contract import check_json_output, json_output_requested
 from streaming.sse import format_sse_data, iter_sse_events
 
 _AIHUBMIX_QUOTA_PREFIX = (
@@ -166,8 +167,53 @@ def _stream_response(response, deadline, on_failure, provider):
     return downstream
 
 
+def _checked_json_stream(response, response_format, deadline):
+    """Hold structured output until JSON is complete, so invalid output can fail over."""
+    try:
+        body = b"".join(
+            chunk.encode() if isinstance(chunk, str) else chunk
+            for chunk in _checked_chunks(response, deadline)
+        )
+        answers = {}
+        refusals = set()
+        for event in iter_sse_events([body]):
+            if not event.data or event.is_done:
+                continue
+            for choice in _event_payload(event)["choices"]:
+                index = choice.get("index", 0)
+                if type(index) is not int:
+                    raise FreeUpstreamFailure()
+                delta = choice.get("delta") or {}
+                if delta.get("refusal"):
+                    refusals.add(index)
+                content = delta.get("content") or ""
+                if not isinstance(content, str):
+                    raise FreeUpstreamFailure()
+                answers[index] = answers.get(index, "") + content
+        if not answers:
+            raise FreeUpstreamFailure()
+        for index, content in answers.items():
+            if index not in refusals:
+                check_json_output(content, response_format)
+        downstream = Response(
+            body, content_type="text/event-stream", headers=response.headers
+        )
+        downstream.headers["X-MultiLLM-JSON-Buffered"] = "true"
+        return downstream
+    except (ValueError, requests.RequestException) as error:
+        raise FreeUpstreamFailure() from error
+    finally:
+        response.close()
+
+
 def validated_free_response(
-    upstream, *, stream: bool, deadline: float, on_failure=None, provider=""
+    upstream,
+    *,
+    stream: bool,
+    deadline: float,
+    on_failure=None,
+    provider="",
+    response_format=None,
 ) -> Response:
     response = (
         upstream
@@ -179,7 +225,10 @@ def validated_free_response(
         if content_type != "text/event-stream":
             response.close()
             raise FreeUpstreamFailure()
-        return _stream_response(response, deadline, on_failure, provider)
+        downstream = _stream_response(response, deadline, on_failure, provider)
+        if json_output_requested(response_format):
+            return _checked_json_stream(downstream, response_format, deadline)
+        return downstream
     try:
         body = b"".join(
             chunk.encode() if isinstance(chunk, str) else chunk
@@ -198,6 +247,8 @@ def validated_free_response(
             ):
                 raise FreeUpstreamFailure()
             _quota_text(provider, message.get("content") or message.get("refusal"))
+            if json_output_requested(response_format) and not message.get("refusal"):
+                check_json_output(message.get("content"), response_format)
         return Response(
             body,
             content_type="application/json",

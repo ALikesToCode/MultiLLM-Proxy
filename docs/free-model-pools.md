@@ -145,6 +145,15 @@ unrecognized parameters are rejected; caller billing/routing headers are not
 forwarded. Common sampling, reasoning-effort and response-format parameters are
 passed through, and must be supported by the selected upstream model.
 
+For JSON output, OpenRouter is restricted to endpoints supporting the requested
+parameters. The pool checks completed JSON syntax (and object shape for
+`json_object`); the upstream remains responsible for JSON Schema conformance.
+Non-JSON answers can fail over before anything is sent to the caller. JSON
+streams are therefore buffered to completion within the existing size and time
+limits, then returned as SSE with `X-MultiLLM-JSON-Buffered: true`. This delays
+their first token. Ordinary text streams remain incremental. Explicit provider
+refusals are preserved rather than retried.
+
 Inspect `/v1/free/models` for candidate IDs, configured status, vision support,
 billing basis, and remaining cooldown seconds. It contains no keys. Response
 headers `X-MultiLLM-Auto-Route`, `X-MultiLLM-Auto-Selected-Model`,

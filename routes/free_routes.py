@@ -10,6 +10,7 @@ from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, stream_upstream_response
 from routes.free_response import FreeUpstreamFailure, validated_free_response
+from services.free_json_contract import json_output_requested
 from services.free_model_policy import (
     FREE_MODELS,
     free_candidates,
@@ -70,6 +71,12 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     url = free_chat_url(config, candidate.provider)
     if not token or not url:
         raise FreeUpstreamFailure(503)
+    upstream_payload = {**payload, "model": candidate.model}
+    if candidate.provider == "openrouter" and json_output_requested(
+        payload.get("response_format")
+    ):
+        # Unsupported formatting must fail instead of silently becoming plain text.
+        upstream_payload["provider"] = {"require_parameters": True}
     return proxy.make_request(
         method="POST",
         url=url,
@@ -82,9 +89,7 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
             **dict(FREE_PROVIDERS[candidate.provider].headers),
         },
         params={},
-        data=json.dumps(
-            {**payload, "model": candidate.model}, ensure_ascii=False
-        ).encode("utf-8"),
+        data=json.dumps(upstream_payload, ensure_ascii=False).encode("utf-8"),
         api_provider=candidate.provider,
         use_cache=False,
         timeout_override=(min(5, remaining), min(60, remaining)),
@@ -120,6 +125,7 @@ def _try_candidate(
             provider=candidate.provider,
             stream=payload.get("stream", False),
             deadline=deadline,
+            response_format=payload.get("response_format"),
             on_failure=lambda status: _record_failure(candidate, status, headers),
         )
     except (requests.RequestException, FreeUpstreamFailure, APIError) as error:
@@ -130,7 +136,14 @@ def _try_candidate(
         )
         if status not in FAILOVER_STATUSES:
             raise
-        _record_failure(candidate, status, headers)
+        # OpenRouter's parameter-support 404 is request-specific; the same
+        # free model may still serve ordinary text without structured output.
+        if not (
+            status == 404
+            and candidate.provider == "openrouter"
+            and json_output_requested(payload.get("response_format"))
+        ):
+            _record_failure(candidate, status, headers)
         if upstream is not None:
             _close_upstream(upstream)
         return None
