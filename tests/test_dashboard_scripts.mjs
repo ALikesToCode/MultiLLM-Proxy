@@ -8,6 +8,7 @@ const catalogSource = readFileSync("static/js/auto-route-catalog.js", "utf8");
 const editorSource = readFileSync("static/js/auto-routes.js", "utf8");
 const openrouterSource = readFileSync("static/js/openrouter.js", "utf8");
 const dashboardSource = readFileSync("static/js/dashboard.js", "utf8");
+const workerSource = readFileSync("static/service-worker.js", "utf8");
 
 function browserContext(getElementById = () => null) {
   const document = {
@@ -245,4 +246,94 @@ test('dashboard aborts a stalled snapshot and schedules a bounded retry', async 
   await settle();
   assert.equal(fixture.status.textContent, 'Refresh failed · retrying');
   assert.equal(fixture.timers.size, 2);
+});
+
+function serviceWorkerFixture(fetch, { failWrite = false } = {}) {
+  const handlers = {};
+  const entries = new Map();
+  const deleted = [];
+  let claimed = false;
+  const key = (request) => typeof request === 'string' ? request : request.url;
+  const cache = {
+    match: async (request) => entries.get(key(request))?.clone(),
+    async put(request, response) {
+      if (failWrite) throw new Error('Quota exceeded');
+      entries.set(key(request), response);
+    },
+  };
+  const context = vm.createContext({
+    URL, Response, fetch,
+    self: {
+      location: { origin: 'https://proxy.test' },
+      addEventListener: (name, callback) => { handlers[name] = callback; },
+      clients: { async claim() { claimed = true; } },
+    },
+    caches: {
+      open: async () => cache,
+      keys: async () => ['multillm-proxy-v11', 'multillm-proxy-v12', 'other-app-v1'],
+      delete: async (name) => deleted.push(name),
+    },
+  });
+  vm.runInContext(workerSource, context);
+  return {
+    entries, deleted,
+    async activate() {
+      let pending;
+      handlers.activate({ waitUntil: (promise) => { pending = promise; } });
+      await pending;
+      assert.equal(claimed, true);
+    },
+    async request(path, mode = 'cors') {
+      const pending = [];
+      let result;
+      handlers.fetch({
+        request: { url: new URL(path, 'https://proxy.test').href, method: 'GET', mode },
+        waitUntil: (promise) => pending.push(promise),
+        respondWith: (promise) => { result = promise; },
+      });
+      const response = await result;
+      await Promise.all(pending);
+      return response;
+    },
+  };
+}
+
+test('service worker refreshes stable asset URLs and preserves unrelated caches', async () => {
+  let options;
+  const fixture = serviceWorkerFixture(async (_request, init) => {
+    options = init;
+    return new Response('new script');
+  });
+  fixture.entries.set('https://proxy.test/static/js/app.js', new Response('old script'));
+  assert.equal(await (await fixture.request('/static/js/app.js')).text(), 'new script');
+  assert.equal(options.cache, 'no-cache');
+  assert.equal(await fixture.entries.get('https://proxy.test/static/js/app.js').clone().text(), 'new script');
+  await fixture.activate();
+  assert.deepEqual(fixture.deleted, ['multillm-proxy-v11']);
+});
+
+test('service worker retains known-good assets on failures and does not cache private responses', async () => {
+  const redirected = new Response('login');
+  Object.defineProperty(redirected, 'redirected', { value: true });
+  for (const response of [new Response('failure', { status: 500 }), redirected,
+    new Response('private', { headers: { 'Cache-Control': 'private' } })]) {
+    const fixture = serviceWorkerFixture(async () => response);
+    fixture.entries.set('https://proxy.test/static/js/app.js', new Response('old script'));
+    await fixture.request('/static/js/app.js');
+    assert.equal(await fixture.entries.get('https://proxy.test/static/js/app.js').text(), 'old script');
+  }
+  const offline = serviceWorkerFixture(async () => { throw new Error('Offline'); });
+  offline.entries.set('https://proxy.test/static/js/app.js', new Response('cached script'));
+  assert.equal(await (await offline.request('/static/js/app.js')).text(), 'cached script');
+  assert.equal((await offline.request('/static/js/missing.js')).type, 'error');
+});
+
+test('service worker cache write failures do not break fresh assets or intercept API data', async () => {
+  let fetches = 0;
+  const fixture = serviceWorkerFixture(async () => { fetches += 1; return new Response('fresh'); }, { failWrite: true });
+  assert.equal(await (await fixture.request('/static/js/app.js')).text(), 'fresh');
+  for (const path of ['/api/status', '/health', '/dashboard/metrics', '/v1/chat/completions', 'https://other.test/static/app.js']) {
+    assert.equal(await fixture.request(path), undefined);
+  }
+  assert.equal(fetches, 1);
 });

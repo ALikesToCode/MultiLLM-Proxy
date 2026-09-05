@@ -1,4 +1,4 @@
-const CACHE_NAME = 'multillm-proxy-v11';
+const CACHE_NAME = 'multillm-proxy-v12';
 const OFFLINE_URL = '/static/offline.html';
 const PRECACHE_URLS = [
   OFFLINE_URL,
@@ -30,9 +30,10 @@ const SHELL_FILE_PATHS = new Set([
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -40,13 +41,21 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => key.startsWith('multillm-proxy-v') && key !== CACHE_NAME)
           .map((key) => caches.delete(key))
       )
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
+
+async function cachedAsset(request) {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    return await cache.match(request);
+  } catch {
+    return undefined;
+  }
+}
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') {
@@ -65,7 +74,7 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .catch(() => caches.match(OFFLINE_URL))
+        .catch(async () => await cachedAsset(OFFLINE_URL) || Response.error())
     );
     return;
   }
@@ -77,17 +86,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(event.request).then((response) => {
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-        return response;
-      });
-    })
-  );
+  // Revalidate stable asset URLs so cached scripts cannot mask a new deployment.
+  const network = fetch(event.request, { cache: 'no-cache' });
+  event.waitUntil(network.then(async (response) => {
+    if (response.status === 200 && !response.redirected &&
+        !/\b(no-store|private)\b/i.test(response.headers.get('Cache-Control') || '')) {
+      const copy = response.clone();
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(event.request, copy);
+    }
+  }).catch(() => {
+    // Offline and storage-quota failures must not discard a usable response.
+  }));
+  event.respondWith(network.then(async (response) => {
+    if (!response.ok || response.redirected) {
+      return await cachedAsset(event.request) || response;
+    }
+    return response;
+  }).catch(async () => await cachedAsset(event.request) || Response.error()));
 });
