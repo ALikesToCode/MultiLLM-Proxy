@@ -2,12 +2,18 @@
 
 import json
 import time
+from itertools import chain
 
 import requests
 from flask import Response
 
 from route_helpers import copy_raw_provider_response_headers, stream_upstream_response
 from streaming.sse import format_sse_data, iter_sse_events
+
+_AIHUBMIX_QUOTA_PREFIX = (
+    "sorry, to prevent abuse of free resources, accounts that have not been "
+    "recharged can only try 10 times."
+)
 
 
 class FreeUpstreamFailure(Exception):
@@ -41,14 +47,61 @@ def _event_payload(event):
     return payload
 
 
-def _stream_response(response, deadline, on_failure):
+def _quota_text(provider, content):
+    if provider != "aihubmix" or not isinstance(content, str):
+        return ""
+    text = " ".join(content.lower().split())
+    if text.startswith(_AIHUBMIX_QUOTA_PREFIX):
+        raise FreeUpstreamFailure(429)
+    return text
+
+
+def _initial_events(events, provider):
+    first = next(event for event in events if event.data)
+    if first.is_done or not _event_payload(first).get("choices"):
+        raise FreeUpstreamFailure()
+    if provider != "aihubmix":
+        return [first]
+
+    # AIHubMix can report exhausted free access as assistant text with HTTP 200.
+    # Hold only its ambiguous prefix before committing the downstream stream;
+    # other providers and ordinary answers retain their normal streaming path.
+    buffered = []
+    content = ""
+    size = 0
+    for event in chain([first], events):
+        buffered.append(event)
+        size += len(event.data.encode())
+        if size > 64 * 1024 or len(buffered) > 256:
+            raise FreeUpstreamFailure()
+        if event.is_done:
+            return buffered
+        if not event.data:
+            continue
+        payload = _event_payload(event)
+        finished = False
+        for choice in payload["choices"]:
+            delta = choice.get("delta") or {}
+            if not isinstance(delta, dict):
+                raise FreeUpstreamFailure()
+            value = delta.get("content") or delta.get("refusal") or ""
+            if not isinstance(value, str):
+                raise FreeUpstreamFailure()
+            content += value
+            finished = finished or choice.get("finish_reason") is not None
+        text = _quota_text(provider, content)
+        if finished or (text and not _AIHUBMIX_QUOTA_PREFIX.startswith(text)):
+            return buffered
+    raise FreeUpstreamFailure()
+
+
+def _stream_response(response, deadline, on_failure, provider):
     events = iter_sse_events(_checked_chunks(response, deadline))
     # Ignore heartbeats until the provider actually starts a completion. The
     # transport read timeout and whole-response byte/deadline bounds still apply.
     try:
-        first = next(event for event in events if event.data)
-        if first.is_done or not _event_payload(first).get("choices"):
-            raise FreeUpstreamFailure()
+        buffered = _initial_events(events, provider)
+        events = chain(buffered, events)
     except (StopIteration, ValueError, requests.RequestException) as error:
         response.close()
         raise FreeUpstreamFailure() from error
@@ -60,7 +113,7 @@ def _stream_response(response, deadline, on_failure):
         finished = False
         visible = False
         try:
-            event = first
+            event = next(events)
             while True:
                 if event.is_done:
                     if not finished or not visible:
@@ -114,7 +167,7 @@ def _stream_response(response, deadline, on_failure):
 
 
 def validated_free_response(
-    upstream, *, stream: bool, deadline: float, on_failure=None
+    upstream, *, stream: bool, deadline: float, on_failure=None, provider=""
 ) -> Response:
     response = (
         upstream
@@ -126,7 +179,7 @@ def validated_free_response(
         if content_type != "text/event-stream":
             response.close()
             raise FreeUpstreamFailure()
-        return _stream_response(response, deadline, on_failure)
+        return _stream_response(response, deadline, on_failure, provider)
     try:
         body = b"".join(
             chunk.encode() if isinstance(chunk, str) else chunk
@@ -144,6 +197,7 @@ def validated_free_response(
                 message.get("content") or message.get("refusal")
             ):
                 raise FreeUpstreamFailure()
+            _quota_text(provider, message.get("content") or message.get("refusal"))
         return Response(
             body,
             content_type="application/json",

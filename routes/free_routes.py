@@ -116,6 +116,7 @@ def _try_candidate(
         FreeQuotaService.observe(candidate.provider, headers)
         return validated_free_response(
             upstream,
+            provider=candidate.provider,
             stream=payload.get("stream", False),
             deadline=deadline,
             on_failure=lambda status: _record_failure(candidate, status, headers),
