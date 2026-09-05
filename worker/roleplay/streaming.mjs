@@ -94,6 +94,7 @@ export function createObservedStream({
   });
   let reader = upstreamBody.getReader();
   let activeController = upstreamController;
+  const continuationController = new AbortController();
   let activeCleanup = cleanup;
   let decoder = new TextDecoder();
   let currentReasoningMetadata = reasoningMetadata;
@@ -218,6 +219,7 @@ export function createObservedStream({
   };
 
   const stopUpstream = async (reason) => {
+    continuationController.abort(reason);
     activeController.abort(reason);
     // Upstream cancellation acknowledgement must not hold the session queue.
     void reader.cancel(reason).catch(() => {});
@@ -252,26 +254,32 @@ export function createObservedStream({
     if (settled || terminating) return;
     terminating = true;
     clearTimeout(idleTimer);
-    await stopUpstream(error);
-    if (reason === "request_aborted") {
-      streamController.error(error);
-    } else {
-      if (delivery.thinkingOpen) {
+    try {
+      await stopUpstream(error);
+      if (reason === "request_aborted") {
+        streamController.error(error);
+      } else {
+        if (delivery.thinkingOpen) {
+          enqueueFrames(streamController, [
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "</think>\n\n" }, finish_reason: null }] })}\n\n`,
+          ]);
+        }
+        const message = reason === "turn_timeout"
+          ? "Generation exceeded the total turn deadline. Partial output was not saved."
+          : reason === "upstream_idle_timeout"
+            ? "The provider stopped generating. Partial output was not saved."
+            : "The provider stream was interrupted. Partial output was not saved.";
         enqueueFrames(streamController, [
-          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "</think>\n\n" }, finish_reason: null }] })}\n\n`,
+          `data: ${JSON.stringify({ error: { code: reason, type: "stream_error", message } })}\n\n`,
         ]);
+        streamController.close();
       }
-      const message = reason === "turn_timeout"
-        ? "Generation exceeded the total turn deadline. Partial output was not saved."
-        : reason === "upstream_idle_timeout"
-          ? "The provider stopped generating. Partial output was not saved."
-          : "The provider stream was interrupted. Partial output was not saved.";
-      enqueueFrames(streamController, [
-        `data: ${JSON.stringify({ error: { code: reason, type: "stream_error", message } })}\n\n`,
-      ]);
-      streamController.close();
+    } catch (deliveryError) {
+      // A client can cancel between upstream shutdown and the error frame.
+      logStreamError("roleplay_stream_failure_delivery_failed", deliveryError);
+    } finally {
+      void settle({ success: false, assistant: "", finishReason: "", reason });
     }
-    void settle({ success: false, assistant: "", finishReason: "", reason });
   };
 
   const abortStream = () => {
@@ -510,6 +518,7 @@ export function createObservedStream({
               if (!pendingContinuation) {
                 pendingContinuation = Promise.resolve(
                   openContinuation({
+                    signal: continuationController.signal,
                     assistant,
                     continuationCount: continuationCount + 1,
                     reason: incompleteReason,

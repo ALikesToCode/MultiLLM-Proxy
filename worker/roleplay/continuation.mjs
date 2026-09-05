@@ -163,6 +163,7 @@ export function createRoleplayContinuation({
     continuationCount,
     reason,
     contractAnalysis,
+    signal: nextSignal = signal,
   }) => {
     const semanticRefusal = reason === "semantic_refusal";
     const retriesFromBeginning =
@@ -235,11 +236,11 @@ export function createRoleplayContinuation({
           ),
         env,
         settings,
-        signal,
+        nextSignal,
         continuationIdempotencyKey(idempotencyKey, continuationCount),
       );
     } catch (error) {
-      if (signal?.aborted) {
+      if (nextSignal?.aborted) {
         throw error;
       }
       logRoleplayError("roleplay_continuation_fetch_failed", error, {
@@ -249,6 +250,13 @@ export function createRoleplayContinuation({
         continuationReason: reason,
       });
       return null;
+    }
+    if (nextSignal?.aborted) {
+      attempted.controller?.abort(nextSignal.reason);
+      attempted.cleanup?.();
+      const response = attempted.response ?? attempted.terminalResponse;
+      void response?.body?.cancel().catch(() => {});
+      throw nextSignal.reason;
     }
     currentState = attempted.state;
     upstreamCallCount += attempted.fallbackCount ?? 0;

@@ -128,6 +128,35 @@ test("total deadline settles streams even if the client stops reading", async ()
   } finally { scope.dispose(); }
 });
 
+test("idle deadline cancels pending continuation headers", async () => {
+  let continuationSignal;
+  const fixture = observedFixture({
+    maxContinuations: 1,
+    getIncompleteReason: () => "output_limit",
+    openContinuation: ({ signal }) => new Promise((_resolve, reject) => {
+      continuationSignal = signal;
+      signal.addEventListener("abort", () => reject(signal.reason));
+    }),
+  });
+  fixture.send('data: {"choices":[{"delta":{"content":"Partial"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n');
+  fixture.close();
+  const text = await new Response(fixture.stream).text();
+  assert.match(text, /upstream_idle_timeout/);
+  assert.equal(continuationSignal.aborted, true);
+  assert.equal((await fixture.completion).success, false);
+});
+
+test("client cancellation during failure delivery still settles the session", async () => {
+  const fixture = observedFixture();
+  const reader = fixture.stream.getReader();
+  let cancelled;
+  fixture.upstreamController.signal.addEventListener("abort", () => { cancelled = reader.cancel(); });
+  const outcome = await fixture.completion;
+  await cancelled;
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.reason, "upstream_idle_timeout");
+});
+
 test("non-streaming body reads cancel promptly on the total deadline", async () => {
   const scope = createTurnScope(undefined, 10);
   let cancelled = false;
@@ -166,6 +195,33 @@ test("stalled session releases the next turn and never persists partial output",
     assert.equal(instance.pendingTurns, 0);
     assert.equal(calls, 2);
     assert.doesNotMatch(JSON.stringify([...storage.values]), /Discard this incomplete reply/);
+  });
+});
+
+test("session idle timeout reaches the continuation provider fetch", async () => {
+  const fixture = opencodeOnlyFixture();
+  const stub = fixture.env.ROLEPLAY_SESSION.getByName("continuation-deadline");
+  const { instance } = fixture.storageBySession.get("continuation-deadline");
+  instance.settings.streamIdleTimeoutMs = 80;
+  let calls = 0;
+  let continuationSignal;
+  await withGlobalFetch(async (_url, { signal }) => {
+    calls += 1;
+    if (calls === 1) return new Response(
+      'data: {"choices":[{"delta":{"content":"Partial story"},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n',
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+    continuationSignal = signal;
+    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+  }, async () => {
+    const response = await stub.fetch(roleplayRequest({
+      model: "roleplay:glm", stream: true, output_mode: "unlimited", input: "Continue the synthetic scene.",
+    }, {}, "/turn"));
+    assert.match(await response.text(), /upstream_idle_timeout/);
+    await fixture.waitForBackgroundWork();
+    assert.equal(calls, 2);
+    assert.equal(continuationSignal.aborted, true);
+    assert.equal(instance.pendingTurns, 0);
   });
 });
 
