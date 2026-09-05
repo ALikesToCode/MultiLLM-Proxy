@@ -7,6 +7,7 @@ const appSource = readFileSync("static/js/app.js", "utf8");
 const catalogSource = readFileSync("static/js/auto-route-catalog.js", "utf8");
 const editorSource = readFileSync("static/js/auto-routes.js", "utf8");
 const openrouterSource = readFileSync("static/js/openrouter.js", "utf8");
+const dashboardSource = readFileSync("static/js/dashboard.js", "utf8");
 
 function browserContext(getElementById = () => null) {
   const document = {
@@ -161,4 +162,87 @@ test("clipboard rejection reports failure and removes the temporary textarea", a
   assert.equal(removed, true);
   assert.match(region.textContent, /Could not copy/);
   assert.doesNotMatch(region.textContent, /Copied to clipboard/);
+});
+
+function dashboardFixture(fetch) {
+  const status = new FakeElement();
+  const refresh = new FakeElement();
+  const metric = new FakeElement();
+  metric.dataset.metric = 'total-requests';
+  const elements = {
+    'operations-dashboard': { dataset: { admin: 'true', statusSnapshot: '/snapshot', requestLog: '/requests' } },
+    'dashboard-initial-state': { textContent: '{}' },
+    'stream-state': status,
+    'refresh-requests': refresh,
+  };
+  const timers = new Map();
+  const listeners = {};
+  let nextTimer = 0;
+  const context = browserContext((id) => elements[id] || null);
+  Object.assign(context, { AbortController, fetch });
+  Object.assign(context.document, {
+    hidden: false,
+    querySelectorAll: () => [metric],
+    addEventListener: (event, callback) => { listeners[event] = callback; },
+  });
+  Object.assign(context.window, {
+    setTimeout(callback, delay) { timers.set(++nextTimer, { callback, delay }); return nextTimer; },
+    clearTimeout: (id) => timers.delete(id),
+    setInterval() {},
+    addEventListener: (event, callback) => { listeners[event] = callback; },
+    EventSource() { throw new Error('Dashboard must not occupy a streaming connection'); },
+  });
+  vm.runInContext(dashboardSource, context);
+  return { context, status, refresh, metric, timers, listeners };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('dashboard polling works without EventSource and never overlaps requests', async () => {
+  const calls = [];
+  const fixture = dashboardFixture((url, options) => new Promise((resolve) => calls.push({ url, options, resolve })));
+  fixture.listeners.visibilitychange();
+  fixture.listeners.pageshow();
+  fixture.refresh.listeners.click();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.cache, 'no-store');
+  calls[0].resolve(new Response('{"stats":{"total_requests":42}}'));
+  calls[1].resolve(new Response('{"requests":[]}'));
+  await settle();
+  assert.equal(fixture.metric.textContent, '42');
+  assert.equal(fixture.status.textContent, 'Live updates');
+  assert.deepEqual([...fixture.timers.values()].map((timer) => timer.delay).sort(), [10000, 30000]);
+});
+
+test('dashboard pauses hidden tabs, aborts requests and resumes after page restore', async () => {
+  const calls = [];
+  const fixture = dashboardFixture((_url, { signal }) => new Promise((_resolve, reject) => {
+    calls.push(signal);
+    signal.addEventListener('abort', () => reject(new Error('Aborted')));
+  }));
+  fixture.context.document.hidden = true;
+  fixture.listeners.visibilitychange();
+  await settle();
+  assert.ok(calls.every((signal) => signal.aborted));
+  assert.equal(fixture.timers.size, 0);
+  assert.equal(fixture.status.textContent, 'Paused');
+  fixture.listeners.pagehide();
+  fixture.context.document.hidden = false;
+  fixture.listeners.visibilitychange();
+  assert.equal(calls.length, 2);
+  fixture.listeners.pageshow();
+  assert.equal(calls.length, 4);
+  fixture.listeners.pagehide();
+  await settle();
+});
+
+test('dashboard aborts a stalled snapshot and schedules a bounded retry', async () => {
+  const fixture = dashboardFixture((url, { signal }) => url === '/requests'
+    ? Promise.resolve(new Response('{"requests":[]}'))
+    : new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Deadline')))));
+  await settle();
+  [...fixture.timers.values()].find((timer) => timer.delay === 10000).callback();
+  await settle();
+  assert.equal(fixture.status.textContent, 'Refresh failed · retrying');
+  assert.equal(fixture.timers.size, 2);
 });

@@ -10,7 +10,7 @@
 {% block content %}
 <div
     id="operations-dashboard"
-    data-status-stream="{{ url_for('status_updates') }}"
+    data-status-snapshot="{{ url_for('status_page') }}"
     data-request-log="{{ url_for('admin_request_metrics') }}"
     data-auto-routes="{{ url_for('admin_auto_routes') }}"
     data-model-catalog="{{ url_for('admin_auto_route_catalog') }}"

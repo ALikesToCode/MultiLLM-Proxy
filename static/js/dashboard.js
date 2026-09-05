@@ -478,7 +478,7 @@
         });
     }
 
-    async function fetchRequests() {
+    async function fetchRequests(signal) {
         if (!isAdmin) {
             const empty = document.getElementById('request-log-empty');
             if (empty) {
@@ -488,20 +488,10 @@
             }
             return;
         }
-        try {
-            const response = await fetch(root.dataset.requestLog, {
-                credentials: 'same-origin',
-                headers: { Accept: 'application/json' }
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-            const payload = await response.json();
+        const payload = await fetchSnapshot(root.dataset.requestLog, signal);
+        if (!signal.aborted) {
             state.requests = payload.requests || [];
             renderRequests();
-        } catch (error) {
-            console.error('Request telemetry refresh failed:', error);
-            window.MultiLLM?.showToast('Request telemetry could not be refreshed', 'error');
         }
     }
 
@@ -517,13 +507,17 @@
         updateLastRefreshed();
     }
 
-    function parseEvent(event) {
-        try {
-            return JSON.parse(event.data);
-        } catch (error) {
-            console.error('Status stream event was invalid:', error);
-            return null;
+    async function fetchSnapshot(url, signal) {
+        const response = await fetch(url, {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
         }
+        return response.json();
     }
 
     function setStreamState(label, connected) {
@@ -535,65 +529,79 @@
         node.classList.toggle('tone-warning', !connected);
     }
 
-    function startStatusStream() {
-        if (!window.EventSource) {
-            setStreamState('Polling only', false);
-            return;
+    let pageActive = true;
+
+    function createPoller(load, intervalMs, onError) {
+        let timer;
+        let controller;
+        const visible = () => pageActive && !document.hidden;
+        async function refresh() {
+            window.clearTimeout(timer);
+            if (controller || !visible()) return;
+            controller = new AbortController();
+            let timedOut = false;
+            const deadline = window.setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+            }, 10_000);
+            try {
+                await load(controller.signal);
+            } catch (error) {
+                if (visible() && (timedOut || !controller.signal.aborted)) {
+                    onError(error);
+                }
+            } finally {
+                window.clearTimeout(deadline);
+                controller = null;
+                if (visible()) timer = window.setTimeout(refresh, intervalMs);
+            }
         }
-        const source = new EventSource(root.dataset.statusStream);
-        source.onopen = () => setStreamState('Live stream', true);
-        source.onerror = () => setStreamState('Reconnecting', false);
-        source.addEventListener('system', (event) => {
-            const payload = parseEvent(event);
-            if (payload) {
-                state.system = payload;
-                updateUptime();
-                updateLastRefreshed();
+        return {
+            refresh,
+            pause() {
+                window.clearTimeout(timer);
+                controller?.abort();
             }
-        });
-        source.addEventListener('stats', (event) => {
-            const payload = parseEvent(event);
-            if (payload) {
-                state.stats = payload;
-                updateOverview();
-                renderTrafficChart();
-                renderStatusBreakdown();
-                updateLastRefreshed();
-            }
-        });
-        source.addEventListener('activity', (event) => {
-            const payload = parseEvent(event);
-            if (payload) {
-                state.recentActivity = payload;
-                renderRouteTrace();
-            }
-        });
-        source.addEventListener('providers', (event) => {
-            const payload = parseEvent(event);
-            if (payload) {
-                state.providers = payload;
-                renderProviderHealth();
-            }
-        });
-        source.addEventListener('analytics', (event) => {
-            const payload = parseEvent(event);
-            if (payload) {
-                state.analytics = payload;
-                updateOverview();
-                renderCostSummary();
-            }
-        });
+        };
     }
 
+    const statusPoller = createPoller(async (signal) => {
+        const payload = await fetchSnapshot(root.dataset.statusSnapshot, signal);
+        if (signal.aborted) return;
+        state.system = payload.system || {};
+        state.stats = payload.stats || {};
+        state.providers = payload.providers || {};
+        state.analytics = payload.analytics || {};
+        state.recentActivity = payload.recent_activity || [];
+        renderAll();
+        setStreamState('Live updates', true);
+    }, 10_000, () => setStreamState('Refresh failed · retrying', false));
+    const requestPoller = createPoller(fetchRequests, 30_000, (error) => {
+        console.error('Request telemetry refresh failed:', error);
+        window.MultiLLM?.showToast('Request telemetry could not be refreshed', 'error');
+    });
+
+    function updatePolling() {
+        if (pageActive && !document.hidden) {
+            statusPoller.refresh();
+            requestPoller.refresh();
+        } else {
+            statusPoller.pause();
+            requestPoller.pause();
+            setStreamState('Paused', false);
+        }
+    }
+
+    document.addEventListener('visibilitychange', updatePolling);
+    window.addEventListener('pagehide', () => { pageActive = false; updatePolling(); });
+    window.addEventListener('pageshow', () => { pageActive = true; updatePolling(); });
     ['request-search', 'request-provider-filter', 'request-status-filter'].forEach((id) => {
         document.getElementById(id)?.addEventListener('input', renderRequests);
         document.getElementById(id)?.addEventListener('change', renderRequests);
     });
-    document.getElementById('refresh-requests')?.addEventListener('click', fetchRequests);
+    document.getElementById('refresh-requests')?.addEventListener('click', requestPoller.refresh);
 
     renderAll();
-    fetchRequests();
-    startStatusStream();
+    updatePolling();
     window.setInterval(updateUptime, 30_000);
-    window.setInterval(fetchRequests, 30_000);
 }());
