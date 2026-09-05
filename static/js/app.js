@@ -18,9 +18,11 @@ function fallbackCopy(text) {
     textarea.style.opacity = '0';
     document.body.appendChild(textarea);
     textarea.select();
-    const copied = document.execCommand('copy');
-    textarea.remove();
-    return copied;
+    try {
+        return document.execCommand('copy');
+    } finally {
+        textarea.remove();
+    }
 }
 
 async function copyText(text) {
@@ -66,7 +68,7 @@ function initializeCopyButtons() {
         }
         const value = button.getAttribute('data-copy-value') || '';
         try {
-            await copyText(value);
+            if (!await copyText(value)) throw new Error('Clipboard copy was rejected');
             showToast('Copied to clipboard');
         } catch (error) {
             console.error('Clipboard copy failed:', error);

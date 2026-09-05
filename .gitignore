@@ -147,3 +147,5 @@ user_data.json
 
 # Local secret-bearing API profile export
 /example.json
+# Local browser verification artifacts
+output/playwright/

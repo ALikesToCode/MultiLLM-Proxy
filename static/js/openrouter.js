@@ -14,7 +14,9 @@
     const streamingToggle = document.getElementById('streaming-toggle');
     const selectedModelDisplay = document.getElementById('selected-model-display');
     const testButton = document.getElementById('test-button');
+    const stopButton = document.getElementById('stop-button');
     const copyButton = document.getElementById('copy-response');
+    let activeRequest = null;
 
     function getCsrfToken() {
         const tokenElement = document.querySelector('meta[name="csrf-token"]');
@@ -45,15 +47,18 @@
         }
         wrapper.textContent = text;
         element.appendChild(wrapper);
+        return wrapper;
     }
 
     function setResponseText(text, className) {
-        setPlainText(responseArea, text, className);
+        const wrapper = setPlainText(responseArea, text, className);
         responseArea.scrollTop = responseArea.scrollHeight;
+        return wrapper;
     }
 
     function setLoading(isLoading) {
         document.getElementById('response-status')?.classList.toggle('hidden', !isLoading);
+        if (stopButton) stopButton.disabled = !isLoading;
         if (testButton) {
             testButton.disabled = isLoading || root.dataset.admin !== 'true';
             testButton.textContent = isLoading ? 'Running…' : 'Run request';
@@ -85,45 +90,68 @@
         if (payload === '[DONE]') {
             return true;
         }
-        try {
-            onData(JSON.parse(payload));
-        } catch (error) {
-            console.error('Error parsing streaming response:', error);
-        }
+        const parsed = JSON.parse(payload);
+        if (parsed.error) throw new Error(parsed.error.message || 'Provider stream failed');
+        onData(parsed);
         return false;
     }
 
-    async function readSseStream(response, onData) {
+    async function readSseStream(response, onData, signal) {
+        if (!response.body) throw new Error('The provider returned no response body');
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-                break;
-            }
-            buffer += decoder.decode(value, { stream: true });
-            const events = buffer.split(/\r?\n\r?\n/);
-            buffer = events.pop() || '';
-            for (const eventBlock of events) {
-                if (onSseEventBlock(eventBlock, onData)) {
-                    return;
+        let terminated = false;
+        const consume = (block) => onSseEventBlock(block, (data) => {
+            if (data.choices?.some((choice) => choice.finish_reason)) terminated = true;
+            onData(data);
+        });
+        const abort = () => { void reader.cancel().catch(() => {}); };
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+            while (true) {
+                signal.throwIfAborted();
+                const { done, value } = await reader.read();
+                signal.throwIfAborted();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const events = buffer.split(/\r?\n\r?\n/);
+                buffer = events.pop() || '';
+                for (const eventBlock of events) {
+                    if (consume(eventBlock)) return;
                 }
             }
-        }
-        buffer += decoder.decode();
-        if (buffer.trim()) {
-            onSseEventBlock(buffer, onData);
+            buffer += decoder.decode();
+            if (buffer.trim() && consume(buffer)) return;
+            if (!terminated) throw new Error('Stream ended before completion. Partial output is preserved.');
+        } finally {
+            signal.removeEventListener('abort', abort);
+            void reader.cancel().catch(() => {});
+            reader.releaseLock();
         }
     }
 
     async function testOpenRouterModel(model, prompt, stream) {
+        if (activeRequest) return;
+        activeRequest = new AbortController();
+        let pendingText = '';
+        let outputNode;
+        let renderFrame;
+        const flush = () => {
+            if (renderFrame !== undefined) window.cancelAnimationFrame(renderFrame);
+            renderFrame = undefined;
+            if (outputNode && pendingText) {
+                outputNode.appendData(pendingText);
+                pendingText = '';
+                responseArea.scrollTop = responseArea.scrollHeight;
+            }
+        };
         setResponseText('Generating response…', 'response-placeholder');
         setLoading(true);
         try {
             const response = await dashboardFetch('/dashboard/openrouter/chat-completions', {
                 method: 'POST',
+                signal: activeRequest.signal,
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': stream ? 'text/event-stream' : 'application/json'
@@ -136,22 +164,24 @@
             });
             if (!response.ok) {
                 const errorPayload = await response.json().catch(() => ({}));
-                throw new Error(errorPayload.message || errorPayload.error || `HTTP error ${response.status}`);
+                throw new Error(errorPayload.message || errorPayload.error?.message ||
+                    (typeof errorPayload.error === 'string' ? errorPayload.error : `HTTP error ${response.status}`));
             }
 
             if (stream) {
-                let responseText = '';
-                setResponseText('');
+                const output = setResponseText('');
+                outputNode = document.createTextNode('');
+                output.appendChild(outputNode);
                 await readSseStream(response, (data) => {
                     const content = data.choices?.[0]?.delta?.content;
                     if (content) {
-                        responseText += content;
-                        setResponseText(responseText);
+                        pendingText += content;
+                        if (renderFrame === undefined) renderFrame = window.requestAnimationFrame(flush);
                     }
                     if (data.usage) {
                         updateTokensInfo(data.usage);
                     }
-                });
+                }, activeRequest.signal);
             } else {
                 const data = await response.json();
                 const content = data.choices?.[0]?.message?.content
@@ -161,8 +191,18 @@
             }
             updateOpenRouterCredits();
         } catch (error) {
-            setResponseText(`Error: ${error.message}`, 'tone-danger');
+            flush();
+            const message = activeRequest.signal.aborted ? 'Stopped. Partial output is preserved.' : `Error: ${error.message}`;
+            if (outputNode) {
+                const notice = document.createElement('p');
+                notice.className = 'tone-danger';
+                notice.setAttribute('role', 'status');
+                notice.textContent = message;
+                responseArea.appendChild(notice);
+            } else setResponseText(message, 'tone-danger');
         } finally {
+            flush();
+            activeRequest = null;
             setLoading(false);
         }
     }
@@ -247,12 +287,17 @@
             window.MultiLLM?.showToast('Enter both a model ID and prompt', 'error');
             return;
         }
-        testOpenRouterModel(model, prompt, Boolean(streamingToggle?.checked));
+        return testOpenRouterModel(model, prompt, Boolean(streamingToggle?.checked));
     });
+
+    stopButton?.addEventListener('click', () => activeRequest?.abort());
+    window.addEventListener('pagehide', () => activeRequest?.abort());
 
     copyButton?.addEventListener('click', async () => {
         try {
-            await window.MultiLLM.copyText(responseArea.textContent || '');
+            if (!await window.MultiLLM.copyText(responseArea.textContent || '')) {
+                throw new Error('Clipboard copy was rejected');
+            }
             window.MultiLLM.showToast('Response copied');
         } catch (error) {
             window.MultiLLM?.showToast('Could not copy response', 'error');
