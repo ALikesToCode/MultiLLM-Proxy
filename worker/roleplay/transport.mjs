@@ -398,6 +398,7 @@ export function recordModelResult(
     consecutiveFailures: 0,
   };
   const attempts = previous.attempts + 1;
+  const sampleLatency = success && (performance?.upstreamCallCount ?? 1) === 1;
   const successes = previous.successes + (success ? 1 : 0);
   const failures = previous.failures + (success ? 0 : 1);
   const consecutiveFailures = success
@@ -450,16 +451,16 @@ export function recordModelResult(
         failures,
         consecutiveFailures,
         cooldownUntil,
-        ewmaTtfbMs: success
+        ewmaTtfbMs: sampleLatency
           ? updateEwma(previous.ewmaTtfbMs, ttfbMs)
           : previous.ewmaTtfbMs,
-        ewmaTotalMs: success
+        ewmaTotalMs: sampleLatency
           ? updateEwma(previous.ewmaTotalMs, totalMs)
           : previous.ewmaTotalMs,
-        ttfbSamplesMs: success
+        ttfbSamplesMs: sampleLatency
           ? appendLatencySample(previous.ttfbSamplesMs, ttfbMs)
           : previous.ttfbSamplesMs,
-        totalSamplesMs: success
+        totalSamplesMs: sampleLatency
           ? appendLatencySample(previous.totalSamplesMs, totalMs)
           : previous.totalSamplesMs,
         lastStatus: status,

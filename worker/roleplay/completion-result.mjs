@@ -103,6 +103,10 @@ export function logRoleplayStreamCompletion({
         timings.credentialCheckPerformed,
       ),
       ttfbMs: Math.round(completion.ttfbMs),
+      firstReasoningMs: completion.firstReasoningMs === null ? null
+        : Math.round((timings.totalToHeadersMs ?? headerMs) + completion.firstReasoningMs),
+      firstContentMs: completion.firstContentMs === null ? null
+        : Math.round((timings.totalToHeadersMs ?? headerMs) + completion.firstContentMs),
       streamMs: Math.round(completion.streamMs),
       completionTokens: completion.completionTokens || undefined,
       generationMs: Math.round(completion.generationMs || 0) || undefined,

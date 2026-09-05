@@ -873,7 +873,7 @@ export class RoleplaySession extends DurableObject {
               ttfbMs: headerMs + ttfbMs,
               totalMs: performance.now() - startedAt,
               status: disposition.modelSucceeded ? response.status : 0,
-              performance: completion,
+              performance: { ...completion, headerMs },
             },
             inputTokensSaved,
             persistedConversation,

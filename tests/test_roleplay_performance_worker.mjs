@@ -9,7 +9,7 @@ import {
   compactionPlan,
 } from "../worker/roleplay/memory.mjs";
 import { applyRoleplayPromptCache } from "../worker/roleplay/prompt-cache.mjs";
-import { createSseAssistantCollector } from "../worker/roleplay/sse-collector.mjs";
+import { createSseAssistantCollector, createSseDeliveryTracker } from "../worker/roleplay/sse-collector.mjs";
 import {
   modelThroughputMetrics,
   recordThroughputObservation,
@@ -191,6 +191,27 @@ test("roleplay throughput metrics retain bounded observed TPS", () => {
   });
   assert.equal(metrics.last_completion_tokens, 1_000);
   assert.equal(metrics.last_generation_ms, 5_000);
+});
+
+test("delivery timings exclude comments, role headers and reasoning from visible TTFT", () => {
+  const delivery = createSseDeliveryTracker(100);
+  const frame = (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+  delivery.observe([": heartbeat\n\n", 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'], 110);
+  assert.deepEqual(delivery.metrics(), { firstReasoningMs: null, firstContentMs: null });
+  delivery.observe([frame("<think>Consider the context.")], 120);
+  delivery.observe([frame("</think>\n\n")], 190);
+  assert.deepEqual(delivery.metrics(), { firstReasoningMs: 20, firstContentMs: null });
+  delivery.observe([frame("The reply.")], 200);
+  assert.deepEqual(delivery.metrics(), { firstReasoningMs: 20, firstContentMs: 100 });
+  const stats = recordThroughputObservation({}, { ...delivery.metrics(), headerMs: 30 });
+  assert.equal(modelThroughputMetrics(stats).delivery.first_content_ms.p50, 130);
+  assert.equal(modelThroughputMetrics(stats).delivery.first_reasoning_ms.p50, 50);
+});
+
+test("mixed continuation totals are excluded from per-model throughput samples", () => {
+  assert.deepEqual(recordThroughputObservation({}, {
+    completionTokens: 1000, generationMs: 1000, firstContentMs: 10, upstreamCallCount: 2,
+  }), {});
 });
 
 test("roleplay captures completion tokens from a final usage-only SSE frame", () => {

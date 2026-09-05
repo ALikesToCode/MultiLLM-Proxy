@@ -1,5 +1,6 @@
 import {
   bufferedCompletionFrames,
+  createSseDeliveryTracker,
   createSseAssistantCollector as createLegCollector,
 } from "./sse-collector.mjs";
 import { createRoleplayStreamValidationGate } from "./stream-validation-gate.mjs";
@@ -99,7 +100,6 @@ export function createObservedStream({
   let idleTimer;
   let streamController;
   let terminating = false;
-  let downstreamThinking = false;
   const resetIdle = () => {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
@@ -112,7 +112,10 @@ export function createObservedStream({
       deferTerminalFrames:
         typeof openContinuation === "function" || bufferUntilValidated,
       reasoningMetadata: currentReasoningMetadata,
-      onProgress: resetIdle,
+      onProgress: () => {
+        if (!legFirstByteAt) legFirstByteAt = performance.now();
+        resetIdle();
+      },
     });
   let collector = newCollector();
   const validationGate = createRoleplayStreamValidationGate(
@@ -141,6 +144,7 @@ export function createObservedStream({
   let terminalFrames = [];
   let template = null;
   const streamStartedAt = performance.now();
+  const delivery = createSseDeliveryTracker(streamStartedAt);
   let lastDownstreamAt = streamStartedAt;
 
   const releaseReader = () => {
@@ -183,6 +187,7 @@ export function createObservedStream({
     requestSignal?.removeEventListener("abort", abortStream);
     const completed = {
       ...result,
+      ...delivery.metrics(),
       heartbeatCount,
       continuationCount,
       upstreamCallCount:
@@ -234,10 +239,8 @@ export function createObservedStream({
   };
 
   const enqueueFrames = (controller, frames) => {
+    delivery.observe(frames, performance.now());
     for (const frame of frames) {
-      // Normalized reasoning delimiters are complete strings in each frame.
-      if (frame.includes("<think>")) downstreamThinking = true;
-      if (frame.includes("</think>")) downstreamThinking = false;
       controller.enqueue(SSE_ENCODER.encode(frame));
     }
     if (frames.length) {
@@ -253,7 +256,7 @@ export function createObservedStream({
     if (reason === "request_aborted") {
       streamController.error(error);
     } else {
-      if (downstreamThinking) {
+      if (delivery.thinkingOpen) {
         enqueueFrames(streamController, [
           `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "</think>\n\n" }, finish_reason: null }] })}\n\n`,
         ]);
@@ -613,9 +616,6 @@ export function createObservedStream({
           const now = performance.now();
           if (!firstByteAt) {
             firstByteAt = now;
-          }
-          if (!legFirstByteAt) {
-            legFirstByteAt = now;
           }
           const decoded = decoder.decode(value, { stream: true });
           const frames = collector.consume(decoded);

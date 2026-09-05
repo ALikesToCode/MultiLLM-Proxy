@@ -44,6 +44,30 @@ function frameData(frame) {
   }
 }
 
+export function createSseDeliveryTracker(startedAt) {
+  const visible = createVisibleRoleplayContentCollector();
+  let firstReasoningMs = null;
+  let firstContentMs = null;
+  let thinkingOpen = false;
+  return {
+    get thinkingOpen() { return thinkingOpen; },
+    observe(frames, now) {
+      for (const frame of frames) {
+        const content = frameData(frame)?.payload?.choices?.[0]?.delta?.content;
+        if (typeof content !== "string") continue;
+        for (const tag of content.matchAll(/<\/?think>/gi)) {
+          thinkingOpen = tag[0].toLowerCase() === "<think>";
+          if (thinkingOpen && firstReasoningMs === null) firstReasoningMs = now - startedAt;
+        }
+        if (visible.consume(content).trim() && firstContentMs === null) {
+          firstContentMs = now - startedAt;
+        }
+      }
+    },
+    metrics() { return { firstReasoningMs, firstContentMs }; },
+  };
+}
+
 function rewrittenChoiceFrame(payload, { finishReason, dropContent }) {
   const choices = Array.isArray(payload?.choices)
     ? [...payload.choices]
