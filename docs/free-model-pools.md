@@ -55,6 +55,10 @@ FREE_ROUTE_PROVIDER_ORDER=groq,opencode,aihubmix,gemini,openrouter
 This is an operator assertion, not a billing check or a per-request spending
 cap. Remove the assertion before upgrading an account to paid. If you require
 free-labelled models regardless of account tier, leave the first setting empty.
+Cloudflare uses `keep_vars: true` so later deployments preserve operator-owned
+free-pool settings instead of deleting them. Account-tier assertions stay out of
+the checked-in deployment configuration. To withdraw an assertion, explicitly
+change its runtime setting; omitting it from a later deploy does not remove it.
 The seed list for the optional free tiers is Groq `qwen/qwen3.8-27b`,
 `qwen/qwen3.6-27b`, `openai/gpt-oss-120b` (text), and Gemini
 `gemini-3.1-flash-lite`. It deliberately does not admit every model on a paid

@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "multillm-proxy",
+  "keep_vars": true,
   "main": "./cloudflare-worker.mjs",
   "build": { "command": "python scripts/build_release_metadata.py" },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },

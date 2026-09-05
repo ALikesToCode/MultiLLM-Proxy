@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
@@ -6,6 +7,12 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 
 const worker = (await loadWorkerModule()).default;
 const origin = "https://example.test";
+
+test("deployments preserve operator-owned free-tier settings", async () => {
+  const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+  assert.equal(config.keep_vars, true);
+  assert.equal(config.vars.FREE_ROUTE_FREE_TIER_PROVIDERS, undefined);
+});
 
 function environment(fetch) {
   return { MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch }) } };
