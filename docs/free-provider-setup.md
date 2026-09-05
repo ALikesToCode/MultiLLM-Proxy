@@ -5,6 +5,8 @@ destinations. You do not need all of them. Start with OpenRouter, OpenCode Zen,
 AIHubMix, and a verified Groq Free account; add destinations as needed.
 Ordering is a preference, not a measured speed or quality ranking.
 
+For a compact account-opening reference, see [signup links and key names](free-provider-signup-links.md).
+
 Reviewed September 5, 2026: public documentation was checked; authenticated
 generation and your account's billing tier were not. Offerings, capacity,
 model IDs and terms can change. The community list supplies leads, not API or
