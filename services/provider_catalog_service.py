@@ -11,6 +11,7 @@ from typing import Any
 
 from providers.image_relays import image_relay_specs
 from providers.opencode_go import is_opencode_zen_free_model
+from services.provider_capability_discovery import enrich_model_capabilities
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
     encode_provider_metadata,
@@ -452,6 +453,26 @@ class ProviderCatalogService:
 
     @classmethod
     def _fetch_configured_provider(
+        cls,
+        provider: str,
+        spec: ProviderCatalogSpec,
+        base_url: str,
+        credentials: tuple[str | None, ...],
+        proxy_service_cls,
+        supplemental_base_url: str | None,
+    ) -> dict[str, Any]:
+        result = cls._fetch_provider_catalog(
+            provider, spec, base_url, credentials, proxy_service_cls,
+            supplemental_base_url,
+        )
+        if result["status"] == "updated":
+            result["models"] = enrich_model_capabilities(
+                provider, base_url, tuple(result["models"])
+            )
+        return result
+
+    @classmethod
+    def _fetch_provider_catalog(
         cls,
         provider: str,
         spec: ProviderCatalogSpec,

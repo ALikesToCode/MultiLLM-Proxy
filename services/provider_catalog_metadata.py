@@ -18,6 +18,7 @@ CATALOG_METADATA_FIELDS = frozenset(
         "modality",
         "tokenizer",
         "supports_vision",
+        "vision_metadata_source",
         "supports_tools",
         "supports_function_calling",
         "supports_reasoning",
@@ -46,6 +47,7 @@ _STRING_FIELDS = frozenset(
         "metadata_source",
         "metadata_resolved_from",
         "metadata_status",
+        "vision_metadata_source",
     }
 )
 _INTEGER_FIELDS = frozenset(
@@ -66,6 +68,47 @@ _BOOLEAN_FIELDS = frozenset(
 )
 _MODALITY_FIELDS = frozenset({"input_modalities", "output_modalities"})
 _INVALID = object()
+
+
+def _modalities(value: Any) -> list[str] | None:
+    if isinstance(value, str) and len(value) <= 1024:
+        value = value.split(",")
+    if not isinstance(value, list) or not 0 < len(value) <= 32:
+        return None
+    if not all(isinstance(item, str) and 0 < len(item.strip()) <= 256 for item in value):
+        return None
+    return list(dict.fromkeys(item.strip().lower() for item in value))
+
+
+def _normalized_modalities(item: Mapping[str, Any]) -> dict[str, list[str]]:
+    normalized = {}
+    architecture = item.get("architecture")
+    nested = item.get("modalities")
+    for direction in ("input", "output"):
+        field = f"{direction}_modalities"
+        candidates = [item.get(field)]
+        if isinstance(architecture, Mapping):
+            candidates.append(architecture.get(field))
+        if isinstance(nested, Mapping):
+            candidates.append(nested.get(direction))
+        for candidate in candidates:
+            modalities = _modalities(candidate)
+            if modalities:
+                normalized[field] = modalities
+                break
+    return normalized
+
+
+def model_supports_vision(metadata: Mapping[str, Any] | None) -> bool | None:
+    """Resolve model input support; transport defaults and output images are not evidence."""
+    metadata = metadata or {}
+    explicit = metadata.get("supports_vision")
+    if isinstance(explicit, bool):
+        return explicit
+    modalities = _normalized_modalities(metadata).get("input_modalities")
+    if modalities:
+        return "image" in modalities or "images" in modalities
+    return None
 
 
 def _sanitize_value(key: str, value: Any) -> Any:
@@ -121,6 +164,7 @@ def sanitize_provider_metadata(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, Mapping):
         return None
 
+    item = {**item, **_normalized_modalities(item)}
     metadata: dict[str, Any] = {}
     for key in CATALOG_METADATA_FIELDS:
         if key not in item:

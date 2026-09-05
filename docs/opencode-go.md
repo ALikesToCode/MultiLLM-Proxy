@@ -48,6 +48,13 @@ Go catalog only. Use `GET /v1/models` for MultiLLM's combined OpenCode Go plus
 free Zen catalog. Unified requests use `opencode:<model-id>` and automatically
 select `/zen/go/v1` for Go models or `/zen/v1` for free models.
 
+**Refresh live models** fills missing image-input metadata from exact OpenCode
+entries in models.dev. The unified catalog exposes `input_modalities`,
+`vision_metadata_source`, and matching top-level / nested `supports_vision`
+flags. Unknown support is `null`, not a generic provider-level `false`.
+See [vision discovery semantics](auto-routing.md); public metadata does not
+establish account access or a successful image-input request.
+
 OpenAI-compatible example:
 
 ```python

@@ -40,6 +40,34 @@ the upstream catalog. The original allowlisted fields are grouped under
 `provider_metadata` as well as promoted where they do not conflict with the
 OpenAI-compatible model envelope.
 
+Vision is resolved per model, not from the provider's transport defaults.
+`supports_vision` and `capabilities.supports_vision` agree: `true` means the
+catalog advertises image input, `false` means explicit non-vision support, and
+`null` means unknown. Image output (`supports_images`) does not establish image
+input support. Clients should keep unknown models distinct from text-only ones.
+
+**Refresh live models** also fills missing vision metadata for the official
+AIHubMix and OpenCode origins. AIHubMix uses its public
+[`/api/v1/models` catalog](https://aihubmix.com/api/v1/models); OpenCode uses its
+provider-specific entries in [models.dev](https://models.dev/api.json).
+`vision_metadata_source` identifies enrichment provenance. Comma-separated
+modalities and nested `architecture.input_modalities` / `modalities.input` lists
+are normalized to `input_modalities` arrays. Explicit model-level decisions win.
+
+Enrichment matches exact IDs already returned by the primary catalog; it never
+adds models, strips a `-free` suffix, copies pricing, or infers capabilities from
+names. Custom gateway origins are not enriched from another service's catalog.
+The public lookup sends no credentials, ignores environment authentication,
+disallows redirects, and has time and size limits. Failure leaves the primary
+catalog usable with unknown capabilities; a failed primary refresh retains the
+previous cached catalog. Ordinary model-list and generation requests perform no
+additional metadata lookup.
+
+These flags describe published metadata, not a successful vision probe or an
+account entitlement. AIHubMix's [official catalog tooling](https://github.com/AIhubmix/skills/tree/main/skills/aihubmixApi)
+notes that modality tags can be inaccurate. Confirm the selected model with an
+explicitly authorized image-input test before depending on it in production.
+
 GLM-5.2 defaults to maximum reasoning on every unified and automatic route.
 The proxy maps semantic `max` to the selected transport: OpenCode receives
 `max`, NanoGPT receives `max`, NavyAI receives `xhigh`, LinkAPI receives `high`, and

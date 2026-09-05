@@ -58,6 +58,13 @@ In the dashboard, open **Operations**, select **Refresh live models**, then
 filter the model catalog by `aihubmix`. The `/docs` page reports whether the
 credential is configured and lists the same built-in and refreshed models.
 
+The refresh enriches image-input capabilities from AIHubMix's separate public
+`/api/v1/models` metadata catalog. `GET /v1/models` exposes normalized
+`input_modalities`, matching top-level and nested `supports_vision` flags, and
+`vision_metadata_source`. Missing metadata remains unknown (`null`), not false.
+See [vision discovery semantics](auto-routing.md) for provenance and limitations;
+the native passthrough endpoint remains unchanged.
+
 ## Generate with GPT Image
 
 The unified endpoint sends the documented OpenAI Images payload unchanged

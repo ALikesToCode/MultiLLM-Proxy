@@ -10,6 +10,7 @@ from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.model_registry import ModelRegistry
+from services.provider_catalog_metadata import model_supports_vision
 from services.provider_catalog_service import ProviderCatalogService
 
 KNOWN_IMAGE_MODEL_IDS = {
@@ -149,6 +150,9 @@ def build_model_catalog(
         entry = entries[model_id]
         adapter = adapters.get(entry["provider"])
         capabilities = asdict(adapter.capabilities()) if adapter else {}
+        capabilities["supports_vision"] = model_supports_vision(
+            entry["provider_metadata"]
+        )
         if "supports_images" in capabilities:
             capabilities["supports_images"] = _model_supports_image_output(
                 entry["provider"],
@@ -187,6 +191,7 @@ def unified_model_payload(model: Mapping[str, Any]) -> dict[str, Any]:
         "context_window": model["context_window"],
         "max_output_tokens": model["max_output_tokens"],
         "capabilities": dict(model.get("capabilities") or {}),
+        "supports_vision": model_supports_vision(provider_metadata),
     }
     if not provider_metadata:
         return payload
@@ -203,6 +208,7 @@ def unified_model_payload(model: Mapping[str, Any]) -> dict[str, Any]:
         "status",
         "context_window",
         "max_output_tokens",
+        "supports_vision",
     }
     for field, value in provider_metadata.items():
         if field not in reserved_fields:
