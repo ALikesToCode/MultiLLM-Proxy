@@ -39,6 +39,10 @@ class FakeStorage {
     this.alarm = value;
   }
 
+  async delete(key) {
+    return this.values.delete(key);
+  }
+
   async deleteAll() {
     this.operations.deleteAll += 1;
     this.values.clear();

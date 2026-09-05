@@ -217,6 +217,7 @@ export function isRoleplayPath(pathname) {
   return (
     ROLEPLAY_TURN_PATHS.has(pathname) ||
     pathname === ROLEPLAY_MODELS_PATH ||
+    pathname.startsWith("/v1/roleplay/control/") ||
     pathname === ROLEPLAY_METRICS_PATH
   );
 }

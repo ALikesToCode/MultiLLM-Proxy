@@ -1,4 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
+import { collectContainerEnv } from "./worker/container-env.mjs";
 import {
   RoleplaySession,
   handleRoleplayEdgeRequest,
@@ -53,7 +54,7 @@ const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, X-Roleplay-Session-ID, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
 const CORS_EXPOSE_HEADERS =
-  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-MultiLLM-Reasoning-Normalized, X-Roleplay-Session-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-MultiLLM-Reasoning-Normalized, X-Roleplay-Session-ID, X-Roleplay-Trace-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -175,138 +176,6 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 
-const DIRECT_ENV_KEYS = [
-  "A6API_API_KEY",
-  "AIHUBMIX_API_KEY",
-  "AIHUBMIX_BASE_URL",
-  "AIHUBMIX_BACKUP_BASE_URL",
-  "AIHUBMIX_PREFERRED_BASE_URL",
-  "ADMIN_USERNAME",
-  "ADMIN_API_KEY",
-  "AIMLAPI_API_KEY",
-  "AUTH_DB_PATH",
-  "RATE_LIMIT_ENABLED",
-  "RATE_LIMIT_RPM",
-  "RATE_LIMIT_TPM",
-  "DAILY_REQUEST_LIMIT",
-  "MAX_REQUEST_BYTES",
-  "MAX_PROMPT_TOKENS",
-  "MAX_OUTPUT_TOKENS",
-  "OPTIMIZER_MAX_REQUEST_BYTES",
-  "OPTIMIZER_SUMMARY_TIMEOUT_SECONDS",
-  "GLM_AUTO_OPTIMIZE",
-  "GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS",
-  "GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS",
-  "CONTEXT_ANALYSIS_CACHE_ENABLED",
-  "CONTEXT_ANALYSIS_CACHE_TTL_SECONDS",
-  "CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES",
-  "PROMPT_CACHE_ENABLED",
-  "PROMPT_CACHE_MIN_TOKENS",
-  "RATE_LIMIT_USAGE_RETENTION_SECONDS",
-  "FLASK_SECRET_KEY",
-  "JWT_SECRET",
-  "IMAGE_RELAY_API_KEYS_JSON",
-  "IMAGE_RELAY_PROVIDERS_JSON",
-  "LATIX_API_KEY",
-  "PROJECT_ID",
-  "LOCATION",
-  "GOOGLE_ENDPOINT",
-  "GOOGLE_APPLICATION_CREDENTIALS",
-  "GOOGLE_APPLICATION_CREDENTIALS_JSON",
-  "OPENAI_API_KEY",
-  "CEREBRAS_API_KEY",
-  "EPHONE_API_KEY",
-  "GGUU_API_KEY",
-  "GGUUAI_API_KEY",
-  "XAI_API_KEY",
-  "TOGETHER_API_KEY",
-  "AZURE_API_KEY",
-  "SCALEWAY_API_KEY",
-  "HYPERBOLIC_API_KEY",
-  "SAMBANOVA_API_KEY",
-  "OPENROUTER_API_KEY",
-  "OPENCODE_GO_API_KEY",
-  "OPENCODE_API_KEY",
-  "OPENCODE_GO_BASE_URL",
-  "OPENCODE_BASE_URL",
-  "OPENCODE_ZEN_BASE_URL",
-  "MIMO_API_KEY",
-  "NANOGPT_API_KEY",
-  "NANOGPT_API_KEYS",
-  "NANO_GPT_KEY",
-  "NANO_GPT_KEYS",
-  "NANOGPT_BILLING_MODE",
-  "NANOGPT_BASE_URL",
-  "NANOGPT_SUBSCRIPTION_BASE_URL",
-  "NANOGPT_BATCH_BASE_URL",
-  "NANOGPT_ORIGIN_URL",
-  "NANOGPT_KEY_CHECK_TIMEOUT_SECONDS",
-  "NANOGPT_KEY_CHECK_TTL_SECONDS",
-  "NANOGPT_KEY_CHECK_EVERY_REQUESTS",
-  "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS",
-  "NANOGPT_PREFERRED_KEY_INDEX",
-  "NAVYAI_API_KEY",
-  "NAVYAI_BASE_URL",
-  "LINKAPI_KEY",
-  "LINKAPI_API_KEY",
-  "LINKAPI_BASE_URL",
-  "CODEX_EASY_API_KEY",
-  "CODEX_API_KEY",
-  "KIMI_CODE_API_KEY",
-  "OPENROUTER_SITE_URL",
-  "OPENROUTER_APP_NAME",
-  "OPENROUTER_REFERER",
-  "PALM_API_KEY",
-  "NINETEEN_API_KEY",
-  "CHUTES_API_TOKEN",
-  "GEMINI_API_KEY",
-  "APP_NAME",
-  "GUNICORN_WORKERS",
-  "GUNICORN_THREADS",
-  "GUNICORN_TIMEOUT",
-  "GUNICORN_GRACEFUL_TIMEOUT",
-  "GUNICORN_ACCESS_LOG",
-];
-
-const DYNAMIC_ENV_PATTERNS = [
-  /^GROQ_API_KEY_\d+$/,
-  /^NANOGPT_API_KEY_\d+$/,
-  /^NANO_GPT_KEY_\d+$/,
-  /^(?:AZURE|CEREBRAS|CHUTES|CODEX_EASY|GEMINI|GOOGLEAI|GROQ|HYPERBOLIC|KIMI_CODE|LINKAPI|MIMO|NANOGPT|NAVYAI|NINETEEN|OPENAI|OPENCODE|OPENCODE_GO|OPENROUTER|PALM|SAMBANOVA|SCALEWAY|TOGETHER|XAI)_(?:RATE_LIMIT_RPM|RATE_LIMIT_TPM|DAILY_REQUEST_LIMIT|MAX_REQUEST_BYTES|MAX_PROMPT_TOKENS|MAX_OUTPUT_TOKENS)$/,
-];
-
-function shouldPassThroughKey(key) {
-  return DIRECT_ENV_KEYS.includes(key) || DYNAMIC_ENV_PATTERNS.some((pattern) => pattern.test(key));
-}
-
-function collectContainerEnv(source = {}) {
-  const envVars = {
-    AUTH_DB_PATH: source.AUTH_DB_PATH ?? "/tmp/auth.sqlite3",
-    RATE_LIMIT_DB_PATH: source.RATE_LIMIT_DB_PATH ?? "/tmp/rate_limits.sqlite3",
-    MODEL_REGISTRY_DB_PATH: source.MODEL_REGISTRY_DB_PATH ?? "/tmp/model_registry.sqlite3",
-    FLASK_ENV: source.FLASK_ENV ?? "production",
-    GUNICORN_WORKERS: source.GUNICORN_WORKERS ?? "1",
-    HOME: "/tmp",
-    MULTILLM_TRUST_PROXY_HEADERS: "true",
-    SERVER_HOST: "0.0.0.0",
-    SERVER_PORT: "8080",
-    PYTHONUNBUFFERED: "1",
-  };
-
-  for (const [key, value] of Object.entries(source)) {
-    if (!shouldPassThroughKey(key)) {
-      continue;
-    }
-
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-
-    envVars[key] = String(value);
-  }
-
-  return envVars;
-}
 
 function isApiRequestPath(pathname) {
   const stripped = pathname.replace(/^\/+|\/+$/g, "");

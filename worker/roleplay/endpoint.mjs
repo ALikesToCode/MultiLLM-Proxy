@@ -1,17 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
+import { TurnTraceJournal } from "./turn-trace.mjs";
+import { handleOperatorMemory } from "./operator-memory.mjs";
+import { recoveryTemplate, preserveRecovery, handleRecoverySnapshot } from "./recovery.mjs";
+import { parseRoutingPolicy, filterRoutingCandidates, parameterReceipt } from "./routing-policy.mjs";
 
 import {
-  ROLEPLAY_METRICS_PATH,
-  ROLEPLAY_MODELS_PATH,
-  extractBearerToken,
-  hasRoleplayAuthentication,
-  isDerivedRoleplaySessionId,
-  isAuthorizedRoleplayToken,
   isRoleplayPath,
-  isRoleplayTurnPath,
-  isValidRoleplaySessionId,
-  resolveRoleplaySession,
-  responseWithRoleplaySession,
   scopePublicRoleplaySessionId,
 } from "./compatibility.mjs";
 import {
@@ -38,13 +32,11 @@ import {
 } from "./completion-result.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
-import { ROLEPLAY_PUBLIC_MODEL_ALIASES } from "./model-selection.mjs";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
   rankRoleplayCandidates,
   ROLEPLAY_SAFE_FALLBACK_STATUSES,
-  roleplayCatalog,
 } from "./config.mjs";
 import {
   RoleplayRequestError,
@@ -88,234 +80,8 @@ import {
 } from "./turn-runtime.mjs";
 export { isRoleplayPath, scopePublicRoleplaySessionId };
 
-const JANITOR_ORIGINS = new Set([
-  "https://janitorai.com",
-  "https://www.janitorai.com",
-]);
+export { handleRoleplayEdgeRequest } from "./edge.mjs";
 const INTERNAL_OUTPUT_MODE_HEADER = "X-MultiLLM-Roleplay-Output-Mode";
-
-async function readBoundedJsonRequest(request, maximumBytes) {
-  const declaredLength = Number.parseInt(
-    request.headers.get("Content-Length") ?? "",
-    10,
-  );
-  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
-    throw new RoleplayRequestError(
-      `Request body exceeds ${maximumBytes} bytes`,
-      413,
-    );
-  }
-
-  const { bytes } = await readBoundedBytes(
-    request.body,
-    maximumBytes,
-    request.signal,
-  );
-  if (!bytes.byteLength) {
-    throw new RoleplayRequestError("Request body must not be empty");
-  }
-  const bodyText = new TextDecoder().decode(bytes);
-  try {
-    return {
-      bodyText,
-      payload: JSON.parse(bodyText),
-    };
-  } catch {
-    throw new RoleplayRequestError("Request body must be valid JSON");
-  }
-}
-
-function getIdempotencyKey(payload, request) {
-  const value =
-    request.headers.get("Idempotency-Key") ?? payload?.idempotency_key ?? "";
-  if (value === "") {
-    return "";
-  }
-  if (
-    typeof value !== "string" ||
-    !value.trim() ||
-    value.length > 200 ||
-    /[\u0000-\u001f\u007f]/.test(value)
-  ) {
-    throw new RoleplayRequestError(
-      "Idempotency-Key must be 1-200 visible characters",
-    );
-  }
-  return value.trim();
-}
-
-function locationHint(request) {
-  const continent = request.cf?.continent;
-  if (continent === "NA") {
-    return "wnam";
-  }
-  if (continent === "SA") {
-    return "sam";
-  }
-  if (continent === "EU") {
-    return "weur";
-  }
-  if (continent === "AF") {
-    return "afr";
-  }
-  if (continent === "OC") {
-    return "oc";
-  }
-  if (continent === "AS") {
-    return "apac";
-  }
-  return undefined;
-}
-
-function roleplayStub(env, sessionId, request) {
-  const hint = locationHint(request);
-  return hint
-    ? env.ROLEPLAY_SESSION.getByName(sessionId, { locationHint: hint })
-    : env.ROLEPLAY_SESSION.getByName(sessionId);
-}
-
-function janitorUnlimitedOutput(request) {
-  return JANITOR_ORIGINS.has(request.headers.get("Origin") ?? "");
-}
-
-export async function handleRoleplayEdgeRequest(request, env) {
-  if (
-    !env.ROLEPLAY_SESSION ||
-    typeof env.ROLEPLAY_SESSION.getByName !== "function"
-  ) {
-    return errorResponse(
-      "Roleplay session storage is not configured",
-      503,
-      "roleplay_not_configured",
-    );
-  }
-
-  if (!hasRoleplayAuthentication(env)) {
-    return errorResponse(
-      "Roleplay authentication is not configured",
-      503,
-      "roleplay_not_configured",
-    );
-  }
-  const providedToken = extractBearerToken(request);
-  if (!(await isAuthorizedRoleplayToken(providedToken, env))) {
-    return errorResponse("Authentication required", 401, "unauthorized");
-  }
-
-  const requestUrl = new URL(request.url);
-  const settings = getRoleplaySettings(env);
-
-  if (requestUrl.pathname === ROLEPLAY_MODELS_PATH) {
-    if (request.method !== "GET") {
-      return errorResponse("Method not allowed", 405, "method_not_allowed");
-    }
-    return jsonResponse({
-      object: "list",
-      data: roleplayCatalog(env, settings),
-      selection: {
-        provider_order: settings.providerOrder,
-        policy: "strict_provider_subscription_safe_with_optional_tps_ranking",
-        quality_latency_premium_percent:
-          settings.qualityLatencyPremiumPercent,
-        quality_minimum_samples: settings.qualityMinimumSamples,
-        speed_reference_output_tokens:
-          settings.speedReferenceOutputTokens,
-        safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
-        model_aliases: ROLEPLAY_PUBLIC_MODEL_ALIASES,
-      },
-    });
-  }
-
-  if (requestUrl.pathname === ROLEPLAY_METRICS_PATH) {
-    if (request.method !== "GET") {
-      return errorResponse("Method not allowed", 405, "method_not_allowed");
-    }
-    const sessionId = requestUrl.searchParams.get("session_id") ?? "";
-    if (!isValidRoleplaySessionId(sessionId)) {
-      return errorResponse(
-        "session_id query parameter is required",
-        400,
-        "invalid_session_id",
-      );
-    }
-    const storageSessionId = isDerivedRoleplaySessionId(sessionId)
-      ? sessionId
-      : await scopePublicRoleplaySessionId(sessionId, providedToken);
-    const stub = roleplayStub(env, storageSessionId, request);
-    const response = await stub.fetch(
-      new Request("https://roleplay.internal/metrics", {
-        method: "GET",
-        signal: request.signal,
-      }),
-    );
-    return responseWithRoleplaySession(response, sessionId, "explicit");
-  }
-
-  if (
-    !isRoleplayTurnPath(requestUrl.pathname) ||
-    request.method !== "POST"
-  ) {
-    return errorResponse("Method not allowed", 405, "method_not_allowed");
-  }
-
-  try {
-    const { bodyText, payload } = await readBoundedJsonRequest(
-      request,
-      settings.maxRequestBytes,
-    );
-    const session = await resolveRoleplaySession(
-      payload,
-      request,
-      providedToken,
-    );
-    if (session.error) {
-      throw new RoleplayRequestError(session.error);
-    }
-    const idempotencyKey = getIdempotencyKey(payload, request);
-    const stub = roleplayStub(env, session.id, request);
-    const headers = new Headers({ "Content-Type": "application/json" });
-    if (idempotencyKey) {
-      headers.set("Idempotency-Key", idempotencyKey);
-    }
-    if (janitorUnlimitedOutput(request)) {
-      headers.set(INTERNAL_OUTPUT_MODE_HEADER, "unlimited");
-    }
-    const response = await stub.fetch(
-      new Request("https://roleplay.internal/turn", {
-        method: "POST",
-        headers,
-        body: bodyText,
-        signal: request.signal,
-      }),
-    );
-    return responseWithRoleplaySession(
-      response,
-      session.publicId,
-      session.source,
-    );
-  } catch (error) {
-    if (error instanceof RoleplayRequestError) {
-      return errorResponse(
-        error.message,
-        error.status,
-        error.status === 413 ? "request_too_large" : "invalid_request",
-      );
-    }
-    if (request.signal.aborted || error?.name === "AbortError") {
-      return errorResponse(
-        "Roleplay request was aborted by the client",
-        499,
-        "request_aborted",
-      );
-    }
-    logRoleplayError("roleplay_edge_request_failed", error);
-    return errorResponse(
-      "Roleplay request could not be handled",
-      502,
-      "roleplay_unavailable",
-    );
-  }
-}
 
 export class RoleplaySession extends DurableObject {
   constructor(ctx, env) {
@@ -331,6 +97,7 @@ export class RoleplaySession extends DurableObject {
       this.settings.sessionTtlSeconds,
     );
     this.turnQueue = new RoleplayTurnQueue();
+    this.traces = new TurnTraceJournal(ctx.storage);
   }
 
   get pendingTurns() { return this.turnQueue.pending; }
@@ -338,10 +105,19 @@ export class RoleplaySession extends DurableObject {
   async alarm() {
     await this.ctx.storage.deleteAll();
     this.stateRepository.clear();
+    this.traces.clear();
   }
 
   async fetch(request) {
+    await this.traces.ready;
     const pathname = new URL(request.url).pathname;
+    if (pathname === "/operator/timeline" && request.method === "GET") {
+      return jsonResponse(this.traces.snapshot());
+    }
+    if (["/operator/memory", "/operator/import-branch"].includes(pathname)) {
+      return handleOperatorMemory(this, request, pathname.split("/").pop());
+    }
+    if (pathname === "/operator/recovery" && request.method === "POST") return handleRecoverySnapshot(this, request);
     if (pathname === "/metrics" && request.method === "GET") {
       const state = await this.stateRepository.load();
       return jsonResponse(
@@ -358,13 +134,26 @@ export class RoleplaySession extends DurableObject {
   }
 
   async enqueueTurn(request, settings) {
+    const trace = this.traces.begin();
     try {
       return await this.turnQueue.run(
         request, settings,
-        (turnRequest, queueMs) => this.handleTurn(turnRequest, settings, queueMs),
+        async (turnRequest, queueMs) => {
+          trace.phase("preparing");
+          trace.metrics({ queueMs });
+          const result = await this.handleTurn(turnRequest, settings, queueMs, trace);
+          result.response.headers.set("X-Roleplay-Trace-ID", trace.id);
+          result.completion = Promise.resolve(result.completion).then(async (completion) => {
+            if (completion?.persistenceFailed) await trace.finish(false, "persistence_failed");
+            return completion;
+          });
+          if (!result.response.ok) await trace.finish(false, "request_failed");
+          return result;
+        },
         (completion) => this.ctx.waitUntil(completion),
       );
     } catch (error) {
+      await trace.finish(false, error.code || "turn_failed");
       if (error instanceof RoleplayTurnError) {
         return errorResponse(error.message, error.status, error.code);
       }
@@ -384,10 +173,11 @@ export class RoleplaySession extends DurableObject {
     }
   }
 
-  async handleTurn(request, settings, queueMs = 0) {
+  async handleTurn(request, settings, queueMs = 0, trace = null) {
     const turnStartedAt = performance.now();
     let compactionMs = 0;
     const payload = await request.json();
+    if (payload.recovery_enabled !== undefined && typeof payload.recovery_enabled !== "boolean") throw new RoleplayRequestError("recovery_enabled must be a boolean");
     const stateCacheHit = this.stateRepository.loaded;
     const stateLoadStartedAt = performance.now();
     let state = await this.stateRepository.load();
@@ -401,6 +191,10 @@ export class RoleplaySession extends DurableObject {
           request.headers.get(INTERNAL_OUTPUT_MODE_HEADER) === "unlimited",
       },
     );
+    parsedInitial.routing = parseRoutingPolicy(payload.routing);
+    if (parsedInitial.routing.fallback === "none") {
+      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
+    }
     const { profile, parsed: parsedWithProfile } = effectiveRoleplayCharacter(
       state,
       parsedInitial,
@@ -451,7 +245,7 @@ export class RoleplaySession extends DurableObject {
       await this.stateRepository.save(state);
     }
 
-    const configuredCandidates = this.configuredCandidates;
+    const configuredCandidates = filterRoutingCandidates(this.configuredCandidates, parsed.routing);
     const credentialCheckStartedAt = performance.now();
     const checkedState = await revalidateNanoCredential(
       state,
@@ -473,11 +267,14 @@ export class RoleplaySession extends DurableObject {
       Date.now(),
       state.activeCredentials,
       {
+        mode: parsed.routing.mode,
+        exactModel: Boolean(parsed.routing.model),
         premiumPercent: settings.qualityLatencyPremiumPercent,
         minimumSamples: settings.qualityMinimumSamples,
         referenceOutputTokens: settings.speedReferenceOutputTokens,
       },
     );
+    if (parsed.routing.fallback === "none") candidates.splice(1);
     if (!candidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "no_provider");
       await this.stateRepository.save(state);
@@ -706,6 +503,8 @@ export class RoleplaySession extends DurableObject {
       };
     }
 
+    const recovery = recoveryTemplate(payload, roleplayMessages);
+    trace?.phase("connecting");
     const attempted = await attemptRoleplayCandidates(
       state,
       generationCandidates,
@@ -730,6 +529,7 @@ export class RoleplaySession extends DurableObject {
     );
     state = attempted.state;
     if (attempted.terminalResponse) {
+      await preserveRecovery(this.ctx.storage, recovery, { success: false, reason: "provider_failed" }, trace?.id);
       state = markRoleplayRequest(state, idempotencyKey, "provider_failed");
       await this.stateRepository.save(state);
       return {
@@ -748,6 +548,9 @@ export class RoleplaySession extends DurableObject {
       promptCache,
       refusalFallbackCandidates,
     } = attempted;
+    trace?.phase("headers");
+    trace?.metrics({ headerMs });
+    trace?.selected(candidate, parameterReceipt(parsed, candidate, settings));
     const continuation = createRoleplayContinuation({
       state,
       candidate,
@@ -759,10 +562,10 @@ export class RoleplaySession extends DurableObject {
       idempotencyKey,
       refusalFallbackCandidates,
     });
-    const selectionReason =
+    const selectionReason = candidate.selectionReason || (parsed.routing.mode !== "provider-priority" ? parsed.routing.mode :
       (state.stats[candidate.key]?.successes ?? 0) < 2
         ? "exploration"
-        : "adaptive_speed";
+        : "adaptive_speed");
     const contentType = response.headers.get("Content-Type") ?? "";
     const timings = createRoleplayTimingSummary({
       queueMs,
@@ -802,6 +605,7 @@ export class RoleplaySession extends DurableObject {
     ) {
       responseHeaders.set("Cache-Control", "no-cache, no-transform");
       const observed = createObservedStream({
+        onProgress: (progress) => trace?.progress(progress),
         upstreamBody: response.body,
         requestSignal: request.signal,
         upstreamController: controller,
@@ -829,6 +633,7 @@ export class RoleplaySession extends DurableObject {
         detectRefusal: continuation.classifyRefusal,
         refusalFallbackEnabled: continuation.refusalFallbackEnabled,
         onComplete: async (completion) => {
+          await preserveRecovery(this.ctx.storage, recovery, completion, trace?.id);
           const {
             success,
             assistant,
@@ -837,6 +642,7 @@ export class RoleplaySession extends DurableObject {
           } = completion;
           state = continuation.state;
           const finalCandidate = continuation.candidate;
+          trace?.selected(finalCandidate, parameterReceipt(parsed, finalCandidate, settings));
           logRoleplayStreamCompletion({
             candidate: finalCandidate,
             parsed,
@@ -880,7 +686,9 @@ export class RoleplaySession extends DurableObject {
             settings,
             idempotencyKey,
           });
-          await this.stateRepository.save(state);
+          trace?.metrics(completion);
+          if (trace) await trace.finish(success, reason, (metadata) => this.stateRepository.save(state, metadata));
+          else await this.stateRepository.save(state);
         },
       });
       return {
@@ -978,7 +786,10 @@ export class RoleplaySession extends DurableObject {
       completion: completionResult,
       timings,
     });
-    await this.stateRepository.save(state);
+    trace?.selected(finalCandidate, parameterReceipt(parsed, finalCandidate, settings));
+    if (trace) await trace.finish(completionResult.success, completionResult.reason, (metadata) => this.stateRepository.save(state, metadata));
+    else await this.stateRepository.save(state);
+    await preserveRecovery(this.ctx.storage, recovery, completionResult, trace?.id);
     return {
       response: new Response(responseBytes, {
         status: response.status,

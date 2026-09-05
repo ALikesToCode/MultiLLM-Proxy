@@ -49,7 +49,11 @@ export function createSseDeliveryTracker(startedAt) {
   let firstReasoningMs = null;
   let firstContentMs = null;
   let thinkingOpen = false;
+  let visiblePartial = "";
+  let partialTruncated = false;
   return {
+    visiblePartial() { return visiblePartial; },
+    get partialTruncated() { return partialTruncated; },
     get thinkingOpen() { return thinkingOpen; },
     observe(frames, now) {
       for (const frame of frames) {
@@ -59,7 +63,10 @@ export function createSseDeliveryTracker(startedAt) {
           thinkingOpen = tag[0].toLowerCase() === "<think>";
           if (thinkingOpen && firstReasoningMs === null) firstReasoningMs = now - startedAt;
         }
-        if (visible.consume(content).trim() && firstContentMs === null) {
+        const visibleDelta = visible.consume(content);
+        partialTruncated ||= visiblePartial.length + visibleDelta.length > 16_000;
+        visiblePartial = (visiblePartial + visibleDelta).slice(0, 16_000);
+        if (visibleDelta.trim() && firstContentMs === null) {
           firstContentMs = now - startedAt;
         }
       }

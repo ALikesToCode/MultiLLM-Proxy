@@ -227,9 +227,10 @@ export async function saveRoleplayState(
   storage,
   state,
   previousState = null,
+  metadata = {},
 ) {
   const { directives, messages, ...core } = state;
-  const entries = { [STATE_KEY]: core };
+  const entries = { ...metadata, [STATE_KEY]: core };
   if (!previousState || previousState.messages !== messages) {
     entries[MESSAGES_KEY] = messages;
   }

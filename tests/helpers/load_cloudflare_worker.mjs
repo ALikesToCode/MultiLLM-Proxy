@@ -225,6 +225,7 @@ export async function roleplayModuleUrl() {
   const modelPerformanceDataUrl = dataModuleUrl(modelPerformanceSource);
   const configDataUrl = dataModuleUrl(
     configSource
+      .replace('from "./routing-policy.mjs";', `from "${new URL("../../worker/roleplay/routing-policy.mjs", import.meta.url)}";`)
       .replace(
         'from "./capacity.mjs";',
         `from "${capacityDataUrl}";`,
@@ -456,6 +457,11 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('from "./recovery.mjs";', `from "${new URL("../../worker/roleplay/recovery.mjs", import.meta.url)}";`)
+    .replace('from "./operator-memory.mjs";', `from "${new URL("../../worker/roleplay/operator-memory.mjs", import.meta.url)}";`)
+    .replace('from "./routing-policy.mjs";', `from "${new URL("../../worker/roleplay/routing-policy.mjs", import.meta.url)}";`)
+    .replace('from "./turn-trace.mjs";', `from "${new URL("../../worker/roleplay/turn-trace.mjs", import.meta.url)}";`)
+    .replace('from "./edge.mjs";', `from "${new URL("../../worker/roleplay/edge.mjs", import.meta.url)}";`)
     .replace(
       'from "./turn-runtime.mjs";',
       `from "${new URL("../../worker/roleplay/turn-runtime.mjs", import.meta.url)}";`,
@@ -687,6 +693,10 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace(
+      'from "./worker/container-env.mjs";',
+      `from "${new URL("../../worker/container-env.mjs", import.meta.url)}";`,
+    )
     .replace(
       /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
       "class Container {}\nconst getContainer = (binding, name) => binding.getByName(name);\nconst switchPort = (request) => request;",

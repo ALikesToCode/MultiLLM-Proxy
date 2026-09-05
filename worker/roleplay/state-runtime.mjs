@@ -41,12 +41,12 @@ export function createRoleplayStateRepository(storage) {
       }
     },
 
-    async save(state) {
-      if (state === persistedState) {
+    async save(state, metadata = {}) {
+      if (state === persistedState && !Object.keys(metadata).length) {
         cachedState = state;
         return state;
       }
-      await saveRoleplayState(storage, state, persistedState);
+      await saveRoleplayState(storage, state, persistedState, metadata);
       cachedState = state;
       persistedState = state;
       return state;

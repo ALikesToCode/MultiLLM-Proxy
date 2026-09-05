@@ -1,3 +1,4 @@
+import { rankFastestEligible, rankQualityEligible } from "./routing-policy.mjs";
 import {
   parseRoleplayProviderLimits,
   resolveRoleplayCandidateLimits,
@@ -678,8 +679,12 @@ export function rankRoleplayCandidates(
   const normalizedPreference =
     typeof preference === "string" ? preference.toLowerCase() : "auto";
   const eligible = candidates.filter((candidate) =>
-    roleplayCandidateMatchesPreference(candidate, normalizedPreference),
+    qualityPolicy.exactModel || roleplayCandidateMatchesPreference(candidate, normalizedPreference),
   );
+  if (qualityPolicy.mode === "fastest-eligible") {
+    return rankFastestEligible(eligible, modelStats, now, qualityPolicy.referenceOutputTokens);
+  }
+  if (qualityPolicy.mode === "quality") return rankQualityEligible(eligible, modelStats, now);
   const providerRanks = [...new Set(eligible.map((candidate) => candidate.providerRank))];
   const ranked = [];
   const coolingDown = [];

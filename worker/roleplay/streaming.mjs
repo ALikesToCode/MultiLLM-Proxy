@@ -75,6 +75,7 @@ export function createObservedStream({
   heartbeatMs,
   idleTimeoutMs = 90_000,
   onComplete,
+  onProgress = () => {},
   cleanup = () => {},
   openContinuation = null,
   getIncompleteReason = null,
@@ -188,6 +189,8 @@ export function createObservedStream({
     requestSignal?.removeEventListener("abort", abortStream);
     const completed = {
       ...result,
+      visiblePartial: delivery.visiblePartial(),
+      partialTruncated: delivery.partialTruncated,
       ...delivery.metrics(),
       heartbeatCount,
       continuationCount,
@@ -212,6 +215,7 @@ export function createObservedStream({
     try {
       await onComplete(completed);
     } catch (error) {
+      completed.persistenceFailed = true;
       logStreamError("roleplay_stream_state_write_failed", error);
     } finally {
       resolveCompletion(completed);
@@ -242,6 +246,7 @@ export function createObservedStream({
 
   const enqueueFrames = (controller, frames) => {
     delivery.observe(frames, performance.now());
+    onProgress(delivery.metrics());
     for (const frame of frames) {
       controller.enqueue(SSE_ENCODER.encode(frame));
     }
@@ -265,10 +270,10 @@ export function createObservedStream({
           ]);
         }
         const message = reason === "turn_timeout"
-          ? "Generation exceeded the total turn deadline. Partial output was not saved."
+          ? "Generation exceeded the total turn deadline. Partial output was not added to conversation memory."
           : reason === "upstream_idle_timeout"
-            ? "The provider stopped generating. Partial output was not saved."
-            : "The provider stream was interrupted. Partial output was not saved.";
+            ? "The provider stopped generating. Partial output was not added to conversation memory."
+            : "The provider stream was interrupted. Partial output was not added to conversation memory.";
         enqueueFrames(streamController, [
           `data: ${JSON.stringify({ error: { code: reason, type: "stream_error", message } })}\n\n`,
         ]);
