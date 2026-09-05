@@ -4,6 +4,10 @@ These OpenAI-compatible routes select a configured free model and move to
 another provider after quota exhaustion or an upstream availability failure.
 They do not alter `/v1/chat/completions`, saved `auto:` routes, or roleplay routing.
 
+For all account/key names and enablement settings, see the
+[11-service setup checklist](free-provider-setup.md). Six additional services
+are opt-in: Mistral, Workers AI, Z.ai, OrcaRouter, BazaarLink and LLM7.
+
 | OpenAI-compatible base path | Model | Purpose |
 | --- | --- | --- |
 | `/v1/free` | `free:text` or `free:vision` | Universal pool, selected by model |
@@ -69,8 +73,10 @@ skipped. Reordering cannot admit a paid candidate.
   the next request. Unusable headers use a 60-second fallback, not a guessed
   daily quota. Cooldowns are capped at seven days and expire automatically.
 - `401`, `402`, and `403` skip the provider with a five-minute default cooldown;
-  `404` pauses only that model. `500`, `502`, `503`, `504`, and pre-stream
+  `404` and `410` pause only that model. `500`, `502`, `503`, `504`, and pre-stream
   connection failures pause the provider with a 60-second default cooldown.
+- OrcaRouter `429` without `Retry-After` indicates a prompt-size cap, not an
+  exhausted quota window. It can fail over but does not cool the account.
 - Input errors such as `400`, `413`, and `422` return to the caller without
   cycling providers. Fix the payload or select a suitable explicit provider.
 - The pool attempts at most eight candidates and has a 120-second response
@@ -140,6 +146,10 @@ billing basis, and remaining cooldown seconds. It contains no keys. Response
 headers `X-MultiLLM-Auto-Route`, `X-MultiLLM-Auto-Selected-Model`,
 `X-MultiLLM-Auto-Attempts`, `X-MultiLLM-Auto-Selected-Priority`, and
 `X-MultiLLM-Provider` identify what was selected. They are exposed through CORS.
+
+Inspect `/v1/free/providers` for safe configuration status: key environment
+names, enablement, required free-tier assertions and missing settings. It does
+not validate live credentials or return secret/account values.
 
 Regression tests simulate quota exhaustion; they do not deliberately consume
 live daily quotas or send private prompts to providers:

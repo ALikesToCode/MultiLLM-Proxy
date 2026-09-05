@@ -9,24 +9,19 @@ from urllib.parse import urlsplit
 from error_handlers import APIError
 from providers.aihubmix import is_aihubmix_image_model
 from providers.opencode_go import is_opencode_zen_free_model, opencode_model_endpoint
+from services.free_provider_catalog import (
+    FREE_PROVIDERS,
+    FREE_TIER_MODELS,
+    PROVIDER_ORDER,
+    SEED_VISION,
+    provider_enabled,
+    provider_tier_confirmed,
+)
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_metadata import model_supports_vision
 
 FREE_MODELS = {"free:text": False, "free:vision": True}
-PROVIDER_ORDER = ("groq", "opencode", "aihubmix", "gemini", "openrouter")
-# These models require an explicit operator assertion about the account tier.
-# A model name alone cannot prevent billing on an upgraded account/project.
-FREE_TIER_MODELS = {
-    "groq": ("qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "openai/gpt-oss-120b"),
-    "gemini": ("gemini-3.1-flash-lite",),
-}
-VISION_SEEDS = {
-    "groq:qwen/qwen3.8-27b",
-    "groq:qwen/qwen3.6-27b",
-    "gemini:gemini-3.1-flash-lite",
-    "openrouter:openrouter/free",
-}
 REQUEST_FIELDS = frozenset(
     {
         "model",
@@ -85,17 +80,14 @@ def _free_label(provider: str, model: str) -> bool:
 
 def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
     """Use cached discovery only; never spend a generation to discover capability."""
-    attested = {
-        p.strip() for p in config.get("FREE_ROUTE_FREE_TIER_PROVIDERS", "").split(",")
-    }
     catalog = {row["id"]: row for row in build_model_catalog(config["API_BASE_URLS"])}
-    seeds = ["openrouter:openrouter/free"]
-    seeds.extend(
+    seeds = [
         f"{provider}:{model}"
-        for provider, models in FREE_TIER_MODELS.items()
-        if provider in attested
-        for model in models
-    )
+        for provider, spec in FREE_PROVIDERS.items()
+        if provider_enabled(config, provider)
+        and provider_tier_confirmed(config, provider)
+        for model, _ in spec.models
+    ]
     for model_id in seeds:
         provider, model = model_id.split(":", 1)
         catalog.setdefault(
@@ -111,11 +103,19 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
     for row in catalog.values():
         provider, model = row["provider"], row["model"]
         metadata = row.get("provider_metadata") or {}
-        if provider not in config["API_BASE_URLS"] or row["status"] == "disabled":
+        if not provider_enabled(config, provider) or row["status"] == "disabled":
             continue
-        tier = provider in attested and model in FREE_TIER_MODELS.get(provider, ())
+        if not provider_tier_confirmed(config, provider):
+            continue
+        spec = FREE_PROVIDERS[provider]
+        seeded = (model, SEED_VISION.get(row["id"])) in spec.models
+        # New providers have reviewed seeds only, not a generic free-name rule.
+        if spec.extra and not seeded:
+            continue
+        tier = spec.requires_free_tier and seeded
         if not tier and (
-            not _free_label(provider, model) or _has_price(metadata.get("pricing"))
+            not (seeded or _free_label(provider, model))
+            or _has_price(metadata.get("pricing"))
         ):
             continue
         if metadata.get("supports_image_output") is True:
@@ -126,8 +126,11 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
         if outputs and "text" not in outputs:
             continue
         image_support = model_supports_vision(metadata)
-        if image_support is None and row["id"] in VISION_SEEDS:
-            image_support = True
+        if image_support is None:
+            image_support = SEED_VISION.get(row["id"])
+        # Seeds without reviewed vision coverage stay out of image routing.
+        if seeded and SEED_VISION.get(row["id"]) is not True:
+            image_support = SEED_VISION.get(row["id"])
         if vision and image_support is not True:
             continue
         candidates.append(
@@ -136,7 +139,13 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
                 provider,
                 model,
                 image_support,
-                "free-tier-attested" if tier else "free-labelled",
+                "free-tier-attested"
+                if tier
+                else (
+                    "free-fallback-disabled"
+                    if provider == "bazaarlink"
+                    else "free-labelled"
+                ),
             )
         )
     preferred = list(

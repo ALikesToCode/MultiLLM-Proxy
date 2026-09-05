@@ -15,18 +15,10 @@ from services.free_model_policy import (
     free_candidates,
     validate_free_payload,
 )
+from services.free_provider_catalog import FREE_PROVIDERS, free_chat_url, provider_setup
 from services.free_quota_service import FreeQuotaService, retry_seconds
 
-# Fixed official origins keep a custom relay from reinterpreting a free model
-# as a paid alias. Regular provider routes retain their configurable origins.
-FREE_CHAT_URLS = {
-    "groq": "https://api.groq.com/openai/v1/chat/completions",
-    "opencode": "https://opencode.ai/zen/v1/chat/completions",
-    "aihubmix": "https://aihubmix.com/v1/chat/completions",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    "openrouter": "https://openrouter.ai/api/v1/chat/completions",
-}
-FAILOVER_STATUSES = {401, 402, 403, 404, 429, 500, 502, 503, 504}
+FAILOVER_STATUSES = {401, 402, 403, 404, 410, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 8
 REQUEST_DEADLINE_SECONDS = 120
 
@@ -39,10 +31,19 @@ def _cooldown(candidate) -> int:
 
 
 def _record_failure(candidate, status, headers) -> None:
+    if (
+        candidate.provider == "orcarouter"
+        and status == 429
+        and not any(k.lower() == "retry-after" for k in headers.keys())
+    ):
+        # OrcaRouter uses this for a prompt-size cap, not exhausted account quota.
+        return
     scope = (
-        f"model:{candidate.id}" if status == 404 else f"provider:{candidate.provider}"
+        f"model:{candidate.id}"
+        if status in {404, 410}
+        else f"provider:{candidate.provider}"
     )
-    default = 300 if status in {401, 402, 403, 404} else 60
+    default = 300 if status in {401, 402, 403, 404, 410} else 60
     FreeQuotaService.block(scope, retry_seconds(headers, time.time(), default))
 
 
@@ -63,19 +64,21 @@ def _close_upstream(upstream):
     upstream.close()
 
 
-def _request_candidate(auth, proxy, payload, candidate, remaining):
+def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     token = auth.get_api_key(candidate.provider)
-    if not token:
+    url = free_chat_url(config, candidate.provider)
+    if not token or not url:
         raise FreeUpstreamFailure(503)
     return proxy.make_request(
         method="POST",
-        url=FREE_CHAT_URLS[candidate.provider],
+        url=url,
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream"
             if payload.get("stream")
             else "application/json",
+            **dict(FREE_PROVIDERS[candidate.provider].headers),
         },
         params={},
         data=json.dumps(
@@ -88,13 +91,17 @@ def _request_candidate(auth, proxy, payload, candidate, remaining):
     )
 
 
-def _try_candidate(auth, metrics, proxy, payload, candidate, remaining, deadline):
+def _try_candidate(
+    config, auth, metrics, proxy, payload, candidate, remaining, deadline
+):
     start = time.monotonic()
     status = 502
     upstream = None
     headers = {}
     try:
-        upstream = _request_candidate(auth, proxy, payload, candidate, remaining)
+        upstream = _request_candidate(
+            config, auth, proxy, payload, candidate, remaining
+        )
         status, headers = upstream.status_code, upstream.headers
         if status in FAILOVER_STATUSES:
             raise FreeUpstreamFailure(status)
@@ -161,7 +168,11 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
     candidates = free_candidates(app.config, vision=FREE_MODELS[model])
     # Look up credentials only through the existing server-side store. Caller
     # headers are never forwarded, and keys are never included in pool status.
-    configured = [c for c in candidates if auth.get_api_key(c.provider)]
+    configured = [
+        c
+        for c in candidates
+        if auth.get_api_key(c.provider) and free_chat_url(app.config, c.provider)
+    ]
     if not configured:
         return jsonify(
             {
@@ -182,7 +193,7 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
             break
         attempts += 1
         response = _try_candidate(
-            auth, metrics, proxy, payload, candidate, remaining, deadline
+            app.config, auth, metrics, proxy, payload, candidate, remaining, deadline
         )
         if response is not None:
             return _decorate(response, candidate, model, attempts, priority)
@@ -190,6 +201,12 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
 
 
 def register_free_routes(app, csrf, auth, metrics, proxy):
+    @app.route("/v1/free/providers", methods=["GET", "OPTIONS"])
+    @csrf.exempt
+    @api_auth_required(required_scope="models")
+    def list_free_providers():
+        return jsonify({"object": "list", "data": provider_setup(app.config, auth)})
+
     @app.route("/v1/free/models", methods=["GET", "OPTIONS"])
     @app.route("/v1/free/<mode>/models", methods=["GET", "OPTIONS"])
     @csrf.exempt
@@ -215,7 +232,10 @@ def register_free_routes(app, csrf, auth, metrics, proxy):
                             "provider": c.provider,
                             "supports_vision": c.vision,
                             "billing_basis": c.billing_basis,
-                            "configured": bool(auth.get_api_key(c.provider)),
+                            "configured": bool(
+                                auth.get_api_key(c.provider)
+                                and free_chat_url(app.config, c.provider)
+                            ),
                             "retry_after": _cooldown(c),
                         }
                         for c in candidates

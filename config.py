@@ -62,6 +62,8 @@ def load_env_choice(
 
 
 class Config:
+    FREE_ROUTE_EXTRA_PROVIDERS = os.environ.get('FREE_ROUTE_EXTRA_PROVIDERS', '')
+    FREE_ROUTE_WORKERSAI_ACCOUNT_ID = os.environ.get('FREE_ROUTE_WORKERSAI_ACCOUNT_ID', '')
     FREE_ROUTE_FREE_TIER_PROVIDERS = os.environ.get('FREE_ROUTE_FREE_TIER_PROVIDERS', '')
     FREE_ROUTE_PROVIDER_ORDER = os.environ.get('FREE_ROUTE_PROVIDER_ORDER', '')
     PROJECT_ID = os.environ.get('PROJECT_ID')
