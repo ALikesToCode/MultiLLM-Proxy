@@ -13,6 +13,7 @@ from routes.free_response import FreeUpstreamFailure, validated_free_response
 from services.free_model_policy import (
     FREE_MODELS,
     free_candidates,
+    free_model_aliases,
     validate_free_payload,
 )
 from services.free_provider_catalog import FREE_PROVIDERS, free_chat_url, provider_setup
@@ -216,17 +217,13 @@ def register_free_routes(app, csrf, auth, metrics, proxy):
         if mode is not None and f"free:{mode}" not in FREE_MODELS:
             raise APIError("Unknown free route", status_code=404)
         models = []
-        for model, vision in FREE_MODELS.items():
-            if mode is not None and model != f"free:{mode}":
+        for alias in free_model_aliases():
+            if mode is not None and alias["id"] != f"free:{mode}":
                 continue
-            candidates = free_candidates(app.config, vision=vision)
+            candidates = free_candidates(app.config, vision=alias["supports_vision"])
             models.append(
                 {
-                    "id": model,
-                    "object": "model",
-                    "created": 0,
-                    "owned_by": "multillm",
-                    "supports_vision": vision,
+                    **alias,
                     "candidates": [
                         {
                             "id": c.id,

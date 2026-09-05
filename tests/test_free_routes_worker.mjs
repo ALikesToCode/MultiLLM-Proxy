@@ -89,3 +89,42 @@ test("free provider setup discovery reaches the authenticated container path", a
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
 });
+
+test("standard endpoint forwards free vision and JSON schema without provider rewriting", async () => {
+  const payload = { model: "free:vision", messages: [{ role: "user", content: [
+    { type: "text", text: "Read the color" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } },
+  ] }], response_format: { type: "json_schema", json_schema: {
+    name: "color", strict: true, schema: { type: "object",
+      properties: { color: { type: "string" } }, required: ["color"], additionalProperties: false },
+  } } };
+  const response = await worker.fetch(new Request("https://proxy.example/v1/chat/completions", {
+    method: "POST", headers: { Origin: origin, Authorization: "Bearer test-proxy-key",
+      "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  }), environment(async (request) => {
+    assert.equal(new URL(request.url).pathname, "/v1/chat/completions");
+    assert.equal(request.headers.get("Authorization"), "Bearer test-proxy-key");
+    assert.deepEqual(await request.json(), payload);
+    return Response.json({ choices: [{ message: { content: '{"color":"red"}' } }] }, {
+      headers: { "X-MultiLLM-Auto-Route": "free:vision", "X-MultiLLM-Auto-Selected-Model": "groq:qwen/qwen3.8-27b" },
+    });
+  }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+  assert.equal(response.headers.get("X-MultiLLM-Auto-Route"), "free:vision");
+  assert.equal((await response.json()).choices[0].message.content, '{"color":"red"}');
+});
+
+test("standard model discovery preserves free aliases from the container", async () => {
+  const payload = { object: "list", data: [{ id: "free:text", supports_vision: false },
+    { id: "free:vision", supports_vision: true }] };
+  const response = await worker.fetch(new Request("https://proxy.example/v1/models", {
+    headers: { Origin: origin, Authorization: "Bearer test-proxy-key" },
+  }), environment(async (request) => {
+    assert.equal(new URL(request.url).pathname, "/v1/models");
+    assert.equal(request.headers.get("Authorization"), "Bearer test-proxy-key");
+    return Response.json(payload);
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), payload);
+});

@@ -28,9 +28,10 @@ from route_helpers import (
 from routes.auto_routes import (
     AutoRouteCandidateUnavailable,
     dispatch_auto_route_chat_completion,
-    openai_auto_route_models,
     register_auto_route_admin_routes,
 )
+from routes.free_routes import dispatch_free_chat
+from routes.model_discovery import register_model_discovery_route
 from routes.responses_compat import (
     chat_response_to_responses_payload,
     responses_input_to_messages,
@@ -44,7 +45,6 @@ from services.adaptive_context_service import apply_adaptive_glm_context
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
-from services.model_catalog_service import build_model_catalog, unified_model_payload
 from services.model_registry import ModelRegistry
 from services.nanogpt_key_pool import (
     NanoGPTKeyPoolExhausted,
@@ -528,7 +528,12 @@ def dispatch_unified_chat_completion(
     request_timeout=None,
     adaptive_context=True,
 ):
-    """Dispatch an explicit or dashboard-configured unified chat model."""
+    """Dispatch an explicit model or a server-owned chat routing alias."""
+    model = payload.get("model")
+    if isinstance(model, str) and model.startswith("free:"):
+        return dispatch_free_chat(
+            app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
+        )
     if AutoRouteService.is_auto_route(payload.get("model")):
         def validate_candidate(candidate: str) -> None:
             _validate_direct_chat_target(
@@ -679,27 +684,13 @@ def dispatch_unified_image_generation(
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
+    register_model_discovery_route(app, csrf)
     register_auto_route_admin_routes(
         app,
         login_required,
         auth_service_cls,
         proxy_service_cls,
     )
-
-    @app.route("/v1/models", methods=["GET", "OPTIONS"])
-    @csrf.exempt
-    @api_auth_required(required_scope="models")
-    def list_unified_models():
-        models = [
-            unified_model_payload(model)
-            for model in build_model_catalog(
-                app.config["API_BASE_URLS"],
-                AutoRouteService.list_routes(),
-            )
-            if model["status"] != "disabled"
-        ]
-        models.extend(openai_auto_route_models())
-        return jsonify({"object": "list", "data": models})
 
     @app.route("/admin/models", methods=["GET"])
     @login_required

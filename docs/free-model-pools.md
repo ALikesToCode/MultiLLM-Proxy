@@ -2,7 +2,9 @@
 
 These OpenAI-compatible routes select a configured free model and move to
 another provider after quota exhaustion or an upstream availability failure.
-They do not alter `/v1/chat/completions`, saved `auto:` routes, or roleplay routing.
+Use `free:text` or `free:vision` on the standard `/v1/chat/completions`
+endpoint. Both aliases are listed by `/v1/models`. Explicit provider models,
+saved `auto:` routes, and roleplay routing retain their existing behavior.
 
 For all account/key names and enablement settings, see the
 [11-service setup checklist](free-provider-setup.md). Six additional services
@@ -10,13 +12,14 @@ are opt-in: Mistral, Workers AI, Z.ai, OrcaRouter, BazaarLink and LLM7.
 
 | OpenAI-compatible base path | Model | Purpose |
 | --- | --- | --- |
+| `/v1` | `free:text` or `free:vision` | Standard endpoint; specify the alias explicitly |
 | `/v1/free` | `free:text` or `free:vision` | Universal pool, selected by model |
 | `/v1/free/text` | `free:text` | Text conversations; rejects image input |
 | `/v1/free/vision` | `free:vision` | Image understanding with confirmed vision models |
 
 Append `/chat/completions` for generation or `/models` for discovery. The fixed
 paths supply their model if omitted, and reject a conflicting model. The
-universal path defaults to `free:text`. Vision means image **input**, not image
+`/v1/free` path defaults to `free:text`. Vision means image **input**, not image
 generation. Text requests may use vision-capable models without images.
 
 ## Setup and billing boundary
@@ -108,13 +111,14 @@ counters are per minute. Gemini uses its
 Text example, using a proxy key already stored securely in your environment:
 
 ```bash
-curl -i http://localhost:1400/v1/free/text/chat/completions \
+curl -i http://localhost:1400/v1/chat/completions \
   -H "Authorization: Bearer $MULTILLM_PROXY_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"free:text","messages":[{"role":"user","content":"Reply with one short greeting."}],"max_tokens":80}'
 ```
 
-For vision, use `/v1/free/vision/chat/completions` and this body. Replace the
+For vision, use `/v1/chat/completions` and this body. The fixed
+`/v1/free/vision/chat/completions` path remains supported. Replace the
 image URL with a synthetic/public image, or an inline PNG/JPEG/WebP/GIF data URL:
 
 ```json

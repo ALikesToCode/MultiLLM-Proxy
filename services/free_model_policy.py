@@ -51,6 +51,20 @@ class FreeCandidate:
     billing_basis: str
 
 
+def free_model_aliases() -> list[dict]:
+    """Advertise pool capabilities without implying live provider availability."""
+    return [
+        {
+            "id": model,
+            "object": "model",
+            "created": 0,
+            "owned_by": "multillm",
+            "supports_vision": vision,
+        }
+        for model, vision in FREE_MODELS.items()
+    ]
+
+
 def _has_price(pricing) -> bool:
     """Fail closed when a free-labelled model advertises a charge."""
     if not isinstance(pricing, Mapping):
