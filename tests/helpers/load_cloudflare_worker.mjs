@@ -457,6 +457,10 @@ export async function roleplayModuleUrl() {
   );
   const patchedEndpoint = endpointSource
     .replace(
+      'from "./turn-runtime.mjs";',
+      `from "${new URL("../../worker/roleplay/turn-runtime.mjs", import.meta.url)}";`,
+    )
+    .replace(
       'import { DurableObject } from "cloudflare:workers";',
       "class DurableObject { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }",
     )

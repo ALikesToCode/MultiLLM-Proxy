@@ -104,6 +104,7 @@ export function createSseAssistantCollector({
   maximumCharacters = MAX_COLLECTED_ASSISTANT_CHARACTERS,
   deferTerminalFrames = false,
   reasoningMetadata = null,
+  onProgress = () => {},
 } = {}) {
   let buffered = "";
   let assistant = "";
@@ -208,6 +209,19 @@ export function createSseAssistantCollector({
     buffered += text;
     const split = splitSseFrames(buffered, flush);
     buffered = split.remaining;
+    for (const frame of split.frames) {
+      const parsed = frameData(frame);
+      const choice = parsed?.payload?.choices?.[0];
+      const delta = choice?.delta;
+      if (parsed?.done || choice?.finish_reason ||
+          [delta?.content, delta?.reasoning_content, delta?.reasoning, delta?.refusal]
+            .some((value) => typeof value === "string" && value.length > 0) ||
+          (Array.isArray(delta?.reasoning_details) && delta.reasoning_details.some((detail) =>
+            [typeof detail === "string" ? detail : "", detail?.text, detail?.reasoning, detail?.reasoning_content]
+              .some((value) => typeof value === "string" && value.length > 0)))) {
+        onProgress();
+      }
+    }
     const frames = reasoningNormalizer
       ? split.frames.flatMap((frame) => reasoningNormalizer.transform(frame))
       : split.frames;

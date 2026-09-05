@@ -83,6 +83,9 @@ import {
   requestCompaction,
 } from "./transport.mjs";
 import { createObservedStream } from "./streaming.mjs";
+import {
+  RoleplayTurnError, RoleplayTurnQueue,
+} from "./turn-runtime.mjs";
 export { isRoleplayPath, scopePublicRoleplaySessionId };
 
 const JANITOR_ORIGINS = new Set([
@@ -327,9 +330,10 @@ export class RoleplaySession extends DurableObject {
       ctx,
       this.settings.sessionTtlSeconds,
     );
-    this.pendingTurns = 0;
-    this.turnTail = Promise.resolve();
+    this.turnQueue = new RoleplayTurnQueue();
   }
+
+  get pendingTurns() { return this.turnQueue.pending; }
 
   async alarm() {
     await this.ctx.storage.deleteAll();
@@ -354,28 +358,16 @@ export class RoleplaySession extends DurableObject {
   }
 
   async enqueueTurn(request, settings) {
-    const queuedAt = performance.now();
-    this.pendingTurns += 1;
-    const previous = this.turnTail.catch(() => {});
-    let release;
-    const current = new Promise((resolve) => {
-      release = resolve;
-    });
-    this.turnTail = previous.then(() => current);
-    await previous;
-    const queueMs = performance.now() - queuedAt;
-    const finish = () => {
-      this.pendingTurns = Math.max(0, this.pendingTurns - 1);
-      release();
-    };
-
     try {
-      const result = await this.handleTurn(request, settings, queueMs);
-      const completion = Promise.resolve(result.completion).finally(finish);
-      this.ctx.waitUntil(completion);
-      return result.response;
+      return await this.turnQueue.run(
+        request, settings,
+        (turnRequest, queueMs) => this.handleTurn(turnRequest, settings, queueMs),
+        (completion) => this.ctx.waitUntil(completion),
+      );
     } catch (error) {
-      finish();
+      if (error instanceof RoleplayTurnError) {
+        return errorResponse(error.message, error.status, error.code);
+      }
       if (error instanceof RoleplayRequestError) {
         return errorResponse(
           error.message,
@@ -814,6 +806,7 @@ export class RoleplaySession extends DurableObject {
         requestSignal: request.signal,
         upstreamController: controller,
         heartbeatMs: settings.streamHeartbeatMs,
+        idleTimeoutMs: settings.streamIdleTimeoutMs,
         cleanup,
         openContinuation: continuation.canOpen
           ? continuation.open.bind(continuation)

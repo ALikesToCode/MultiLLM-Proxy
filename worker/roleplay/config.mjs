@@ -386,6 +386,10 @@ function configuredModelsFor(env, overrides, provider, family) {
 
 export function getRoleplaySettings(env) {
   return {
+    maxPendingTurns: boundedInteger(env.ROLEPLAY_MAX_PENDING_TURNS, 4, 1, 32),
+    queueTimeoutMs: boundedInteger(env.ROLEPLAY_QUEUE_TIMEOUT_MS, 120_000, 1_000, 600_000),
+    turnTimeoutMs: boundedInteger(env.ROLEPLAY_TURN_TIMEOUT_MS, 600_000, 10_000, 1_800_000),
+    streamIdleTimeoutMs: boundedInteger(env.ROLEPLAY_STREAM_IDLE_TIMEOUT_MS, 90_000, 1_000, 600_000),
     defaultReasoningEffort: defaultReasoningEffort(
       env.ROLEPLAY_DEFAULT_REASONING_EFFORT,
     ),

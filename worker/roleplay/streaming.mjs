@@ -72,6 +72,7 @@ export function createObservedStream({
   requestSignal,
   upstreamController,
   heartbeatMs,
+  idleTimeoutMs = 90_000,
   onComplete,
   cleanup = () => {},
   openContinuation = null,
@@ -95,12 +96,23 @@ export function createObservedStream({
   let activeCleanup = cleanup;
   let decoder = new TextDecoder();
   let currentReasoningMetadata = reasoningMetadata;
+  let idleTimer;
+  let streamController;
+  let terminating = false;
+  let downstreamThinking = false;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      void failStream(new Error("Upstream generation stalled"), "upstream_idle_timeout");
+    }, idleTimeoutMs);
+  };
   const newCollector = () =>
     createLegCollector({
       maximumCharacters: MAX_COLLECTED_ASSISTANT_CHARACTERS,
       deferTerminalFrames:
         typeof openContinuation === "function" || bufferUntilValidated,
       reasoningMetadata: currentReasoningMetadata,
+      onProgress: resetIdle,
     });
   let collector = newCollector();
   const validationGate = createRoleplayStreamValidationGate(
@@ -159,6 +171,7 @@ export function createObservedStream({
     legFirstByteAt = 0;
     activeContinuationReason = decision.reason;
     repairBaseline = decision.contractAnalysis ?? null;
+    resetIdle();
   };
 
   const settle = async (result) => {
@@ -166,6 +179,8 @@ export function createObservedStream({
       return;
     }
     settled = true;
+    clearTimeout(idleTimer);
+    requestSignal?.removeEventListener("abort", abortStream);
     const completed = {
       ...result,
       heartbeatCount,
@@ -199,11 +214,8 @@ export function createObservedStream({
 
   const stopUpstream = async (reason) => {
     activeController.abort(reason);
-    try {
-      await reader.cancel(reason);
-    } catch {
-      // The abort may already have errored the upstream reader.
-    }
+    // Upstream cancellation acknowledgement must not hold the session queue.
+    void reader.cancel(reason).catch(() => {});
     pendingRead = null;
     releaseReader();
     cleanupLeg();
@@ -223,6 +235,9 @@ export function createObservedStream({
 
   const enqueueFrames = (controller, frames) => {
     for (const frame of frames) {
+      // Normalized reasoning delimiters are complete strings in each frame.
+      if (frame.includes("<think>")) downstreamThinking = true;
+      if (frame.includes("</think>")) downstreamThinking = false;
       controller.enqueue(SSE_ENCODER.encode(frame));
     }
     if (frames.length) {
@@ -230,10 +245,49 @@ export function createObservedStream({
     }
   };
 
+  const failStream = async (error, reason) => {
+    if (settled || terminating) return;
+    terminating = true;
+    clearTimeout(idleTimer);
+    await stopUpstream(error);
+    if (reason === "request_aborted") {
+      streamController.error(error);
+    } else {
+      if (downstreamThinking) {
+        enqueueFrames(streamController, [
+          `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "</think>\n\n" }, finish_reason: null }] })}\n\n`,
+        ]);
+      }
+      const message = reason === "turn_timeout"
+        ? "Generation exceeded the total turn deadline. Partial output was not saved."
+        : reason === "upstream_idle_timeout"
+          ? "The provider stopped generating. Partial output was not saved."
+          : "The provider stream was interrupted. Partial output was not saved.";
+      enqueueFrames(streamController, [
+        `data: ${JSON.stringify({ error: { code: reason, type: "stream_error", message } })}\n\n`,
+      ]);
+      streamController.close();
+    }
+    void settle({ success: false, assistant: "", finishReason: "", reason });
+  };
+
+  const abortStream = () => {
+    const reason = requestSignal?.reason?.code === "turn_timeout"
+      ? "turn_timeout" : "request_aborted";
+    void failStream(new DOMException("Request aborted", "AbortError"), reason);
+  };
+
   const stream = new ReadableStream({
+    start(controller) {
+      streamController = controller;
+      resetIdle();
+      requestSignal?.addEventListener("abort", abortStream, { once: true });
+      if (requestSignal?.aborted) abortStream();
+    },
     async pull(controller) {
       try {
         while (true) {
+          if (terminating || settled) return;
           if (requestSignal?.aborted) {
             throw new DOMException("Request aborted", "AbortError");
           }
@@ -253,6 +307,7 @@ export function createObservedStream({
             wait.promise,
           ]);
           wait.cancel();
+          if (terminating || settled) return;
 
           if (outcome.kind === "timer") {
             enqueueHeartbeat(controller);
@@ -458,7 +513,15 @@ export function createObservedStream({
                     contractAnalysis: decision.contractAnalysis,
                   }),
                 ).then(
-                  (next) => ({ kind: "continuation", next }),
+                  (next) => {
+                    if (terminating || settled) {
+                      next?.upstreamController?.abort();
+                      void next?.upstreamBody?.cancel().catch(() => {});
+                      next?.cleanup?.();
+                      return { kind: "continuation", next: null };
+                    }
+                    return { kind: "continuation", next };
+                  },
                   (error) => ({ kind: "continuation_error", error }),
                 );
               }
@@ -474,6 +537,14 @@ export function createObservedStream({
                 continuationWait.promise,
               ]);
               continuationWait.cancel();
+              if (terminating || settled) {
+                if (continuationOutcome.next) {
+                  continuationOutcome.next.upstreamController?.abort();
+                  void continuationOutcome.next.upstreamBody?.cancel().catch(() => {});
+                  continuationOutcome.next.cleanup?.();
+                }
+                return;
+              }
               if (continuationOutcome.kind === "timer") {
                 enqueueHeartbeat(controller);
                 return;
@@ -566,19 +637,14 @@ export function createObservedStream({
         }
       } catch (error) {
         const reason = requestSignal?.aborted
-          ? "request_aborted"
+          ? requestSignal.reason?.code === "turn_timeout" ? "turn_timeout" : "request_aborted"
           : "upstream_error";
-        await stopUpstream(error);
-        void settle({
-          success: false,
-          assistant: "",
-          finishReason: "",
-          reason,
-        });
-        controller.error(error);
+        await failStream(error, reason);
       }
     },
     async cancel(reason) {
+      if (terminating || settled) return;
+      terminating = true;
       await stopUpstream(reason);
       await settle({
         success: false,

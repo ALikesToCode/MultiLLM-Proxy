@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { createObservedStream } from "../worker/roleplay/streaming.mjs";
+import { createTurnScope, RoleplayTurnQueue } from "../worker/roleplay/turn-runtime.mjs";
+import { readBoundedBytes } from "../worker/roleplay/transport.mjs";
 
 import {
   compactionPlan,
@@ -25,6 +29,145 @@ function opencodeOnlyFixture() {
     ROLEPLAY_PROVIDER_FAMILIES: JSON.stringify({ opencode: ["glm"] }),
   });
 }
+
+test("cancelled queued turns return immediately without overtaking the active turn", async () => {
+  const queue = new RoleplayTurnQueue();
+  const first = await queue.acquire();
+  const cancelled = new AbortController();
+  const second = queue.acquire(cancelled.signal);
+  cancelled.abort();
+  await assert.rejects(second, { code: "request_aborted", status: 499 });
+  let thirdStarted = false;
+  const third = queue.acquire().then((slot) => { thirdStarted = true; return slot; });
+  await delay(10);
+  assert.equal(thirdStarted, false);
+  assert.equal(queue.pending, 2);
+  first.finish();
+  (await third).finish();
+  first.finish();
+  assert.equal(queue.pending, 0);
+});
+
+test("session queue bounds admission and waiting time", async () => {
+  const queue = new RoleplayTurnQueue();
+  const first = await queue.acquire();
+  await assert.rejects(queue.acquire(undefined, { maxPendingTurns: 1 }), {
+    code: "session_queue_full", status: 429,
+  });
+  await assert.rejects(queue.acquire(undefined, { queueTimeoutMs: 10 }), {
+    code: "session_queue_timeout", status: 503,
+  });
+  assert.equal(queue.pending, 1);
+  first.finish();
+});
+
+function observedFixture(options = {}) {
+  let source;
+  let cancelled = false;
+  const upstreamController = new AbortController();
+  const observed = createObservedStream({
+    upstreamBody: new ReadableStream({
+      start(controller) { source = controller; },
+      cancel() { cancelled = true; },
+    }),
+    upstreamController,
+    heartbeatMs: 5,
+    idleTimeoutMs: 40,
+    onComplete() {},
+    reasoningMetadata: { provider: "test", model: "synthetic" },
+    ...options,
+  });
+  return {
+    ...observed, upstreamController,
+    get cancelled() { return cancelled; },
+    send(text) { source.enqueue(new TextEncoder().encode(text)); },
+    close() { source.close(); },
+  };
+}
+
+test("comment-only streams time out without fake success and cancel upstream", async () => {
+  const fixture = observedFixture();
+  const result = new Response(fixture.stream).text();
+  const interval = setInterval(() => fixture.send(": alive\n\n"), 5);
+  try {
+    const text = await result;
+    assert.match(text, /upstream_idle_timeout/);
+    assert.doesNotMatch(text, /\[DONE\]/);
+    const completion = await fixture.completion;
+    assert.equal(completion.success, false);
+    assert.equal(completion.reason, "upstream_idle_timeout");
+    assert.equal(fixture.cancelled, true);
+    assert.equal(fixture.upstreamController.signal.aborted, true);
+  } finally { clearInterval(interval); }
+});
+
+test("real reasoning resets idle budget and interrupted thinking closes once", async () => {
+  const fixture = observedFixture({ idleTimeoutMs: 80 });
+  const result = new Response(fixture.stream).text();
+  const reasoning = 'data: {"choices":[{"delta":{"reasoning_content":"Consider context. "}}]}\n\n';
+  for (let index = 0; index < 5; index += 1) {
+    fixture.send(reasoning);
+    await delay(25);
+    assert.equal(fixture.cancelled, false);
+  }
+  const text = await result;
+  assert.equal((text.match(/<think>/g) ?? []).length, 1);
+  assert.equal((text.match(/<\/think>/g) ?? []).length, 1);
+  assert.match(text, /upstream_idle_timeout/);
+  assert.equal((await fixture.completion).assistant, "");
+});
+
+test("total deadline settles streams even if the client stops reading", async () => {
+  const scope = createTurnScope(undefined, 30);
+  try {
+    const fixture = observedFixture({ requestSignal: scope.signal, idleTimeoutMs: 500 });
+    const completed = await fixture.completion;
+    assert.equal(completed.reason, "turn_timeout");
+    assert.equal(completed.success, false);
+    assert.match(await new Response(fixture.stream).text(), /turn_timeout/);
+  } finally { scope.dispose(); }
+});
+
+test("non-streaming body reads cancel promptly on the total deadline", async () => {
+  const scope = createTurnScope(undefined, 10);
+  let cancelled = false;
+  const source = new ReadableStream({ cancel() { cancelled = true; } });
+  try {
+    await assert.rejects(readBoundedBytes(source, 1000, scope.signal), { name: "AbortError" });
+    assert.equal(cancelled, true);
+  } finally { scope.dispose(); }
+});
+
+test("stalled session releases the next turn and never persists partial output", async () => {
+  const fixture = opencodeOnlyFixture();
+  const stub = fixture.env.ROLEPLAY_SESSION.getByName("deadline-session");
+  const { instance, storage } = fixture.storageBySession.get("deadline-session");
+  instance.settings.streamIdleTimeoutMs = 30;
+  let calls = 0;
+  await withGlobalFetch(async () => {
+    calls += 1;
+    return calls === 1
+      ? new Response(new ReadableStream({ start(controller) {
+          controller.enqueue(new TextEncoder().encode(
+            'data: {"choices":[{"delta":{"content":"Discard this incomplete reply"}}]}\n\n',
+          ));
+        } }), { headers: { "Content-Type": "text/event-stream" } })
+      : completionResponse("glm-5.3-flash", "The next turn succeeds.");
+  }, async () => {
+    const request = (stream) => roleplayRequest({
+      model: "roleplay:glm", stream,
+      messages: [{ role: "user", content: "Continue the synthetic scene." }],
+    }, {}, "/turn");
+    const first = await stub.fetch(request(true));
+    const second = stub.fetch(request(false));
+    assert.match(await first.text(), /upstream_idle_timeout/);
+    assert.equal((await second).status, 200);
+    await fixture.waitForBackgroundWork();
+    assert.equal(instance.pendingTurns, 0);
+    assert.equal(calls, 2);
+    assert.doesNotMatch(JSON.stringify([...storage.values]), /Discard this incomplete reply/);
+  });
+});
 
 test("roleplay throughput metrics retain bounded observed TPS", () => {
   const first = recordThroughputObservation(

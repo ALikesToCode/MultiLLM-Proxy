@@ -92,6 +92,8 @@ export async function readBoundedBytes(stream, maximumBytes, signal) {
   let size = 0;
   let firstByteAt = 0;
   const startedAt = performance.now();
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal?.addEventListener("abort", abort, { once: true });
 
   try {
     while (true) {
@@ -99,6 +101,9 @@ export async function readBoundedBytes(stream, maximumBytes, signal) {
         throw new DOMException("Request aborted", "AbortError");
       }
       const { value, done } = await reader.read();
+      if (signal?.aborted) {
+        throw new DOMException("Request aborted", "AbortError");
+      }
       if (done) {
         break;
       }
@@ -120,6 +125,7 @@ export async function readBoundedBytes(stream, maximumBytes, signal) {
       chunks.push(chunk);
     }
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
 
