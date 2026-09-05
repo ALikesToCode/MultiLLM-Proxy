@@ -315,3 +315,68 @@ visible-TTFT telemetry, or linear normalization cost.
 Do not begin with blanket model downgrades, shortened prompts, response caching of
 private chats, aggressive retry fan-out, or more container replicas. Those changes
 can alter behavior or cost without addressing the confirmed failure modes.
+
+## Implementation follow-up — September 5, 2026
+
+The findings above describe the review baseline. The following fixes are now
+committed locally; they have not been pushed or deployed.
+
+| Finding | Implementation status |
+| --- | --- |
+| 1: stalled turns and queues | Added total-turn and semantic-progress deadlines, bounded queue admission/waiting, prompt cancellation, and explicit incomplete-stream errors. Continuation fetches share stream cancellation. Failed partial replies are not persisted as completed turns. |
+| 2: completion telemetry | Worker streams now distinguish first reasoning from first visible output after output gates. Mixed continuation aggregates no longer enter single-model latency/TPS samples. Python header-time success recording and cross-runtime aggregation remain open. |
+| 3: reasoning CPU | Cached reasoning comparison at replay/markup boundaries instead of rescanning history on every explicit delta. Existing malformed-tag/replay fixtures and new long-stream/repeated-word cases pass. |
+| 4: routing policy | Unchanged. Provider order, subscription protection, model selection, and reasoning defaults are preserved. |
+| 5: dashboard capacity | Replaced the dashboard's persistent status stream with non-overlapping JSON polls. Hidden/unloaded pages pause and abort pending work. Shared aggregate caching and production concurrency testing remain open; the legacy SSE endpoint remains available to other clients. |
+| 6: Python auth/SQLite | Deferred. No changes to key verification, revocation, quota admission, or database retention. |
+| 7: interface recovery | OpenRouter lab now supports Stop, keeps partial output on errors/cancellation, detects incomplete EOF and in-band failures, and batches text rendering. Clipboard failures are reported. Static assets revalidate with offline fallback; cache replacement is limited to successful non-private, non-redirected responses and cleanup is application-scoped. |
+| 8: control-plane durability | Deferred pending a storage/migration decision. Container-backed SQLite remains ephemeral. |
+
+New roleplay limits are configurable in `.env.example`:
+
+- `ROLEPLAY_TURN_TIMEOUT_MS=600000`: total active generation budget, including continuation legs.
+- `ROLEPLAY_STREAM_IDLE_TIMEOUT_MS=90000`: maximum gap in semantic upstream progress; comments do not reset it, reasoning does.
+- `ROLEPLAY_QUEUE_TIMEOUT_MS=120000`: maximum queued wait.
+- `ROLEPLAY_MAX_PENDING_TURNS=4`: active plus queued turns per session.
+
+An interrupted stream closes an emitted thinking block when delivery remains
+possible, then reports an SSE error without a fabricated success marker. Stop or
+failure cancels the pending provider read/fetch; cancellation acknowledgment does
+not hold the next session turn. Recovery does not silently restart a turn after
+an idle deadline. Provider generation speed and reasoning effort were not reduced
+to obtain the local processing improvement.
+
+### Verification after implementation
+
+- All 22 Worker test files passed after the final continuation cancellation fix.
+  Focused cases cover comment-only stalls, reasoning progress, total deadlines,
+  queue ordering/admission, pending continuation cancellation, and client
+  cancellation racing with error delivery.
+- The Python suite in a tracked-files-only snapshot passed 596 tests and 314
+  subtests. Two socket-dependent cases were sandbox-blocked and both passed in a
+  targeted loopback-enabled rerun; this was not one all-green invocation.
+- Ruff fatal checks, configured mypy checks for 52 source files, Tailwind build,
+  and static secret scan passed. Existing permissive type-check limitations remain.
+- Wrangler 4.122.0 successfully bundled the final Worker using
+  `deploy --dry-run --containers-rollout=none` (392.89 KiB, 86.87 KiB gzip).
+  The full dry run could not build the container because Docker was unavailable.
+  Neither command deployed resources.
+- An isolated loopback page using the actual templates/scripts and synthetic
+  responses verified partial-output preservation on premature EOF, Stop recovery,
+  re-enabled Run controls, and repeated bounded dashboard updates. No console
+  errors occurred on these pages. Cache behavior was verified with simulated
+  service-worker events, not a production service-worker rollout.
+- Final local reasoning benchmark, median of three runs, used unique ` wordN`
+  deltas in 2k/4k/8k/16k frames. Explicit reasoning took 5/10/15/27 ms; inline
+  reasoning took 3/5/8/17 ms. The same 8k explicit workload measured about 1.14 s
+  before the optimization. This measures normalization CPU, not provider TPS,
+  visible TTFT, or paid inference latency.
+- Changed handwritten source files remain below 1,000 lines. Session queue/deadline
+  ownership moved into `turn-runtime.mjs`; `endpoint.mjs` is now 991 lines. The
+  untouched oversized files listed above still need separate cohesive extractions.
+- Private `example.json` remains ignored and untracked; no JSON file or original
+  conversation was included in these commits or submitted to a provider for testing.
+
+Live Janitor/NanoGPT behavior, production CORS/network failures, version-matched
+CI, container rebuild, and deployment monitoring remain unverified by these local
+checks. They must not be inferred from the synthetic tests or a successful bundle.
