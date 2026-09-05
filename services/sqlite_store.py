@@ -25,6 +25,11 @@ def storage_path(env_name: str, default_filename: str) -> Path:
 
 
 def connect(path: Path, *, wal: bool = True) -> sqlite3.Connection:
+    database_url = os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip()
+    if database_url:
+        from services.postgres_store import PostgresConnection
+
+        return PostgresConnection(database_url)  # type: ignore[return-value]
     parent_existed = path.parent.exists()
     database_existed = path.exists()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

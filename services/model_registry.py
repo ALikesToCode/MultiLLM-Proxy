@@ -187,9 +187,10 @@ class ModelRegistry:
     @classmethod
     def get_model_status(cls, model_id: str) -> str:
         cache_key = (str(cls._get_storage_path().absolute()), model_id)
+        shared = bool(os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip())
         with cls._status_cache_lock:
             cached = cls._status_cache.get(cache_key)
-            if cached is not None:
+            if cached is not None and not shared:
                 return cached
 
         with closing(cls._connect()) as connection:
@@ -199,8 +200,9 @@ class ModelRegistry:
                 (model_id,),
             ).fetchone()
         status = row["status"] if row else "available"
-        with cls._status_cache_lock:
-            cls._status_cache[cache_key] = status
+        if not shared:
+            with cls._status_cache_lock:
+                cls._status_cache[cache_key] = status
         return status
 
     @classmethod

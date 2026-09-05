@@ -147,5 +147,6 @@ user_data.json
 
 # Local secret-bearing API profile export
 /example.json
+*.control-plane-backup
 # Local browser verification artifacts
 output/playwright/
