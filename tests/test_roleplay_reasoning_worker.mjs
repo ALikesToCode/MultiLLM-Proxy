@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRoleplayReasoningFrameNormalizer } from "../worker/roleplay/reasoning-output.mjs";
 
 import {
   handleRoleplayEdgeRequest,
@@ -9,6 +10,27 @@ import {
 } from "./helpers/roleplay_fixture.mjs";
 
 const JANITOR_PATH = "/roleplay/v1/chat/completions";
+
+test("long reasoning streams preserve deltas and deduplicate a late cumulative replay", () => {
+  const normalizer = createRoleplayReasoningFrameNormalizer({ provider: "test", model: "test" });
+  const fragments = Array.from({ length: 8000 }, (_, index) => ` word${index}`);
+  const frame = (delta) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`;
+  const output = fragments.flatMap((reasoning_content) => normalizer.transform(frame({ reasoning_content })));
+  output.push(...normalizer.transform(frame({ content: `<think>${fragments.join("")}</think>Visible reply.` })));
+  output.push(...normalizer.finish());
+  const content = visibleContent(output.join(""));
+  assert.equal(content, `<think>[provider: test | model: test]\n${fragments.join("")}</think>\n\nVisible reply.`);
+});
+
+test("inline reasoning preserves repeated token deltas within a single think block", () => {
+  const normalizer = createRoleplayReasoningFrameNormalizer({ provider: "test", model: "test" });
+  const parts = ["<think>", "Consider", " the", " context", ".", " Consider", " the", " alternatives", ".", "</think>Reply."];
+  const frames = parts.flatMap((content) => normalizer.transform(
+    `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`,
+  ));
+  assert.equal(visibleContent(frames.join("")),
+    "<think>[provider: test | model: test]\nConsider the context. Consider the alternatives.</think>\n\nReply.");
+});
 
 test("roleplay defaults generation to max and honors an explicit override", async () => {
   const fixture = makeRoleplayEnv({

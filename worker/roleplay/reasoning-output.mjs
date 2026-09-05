@@ -20,6 +20,16 @@ function cleanReasoning(value) {
   return String(value ?? "").replace(/<\/?think>/gi, "");
 }
 
+function reasoningComparison(state) {
+  // Token deltas need no historical search. Materialize the normalized history
+  // only when content/markup actually needs replay detection.
+  if (state.reasoningComparableLength !== state.reasoningText.length) {
+    state.reasoningComparable = comparable(state.reasoningText);
+    state.reasoningComparableLength = state.reasoningText.length;
+  }
+  return state.reasoningComparable;
+}
+
 function longestExactOverlap(left, right) {
   const maximum = Math.min(left.length, right.length);
   for (let size = maximum; size >= 16; size -= 1) {
@@ -228,17 +238,19 @@ function createReasoningState(metadata) {
     model,
     reasoningText: "",
     reasoningComparable: "",
+    reasoningComparableLength: 0,
     thinkOpen: false,
     thinkClosed: false,
     visibleStarted: false,
     contentThinkDepth: 0,
+    inlineReplayComparison: "",
     pendingReasoningWhitespace: "",
     pendingContent: "",
     template: null,
   };
 }
 
-function appendReasoning(state, value, { replay = false } = {}) {
+function appendReasoning(state, value, { replay = false, replayComparison = null } = {}) {
   if (state.thinkClosed || state.visibleStarted) {
     return "";
   }
@@ -259,7 +271,7 @@ function appendReasoning(state, value, { replay = false } = {}) {
   // meaningful. Historical de-duplication is only safe for replayed markup.
   if (
     replay &&
-    state.reasoningComparable.includes(candidateComparable)
+    (replayComparison ?? reasoningComparison(state)).includes(candidateComparable)
   ) {
     return "";
   }
@@ -281,7 +293,6 @@ function appendReasoning(state, value, { replay = false } = {}) {
   state.pendingReasoningWhitespace = "";
 
   state.reasoningText += candidate;
-  state.reasoningComparable = comparable(state.reasoningText);
   if (!state.thinkOpen) {
     state.thinkOpen = true;
     return `<think>[provider: ${state.provider} | model: ${state.model}]\n${candidate}`;
@@ -299,22 +310,25 @@ function closeThinking(state) {
 }
 
 function looksLikeReasoningReplay(state, value) {
-  if (!state.reasoningComparable) {
+  const previous = reasoningComparison(state);
+  if (!previous) {
     return false;
   }
   const candidate = comparable(value).slice(0, 64);
-  return candidate.length >= 24 && state.reasoningComparable.includes(candidate);
+  return candidate.length >= 24 && previous.includes(candidate);
 }
 
 function couldBecomeReasoningReplay(state, value) {
-  if (!state.reasoningComparable || state.visibleStarted) {
+  if (state.visibleStarted) return false;
+  const previous = reasoningComparison(state);
+  if (!previous) {
     return false;
   }
   const candidate = comparable(value);
   if (!candidate) {
     return /^\s*$/.test(value);
   }
-  return state.reasoningComparable.includes(candidate);
+  return previous.includes(candidate);
 }
 
 function consumePendingContent(state, { flush = false } = {}) {
@@ -351,7 +365,12 @@ function consumePendingContent(state, { flush = false } = {}) {
   let output = "";
   if (containsMarkup || continuingInlineReasoning) {
     for (const part of parsed.reasoning) {
-      output += appendReasoning(state, part, { replay: true });
+      if (containsMarkup) {
+        state.inlineReplayComparison = reasoningComparison(state);
+      }
+      output += appendReasoning(state, part, {
+        replay: true, replayComparison: state.inlineReplayComparison,
+      });
     }
     const visible = state.visibleStarted
       ? parsed.visible
