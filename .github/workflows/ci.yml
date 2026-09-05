@@ -60,3 +60,5 @@ jobs:
         run: npm audit --audit-level=high
       - name: Worker tests
         run: npm run test:worker
+      - name: Free pool Worker contracts
+        run: node --test tests/test_free_routes_worker.mjs

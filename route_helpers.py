@@ -289,6 +289,8 @@ def is_api_request_path(path: str) -> bool:
 
 
 def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
+    if path.startswith("/v1/free/"):
+        return "free"
     first_segment = path.strip("/").split("/", 1)[0]
     if first_segment in {"v1", "optimize"} and isinstance(payload_json, dict):
         model = payload_json.get("model")

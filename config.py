@@ -62,6 +62,8 @@ def load_env_choice(
 
 
 class Config:
+    FREE_ROUTE_FREE_TIER_PROVIDERS = os.environ.get('FREE_ROUTE_FREE_TIER_PROVIDERS', '')
+    FREE_ROUTE_PROVIDER_ORDER = os.environ.get('FREE_ROUTE_PROVIDER_ORDER', '')
     PROJECT_ID = os.environ.get('PROJECT_ID')
     GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
     LOCATION = os.environ.get('LOCATION')

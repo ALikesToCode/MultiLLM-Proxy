@@ -231,6 +231,12 @@ or a saved route. Use `/docs.json` for the same credential-safe catalog as JSON.
 
 Each provider is accessible through their respective endpoints:
 
+For automatic free-only fallback, use `/v1/free` with model `free:text` or
+`free:vision`. Fixed-purpose bases `/v1/free/text` and `/v1/free/vision` are also
+available. See [free model pools](docs/free-model-pools.md) for setup, quota
+cooldowns, image input, and a local test request. These routes never select a
+paid model; Groq/Gemini require an explicit free-tier account assertion.
+
 ```bash
 # OpenAI-compatible endpoint
 curl -X POST "http://localhost:1400/openai/v1/chat/completions" \
