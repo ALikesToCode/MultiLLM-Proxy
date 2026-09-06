@@ -10,6 +10,7 @@ from route_helpers import stream_upstream_response
 
 ERROR_BYTES = 16384
 _MISMATCH = re.compile(
+    r"request too large for model|"
     r"too many images|supports? (?:up to |at most |a maximum of )\d+ images|"
     r"(?:maximum|max) (?:number of images|context length)|context_length_exceeded|"
     r"(?:image|vision) (?:input )?(?:is |are )?not supported|"
