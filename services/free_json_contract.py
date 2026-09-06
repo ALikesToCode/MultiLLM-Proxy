@@ -94,6 +94,12 @@ def _schema_validator(response_format):
         raise ValueError("json_schema.schema must be an object or boolean")
     if "strict" in wrapper and not isinstance(wrapper["strict"], bool):
         raise ValueError("json_schema.strict must be a boolean")
+    if (
+        isinstance(schema, dict)
+        and "$schema" in schema
+        and not isinstance(schema["$schema"], str)
+    ):
+        raise ValueError("JSON Schema dialect must be a string")
     _check_bounds(schema)
     if len(json.dumps(schema, allow_nan=False).encode()) > MAX_SCHEMA_BYTES:
         raise ValueError("Schema exceeds size limit")
