@@ -18,6 +18,7 @@ from services.free_provider_catalog import (
     provider_tier_confirmed,
 )
 from services.model_catalog_service import build_model_catalog
+from services.free_json_contract import validate_response_format
 from services.model_registry import ModelRegistry
 from services.provider_catalog_metadata import model_supports_vision
 
@@ -221,6 +222,10 @@ def validate_free_payload(payload: dict, fixed_model: str | None = None) -> dict
             "tools and paid add-ons are not allowed",
             status_code=400,
         )
+    try:
+        validate_response_format(payload.get("response_format"))
+    except (ValueError, RecursionError) as error:
+        raise APIError("Invalid or unsupported response_format schema", status_code=400) from error
     model = payload.get("model", fixed_model or "free:text")
     if (
         not isinstance(model, str)

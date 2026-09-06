@@ -24,6 +24,29 @@ FORMAT = {
 
 
 class FreeJsonResponseTest(unittest.TestCase):
+    def test_schema_mismatch_never_reaches_client_in_either_mode(self):
+        for stream in (False, True):
+            for content in (
+                '{"wrong_field":123}',
+                '{"color":2}',
+                '{"color":"red","extra":1}',
+            ):
+                with self.subTest(stream=stream, content=content):
+                    upstream = UnifiedApiTestCase._chat_response(content)
+                    if stream:
+                        upstream = Response(
+                            completion_stream([content]),
+                            content_type="text/event-stream",
+                        )
+                    with self.assertRaises(FreeUpstreamFailure) as error:
+                        validated_free_response(
+                            upstream,
+                            stream=stream,
+                            deadline=time.monotonic() + 10,
+                            response_format=FORMAT,
+                        )
+                    self.assertEqual(error.exception.reason, "schema_mismatch")
+
     def test_rejects_non_json_before_exposing_any_stream_frame(self):
         for content in ("User Safety: safe", '{"color":', '{"color": NaN}'):
             with self.subTest(content=content):
@@ -107,8 +130,8 @@ class FreeJsonFallbackTest(UnifiedApiTestCase):
             mocked.start()
             self.addCleanup(mocked.stop)
 
-    def assert_fallback(self, stream):
-        texts = ("User Safety: safe", '{"color":"red"}')
+    def assert_fallback(self, stream, invalid="User Safety: safe"):
+        texts = (invalid, '{"color":"red"}')
         responses = [self._chat_response(text) for text in texts]
         if stream:
             responses = [
@@ -129,6 +152,7 @@ class FreeJsonFallbackTest(UnifiedApiTestCase):
             body = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("User Safety", body)
+        self.assertNotIn("wrong_field", body)
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
         first = json.loads(send.call_args_list[0].kwargs["data"])
         second = json.loads(send.call_args_list[1].kwargs["data"])
@@ -141,6 +165,12 @@ class FreeJsonFallbackTest(UnifiedApiTestCase):
 
     def test_non_json_stream_fails_over_before_any_frame_is_exposed(self):
         self.assert_fallback(True)
+
+    def test_schema_mismatch_completion_fails_over(self):
+        self.assert_fallback(False, '{"wrong_field":123}')
+
+    def test_schema_mismatch_stream_fails_over(self):
+        self.assert_fallback(True, '{"wrong_field":123}')
 
     def test_parameter_mismatch_does_not_cool_ordinary_text_routes(self):
         payload = {

@@ -8,7 +8,7 @@ import requests
 from flask import Response
 
 from route_helpers import copy_raw_provider_response_headers, stream_upstream_response
-from services.free_json_contract import check_json_output, json_output_requested
+from services.free_json_contract import JsonOutputError, check_json_output, json_output_requested
 from streaming.sse import format_sse_data, iter_sse_events
 
 _AIHUBMIX_QUOTA_PREFIX = (
@@ -18,8 +18,9 @@ _AIHUBMIX_QUOTA_PREFIX = (
 
 
 class FreeUpstreamFailure(Exception):
-    def __init__(self, status: int = 502):
+    def __init__(self, status: int = 502, reason: str = "invalid_response"):
         self.status = status
+        self.reason = reason
 
 
 def _checked_chunks(response, deadline, limit=8 * 1024 * 1024):
@@ -200,6 +201,8 @@ def _checked_json_stream(response, response_format, deadline):
         )
         downstream.headers["X-MultiLLM-JSON-Buffered"] = "true"
         return downstream
+    except JsonOutputError as error:
+        raise FreeUpstreamFailure(reason=error.reason) from error
     except (ValueError, requests.RequestException) as error:
         raise FreeUpstreamFailure() from error
     finally:
@@ -254,6 +257,8 @@ def validated_free_response(
             content_type="application/json",
             headers=copy_raw_provider_response_headers(response.headers),
         )
+    except JsonOutputError as error:
+        raise FreeUpstreamFailure(reason=error.reason) from error
     except (ValueError, requests.RequestException) as error:
         raise FreeUpstreamFailure() from error
     finally:

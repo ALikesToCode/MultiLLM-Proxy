@@ -150,9 +150,15 @@ forwarded. Common sampling, reasoning-effort and response-format parameters are
 passed through, and must be supported by the selected upstream model.
 
 For JSON output, OpenRouter is restricted to endpoints supporting the requested
-parameters. The pool checks completed JSON syntax (and object shape for
-`json_object`); the upstream remains responsible for JSON Schema conformance.
-Non-JSON answers can fail over before anything is sent to the caller. JSON
+parameters. The pool validates completed output against the supplied JSON
+Schema, including required fields, types, enums, nested objects, array bounds,
+and extra-property rules. `json_object` requires an object. Duplicate properties
+and non-finite JSON numbers are rejected. Invalid schemas fail with HTTP 400
+before a provider call. Schemas are limited to 64 KiB, 32 nesting levels and
+4,096 nodes; external references are rejected and validation never retrieves
+remote schemas. Local references and recognized JSON Schema dialects are
+supported (Draft 2020-12 by default). `format` annotations are not asserted.
+Non-JSON or schema-invalid answers can fail over before delivery. JSON
 streams are therefore buffered to completion within the existing size and time
 limits, then returned as SSE with `X-MultiLLM-JSON-Buffered: true`. This delays
 their first token. Ordinary text streams remain incremental. Explicit provider
