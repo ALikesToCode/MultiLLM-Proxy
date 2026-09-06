@@ -19,6 +19,7 @@ from services.free_model_policy import (
 )
 from services.free_provider_catalog import FREE_PROVIDERS, free_chat_url, provider_setup
 from services.free_quota_service import FreeQuotaService, retry_seconds
+from services.free_route_diagnostics import exhausted_details, failure_detail
 
 FAILOVER_STATUSES = {401, 402, 403, 404, 410, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 8
@@ -70,7 +71,7 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     token = auth.get_api_key(candidate.provider)
     url = free_chat_url(config, candidate.provider)
     if not token or not url:
-        raise FreeUpstreamFailure(503)
+        raise FreeUpstreamFailure(503, reason="credentials_unavailable")
     upstream_payload = {**payload, "model": candidate.model}
     if candidate.provider == "openrouter" and json_output_requested(
         payload.get("response_format")
@@ -97,20 +98,44 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     )
 
 
+def _record_attempt_failure(candidate, payload, error, status, upstream_status, headers):
+    # Parameter-support 404s do not disable ordinary OpenRouter text requests.
+    unsupported = (
+        status == 404
+        and candidate.provider == "openrouter"
+        and json_output_requested(payload.get("response_format"))
+    )
+    if not unsupported:
+        _record_failure(candidate, status, headers)
+    if unsupported:
+        reason = "unsupported_parameters"
+    elif isinstance(error, requests.Timeout):
+        reason = "timeout"
+    elif isinstance(error, requests.RequestException):
+        reason = "connection_error"
+    elif isinstance(error, FreeUpstreamFailure):
+        reason = error.reason
+    else:
+        reason = None
+    return failure_detail(candidate, status, upstream_status, reason, _cooldown(candidate))
+
+
 def _try_candidate(
-    config, auth, metrics, proxy, payload, candidate, remaining, deadline
+    config, auth, metrics, proxy, payload, candidate, remaining, deadline, failures
 ):
     start = time.monotonic()
     status = 502
     upstream = None
+    upstream_status = None
     headers = {}
     try:
         upstream = _request_candidate(
             config, auth, proxy, payload, candidate, remaining
         )
         status, headers = upstream.status_code, upstream.headers
+        upstream_status = status
         if status in FAILOVER_STATUSES:
-            raise FreeUpstreamFailure(status)
+            raise FreeUpstreamFailure(status, reason="upstream_status")
         if status >= 400:
             return (
                 upstream
@@ -136,14 +161,11 @@ def _try_candidate(
         )
         if status not in FAILOVER_STATUSES:
             raise
-        # OpenRouter's parameter-support 404 is request-specific; the same
-        # free model may still serve ordinary text without structured output.
-        if not (
-            status == 404
-            and candidate.provider == "openrouter"
-            and json_output_requested(payload.get("response_format"))
-        ):
-            _record_failure(candidate, status, headers)
+        failures.append(
+            _record_attempt_failure(
+                candidate, payload, error, status, upstream_status, headers
+            )
+        )
         if upstream is not None:
             _close_upstream(upstream)
         return None
@@ -157,19 +179,15 @@ def _try_candidate(
         )
 
 
-def _exhausted_response(configured, model, attempts):
-    delays = [_cooldown(c) for c in configured]
-    cooling = all(delays)
-    response = jsonify(
-        {
-            "error": {
-                "code": "free_pool_exhausted" if cooling else "free_attempt_limit",
-                "message": "No free provider is currently available. Retry later; no paid model was used.",
-            }
-        }
+def _exhausted_response(configured, model, attempts, failures, stop_reason):
+    status, details = exhausted_details(
+        configured, failures, _cooldown, stop_reason=stop_reason
     )
-    response.status_code = 429 if cooling else 503
-    response.headers["Retry-After"] = str(min(delays) if cooling else 1)
+    details["attempts"] = attempts
+    response = jsonify({"error": details})
+    response.status_code = status
+    if details["retry_after"] is not None:
+        response.headers["Retry-After"] = str(details["retry_after"])
     response.headers["X-MultiLLM-Auto-Route"] = model
     response.headers["X-MultiLLM-Auto-Attempts"] = str(attempts)
     return response
@@ -195,24 +213,42 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
                     "code": "free_models_unavailable",
                     "message": "No configured eligible free models. Configure a provider and refresh the live catalog; "
                     "vision requires confirmed image-input metadata.",
+                    "reason": "no_eligible_models",
+                    "retryable": False,
+                    "retry_after": None,
+                    "attempts": 0,
+                    "failures": [],
                 }
             }
         ), 503
     deadline = time.monotonic() + REQUEST_DEADLINE_SECONDS
     attempts = 0
+    failures = []
+    stop_reason = "providers_failed"
     for priority, candidate in enumerate(configured, 1):
         if _cooldown(candidate):
             continue
         remaining = int(deadline - time.monotonic())
         if attempts >= MAX_ATTEMPTS or remaining < 2:
+            stop_reason = (
+                "attempt_limit" if attempts >= MAX_ATTEMPTS else "deadline_exceeded"
+            )
             break
         attempts += 1
         response = _try_candidate(
-            app.config, auth, metrics, proxy, payload, candidate, remaining, deadline
+            app.config,
+            auth,
+            metrics,
+            proxy,
+            payload,
+            candidate,
+            remaining,
+            deadline,
+            failures,
         )
         if response is not None:
             return _decorate(response, candidate, model, attempts, priority)
-    return _exhausted_response(configured, model, attempts)
+    return _exhausted_response(configured, model, attempts, failures, stop_reason)
 
 
 def register_free_routes(app, csrf, auth, metrics, proxy):

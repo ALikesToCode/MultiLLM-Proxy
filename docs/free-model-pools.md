@@ -96,7 +96,26 @@ skipped. Reordering cannot admit a paid candidate.
 - All candidates cooling down returns `429 free_pool_exhausted` plus the
   earliest `Retry-After`; no configured eligible models returns `503
   free_models_unavailable`. Attempt/deadline exhaustion returns `503
-  free_attempt_limit`. No paid model is substituted.
+  free_attempt_limit`; trying all candidates without a usable response returns
+  `503 free_providers_failed`. No paid model is substituted.
+
+Exhaustion errors include `reason`, `stop_reason`, `attempts`, `retryable`,
+`retry_after`, `failures`, and `cooldowns`. Each failure identifies only the
+provider/model, normalized status, upstream HTTP status (null if unavailable),
+a fixed category such as `rate_limited`, `invalid_json`, `schema_mismatch`,
+`unsupported_parameters`, `timeout`, or `upstream_unavailable`, and cooldown.
+They contain no prompts, images, schema values, credentials or raw upstream
+errors. Cooldown rows are capped at 16 with `cooldowns_truncated` indicating
+omitted rows. No per-request body is retained for these diagnostics.
+
+Batch clients should honor `retryable` and `Retry-After`, use bounded backoff
+with jitter, and retain failed items for later verification. A structured-output
+request with only incompatible endpoints returns `retryable: false` and no
+`Retry-After`; retrying it unchanged cannot fix capability support. When usable
+alternatives are cooling down, the retry delay follows their reset rather than
+recommending a one-second loop against an incompatible endpoint. Schema validity
+does not establish factual accuracy; validate IDs and decisions in the client
+before taking an action.
 
 These are reactive cooldowns, not quota reservations: simultaneous requests can
 reach a provider before the first quota response is observed. Cooldowns share

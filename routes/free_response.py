@@ -8,7 +8,12 @@ import requests
 from flask import Response
 
 from route_helpers import copy_raw_provider_response_headers, stream_upstream_response
-from services.free_json_contract import JsonOutputError, check_json_output, json_output_requested
+from services.free_json_contract import (
+    JsonOutputError,
+    check_json_output,
+    json_output_requested,
+)
+from services.free_route_diagnostics import OUTPUT_REASONS
 from streaming.sse import format_sse_data, iter_sse_events
 
 _AIHUBMIX_QUOTA_PREFIX = (
@@ -27,8 +32,10 @@ def _checked_chunks(response, deadline, limit=8 * 1024 * 1024):
     size = 0
     for chunk in response.response:
         size += len(chunk)
-        if size > limit or time.monotonic() > deadline:
-            raise FreeUpstreamFailure()
+        if size > limit:
+            raise FreeUpstreamFailure(reason="response_too_large")
+        if time.monotonic() > deadline:
+            raise FreeUpstreamFailure(reason="deadline_exceeded")
         yield chunk
 
 
@@ -42,7 +49,17 @@ def _event_payload(event):
     if "error" in payload:
         upstream_error = payload["error"]
         code = upstream_error.get("code") if isinstance(upstream_error, dict) else None
-        raise FreeUpstreamFailure(429 if str(code) == "429" else 502)
+        reason = "upstream_error"
+        if (
+            code == "free_stream_interrupted"
+            and isinstance(upstream_error.get("reason"), str)
+            and upstream_error["reason"] in OUTPUT_REASONS
+        ):
+            reason = upstream_error["reason"]
+        raise FreeUpstreamFailure(
+            429 if str(code) == "429" else 502,
+            reason="upstream_status" if str(code) == "429" else reason,
+        )
     choices = payload.get("choices")
     if not isinstance(choices, list) or any(not isinstance(c, dict) for c in choices):
         raise FreeUpstreamFailure()
@@ -54,7 +71,7 @@ def _quota_text(provider, content):
         return ""
     text = " ".join(content.lower().split())
     if text.startswith(_AIHUBMIX_QUOTA_PREFIX):
-        raise FreeUpstreamFailure(429)
+        raise FreeUpstreamFailure(429, reason="upstream_status")
     return text
 
 
@@ -106,7 +123,7 @@ def _stream_response(response, deadline, on_failure, provider):
         events = chain(buffered, events)
     except (StopIteration, ValueError, requests.RequestException) as error:
         response.close()
-        raise FreeUpstreamFailure() from error
+        raise FreeUpstreamFailure(reason=_stream_failure_reason(error)) from error
     except FreeUpstreamFailure:
         response.close()
         raise
@@ -152,6 +169,7 @@ def _stream_response(response, deadline, on_failure, provider):
                         "error": {
                             "code": "free_stream_interrupted",
                             "message": "The selected provider stream failed. No other model was appended; retry the request.",
+                            "reason": _stream_failure_reason(error),
                         }
                     }
                 )
@@ -166,6 +184,16 @@ def _stream_response(response, deadline, on_failure, provider):
     )
     downstream.call_on_close(response.close)
     return downstream
+
+
+def _stream_failure_reason(error):
+    if isinstance(error, FreeUpstreamFailure):
+        return error.reason
+    if isinstance(error, requests.Timeout):
+        return "timeout"
+    if isinstance(error, requests.RequestException):
+        return "connection_error"
+    return "stream_interrupted"
 
 
 def _checked_json_stream(response, response_format, deadline):
@@ -204,7 +232,7 @@ def _checked_json_stream(response, response_format, deadline):
     except JsonOutputError as error:
         raise FreeUpstreamFailure(reason=error.reason) from error
     except (ValueError, requests.RequestException) as error:
-        raise FreeUpstreamFailure() from error
+        raise FreeUpstreamFailure(reason=_stream_failure_reason(error)) from error
     finally:
         response.close()
 
@@ -260,6 +288,10 @@ def validated_free_response(
     except JsonOutputError as error:
         raise FreeUpstreamFailure(reason=error.reason) from error
     except (ValueError, requests.RequestException) as error:
-        raise FreeUpstreamFailure() from error
+        raise FreeUpstreamFailure(
+            reason="invalid_response"
+            if isinstance(error, ValueError)
+            else _stream_failure_reason(error)
+        ) from error
     finally:
         response.close()
