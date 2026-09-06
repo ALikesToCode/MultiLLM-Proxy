@@ -84,8 +84,12 @@ skipped. Reordering cannot admit a paid candidate.
   connection failures pause the provider with a 60-second default cooldown.
 - OrcaRouter `429` without `Retry-After` indicates a prompt-size cap, not an
   exhausted quota window. It can fail over but does not cool the account.
-- Input errors such as `400`, `413`, and `422` return to the caller without
-  cycling providers. Fix the payload or select a suitable explicit provider.
+- Recognized image-count, context-size, and JSON-format compatibility errors
+  (`400`, `413`, `422`) try the next eligible free model without cooling the
+  account. Other input errors and policy rejections return unchanged. Inspection
+  is bounded and replays the original body; diagnostics never expose its content.
+- Malformed output and JSON-schema mismatches cool only the failing model,
+  leaving sibling models available. They are not evidence of account quota.
 - The pool attempts at most eight candidates and has a 120-second response
   deadline, with bounded connection/read timeouts. It never sleeps waiting for
   quota. A stalled read can last until its read timeout.

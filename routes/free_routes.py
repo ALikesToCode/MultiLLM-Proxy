@@ -10,6 +10,7 @@ from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, stream_upstream_response
 from routes.free_response import FreeUpstreamFailure, validated_free_response
+from services.free_compatibility import inspect_compatibility
 from services.free_json_contract import json_output_requested
 from services.free_model_policy import (
     FREE_MODELS,
@@ -100,12 +101,19 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
 
 def _record_attempt_failure(candidate, payload, error, status, upstream_status, headers):
     # Parameter-support 404s do not disable ordinary OpenRouter text requests.
-    unsupported = (
+    unsupported = (isinstance(error, FreeUpstreamFailure) and error.reason == "unsupported_parameters") or (
         status == 404
         and candidate.provider == "openrouter"
         and json_output_requested(payload.get("response_format"))
     )
-    if not unsupported:
+    output_failure = isinstance(error, FreeUpstreamFailure) and error.reason in {
+        "invalid_response", "invalid_json", "schema_mismatch", "response_too_large",
+        "stream_interrupted", "upstream_error",
+    }
+    if output_failure and not unsupported:
+        # Invalid output is model-specific, not evidence of exhausted account quota.
+        FreeQuotaService.block(f"model:{candidate.id}", retry_seconds(headers, time.time(), 60))
+    elif not unsupported:
         _record_failure(candidate, status, headers)
     if unsupported:
         reason = "unsupported_parameters"
@@ -134,6 +142,9 @@ def _try_candidate(
         )
         status, headers = upstream.status_code, upstream.headers
         upstream_status = status
+        upstream, incompatible = inspect_compatibility(upstream)
+        if incompatible:
+            raise FreeUpstreamFailure(502, reason="unsupported_parameters")
         if status in FAILOVER_STATUSES:
             raise FreeUpstreamFailure(status, reason="upstream_status")
         if status >= 400:

@@ -101,11 +101,12 @@ class FreeDiagnosticRouteTest(UnifiedApiTestCase):
             )
         with patch(
             "app.ProxyService.make_request",
-            side_effect=[bad, Response(status=404)],
+            side_effect=[bad, Response(status=404), Response(status=404)],
         ):
             response = self.post(stream=stream)
         error = response.get_json()["error"]
         failure = error["failures"][0]
+        self.assertEqual(error["attempts"], 3)
         self.assertEqual(failure["reason"], "schema_mismatch")
         self.assertEqual(failure["upstream_status"], 200)
         self.assertEqual(failure["status"], 502)
