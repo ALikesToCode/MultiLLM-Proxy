@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import "./test_roleplay_message_validation_worker.mjs";
 
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import {

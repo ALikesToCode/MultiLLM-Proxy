@@ -102,6 +102,13 @@ Use either:
 - `messages`: OpenAI-style text messages.
 
 When both are present, `input` is appended as the newest user message.
+Blank text placeholders (empty, whitespace-only, null, or missing `content`)
+are omitted from incoming messages. A request still needs at least one
+nonblank message or `input`. Tool-associated messages, refusals, invalid
+roles, and non-text content are not silently discarded; their existing
+validation remains in effect. This normalization applies only to roleplay
+routes, not raw provider routes.
+
 An individual `system`, `developer`, `user`, or `assistant` message may use the
 remaining bounded request body instead of being rejected at 128,000
 characters. Before provider egress, long text is split losslessly into ordered

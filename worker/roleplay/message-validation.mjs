@@ -9,6 +9,16 @@ const ALLOWED_ROLES = new Set([
   "tool",
 ]);
 
+function isBlankTextPlaceholder(message, role) {
+  // Tool calls, results, and refusals carry meaning even without text.
+  if (role === "tool" || ["tool_calls", "function_call", "tool_call_id", "refusal"]
+    .some(field => Object.hasOwn(message, field))) {
+    return false;
+  }
+  return message.content === undefined || message.content === null ||
+    (typeof message.content === "string" && !message.content.trim());
+}
+
 function sanitizeMessage(message, index, maximumCharacters) {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     throw new RoleplayRequestError(`messages[${index}] must be an object`);
@@ -24,6 +34,7 @@ function sanitizeMessage(message, index, maximumCharacters) {
       `messages[${index}].role is not supported`,
     );
   }
+  if (isBlankTextPlaceholder(message, role)) return null;
   const content = boundedString(
     message.content,
     `messages[${index}].content`,
@@ -62,5 +73,5 @@ export function sanitizeRoleplayMessages(value, maximumCharacters) {
   }
   return value.map((message, index) =>
     sanitizeMessage(message, index, maximumCharacters),
-  );
+  ).filter(message => message !== null);
 }
