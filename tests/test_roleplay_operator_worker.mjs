@@ -24,9 +24,8 @@ test("request-path pins enforce provider, model, billing, and one attempt", asyn
   }, async () => {
     const response = await handleRoleplayEdgeRequest(turn("pin-request-case", { model: "roleplay:auto", memory: { mode: "off" },
       routing: { mode: "pinned", provider: "nanogpt", model: "z-ai/glm-5.3", billing: "subscription-only", fallback: "none" } }), fixture.env);
-    // Exhausted safe-fallback pools use the existing no-provider response.
-    assert.equal(response.status, 503);
-    await response.text();
+    assert.equal(response.status, 429);
+    assert.deepEqual(await response.json(), { error: { message: "rejected" } });
     await fixture.waitForBackgroundWork();
   });
   assert.equal(count, 1);

@@ -306,6 +306,14 @@ one provider before the next provider tier is tried. Transport errors and
 other `5xx` responses remain ambiguous because a provider might have started
 generation; the Worker stops instead of risking a duplicate request.
 
+When the last eligible candidate rejects the request, the Worker preserves its
+HTTP status, error body, and rate-limit headers, including `Retry-After`.
+`X-Roleplay-Provider`, `X-Roleplay-Model`, and `X-Roleplay-Fallback-Count` identify
+the final attempt. A provider rejection is not replaced with a generic
+`no_roleplay_provider` error. For example, NanoGPT rejects disabling reasoning
+on GLM 5.3 with `400 reasoning_required`; omit `reasoning_effort` to use the
+configured default or use a supported nonzero effort such as `high`.
+
 `Idempotency-Key` is optional but recommended. The session stores recent keys
 before any model call. Reusing one returns `409` and does not start another
 generation. This is a duplicate-execution guard, not a response replay cache.

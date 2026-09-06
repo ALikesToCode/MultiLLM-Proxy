@@ -341,6 +341,64 @@ test("roleplay reports the final provider transport failure", async () => {
   assert.equal((await response.json()).error.code, "provider_transport_failure");
 });
 
+for (const status of [400, 404, 429, 503]) {
+  for (const stream of [false, true]) {
+    for (const candidateCount of [1, 2]) {
+      test(`roleplay preserves final HTTP ${status}, stream=${stream}, candidates=${candidateCount}`, async () => {
+        const fixture = transportFallbackEnv({
+          ROLEPLAY_PROVIDER_ORDER:
+            candidateCount === 1 ? "nanogpt" : "nanogpt,opencode",
+        });
+        let calls = 0;
+        let finalBody;
+        const response = await withGlobalFetch(async () => {
+          calls += 1;
+          finalBody = JSON.stringify({
+            error: {
+              message: `Rejected attempt ${calls}`,
+              code: "upstream_rejection",
+            },
+          });
+          return new Response(finalBody, {
+            status,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": "17",
+              "X-RateLimit-Remaining-Tokens": "0",
+              "X-Request-ID": `upstream-${calls}`,
+              "Set-Cookie": "upstream-private=value",
+            },
+          });
+        }, () => handleRoleplayEdgeRequest(
+          roleplayRequest({
+            session_id: `session-http-${status}-${stream}-${candidateCount}`,
+            input: "Continue.",
+            model: "roleplay:glm",
+            stream,
+          }), fixture.env,
+        ));
+
+        assert.equal(response.status, status);
+        assert.equal(await response.text(), finalBody);
+        assert.equal(calls, candidateCount);
+        assert.equal(response.headers.get("Retry-After"), "17");
+        assert.equal(response.headers.get("X-RateLimit-Remaining-Tokens"), "0");
+        assert.equal(response.headers.get("X-Request-ID"), `upstream-${calls}`);
+        assert.equal(response.headers.get("Set-Cookie"), null);
+        assert.equal(
+          response.headers.get("X-Roleplay-Fallback-Count"),
+          String(candidateCount - 1),
+        );
+        assert.equal(
+          response.headers.get("X-Roleplay-Provider"),
+          candidateCount === 1 ? "nanogpt" : "opencode",
+        );
+        assert.equal(response.headers.get("X-Roleplay-Failure-Kind"), "http_status");
+      });
+    }
+  }
+}
+
 test("roleplay never advances after a client abort", async () => {
   const fixture = transportFallbackEnv();
   const controller = new AbortController();

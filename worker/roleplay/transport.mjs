@@ -173,6 +173,7 @@ async function handleCandidateHttpFailure(
   candidate,
   attempted,
   settings,
+  hasFallbackCandidate,
   fallbackCount,
 ) {
   const nextState = recordModelResult(state, candidate, {
@@ -201,7 +202,7 @@ async function handleCandidateHttpFailure(
     },
   );
 
-  if (safeFallback) {
+  if (safeFallback && hasFallbackCandidate) {
     await attempted.response.body?.cancel();
     return {
       state: nextState,
@@ -902,6 +903,7 @@ export async function attemptRoleplayCandidates(
       candidate,
       attempted,
       settings,
+      candidateIndex + 1 < candidates.length,
       fallbackCount,
     );
     nextState = failure.state;
