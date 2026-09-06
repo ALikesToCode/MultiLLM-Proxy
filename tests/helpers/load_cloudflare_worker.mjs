@@ -49,6 +49,10 @@ export async function roleplayModuleUrl() {
     "../../worker/roleplay/memory.mjs",
     import.meta.url,
   );
+  const messageValidationUrl = new URL(
+    "../../worker/roleplay/message-validation.mjs",
+    import.meta.url,
+  );
   const messageFragmentsUrl = new URL(
     "../../worker/roleplay/message-fragments.mjs",
     import.meta.url,
@@ -149,6 +153,7 @@ export async function roleplayModuleUrl() {
     historyReconciliationSource,
     fallbackMemorySource,
     memorySource,
+    messageValidationSource,
     messageFragmentsSource,
     modelSelectionSource,
     modelPerformanceSource,
@@ -184,6 +189,7 @@ export async function roleplayModuleUrl() {
       readFile(historyReconciliationUrl, "utf8"),
       readFile(fallbackMemoryUrl, "utf8"),
       readFile(memoryUrl, "utf8"),
+      readFile(messageValidationUrl, "utf8"),
       readFile(messageFragmentsUrl, "utf8"),
       readFile(modelSelectionUrl, "utf8"),
       readFile(modelPerformanceUrl, "utf8"),
@@ -210,6 +216,12 @@ export async function roleplayModuleUrl() {
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
   const capacityDataUrl = dataModuleUrl(capacitySource);
   const validationDataUrl = dataModuleUrl(validationSource);
+  const messageValidationDataUrl = dataModuleUrl(
+    messageValidationSource.replace(
+      'from "./validation.mjs";',
+      `from "${validationDataUrl}";`,
+    ),
+  );
   const modelSelectionDataUrl = dataModuleUrl(
     modelSelectionSource.replace(
       'from "./validation.mjs";',
@@ -338,6 +350,7 @@ export async function roleplayModuleUrl() {
   );
   const memoryDataUrl = dataModuleUrl(
     memorySource
+      .replace('from "./message-validation.mjs";', `from "${messageValidationDataUrl}";`)
       .replace(
         'from "./directives.mjs";',
         `from "${directivesDataUrl}";`,
