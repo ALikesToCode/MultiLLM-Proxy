@@ -21,10 +21,10 @@ _MISMATCH = re.compile(
 )
 
 
-def inspect_compatibility(upstream):
+def inspect_compatibility_detail(upstream):
     """Replay inspected bytes for ordinary errors, including streaming transports."""
     if upstream.status_code not in {400, 413, 422}:
-        return upstream, False
+        return upstream, None
     response = upstream if isinstance(upstream, Response) else stream_upstream_response(upstream)
     iterator = iter(response.iter_encoded())
     buffered = []
@@ -37,13 +37,27 @@ def inspect_compatibility(upstream):
         size += len(chunk)
     response.response = chain(buffered, iterator)
     if size > ERROR_BYTES:
-        return response, False
+        return response, None
     try:
         payload = json.loads(b"".join(buffered))
     except (ValueError, UnicodeError):
-        return response, False
+        return response, None
     error = payload.get("error") if isinstance(payload, dict) else None
     if not isinstance(error, dict):
-        return response, False
+        return response, None
     text = " ".join(str(error.get(field, "")) for field in ("message", "code", "param"))
-    return response, bool(_MISMATCH.search(text))
+    if not _MISMATCH.search(text):
+        return response, None
+    if re.search(r"request too large for model|context length|context_length_exceeded", text, re.I):
+        return response, "input_too_large"
+    if re.search(r"too many images|number of images|\d+ images", text, re.I):
+        return response, "image_limit"
+    if re.search(r"response_format|json_schema|no endpoints found that support", text, re.I):
+        return response, "output_format"
+    return response, "vision_input"
+
+
+def inspect_compatibility(upstream):
+    """Keep the boolean inspection contract for existing callers."""
+    response, reason = inspect_compatibility_detail(upstream)
+    return response, reason is not None

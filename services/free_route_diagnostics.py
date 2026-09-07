@@ -23,10 +23,10 @@ OUTPUT_REASONS = {
 }
 
 
-def failure_detail(candidate, status, upstream_status, reason=None, retry_after=0):
+def failure_detail(candidate, status, upstream_status, reason=None, retry_after=0, *, compatibility=None):
     if reason != "unsupported_parameters" and reason not in OUTPUT_REASONS:
         reason = STATUS_REASONS.get(status, "upstream_unavailable")
-    return {
+    detail = {
         "provider": candidate.provider,
         "model": candidate.id,
         "reason": reason,
@@ -34,6 +34,9 @@ def failure_detail(candidate, status, upstream_status, reason=None, retry_after=
         "upstream_status": upstream_status,
         "retry_after": retry_after,
     }
+    if compatibility in {"input_too_large", "image_limit", "output_format", "vision_input"}:
+        detail["compatibility"] = compatibility
+    return detail
 
 
 def exhausted_details(configured, failures, cooldown, *, stop_reason):

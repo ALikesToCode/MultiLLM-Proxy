@@ -112,6 +112,12 @@ They contain no prompts, images, schema values, credentials or raw upstream
 errors. Cooldown rows are capped at 16 with `cooldowns_truncated` indicating
 omitted rows. No per-request body is retained for these diagnostics.
 
+Compatibility failures also identify `input_too_large`, `image_limit`,
+`output_format`, or `vision_input` in the `compatibility` field. A large
+multi-image request can exceed a provider's input-token limit even when a
+single-image request succeeds. Reduce batch size before repeating that request;
+this is not evidence of daily quota exhaustion.
+
 Batch clients should honor `retryable` and `Retry-After`, use bounded backoff
 with jitter, and retain failed items for later verification. A structured-output
 request with only incompatible endpoints returns `retryable: false` and no

@@ -23,9 +23,10 @@ _AIHUBMIX_QUOTA_PREFIX = (
 
 
 class FreeUpstreamFailure(Exception):
-    def __init__(self, status: int = 502, reason: str = "invalid_response"):
+    def __init__(self, status: int = 502, reason: str = "invalid_response", *, compatibility=None):
         self.status = status
         self.reason = reason
+        self.compatibility = compatibility
 
 
 def _checked_chunks(response, deadline, limit=8 * 1024 * 1024):

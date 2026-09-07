@@ -4,7 +4,9 @@ import json
 
 from flask import Response
 
-from services.free_compatibility import inspect_compatibility
+from services.free_compatibility import inspect_compatibility, inspect_compatibility_detail
+from services.free_model_policy import FreeCandidate
+from services.free_route_diagnostics import failure_detail
 
 
 def test_model_input_size_limit_allows_compatibility_fallback():
@@ -34,3 +36,21 @@ def test_generic_payload_limit_is_not_model_compatibility():
     response, incompatible = inspect_compatibility(Response(body, status=413))
     assert incompatible is False
     assert response.get_data(as_text=True) == body
+
+
+def test_compatibility_categories_do_not_expose_error_content():
+    candidate = FreeCandidate("groq:synthetic", "groq", "synthetic", True, "free-tier-attested")
+    cases = [
+        (413, "Request too large for model private-model", "input_too_large"),
+        (400, "Too many images for private-model", "image_limit"),
+        (422, "json_schema is not supported by private-model", "output_format"),
+        (400, "vision input is not supported by private-model", "vision_input"),
+    ]
+    for status, message, expected in cases:
+        _, category = inspect_compatibility_detail(Response(json.dumps({"error": {"message": message}}), status=status))
+        assert category == expected
+        detail = failure_detail(candidate, 502, status, "unsupported_parameters", compatibility=category)
+        assert detail["compatibility"] == expected
+        assert "private-model" not in json.dumps(detail)
+    detail = failure_detail(candidate, 502, 413, "unsupported_parameters", compatibility="private-model")
+    assert "compatibility" not in detail

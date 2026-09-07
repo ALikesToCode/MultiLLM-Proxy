@@ -10,7 +10,7 @@ from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, stream_upstream_response
 from routes.free_response import FreeUpstreamFailure, validated_free_response
-from services.free_compatibility import inspect_compatibility
+from services.free_compatibility import inspect_compatibility_detail
 from services.free_json_contract import json_output_requested
 from services.free_model_policy import (
     FREE_MODELS,
@@ -125,7 +125,8 @@ def _record_attempt_failure(candidate, payload, error, status, upstream_status, 
         reason = error.reason
     else:
         reason = None
-    return failure_detail(candidate, status, upstream_status, reason, _cooldown(candidate))
+    return failure_detail(candidate, status, upstream_status, reason, _cooldown(candidate),
+                          compatibility=getattr(error, "compatibility", None))
 
 
 def _try_candidate(
@@ -142,9 +143,9 @@ def _try_candidate(
         )
         status, headers = upstream.status_code, upstream.headers
         upstream_status = status
-        upstream, incompatible = inspect_compatibility(upstream)
+        upstream, incompatible = inspect_compatibility_detail(upstream)
         if incompatible:
-            raise FreeUpstreamFailure(502, reason="unsupported_parameters")
+            raise FreeUpstreamFailure(502, reason="unsupported_parameters", compatibility=incompatible)
         if status in FAILOVER_STATUSES:
             raise FreeUpstreamFailure(status, reason="upstream_status")
         if status >= 400:
