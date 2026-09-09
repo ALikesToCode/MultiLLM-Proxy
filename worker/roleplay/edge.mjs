@@ -4,6 +4,7 @@ import { ROLEPLAY_PUBLIC_MODEL_ALIASES } from "./model-selection.mjs";
 import { RoleplayRequestError } from "./memory.mjs";
 import { errorResponse, jsonResponse, logRoleplayError, readBoundedBytes } from "./transport.mjs";
 import { handleRoleplayOperatorRequest } from "./operator-edge.mjs";
+import { clientContextHeaders, withClientDefaults, withOpencodeSession } from "../client-headers.mjs";
 
 const JANITOR_ORIGINS = new Set([
   "https://janitorai.com",
@@ -193,7 +194,11 @@ export async function handleRoleplayEdgeRequest(request, env) {
     }
     const idempotencyKey = getIdempotencyKey(payload, request);
     const stub = roleplayStub(env, session.id, request);
-    const headers = new Headers({ "Content-Type": "application/json" });
+    const headers = withOpencodeSession(
+      withClientDefaults(clientContextHeaders(request.headers, "opencode"), env),
+      session.id,
+    );
+    headers.set("Content-Type", "application/json");
     if (idempotencyKey) {
       headers.set("Idempotency-Key", idempotencyKey);
     }

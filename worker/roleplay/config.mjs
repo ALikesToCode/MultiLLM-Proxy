@@ -1,4 +1,5 @@
 import { rankFastestEligible, rankQualityEligible } from "./routing-policy.mjs";
+import { clientContextHeaders, withClientDefaults, withOpencodeSession } from "../client-headers.mjs";
 import {
   parseRoleplayProviderLimits,
   resolveRoleplayCandidateLimits,
@@ -771,12 +772,12 @@ export function roleplayCatalog(env, settings) {
   return [...catalog.values()];
 }
 
-export function buildProviderHeaders(candidate, env, idempotencyKey = "") {
-  const headers = new Headers({
-    Accept: "application/json",
-    Authorization: `Bearer ${candidate.token}`,
-    "Content-Type": "application/json",
-  });
+export function buildProviderHeaders(candidate, env, idempotencyKey = "", clientHeaders = {}) {
+  let headers = withClientDefaults(clientContextHeaders(clientHeaders, candidate.provider), env);
+  if (candidate.provider === "opencode") headers = withOpencodeSession(headers);
+  headers.set("Accept", "application/json");
+  headers.set("Authorization", `Bearer ${candidate.token}`);
+  headers.set("Content-Type", "application/json");
 
   if (idempotencyKey) {
     headers.set("Idempotency-Key", idempotencyKey);

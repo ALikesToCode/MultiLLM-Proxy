@@ -35,6 +35,11 @@ OPENCODE_GO_API_KEY=your-opencode-go-api-key
 
 `OPENCODE_GO_API_KEY` takes precedence when both key names are set.
 
+Missing client headers default to Codex across all providers, including roleplay.
+Explicit caller identity and session headers take precedence. See
+[client header defaults and overrides](client-headers.md) for fleet-wide settings
+and OpenCode session mapping.
+
 ## Client base URLs
 
 | Client | Proxy base URL |

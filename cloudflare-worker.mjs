@@ -1,5 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
+import { CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, withClientDefaults, withOpencodeSession } from "./worker/client-headers.mjs";
 import {
   RoleplaySession,
   handleRoleplayEdgeRequest,
@@ -74,6 +75,8 @@ const LINKAPI_ALLOWED_HOSTNAMES = new Set([
 const OPENCODE_DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
 const OPENCODE_ROUTE_PREFIX = "/opencode";
 const OPENCODE_REQUEST_HEADER_WHITELIST = new Set([
+  ...CLIENT_HEADER_NAMES,
+  ...OPENCODE_CLIENT_HEADER_NAMES,
   "accept",
   "accept-language",
   "anthropic-beta",
@@ -98,6 +101,7 @@ const OPENCODE_REQUEST_HEADER_WHITELIST = new Set([
   "x-stainless-timeout",
 ]);
 const LINKAPI_REQUEST_HEADER_WHITELIST = new Set([
+  ...CLIENT_HEADER_NAMES,
   "accept",
   "accept-language",
   "anthropic-beta",
@@ -146,6 +150,7 @@ const LINKAPI_RESPONSE_HEADER_PREFIXES = [
   "x-ratelimit-",
 ];
 const CODEX_EASY_REQUEST_HEADER_WHITELIST = new Set([
+  ...CLIENT_HEADER_NAMES,
   "accept",
   "content-type",
   "idempotency-key",
@@ -797,13 +802,14 @@ function buildOpencodeUpstreamHeaders(
   upstreamToken,
   callerAuth,
 ) {
-  const headers = new Headers();
+  let headers = new Headers();
 
   for (const [header, value] of request.headers.entries()) {
     if (OPENCODE_REQUEST_HEADER_WHITELIST.has(header.toLowerCase())) {
       headers.set(header, value);
     }
   }
+  headers = withOpencodeSession(headers);
 
   if (
     request.method !== "GET" &&
@@ -1779,7 +1785,8 @@ function buildCorsHeaders(request) {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": CORS_ALLOWED_METHODS,
     "Access-Control-Allow-Headers":
-      request.headers.get("Access-Control-Request-Headers") ?? CORS_DEFAULT_HEADERS,
+      request.headers.get("Access-Control-Request-Headers") ??
+      [CORS_DEFAULT_HEADERS, ...CLIENT_HEADER_NAMES, ...OPENCODE_CLIENT_HEADER_NAMES].join(", "),
     "Access-Control-Expose-Headers": CORS_EXPOSE_HEADERS,
     "Access-Control-Max-Age": "86400",
   };
@@ -1882,6 +1889,10 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (apiPath && !readyPath) {
+      request = new Request(request, { headers: withClientDefaults(request.headers, env) });
     }
 
     if (roleplayPath) {

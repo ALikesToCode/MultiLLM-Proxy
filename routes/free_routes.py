@@ -11,6 +11,7 @@ from request_validation import json_object_body
 from route_helpers import api_auth_required, stream_upstream_response
 from routes.free_response import FreeUpstreamFailure, validated_free_response
 from services.free_compatibility import inspect_compatibility_detail
+from services.client_headers import client_context_headers, with_client_defaults
 from services.free_json_contract import json_output_requested
 from services.free_model_policy import (
     FREE_MODELS,
@@ -82,14 +83,15 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     return proxy.make_request(
         method="POST",
         url=url,
-        headers={
+        headers=with_client_defaults({
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "text/event-stream"
             if payload.get("stream")
             else "application/json",
             **dict(FREE_PROVIDERS[candidate.provider].headers),
-        },
+            **client_context_headers(request.headers, candidate.provider),
+        }, candidate.provider),
         params={},
         data=json.dumps(upstream_payload, ensure_ascii=False).encode("utf-8"),
         api_provider=candidate.provider,

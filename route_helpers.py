@@ -10,6 +10,7 @@ from flask import Response, g, has_request_context, jsonify, redirect, request, 
 
 from config import Config
 from services.auth_service import AuthService
+from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES
 from services.cost_service import CostService
 from services.metrics_service import MetricsService
 from services.rate_limit_service import RateLimitService
@@ -30,7 +31,8 @@ CORS_DEFAULT_HEADERS = (
     "OpenAI-Project, Moderation, Moderation-Model, Redaction, X-App-Name, "
     "X-Billing-Mode, X-BYOK-Provider, X-Client-Request-ID, X-Encryption-Key, "
     "X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, "
-    "X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402"
+    "X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402, "
+    + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
     "Retry-After, X-Request-ID, X-MultiLLM-Optimization, "

@@ -536,7 +536,7 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   const startedAt = performance.now();
 
   try {
-    const headers = buildProviderHeaders(candidate, env, key);
+    const headers = buildProviderHeaders(candidate, env, key, settings.clientHeaders);
     const containerNamespace = env.MULTILLM_PROXY_CONTAINER;
     const useOpenCodeContainer =
       candidate.provider === "opencode" &&

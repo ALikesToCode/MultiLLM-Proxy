@@ -24,6 +24,7 @@ from services.context_optimizer import (
     validate_summary_digest,
 )
 from services.model_registry import ModelRegistry
+from services.client_headers import client_context_headers
 from services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger(__name__)
@@ -156,7 +157,7 @@ def _request_summary_digest(
             metrics_service_cls,
             proxy_service_cls,
             summary_payload,
-            request_headers={},
+            request_headers=client_context_headers(request.headers, "opencode"),
             request_args=[],
             request_timeout=_summary_request_timeout(),
             adaptive_context=False,

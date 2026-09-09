@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { clientContextHeaders } from "../client-headers.mjs";
 import { TurnTraceJournal } from "./turn-trace.mjs";
 import { handleOperatorMemory } from "./operator-memory.mjs";
 import { recoveryTemplate, preserveRecovery, handleRecoverySnapshot } from "./recovery.mjs";
@@ -174,6 +175,7 @@ export class RoleplaySession extends DurableObject {
   }
 
   async handleTurn(request, settings, queueMs = 0, trace = null) {
+    settings = { ...settings, clientHeaders: clientContextHeaders(request.headers, "opencode") };
     const turnStartedAt = performance.now();
     let compactionMs = 0;
     const payload = await request.json();

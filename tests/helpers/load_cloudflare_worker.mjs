@@ -237,6 +237,7 @@ export async function roleplayModuleUrl() {
   const modelPerformanceDataUrl = dataModuleUrl(modelPerformanceSource);
   const configDataUrl = dataModuleUrl(
     configSource
+      .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
       .replace('from "./routing-policy.mjs";', `from "${new URL("../../worker/roleplay/routing-policy.mjs", import.meta.url)}";`)
       .replace(
         'from "./capacity.mjs";',
@@ -470,6 +471,7 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./recovery.mjs";', `from "${new URL("../../worker/roleplay/recovery.mjs", import.meta.url)}";`)
     .replace('from "./operator-memory.mjs";', `from "${new URL("../../worker/roleplay/operator-memory.mjs", import.meta.url)}";`)
     .replace('from "./routing-policy.mjs";', `from "${new URL("../../worker/roleplay/routing-policy.mjs", import.meta.url)}";`)
@@ -706,6 +708,7 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace(
       'from "./worker/container-env.mjs";',
       `from "${new URL("../../worker/container-env.mjs", import.meta.url)}";`,

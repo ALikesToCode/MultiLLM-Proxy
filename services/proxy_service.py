@@ -9,6 +9,7 @@ from request_validation import decode_json_object_bytes, validated_gemini_model_
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
+from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, with_client_defaults
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.image_relays import image_relay_spec
@@ -110,6 +111,7 @@ class ProxyService:
     RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
     SAFE_RETRY_METHODS = {"GET", "HEAD", "OPTIONS"}
     UPSTREAM_HEADER_WHITELIST = {
+        **CLIENT_HEADER_NAMES,
         "accept": "Accept",
         "accept-language": "Accept-Language",
         "anthropic-version": "Anthropic-Version",
@@ -385,6 +387,7 @@ class ProxyService:
             header_whitelist.update(NAVYAI_REQUEST_HEADER_WHITELIST)
         elif api_provider == "opencode":
             header_whitelist.update(OPENCODE_GO_REQUEST_HEADER_WHITELIST)
+            header_whitelist.update(OPENCODE_CLIENT_HEADER_NAMES)
         elif api_provider == "linkapi":
             header_whitelist.update(
                 {
@@ -565,7 +568,7 @@ class ProxyService:
         ):
             headers["Anthropic-Version"] = "2023-06-01"
 
-        return headers
+        return with_client_defaults(headers, api_provider)
 
     @classmethod
     def prepare_params(
@@ -3340,6 +3343,7 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
+        headers = with_client_defaults(headers, api_provider)
         raw_passthrough = (
             force_raw_passthrough
             or api_provider in RAW_PASSTHROUGH_PROVIDERS
