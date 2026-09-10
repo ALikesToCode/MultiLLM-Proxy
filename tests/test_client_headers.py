@@ -162,6 +162,22 @@ def test_shared_transport_supplies_defaults_for_internal_requests(provider):
 
 
 class ClientHeaderRouteTest(UnifiedApiTestCase):
+    def test_headerless_native_and_unified_calls_reach_transport_with_session(self):
+        self.client.environ_base.pop("HTTP_USER_AGENT", None)
+        for route, model in (
+            ("/opencode/v1/chat/completions", "glm-5.3-flash"),
+            ("/opencode/v1/responses", "gpt-5.6-luna"),
+            ("/opencode/v1/messages", "minimax-m3"),
+            ("/v1/chat/completions", "opencode:glm-5.3-flash"),
+        ):
+            with self.subTest(route=route):
+                with patch.object(ProxyService, "_make_base_request", return_value=self._chat_response()) as send:
+                    response = self.client.post(route, headers={"Authorization": "Bearer admin-test-key"}, json={
+                        "model": model, "messages": [{"role": "user", "content": "Synthetic request"}], "input": "Synthetic request",
+                    })
+                assert response.status_code == 200
+                assert send.call_args.kwargs["headers"]["X-Opencode-Session"].startswith("multillm_v1_")
+
     def test_headers_reach_upstream_from_native_and_unified_routes(self):
         self.client.environ_base.pop("HTTP_USER_AGENT", None)
         for route in ("/opencode/v1/chat/completions", "/v1/chat/completions"):

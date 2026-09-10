@@ -43,6 +43,7 @@ export function withClientDefaults(source, env = {}) {
 export function withOpencodeSession(source, fallback = "") {
   const headers = new Headers(source);
   if (!validValue(headers.get("x-opencode-session"))) {
+    headers.delete("x-opencode-session");
     const session = SESSION_HEADER_NAMES.map((name) => headers.get(name)).find(validValue);
     if (session || validValue(fallback)) headers.set("x-opencode-session", session || fallback);
   }

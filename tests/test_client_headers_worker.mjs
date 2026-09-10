@@ -2,10 +2,100 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CLIENT_HEADER_NAMES, clientContextHeaders, withClientDefaults, withOpencodeSession } from "../worker/client-headers.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
+import { MAX_SESSION_BODY_BYTES, withOpencodeRequestSession } from "../worker/opencode-session.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { completionResponse, makeRoleplayEnv, roleplayRequest, withGlobalFetch } from "./helpers/roleplay_fixture.mjs";
 
 const { default: worker } = await loadWorkerModule();
+
+const sessionAuth = { Authorization: "Bearer synthetic-provider-key" };
+function sessionRequest(payload) {
+  const body = JSON.stringify(payload);
+  return new Request("https://proxy.example/opencode/v1/chat/completions", {
+    method: "POST", body, headers: { "Content-Type": "application/json", "Content-Length": String(new TextEncoder().encode(body).byteLength) },
+  });
+}
+async function inferredSession(payload, headers = sessionAuth) {
+  return (await withOpencodeRequestSession(sessionRequest(payload), headers)).get("x-opencode-session");
+}
+
+test("headerless OpenCode requests infer stable credential-scoped conversation affinity", async () => {
+  const messages = [{ role: "system", content: "Synthetic coding assistant" }, { role: "user", content: "Fix the parser" }];
+  const first = await inferredSession({ messages, model: "first" });
+  const later = { messages: [...messages, { role: "assistant", content: "Done" }, { role: "user", content: "Add tests" }], model: "second", stream: true };
+  assert.equal(first, await inferredSession(later));
+  assert.equal(first, await inferredSession(later));
+  assert.notEqual(first, await inferredSession({ messages }, { Authorization: "Bearer other-key" }));
+  assert.notEqual(first, await inferredSession({ messages, instructions: "Different instructions" }));
+  assert.match(first, /^multillm_v1_[a-f0-9]{64}$/);
+  assert.equal(await inferredSession({ input: "Fix the parser" }), await inferredSession({ input: [{ role: "user", content: "Fix the parser" }] }));
+  for (const payload of [
+    { session_id: "body-session" }, { conversation_id: "body-session" },
+    { metadata: { session_id: "body-session" } }, { metadata: { conversation_id: "body-session" } },
+    { conversation: "body-session" }, { conversation: { id: "body-session" } },
+  ]) {
+    assert.equal(await inferredSession(payload), await inferredSession({ ...payload, messages }));
+  }
+  const payloads = Array.from({ length: 20 }, (_, i) => ({ session_id: `conversation-${i}` }));
+  const concurrent = await Promise.all(payloads.map((payload) => inferredSession(payload)));
+  assert.equal(new Set(concurrent).size, 20);
+  assert.deepEqual(concurrent, await Promise.all(payloads.map((payload) => inferredSession(payload))));
+});
+
+test("session inference preserves bytes, honors overrides, and bounds discovery", async () => {
+  for (const body of ["invalid", "[]", "{}", '{"messages":[]}', "x".repeat(MAX_SESSION_BODY_BYTES + 1)]) {
+    const request = new Request("https://proxy.example", {
+      method: "POST", body, headers: { "Content-Type": "application/json", "Content-Length": String(body.length) },
+    });
+    const headers = await withOpencodeRequestSession(request, sessionAuth);
+    assert.match(headers.get("x-opencode-session"), /^multillm_request_/);
+    assert.equal(await request.text(), body);
+    assert.equal((await withOpencodeRequestSession(new Request("https://proxy.example"), headers)).get("x-opencode-session"), headers.get("x-opencode-session"));
+  }
+  assert.notEqual(await inferredSession({}), await inferredSession({}));
+  const override = sessionRequest({ messages: [{ role: "user", content: "test" }] });
+  await override.text();
+  assert.equal((await withOpencodeRequestSession(override, { ...sessionAuth, "thread-id": "explicit-thread" })).get("x-opencode-session"), "explicit-thread");
+  assert.match(await inferredSession({ input: "test" }, { ...sessionAuth, "x-opencode-session": " " }), /^multillm_v1_/);
+  assert.match(await inferredSession({ input: "test" }, { ...sessionAuth, "x-opencode-session": "é" }), /^multillm_v1_/);
+});
+
+test("Worker and Container use the same Unicode content fingerprint", async () => {
+  assert.equal(await inferredSession({ messages: [{ role: "user", content: [{ type: "text", text: "Fix café ☀️" }] }] }), "multillm_v1_83fe68c7b57180ce4a00dad94ce61a386749ceeeab759bc938035d56734c00e2");
+});
+
+test("stalled affinity discovery times out without consuming the original upload", async () => {
+  let controller;
+  const request = new Request("https://proxy.example", {
+    method: "POST", duplex: "half",
+    headers: { "Content-Type": "application/json", "Content-Length": "26" },
+    body: new ReadableStream({ start(value) { controller = value; } }),
+  });
+  const headers = await withOpencodeRequestSession(request, sessionAuth);
+  assert.match(headers.get("x-opencode-session"), /^multillm_request_/);
+  controller.enqueue(new TextEncoder().encode('{"input":"Delayed upload"}'));
+  controller.close();
+  assert.equal(await request.text(), '{"input":"Delayed upload"}');
+});
+
+test("every direct OpenCode protocol supplies a session without harness headers", async () => {
+  for (const path of ["/opencode/v1/chat/completions", "/opencode/v1/responses", "/opencode/v1/messages", "/opencode/v1/models"]) {
+    const env = { ADMIN_API_KEY: "admin-test", OPENCODE_GO_API_KEY: "opencode-test", OPENCODE_EDGE_FETCH: "true" };
+    let seen;
+    const response = await withGlobalFetch(async (request) => {
+      seen = request.headers;
+      if (!seen.get("x-opencode-session")) return new Response('{"error":{"type":"MissingSessionID"}}', { status: 400 });
+      return new Response('{"data":[]}', { headers: { "Content-Type": "application/json" } });
+    }, () => worker.fetch(new Request(`https://proxy.example${path}`, {
+      method: path.endsWith("/models") ? "GET" : "POST",
+      headers: { Authorization: "Bearer admin-test", "Content-Type": "application/json", "Content-Length": "29" },
+      ...(path.endsWith("/models") ? {} : { body: '{"input":"Synthetic request"}' }),
+    }), env));
+    assert.equal(response.status, 200, path);
+    assert.match(seen.get("x-opencode-session"), /^multillm_(v1|request)_/, path);
+    assert.equal(seen.get("User-Agent"), "codex-cli", path);
+  }
+});
 
 test("Codex defaults are overridable, validated, and do not mutate caller headers", () => {
   const source = new Headers({ "uSeR-aGeNt": "fleet/1", Authorization: "Bearer test" });

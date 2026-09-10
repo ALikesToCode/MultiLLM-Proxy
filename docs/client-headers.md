@@ -54,8 +54,24 @@ are preserved on OpenCode routes.
 Roleplay uses its existing credential-scoped conversation ID when none of those
 session headers is supplied. Overrides are per turn and follow that turn through
 fallback, continuation, and compaction; they are not saved as session defaults.
-Other routes leave a missing session ID absent. There is no fleet-wide static
-session ID and no new random session on every retry.
+Other OpenCode routes also supply `x-opencode-session` when the caller sends no
+session headers. Before dispatch, the proxy derives an opaque, credential-scoped
+HMAC from a body `session_id`/`conversation_id` (including metadata and Responses
+`conversation`), or from the opening messages through the first user input.
+Responses string input and Anthropic Messages are supported. Added turns, output
+parameters, and model switches do not change an unchanged opening's ID.
+
+This is best-effort affinity, not reconstructed conversation state. Identical
+openings under the same credential can share affinity; changing or dropping the
+opening can change it. Explicit conversation IDs remain the reliable option.
+No prompts, keys, or generated IDs are stored by this fallback. It does not use
+one fleet-wide ID, an IP address, or a raw credential as the session header.
+
+Discovery is bounded to 1 MiB of JSON; the direct Worker path only probes declared
+JSON bodies with a known length and limits discovery to one second. Unknown-length
+uploads stream immediately. Missing, oversized, or unreadable input receives a unique ID for
+that logical request. Provider retries retain that ID. Request and response bodies
+remain unchanged. Other providers do not receive these inferred OpenCode headers.
 
 Existing authentication, billing, model selection, request bodies, and roleplay
 provider availability are unchanged. This forwarding policy does not include

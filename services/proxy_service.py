@@ -10,6 +10,7 @@ import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, with_client_defaults
+from services.opencode_session import with_opencode_request_session
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.image_relays import image_relay_spec
@@ -3343,7 +3344,11 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
-        headers = with_client_defaults(headers, api_provider)
+        headers = (
+            with_opencode_request_session(headers, data)
+            if api_provider == "opencode"
+            else with_client_defaults(headers, api_provider)
+        )
         raw_passthrough = (
             force_raw_passthrough
             or api_provider in RAW_PASSTHROUGH_PROVIDERS
