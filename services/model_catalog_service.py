@@ -48,11 +48,6 @@ def _model_supports_image_output(
 ) -> bool:
     if provider == "aihubmix":
         return is_aihubmix_image_model(model_id)
-    if is_image_relay_model(provider, model_id):
-        return True
-    if model_id in KNOWN_IMAGE_MODEL_IDS.get(provider, frozenset()):
-        return True
-
     provider_metadata = metadata or {}
     explicit_support = provider_metadata.get("supports_image_output")
     if isinstance(explicit_support, bool):
@@ -63,7 +58,9 @@ def _model_supports_image_output(
             str(modality).strip().lower() in {"image", "images"}
             for modality in output_modalities
         )
-    return False
+    return is_image_relay_model(provider, model_id) or (
+        model_id in KNOWN_IMAGE_MODEL_IDS.get(provider, frozenset())
+    )
 
 
 def _add_source(

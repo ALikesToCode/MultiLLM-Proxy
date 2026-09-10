@@ -179,6 +179,13 @@ context/output limits with built-in IDs and models already referenced by saved
 routes. A shared model name never inherits limits from another gateway.
 Provider keys and upstream error bodies are never returned to the browser.
 
+Configured image relays also refresh automatically when a catalog view is
+opened, with a five-minute refresh window and a one-minute retry delay after
+failure. This includes the global `/v1/models` list, `/admin/models`, the
+Operations picker, and the setup guide. Other providers still use the explicit
+**Refresh live models** action. Model-list refreshes do not generate images or
+chat completions.
+
 ## Failover boundary
 
 MultiLLM advances to the next locally available candidate only when the

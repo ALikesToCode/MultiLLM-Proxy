@@ -286,7 +286,14 @@ def image_relay_model_ids(provider: str) -> tuple[str, ...]:
 
 
 def is_image_relay_model(provider: str, model_id: str) -> bool:
-    return model_id in image_relay_model_ids(provider)
+    spec = image_relay_spec(provider)
+    if spec is None:
+        return False
+    # Minimal relay catalogs omit modalities. Recognize the versioned GPT
+    # Image family without treating every model on a mixed relay as an image model.
+    return model_id in spec.models or bool(
+        re.fullmatch(r"(?:openai/)?gpt-image-\d+(?:\.\d+)*(?:-[a-z0-9]+)*", model_id)
+    )
 
 
 def image_relay_credential_env_names(provider: str) -> tuple[str, ...]:

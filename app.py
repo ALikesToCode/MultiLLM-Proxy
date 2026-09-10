@@ -28,6 +28,7 @@ from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
+from services.image_relay_catalog import ImageRelayCatalogRefresh
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 
@@ -108,6 +109,7 @@ def create_app() -> Flask:
 
     init_error_handlers(app)
     AuthService.initialize()
+    app.extensions["image_relay_catalog_refresh"] = ImageRelayCatalogRefresh()
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
@@ -115,7 +117,7 @@ def create_app() -> Flask:
     register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_core_routes(app)
     register_workbench_routes(app)
-    register_documentation_routes(app, AuthService)
+    register_documentation_routes(app, AuthService, ProxyService)
 
     return app
 

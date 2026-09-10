@@ -6,6 +6,7 @@ from flask import Response, g, has_request_context, jsonify, request
 from error_handlers import APIError
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute, AutoRouteService
+from services.image_relay_catalog import refresh_image_relay_catalog
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
@@ -264,6 +265,7 @@ def register_auto_route_admin_routes(
     @login_required
     def admin_auto_routes():
         _require_admin(auth_service_cls)
+        refresh_image_relay_catalog(app, auth_service_cls, proxy_service_cls)
         if request.method == "PUT":
             payload = request.get_json(silent=True)
             if not isinstance(payload, dict):

@@ -56,6 +56,7 @@ class UnifiedApiTestCase(unittest.TestCase):
         self.config_module.Config.GEMINI_MODELS = ["gemini-test-model"]
         self.app = self.app_module.create_app()
         self.app.config["WTF_CSRF_ENABLED"] = False
+        self.app.config["IMAGE_RELAY_CATALOG_AUTO_REFRESH"] = False
         self.client = self.app.test_client()
 
     def tearDown(self):

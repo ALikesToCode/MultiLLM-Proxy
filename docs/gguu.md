@@ -1,8 +1,9 @@
 # GGUU AI image generation
 
 MultiLLM exposes GGUU AI as a credential-isolated OpenAI Images provider. The
-normalized model ID is `gguu:gpt-image-2`; native requests use the `/gguu/*`
-namespace. Chat and Responses routes are not advertised because GGUU's current
+normalized IDs use `gguu:<provider-model>`, including `gguu:gpt-image-2` and
+the live-discovered `gguu:gpt-image-2.5`; native requests use the `/gguu/*`
+namespace. Chat and Responses routes are not advertised because GGUU's
 GPT Image 2 guide documents the Images API only.
 
 ## Configuration
@@ -16,6 +17,19 @@ GGUU_API_KEY=your-gguu-api-key
 
 `GGUU_API_KEY` is preferred. Existing installations that use
 `GGUUAI_API_KEY` remain supported.
+
+The global `/v1/models` list, admin model list, Operations catalog, and setup
+guide automatically refresh configured image-relay catalogs on first read and
+then at most once every five minutes per process. This repopulates discovery
+after a container restart even when its local catalog database is ephemeral.
+Failed refreshes retain the last good list and wait one minute before retrying.
+Discovery only makes model-list requests; it does not generate images.
+
+New versioned GPT Image IDs receive the image-generation capability even when
+the relay omits modality metadata. Explicit output-modality metadata takes
+precedence. Other models are not assumed to generate images merely because
+they appear on the same relay. Clients that cache `/v1/models` must reload their
+model list to see newly discovered IDs.
 
 The built-in primary origin is `https://gguuai.com`. The bounded backup origin
 is `https://api.aiaimax.com`. A safe `GET /v1/models` transport failure can use
@@ -99,7 +113,7 @@ curl "$PROXY_BASE_URL/gguu/v1/images/edits" \
 The proxy preserves the multipart boundary and binary body without JSON
 normalization.
 
-## Current provider constraints
+## GPT Image 2 provider constraints
 
 - `model` is `gpt-image-2`.
 - `n` must be `1`.
@@ -115,4 +129,5 @@ normalization.
 - Streaming and partial-image events are not supported by this route.
 
 Use the live `/gguu/v1/models` response and the provider dashboard as the
-source of truth if these limits change.
+source of truth for newly listed models and their limits; the constraints above
+describe `gpt-image-2`, not a verified generation contract for every newer ID.

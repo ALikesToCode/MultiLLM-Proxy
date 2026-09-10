@@ -684,25 +684,13 @@ def dispatch_unified_image_generation(
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
-    register_model_discovery_route(app, csrf)
+    register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls)
     register_auto_route_admin_routes(
         app,
         login_required,
         auth_service_cls,
         proxy_service_cls,
     )
-
-    @app.route("/admin/models", methods=["GET"])
-    @login_required
-    def list_admin_models():
-        current_user = AuthService.get_current_user()
-        if not current_user or not current_user.get("is_admin"):
-            raise APIError("Only admin users can view models", status_code=403)
-        models = [
-            ModelRegistry.to_admin_dict(model)
-            for model in ModelRegistry.list_models(app.config["API_BASE_URLS"])
-        ]
-        return jsonify({"models": models})
 
     @app.route("/admin/models/<path:model_id>/disable", methods=["POST"])
     @login_required
