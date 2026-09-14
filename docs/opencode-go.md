@@ -200,6 +200,24 @@ model on `/v1/messages` must be called with the Anthropic Messages contract; a
 model on `/v1/responses` must be called with the OpenAI Responses contract.
 Listing a model in the unified catalog does not change its upstream protocol.
 
+## GLM thinking
+
+GLM-5.x Chat Completions requests default to `reasoning_effort: "max"` with
+`thinking: {"type": "enabled"}`. This applies to `/opencode/v1/chat/completions`,
+the legacy `/opencode/chat/completions` route, and unified
+`/v1/chat/completions` requests using `opencode:<model>`.
+Roleplay also enables GLM thinking; OpenCode `glm-5.3-flash` defaults to `max`
+even when the general roleplay default is lower.
+
+For GLM-5.3 Flash, send `reasoning_effort: "high"` or `"low"` to override the
+default. Direct and unified Chat routes also accept `reasoning: {"effort": "low"}`
+and translate it to `reasoning_effort`; `xhigh` maps to `max`. Explicit native
+`thinking` options are preserved for upstream validation. Z.ai documents
+`max`, `high`, and `low` for GLM-5.3 and GLM-5.3 Flash, and these models
+[require thinking to remain enabled](https://docs.z.ai/guides/capabilities/thinking).
+Requesting `max` selects the provider's strongest effort setting; it does not
+guarantee a fixed number of reasoning tokens.
+
 ## Streaming and compatibility
 
 `POST /opencode/v1/chat/completions` preserves OpenAI SSE framing while

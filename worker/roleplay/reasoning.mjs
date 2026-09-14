@@ -1,3 +1,5 @@
+import { opencodeGlmReasoningFields } from "../opencode/reasoning-policy.mjs";
+
 const MAXIMUM_EFFORT_BY_PROVIDER = Object.freeze({
   navyai: "max",
   linkapi: "high",
@@ -36,7 +38,7 @@ export function maximumReasoningProfile(candidate) {
     // Kimi K2.6 exposes fixed native thinking through OpenCode Go without a
     // supported effort overlay. OpenCode GLM 5.3 and 5.2 accept `max`.
     return family === "glm"
-      ? { mode: "max", effort: "max", fields: { reasoning_effort: "max" } }
+      ? { mode: "max", effort: "max", fields: opencodeGlmReasoningFields() }
       : { mode: "max", effort: "native", fields: {} };
   }
 
@@ -97,7 +99,18 @@ function reasoningFields(candidate, effort) {
   if (provider === "openrouter") {
     return { reasoning: { effort: mappedEffort } };
   }
+  if (provider === "opencode" && family === "glm") {
+    return opencodeGlmReasoningFields(mappedEffort);
+  }
   return { reasoning_effort: mappedEffort };
+}
+
+export function requestedReasoningEffort(payload, candidate, configuredDefault) {
+  if (payload.reasoning_effort != null) return payload.reasoning_effort;
+  const { provider, model } = normalizedCandidate(candidate);
+  return provider === "opencode" && model === "glm-5.3-flash"
+    ? "max"
+    : configuredDefault;
 }
 
 export function applyReasoningPolicy(
@@ -106,7 +119,7 @@ export function applyReasoningPolicy(
   { defaultEffort } = {},
 ) {
   const normalized = { ...payload };
-  const explicitEffort = normalized.reasoning_effort ?? defaultEffort;
+  const explicitEffort = requestedReasoningEffort(normalized, candidate, defaultEffort);
   if (
     explicitEffort !== undefined &&
     !REASONING_EFFORT_ORDER.includes(explicitEffort)
@@ -115,10 +128,12 @@ export function applyReasoningPolicy(
   }
   delete normalized.reasoning;
   delete normalized.reasoning_effort;
+  const fields = explicitEffort === undefined
+    ? maximumReasoningProfile(candidate).fields
+    : reasoningFields(candidate, explicitEffort);
+  if (Object.hasOwn(normalized, "thinking")) delete fields.thinking;
   return {
     ...normalized,
-    ...(explicitEffort === undefined
-      ? maximumReasoningProfile(candidate).fields
-      : reasoningFields(candidate, explicitEffort)),
+    ...fields,
   };
 }

@@ -27,6 +27,8 @@ def is_glm_52_model(model: str) -> bool:
 
 
 def is_glm_5_model(model: str) -> bool:
+    if not isinstance(model, str):
+        return False
     model_name = model.strip().lower().rsplit("/", 1)[-1]
     return model_name.split(":", 1)[0].startswith("glm-5.")
 
@@ -91,6 +93,10 @@ def apply_glm_5_reasoning_policy(
         }
     else:
         normalized["reasoning_effort"] = effort
+    if provider_name == "opencode" and effort not in {"none", "minimal"}:
+        # GLM applies effort only when thinking is enabled. Caller-owned
+        # thinking controls remain available for upstream validation.
+        normalized.setdefault("thinking", {"type": "enabled"})
     return normalized
 
 

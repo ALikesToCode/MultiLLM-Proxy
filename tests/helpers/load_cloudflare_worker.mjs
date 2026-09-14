@@ -335,7 +335,10 @@ export async function roleplayModuleUrl() {
   );
   const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
   const providerErrorsDataUrl = dataModuleUrl(providerErrorsSource);
-  const reasoningDataUrl = dataModuleUrl(reasoningSource);
+  const reasoningDataUrl = dataModuleUrl(reasoningSource.replace(
+    'from "../opencode/reasoning-policy.mjs";',
+    `from "${new URL("../../worker/opencode/reasoning-policy.mjs", import.meta.url)}";`,
+  ));
   const messageFragmentsDataUrl = dataModuleUrl(messageFragmentsSource);
   const sessionStorageDataUrl = dataModuleUrl(
     sessionStorageSource.replace(
@@ -710,6 +713,7 @@ export async function loadWorkerModule() {
   const patchedSource = source
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)
+    .replace('from "./worker/opencode/reasoning-request.mjs";', `from "${new URL("../../worker/opencode/reasoning-request.mjs", import.meta.url)}";`)
     .replace(
       'from "./worker/container-env.mjs";',
       `from "${new URL("../../worker/container-env.mjs", import.meta.url)}";`,

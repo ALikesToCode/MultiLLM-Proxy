@@ -146,14 +146,19 @@ and `glm-5.2` values are also accepted. NanoGPT's exact
 `zai-org/glm-5.2`, and `zai-org/glm-5.2:thinking` IDs map to the same pinned
 variants.
 
-Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployed
-default is `high` to keep deliberate generation without routinely paying the
-latency and hidden-token cost of each model's strongest tier. Callers can
+Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployment
+configuration sets the general default to `high`. OpenCode `glm-5.3-flash`
+defaults to `max` and explicitly enables thinking. Other models retain the
+general default. Callers can
 override generation effort per turn with `reasoning_effort`; semantic `max`
 maps to the selected provider's real ceiling. Model-backed memory compaction
 remains at maximum reasoning. OpenCode Kimi K2.6 keeps its fixed native
 thinking mode because that transport does not expose a supported effort
 overlay for that model.
+
+OpenCode GLM-5.3 Flash supports `max`, `high`, and `low`; thinking cannot be
+disabled for this model. Profile previews and request receipts report the
+effective model default or caller override.
 
 Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
 input tokens by default). NanoGPT receives its `caching: true` routing hint only

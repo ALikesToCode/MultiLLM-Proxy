@@ -49,6 +49,7 @@ from route_helpers import (
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.provider_access_policy import provider_route_scope
+from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.upstream_errors import stream_error_event
 
@@ -364,6 +365,17 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 else request.args
             )
             raw_request_data = request.get_data()
+            if (
+                api_provider == "opencode"
+                and request.method.upper() == "POST"
+                and path.strip("/").lower() in {"chat/completions", "v1/chat/completions"}
+                and isinstance(body, dict)
+            ):
+                normalized_body = apply_glm_5_reasoning_policy(
+                    body, api_provider, body.get("model", "")
+                )
+                if normalized_body != body:
+                    raw_request_data = json.dumps(normalized_body).encode("utf-8")
             if (
                 request.method.upper() == "POST"
                 and path.strip("/") == "v1/images/generations"

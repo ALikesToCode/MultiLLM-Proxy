@@ -19,7 +19,7 @@ export function previewProfile(payload, env) {
   candidates = filterRoutingCandidates(candidates, routing);
   const unique = [...new Map(candidates.map((candidate) => [`${candidate.provider}:${candidate.model}`, candidate])).values()];
   if (!unique.length) throw new RoleplayRequestError("No configured model matches this profile", 422);
-  const parsed = { routing, forwarded: { reasoning_effort: effort } };
+  const parsed = { routing, forwarded: payload.reasoning_effort == null ? {} : { reasoning_effort: effort } };
   const choices = unique.map((candidate) => ({ provider: candidate.provider, model: candidate.model,
     ...parameterReceipt(parsed, candidate, settings) }));
   return { valid: true, validation: "configured credentials and local capability mapping; no provider call made",

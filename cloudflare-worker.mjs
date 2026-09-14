@@ -2,6 +2,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
 import { CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, withClientDefaults, withOpencodeSession } from "./worker/client-headers.mjs";
 import { withOpencodeRequestSession } from "./worker/opencode-session.mjs";
+import { withOpencodeGlmReasoning } from "./worker/opencode/reasoning-request.mjs";
 import {
   RoleplaySession,
   handleRoleplayEdgeRequest,
@@ -1527,6 +1528,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
     return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
+  request = await withOpencodeGlmReasoning(request, requestUrl.pathname);
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl, env, upstreamPath), {
     method: request.method,

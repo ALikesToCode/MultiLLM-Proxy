@@ -1,5 +1,5 @@
 import { RoleplayRequestError } from "./validation.mjs";
-import { applyReasoningPolicy } from "./reasoning.mjs";
+import { applyReasoningPolicy, requestedReasoningEffort } from "./reasoning.mjs";
 import { glmModelVariant } from "./model-selection.mjs";
 
 const MODES = ["provider-priority", "fastest-eligible", "quality", "pinned"];
@@ -69,7 +69,7 @@ export function rankQualityEligible(candidates, stats, now) {
 }
 
 export function parameterReceipt(parsed, candidate, settings) {
-  const requested = parsed.forwarded.reasoning_effort ?? settings.defaultReasoningEffort;
+  const requested = requestedReasoningEffort(parsed.forwarded, candidate, settings.defaultReasoningEffort);
   const mapped = applyReasoningPolicy({ reasoning_effort: requested }, candidate, { defaultEffort: settings.defaultReasoningEffort });
   return { requestedEffort: requested, wireEffort: mapped.reasoning_effort ?? mapped.reasoning?.effort ?? "native",
     providerAcknowledged: false, billingMode: candidate.billingMode,
