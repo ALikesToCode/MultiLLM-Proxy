@@ -1,5 +1,6 @@
 # Documentation
 
+- [Knowledge Gateway design](plans/2026-09-15-knowledge-gateway-design.md)
 - [GPT Image 2 relay research and setup](gpt-image-2-reseller-research.md)
 - [GPT Image moderation defaults](gpt-image-moderation.md)
 - [GGUU AI GPT Image 2 generation and editing](gguu.md)
