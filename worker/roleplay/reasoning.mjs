@@ -108,6 +108,7 @@ function reasoningFields(candidate, effort) {
 export function requestedReasoningEffort(payload, candidate, configuredDefault) {
   if (payload.reasoning_effort != null) return payload.reasoning_effort;
   const { provider, model } = normalizedCandidate(candidate);
+  if (provider === "nanogpt") return undefined;
   return provider === "opencode" && model === "glm-5.3-flash"
     ? "max"
     : configuredDefault;
@@ -120,6 +121,11 @@ export function applyReasoningPolicy(
 ) {
   const normalized = { ...payload };
   const explicitEffort = requestedReasoningEffort(normalized, candidate, defaultEffort);
+  // NanoGPT owns the default thinking mode, including memory compaction.
+  // Only an explicit caller effort should select an upstream effort overlay.
+  if (normalizedCandidate(candidate).provider === "nanogpt" && explicitEffort === undefined) {
+    return normalized;
+  }
   if (
     explicitEffort !== undefined &&
     !REASONING_EFFORT_ORDER.includes(explicitEffort)

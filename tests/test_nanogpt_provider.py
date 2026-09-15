@@ -585,7 +585,7 @@ class NanoGPTRawCapabilityRouteTest(unittest.TestCase):
         )
         upstream_payload = json.loads(request_kwargs["data"])
         self.assertEqual(upstream_payload["model"], "zai-org/glm-5.2:thinking")
-        self.assertEqual(upstream_payload["reasoning_effort"], "xhigh")
+        self.assertNotIn("reasoning_effort", upstream_payload)
 
     def test_unified_responses_rotates_after_nanogpt_balance_rejection(self):
         insufficient_balance = self._json_response(

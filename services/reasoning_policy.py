@@ -72,7 +72,7 @@ def apply_glm_5_reasoning_policy(
     provider: str,
     model: str,
 ) -> dict[str, Any]:
-    """Default GLM-5.x to its maximum and map onto the provider contract."""
+    """Apply GLM-5.x defaults and map explicit effort onto the provider contract."""
     normalized = dict(payload)
     if not is_glm_5_model(model):
         return normalized
@@ -80,6 +80,10 @@ def apply_glm_5_reasoning_policy(
     provider_name = provider.lower()
     maximum = _maximum_effort(provider_name, model)
     specified, requested = _requested_effort(normalized)
+    if provider_name == "nanogpt" and not specified:
+        # Preserve NanoGPT's native thinking mode unless the caller selects
+        # an effort; the generic maximum overlay changes provider behavior.
+        return normalized
     if specified and requested is None:
         return normalized
     effort = _bounded_effort(requested or "max", maximum)

@@ -121,14 +121,14 @@ test("profile previews report the same Flash default and explicit override as ge
   }
 });
 
-test("other roleplay models retain the configured default", () => {
-  for (const candidate of [
-    { provider: "opencode", model: "glm-5.2", family: "glm" },
-    { provider: "nanogpt", model: `z-ai/${MODEL}`, family: "glm" },
+test("other roleplay models retain their provider defaults", () => {
+  for (const [candidate, expected] of [
+    [{ provider: "opencode", model: "glm-5.2", family: "glm" }, "high"],
+    [{ provider: "nanogpt", model: `z-ai/${MODEL}`, family: "glm" }, undefined],
   ]) {
     assert.equal(applyReasoningPolicy({}, candidate, {
       defaultEffort: "high",
-    }).reasoning_effort, "high");
+    }).reasoning_effort, expected);
   }
 });
 

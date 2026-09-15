@@ -70,8 +70,8 @@ export function rankQualityEligible(candidates, stats, now) {
 
 export function parameterReceipt(parsed, candidate, settings) {
   const requested = requestedReasoningEffort(parsed.forwarded, candidate, settings.defaultReasoningEffort);
-  const mapped = applyReasoningPolicy({ reasoning_effort: requested }, candidate, { defaultEffort: settings.defaultReasoningEffort });
-  return { requestedEffort: requested, wireEffort: mapped.reasoning_effort ?? mapped.reasoning?.effort ?? "native",
+  const mapped = applyReasoningPolicy(parsed.forwarded, candidate, { defaultEffort: settings.defaultReasoningEffort });
+  return { requestedEffort: requested ?? "native", wireEffort: mapped.reasoning_effort ?? mapped.reasoning?.effort ?? "native",
     providerAcknowledged: false, billingMode: candidate.billingMode,
     routingMode: parsed.routing.mode, fallback: parsed.routing.fallback,
     maxOutputTokens: candidate.resolvedMaxOutputTokens ?? null };

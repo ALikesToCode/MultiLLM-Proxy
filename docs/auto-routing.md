@@ -68,12 +68,14 @@ account entitlement. AIHubMix's [official catalog tooling](https://github.com/AI
 notes that modality tags can be inaccurate. Confirm the selected model with an
 explicitly authorized image-input test before depending on it in production.
 
-GLM-5.2 defaults to maximum reasoning on every unified and automatic route.
-The proxy maps semantic `max` to the selected transport: OpenCode receives
-`max`, NanoGPT receives `max`, NavyAI receives `xhigh`, LinkAPI receives `high`, and
-OpenRouter receives nested `reasoning.effort: xhigh`. Send an explicit lower
-`reasoning_effort` to reduce it; values above a provider's ceiling are clamped
-to that ceiling.
+GLM-5.x uses provider-specific defaults on unified and automatic routes.
+NanoGPT keeps native thinking with no injected effort. Other providers default
+to maximum reasoning. Explicit `reasoning_effort` overrides are supported:
+semantic `max` maps to `max` for OpenCode and NavyAI, `high` for LinkAPI, and
+nested `reasoning.effort: xhigh` for OpenRouter. NanoGPT maps an explicit `max`
+to `xhigh`, or `high` for Flash Uncensored. Values above a provider's ceiling
+are clamped to that ceiling. Each fallback attempt applies its own provider's
+default when the caller did not select an effort.
 
 Long GLM-5.2 chat contexts also receive safe adaptive preprocessing on the
 normal unified route. Above 8,000 estimated input tokens, older

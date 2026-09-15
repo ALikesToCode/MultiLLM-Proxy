@@ -103,9 +103,20 @@ uses the plan's 2x request multiplier. `roleplay:glm-speed` measures delivered
 streaming tokens per second for the three 1x choices instead of trusting a
 catalog snapshot.
 
-Standard GLM-5.x variants accept semantic `max` reasoning. The uncensored
-Flash variant's published ceiling is `high`, so the proxy maps a default or
-explicit `max` request to `high` for that model. NanoGPT's full GLM-5.3 preview
+NanoGPT uses its native thinking defaults. Unified Chat, the Responses bridge,
+and roleplay omit `reasoning_effort` unless the caller explicitly supplies an
+effort. The general `ROLEPLAY_DEFAULT_REASONING_EFFORT` setting does not apply
+to NanoGPT, and its memory-compaction requests also leave effort unset.
+Omitting effort does not send `none` or otherwise disable thinking.
+
+Explicit client overrides remain supported. On unified and roleplay routes,
+semantic `max` maps to `xhigh` for standard GLM-5.x variants and `high` for
+the uncensored Flash variant. Raw `/nanogpt/*` routes preserve the caller's
+native fields. NanoGPT's [reasoning documentation](https://docs.nano-gpt.com/api-reference/miscellaneous/extended-thinking)
+describes the effort controls and separate reasoning output fields; those
+fields need client support to be displayed.
+
+NanoGPT's full GLM-5.3 preview
 may have different logging or training terms from Flash; verify the live model
 record before sending sensitive roleplay data.
 

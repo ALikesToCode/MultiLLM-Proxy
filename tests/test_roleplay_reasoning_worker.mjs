@@ -32,7 +32,7 @@ test("inline reasoning preserves repeated token deltas within a single think blo
     "<think>[provider: test | model: test]\nConsider the context. Consider the alternatives.</think>\n\nReply.");
 });
 
-test("roleplay defaults generation to max and honors an explicit override", async () => {
+test("roleplay defaults NanoGPT generation to native and honors an explicit override", async () => {
   const fixture = makeRoleplayEnv({
     NANOGPT_API_KEY: "nano-key",
     ROLEPLAY_PROVIDER_ORDER: "nanogpt",
@@ -89,7 +89,7 @@ test("roleplay defaults generation to max and honors an explicit override", asyn
     },
   );
 
-  assert.deepEqual(efforts, ["xhigh", "low"]);
+  assert.deepEqual(efforts, [undefined, "low"]);
 });
 
 function visibleContent(streamBody) {
