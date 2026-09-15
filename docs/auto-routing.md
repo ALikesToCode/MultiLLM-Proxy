@@ -72,8 +72,9 @@ GLM-5.x uses provider-specific defaults on unified and automatic routes.
 NanoGPT keeps native thinking with no injected effort. Other providers default
 to maximum reasoning. Explicit `reasoning_effort` overrides are supported:
 semantic `max` maps to `max` for OpenCode and NavyAI, `high` for LinkAPI, and
-nested `reasoning.effort: xhigh` for OpenRouter. NanoGPT maps an explicit `max`
-to `xhigh`, or `high` for Flash Uncensored. Values above a provider's ceiling
+nested `reasoning.effort: xhigh` for OpenRouter. NanoGPT preserves literal `max`
+for GLM-5.2, GLM-5.3, and GLM-5.3 Flash; GLM-5.1 and Flash Uncensored use `high`.
+Values above a provider's ceiling
 are clamped to that ceiling. Each fallback attempt applies its own provider's
 default when the caller did not select an effort.
 

@@ -30,7 +30,7 @@ class ReasoningPolicyTest(unittest.TestCase):
                 "nanogpt",
                 "glm-5.2",
             )["reasoning_effort"],
-            "xhigh",
+            "max",
         )
         self.assertEqual(
             apply_glm_52_reasoning_policy(
@@ -83,7 +83,11 @@ class ReasoningPolicyTest(unittest.TestCase):
 
     def test_nanogpt_explicit_effort_still_uses_supported_ceiling(self):
         for model, expected in (
-            ("z-ai/glm-5.3-flash", "xhigh"),
+            ("z-ai/glm-5.1", "high"),
+            ("z-ai/glm-5.2", "max"),
+            ("zai-org/glm-5.2:thinking", "max"),
+            ("z-ai/glm-5.3", "max"),
+            ("z-ai/glm-5.3-flash", "max"),
             ("z-ai/glm-5.3-flash-uncensored", "high"),
         ):
             with self.subTest(model=model):
@@ -115,7 +119,7 @@ class ReasoningPolicyTest(unittest.TestCase):
     def test_xhigh_alias_maps_to_each_direct_providers_maximum(self):
         expected_efforts = {
             "opencode": "max",
-            "nanogpt": "xhigh",
+            "nanogpt": "max",
             "navyai": "max",
         }
         for provider, expected_effort in expected_efforts.items():

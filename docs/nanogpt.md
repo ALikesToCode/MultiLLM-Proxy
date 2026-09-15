@@ -110,11 +110,20 @@ to NanoGPT, and its memory-compaction requests also leave effort unset.
 Omitting effort does not send `none` or otherwise disable thinking.
 
 Explicit client overrides remain supported. On unified and roleplay routes,
-semantic `max` maps to `xhigh` for standard GLM-5.x variants and `high` for
-the uncensored Flash variant. Raw `/nanogpt/*` routes preserve the caller's
+GLM-5.2, GLM-5.3, and GLM-5.3 Flash receive literal `max`; `xhigh` is accepted
+as an alias for that tier. GLM-5.1 and the uncensored Flash variant have a
+`high` ceiling. These model-specific tiers follow the
+[detailed model catalog](https://nano-gpt.com/api/v1/models?detailed=true),
+which is more specific than the generic Chat Completions effort enum.
+Raw `/nanogpt/*` routes preserve the caller's
 native fields. NanoGPT's [reasoning documentation](https://docs.nano-gpt.com/api-reference/miscellaneous/extended-thinking)
 describes the effort controls and separate reasoning output fields; those
 fields need client support to be displayed.
+
+Effort selects a reasoning level; it does not require a fixed token count.
+`max_tokens` is an output ceiling, and a model can finish below it. Reasoning
+token counts can vary between runs, so a single longer response does not prove
+that one effort setting provides better reasoning.
 
 NanoGPT's full GLM-5.3 preview
 may have different logging or training terms from Flash; verify the live model

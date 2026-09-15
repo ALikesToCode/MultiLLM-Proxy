@@ -47,7 +47,8 @@ for (const path of ["/v1/roleplay", "/roleplay/v1/chat/completions"]) {
   test(`${path} preserves NanoGPT native thinking and caller overrides`, async (t) => {
     for (const stream of [false, true]) {
       for (const [options, expected] of [[{}, undefined], [{ reasoning_effort: "low" }, "low"],
-        [{ reasoning_effort: "none" }, "none"], [{ reasoning_effort: "max" }, "xhigh"]]) {
+        [{ reasoning_effort: "none" }, "none"], [{ reasoning_effort: "max" }, "max"],
+        [{ reasoning_effort: "xhigh" }, "max"]]) {
         await t.test(`stream=${stream} options=${JSON.stringify(options)}`, async () => {
           const fixture = makeRoleplayEnv({
             NANOGPT_API_KEY: "nano-test-key",
@@ -88,13 +89,26 @@ for (const path of ["/v1/roleplay", "/roleplay/v1/chat/completions"]) {
 
 test("NanoGPT profile receipts report native defaults and explicit mapped effort", () => {
   for (const [options, requested, wire] of [[{}, "native", "native"],
-    [{ reasoning_effort: "low" }, "low", "low"], [{ reasoning_effort: "max" }, "max", "xhigh"]]) {
+    [{ reasoning_effort: "low" }, "low", "low"], [{ reasoning_effort: "max" }, "max", "max"]]) {
     const preview = previewProfile({
       routing: { mode: "pinned", provider: "nanogpt", model: MODEL, fallback: "none" }, ...options,
     }, { NANOGPT_API_KEY: "nano-test-key", ROLEPLAY_DEFAULT_REASONING_EFFORT: "high" });
     assert.equal(preview.selected.requestedEffort, requested);
     assert.equal(preview.selected.wireEffort, wire);
     assert.equal(preview.selected.providerAcknowledged, false);
+  }
+});
+
+test("NanoGPT GLM maximum efforts follow model-specific catalog values", () => {
+  for (const [model, expected] of [
+    ["z-ai/glm-5.1", "high"], ["z-ai/glm-5.2", "max"],
+    ["zai-org/glm-5.2:thinking", "max"], ["z-ai/glm-5.3", "max"],
+    [MODEL, "max"], [`${MODEL}-uncensored`, "high"],
+  ]) {
+    for (const reasoning_effort of ["max", "xhigh"]) {
+      const result = applyReasoningPolicy({ reasoning_effort }, { provider: "nanogpt", family: "glm", model });
+      assert.equal(result.reasoning_effort, expected, model);
+    }
   }
 });
 

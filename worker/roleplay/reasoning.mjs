@@ -4,6 +4,12 @@ const MAXIMUM_EFFORT_BY_PROVIDER = Object.freeze({
   navyai: "max",
   linkapi: "high",
 });
+const NANOGPT_GLM_REASONING_CEILINGS = new Map([
+  ["glm-5.1", "high"],
+  ["glm-5.2", "max"],
+  ["glm-5.3", "max"],
+  ["glm-5.3-flash", "max"],
+]);
 const REASONING_EFFORT_ORDER = Object.freeze([
   "none",
   "minimal",
@@ -54,14 +60,11 @@ export function maximumReasoningProfile(candidate) {
   }
 
   if (provider === "nanogpt") {
-    // NanoGPT names its strongest documented Chat Completions effort `xhigh`.
-    // Keep the uncensored fine-tune at its narrower supported ceiling.
-    const effort =
-      family === "glm"
-        ? model.includes("glm-5.3-flash-uncensored")
-          ? "high"
-          : "xhigh"
-        : "xhigh";
+    // Model-specific GLM tiers override the generic API's xhigh spelling.
+    const modelName = model.split("/").at(-1).split(":", 1)[0];
+    const effort = model.includes("glm-5.3-flash-uncensored")
+      ? "high"
+      : NANOGPT_GLM_REASONING_CEILINGS.get(modelName) ?? "xhigh";
     return {
       mode: "max",
       effort,

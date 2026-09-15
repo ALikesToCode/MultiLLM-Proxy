@@ -271,7 +271,7 @@ test("roleplay preserves an explicit GLM reasoning override for every provider",
     ["opencode", "OPENCODE_GO_API_KEY", "max", undefined],
     ["navyai", "NAVYAI_API_KEY", "max", undefined],
     ["linkapi", "LINKAPI_KEY", "high", undefined],
-    ["nanogpt", "NANOGPT_API_KEY", "xhigh", undefined],
+    ["nanogpt", "NANOGPT_API_KEY", "max", undefined],
     ["openrouter", "OPENROUTER_API_KEY", undefined, "xhigh"],
   ];
 

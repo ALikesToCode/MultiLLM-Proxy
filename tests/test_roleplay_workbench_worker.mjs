@@ -41,7 +41,7 @@ test("pins and subscription-only filters cannot escape their requested boundary"
   assert.throws(() => parseRoutingPolicy({ api_key: "never-store" }));
   const receipt = parameterReceipt({ forwarded: { reasoning_effort: "max" }, routing: policy },
     { provider: "nanogpt", model: "z-ai/glm-5.3-flash", family: "glm", billingMode: "subscription" }, {});
-  assert.equal(receipt.wireEffort, "xhigh");
+  assert.equal(receipt.wireEffort, "max");
   assert.equal(receipt.providerAcknowledged, false);
 });
 

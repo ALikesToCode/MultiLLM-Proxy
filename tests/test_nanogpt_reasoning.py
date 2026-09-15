@@ -59,10 +59,11 @@ class NanoGPTReasoningTest(UnifiedApiTestCase):
 
     def test_explicit_effort_still_reaches_nanogpt(self):
         for path in ("/v1/chat/completions", "/nanogpt/v1/chat/completions"):
-            for effort in ("low", "high", "none", "xhigh"):
+            for effort in ("low", "high", "none", "xhigh", "max"):
                 with self.subTest(path=path, effort=effort):
                     sent = self._request(path, {"reasoning_effort": effort})
-                    self.assertEqual(sent["reasoning_effort"], effort)
+                    expected = "max" if path == "/v1/chat/completions" and effort == "xhigh" else effort
+                    self.assertEqual(sent["reasoning_effort"], expected)
 
     def test_nested_override_is_still_mapped_on_unified_chat(self):
         sent = self._request("/v1/chat/completions", {"reasoning": {"effort": "low"}})

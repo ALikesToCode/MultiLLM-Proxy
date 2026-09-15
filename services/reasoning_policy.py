@@ -19,6 +19,12 @@ GLM_52_MAX_REASONING_EFFORTS = {
     "opencode": "max",
     "openrouter": "xhigh",
 }
+NANOGPT_GLM_REASONING_CEILINGS = {
+    "glm-5.1": "high",
+    "glm-5.2": "max",
+    "glm-5.3": "max",
+    "glm-5.3-flash": "max",
+}
 
 
 def is_glm_52_model(model: str) -> bool:
@@ -34,9 +40,13 @@ def is_glm_5_model(model: str) -> bool:
 
 
 def _maximum_effort(provider: str, model: str) -> str:
-    model_name = model.strip().lower()
+    model_name = model.strip().lower().rsplit("/", 1)[-1].split(":", 1)[0]
     if provider == "nanogpt" and "glm-5.3-flash-uncensored" in model_name:
         return "high"
+    if provider == "nanogpt" and model_name in NANOGPT_GLM_REASONING_CEILINGS:
+        # NanoGPT's model catalog lists native GLM tiers separately from the
+        # generic Chat Completions effort enum. Preserve its literal `max`.
+        return NANOGPT_GLM_REASONING_CEILINGS[model_name]
     return GLM_52_MAX_REASONING_EFFORTS.get(provider, "max")
 
 
