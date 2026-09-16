@@ -148,7 +148,8 @@ variants.
 
 Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployment
 configuration sets the general default to `high`. OpenCode `glm-5.3-flash`
-defaults to `max` and explicitly enables thinking. NanoGPT uses its native
+defaults to `reasoning_effort: max`. Go enables reasoning through that field;
+the proxy does not inject the unsupported Z.AI `thinking` field. NanoGPT uses its native
 thinking defaults and receives no effort unless the caller supplies one.
 Other models retain the general default. Callers can
 override generation effort per turn with `reasoning_effort`; semantic `max`
@@ -162,6 +163,10 @@ OpenCode GLM-5.3 Flash supports `max`, `high`, and `low`; thinking cannot be
 disabled for this model. Profile previews and request receipts report the
 effective model default or caller override; omitted NanoGPT effort is reported
 as `native`.
+
+OpenCode Go's GLM-5.3-Flash reasoning route requires an output budget greater
+than 1,024 tokens to reserve space for the final answer. Use at least 2,048
+for a small reasoning request. Explicit caller budgets remain caller-controlled.
 
 Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
 input tokens by default). NanoGPT receives its `caching: true` routing hint only

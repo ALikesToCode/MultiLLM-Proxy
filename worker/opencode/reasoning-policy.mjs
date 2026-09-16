@@ -8,11 +8,9 @@ export function isOpencodeGlmModel(model) {
 }
 
 export function opencodeGlmReasoningFields(effort = "max") {
-  // Effort only takes effect with thinking enabled. Keep explicit opt-outs
-  // intact so the upstream can validate models that require thinking.
+  // Go enables reasoning through effort and rejects Z.AI's thinking field.
   return {
     reasoning_effort: effort === "xhigh" ? "max" : effort,
-    ...(["none", "minimal"].includes(effort) ? {} : { thinking: { type: "enabled" } }),
   };
 }
 

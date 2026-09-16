@@ -38,7 +38,7 @@ class OpenCodeThinkingTest(UnifiedApiTestCase):
         )
         return json.loads(send.call_args.kwargs["data"])
 
-    def test_glm_thinking_defaults_and_overrides_reach_every_chat_route(self):
+    def test_go_reasoning_defaults_and_overrides_without_unsupported_thinking(self):
         for path in (
             "/v1/chat/completions",
             "/opencode/v1/chat/completions",
@@ -56,7 +56,7 @@ class OpenCodeThinkingTest(UnifiedApiTestCase):
                     with self.subTest(path=path, stream=stream, options=options):
                         sent = self._request(path, options, stream=stream)
                         self.assertEqual(sent.get("reasoning_effort"), expected)
-                        self.assertEqual(sent.get("thinking"), {"type": "enabled"})
+                        self.assertNotIn("thinking", sent)
                         self.assertNotIn("reasoning", sent)
 
     def test_explicit_thinking_options_are_preserved(self):

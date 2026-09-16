@@ -107,10 +107,8 @@ def apply_glm_5_reasoning_policy(
         }
     else:
         normalized["reasoning_effort"] = effort
-    if provider_name == "opencode" and effort not in {"none", "minimal"}:
-        # GLM applies effort only when thinking is enabled. Caller-owned
-        # thinking controls remain available for upstream validation.
-        normalized.setdefault("thinking", {"type": "enabled"})
+    # OpenCode Go enables GLM reasoning through reasoning_effort. Its upstream
+    # rejects the Z.AI-specific top-level thinking field; never inject it.
     return normalized
 
 

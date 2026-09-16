@@ -79,7 +79,7 @@ for (const path of [
   "/opencode/chat/completions",
   "/roleplay/v1/chat/completions",
 ]) {
-  test(`${path} enables GLM thinking by default and honors effort overrides`, async (t) => {
+  test(`${path} uses Go reasoning effort without injecting unsupported thinking`, async (t) => {
     for (const stream of [false, true]) {
       for (const [options, expected] of [
         [{}, "max"],
@@ -91,7 +91,7 @@ for (const path of [
         await t.test(`stream=${stream} options=${JSON.stringify(options)}`, async () => {
           const sent = await captureRequest(path, options, stream);
           assert.equal(sent.reasoning_effort, expected);
-          assert.deepEqual(sent.thinking, { type: "enabled" });
+          assert.equal(Object.hasOwn(sent, "thinking"), false);
         });
       }
     }
@@ -190,6 +190,6 @@ test("chunked GLM requests honor an effort override arriving after the model", a
   const normalized = await withOpencodeGlmReasoning(request, new URL(request.url).pathname);
   const payload = await normalized.json();
   assert.equal(payload.reasoning_effort, "low");
-  assert.deepEqual(payload.thinking, { type: "enabled" });
+  assert.equal(Object.hasOwn(payload, "thinking"), false);
   assert.equal(payload.messages[0].content, "नमस्ते");
 });
