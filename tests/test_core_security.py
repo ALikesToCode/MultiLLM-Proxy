@@ -157,7 +157,7 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
-        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response.headers["Referrer-Policy"], "same-origin")
         self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
 
     def test_health_endpoints_are_public_and_not_cached(self):

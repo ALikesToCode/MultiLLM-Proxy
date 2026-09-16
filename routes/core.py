@@ -13,6 +13,7 @@ from config import Config
 from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, internal_error_payload
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
+from routes.csrf_errors import handle_csrf_error
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -194,21 +195,7 @@ def register_core_routes(app) -> None:
         proxy_service=ProxyService,
     )
 
-    @app.errorhandler(CSRFError)
-    def handle_csrf_error(error: CSRFError):
-        """
-        Handle CSRF errors, returning JSON if it's an AJAX/JSON request.
-        """
-        error_msg = "CSRF token missing or invalid."
-        if request.is_json or "application/json" in request.headers.get("Accept", ""):
-            return jsonify(
-                {
-                    "error": "csrf_failed",
-                    "message": error_msg,
-                    "request_id": get_request_id(),
-                }
-            ), 400
-        return render_template("error.html", error=error_msg), 400
+    app.register_error_handler(CSRFError, handle_csrf_error)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():

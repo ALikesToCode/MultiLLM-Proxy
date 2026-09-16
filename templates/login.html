@@ -48,7 +48,7 @@
 
             {% if error %}
             <div class="alert" role="alert">
-                <strong>Sign-in failed.</strong>
+                <strong>{{ 'Refresh your sign-in.' if csrf_recovery else 'Sign-in failed.' }}</strong>
                 <span>{{ error }}</span>
             </div>
             {% endif %}

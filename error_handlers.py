@@ -92,7 +92,9 @@ def init_error_handlers(app):
         response.headers["X-Request-ID"] = get_request_id()
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # HTTPS form protection requires a same-origin Referer. Withhold it
+        # from external sites without breaking Flask-WTF's strict check.
+        response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault(
             "Content-Security-Policy",
             "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
