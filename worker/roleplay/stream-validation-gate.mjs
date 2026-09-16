@@ -34,21 +34,35 @@ function contentFrame(payload, content) {
   return `data: ${JSON.stringify({ ...payload, choices })}\n\n`;
 }
 
-function markerStart(value) {
-  let lineStart = 0;
-  while (lineStart <= value.length) {
-    const line = value.slice(lineStart);
-    const match = /^[\t ]*IMAGE PROMPT:/i.exec(line);
-    if (match) {
-      return lineStart;
+function scanContent(value, initialDepth, initialLineStart) {
+  let depth = initialDepth;
+  let lineStart = initialLineStart;
+  for (let index = 0; index < value.length; index += 1) {
+    const tail = value.slice(index);
+    const tag = /^<\/?think>/i.exec(tail);
+    if (tag) {
+      depth = tag[0][1] === "/" ? Math.max(0, depth - 1) : depth + 1;
+      index += tag[0].length - 1;
+      lineStart = false;
+      continue;
     }
-    const newline = value.indexOf("\n", lineStart);
-    if (newline < 0) {
-      return -1;
+    if (depth === 0 && lineStart && /^[\t ]*IMAGE PROMPT:/i.test(tail)) {
+      return { boundary: index, depth, lineStart };
     }
-    lineStart = newline + 1;
+    lineStart = value[index] === "\n" ||
+      (lineStart && /[\t ]/.test(value[index]));
   }
-  return -1;
+  return { boundary: -1, depth, lineStart };
+}
+
+function possibleThinkTagStart(value) {
+  for (let size = Math.min(7, value.length); size > 0; size -= 1) {
+    const suffix = value.slice(-size).toLowerCase();
+    if ("<think>".startsWith(suffix) || "</think>".startsWith(suffix)) {
+      return value.length - size;
+    }
+  }
+  return value.length;
 }
 
 function possibleMarkerLineStart(value) {
@@ -64,6 +78,8 @@ export function createRoleplayStreamValidationGate(enabled) {
   let pending = "";
   let released = "";
   let boundaryReached = false;
+  let thinkingDepth = 0;
+  let atLineStart = true;
 
   const releaseFromFrame = (frame) => {
     if (boundaryReached) {
@@ -76,7 +92,8 @@ export function createRoleplayStreamValidationGate(enabled) {
     }
 
     pending += content;
-    const boundary = markerStart(pending);
+    const scanned = scanContent(pending, thinkingDepth, atLineStart);
+    const boundary = scanned.boundary;
     if (boundary >= 0) {
       const safe = pending.slice(0, boundary);
       pending = pending.slice(boundary);
@@ -88,12 +105,22 @@ export function createRoleplayStreamValidationGate(enabled) {
       return [contentFrame(payload, safe)];
     }
 
-    const holdFrom = possibleMarkerLineStart(pending);
+    // Thinking can discuss the output schema without starting the final block.
+    // Retain only ambiguous tag/marker prefixes, never the reasoning or story.
+    const markerLine = pending.lastIndexOf("\n") + 1;
+    const holdMarker = scanned.depth === 0 && (markerLine > 0 || atLineStart);
+    const holdFrom = Math.min(
+      holdMarker ? possibleMarkerLineStart(pending) : pending.length,
+      possibleThinkTagStart(pending),
+    );
     const safe = pending.slice(0, holdFrom);
     pending = pending.slice(holdFrom);
     if (!safe) {
       return [];
     }
+    const next = scanContent(safe, thinkingDepth, atLineStart);
+    thinkingDepth = next.depth;
+    atLineStart = next.lineStart;
     released += safe;
     return [contentFrame(payload, safe)];
   };
@@ -122,6 +149,8 @@ export function createRoleplayStreamValidationGate(enabled) {
       pending = "";
       released = "";
       boundaryReached = false;
+      thinkingDepth = 0;
+      atLineStart = true;
     },
 
     get releasedCharacters() {
