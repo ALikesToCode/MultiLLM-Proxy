@@ -39,6 +39,7 @@
 
     <nav class="docs-jump-nav" aria-label="Guide sections">
         <a href="#quick-start">Quick start</a>
+        <a href="#agent-setup">Agent setup</a>
         <a href="#janitor-ai">Janitor AI</a>
         <a href="#route-contracts">Route contracts</a>
         <a href="#provider-setup">Provider setup</a>
@@ -80,6 +81,21 @@
             </div>
             <pre><code>{{ documentation.examples.models }}</code></pre>
         </article>
+    </section>
+
+    <section class="docs-section" id="agent-setup" aria-labelledby="agent-setup-title">
+        <header class="docs-section__header">
+            <div>
+                <p class="eyebrow">Coding agents</p>
+                <h2 id="agent-setup-title">Connect your application with one prompt</h2>
+                <p>Copy these instructions into your coding agent. They use this deployment's URL and a credential placeholder.</p>
+            </div>
+            <button class="button button--primary" type="button" data-copy-value="{{ documentation.agent_setup_prompt }}">Copy agent prompt</button>
+        </header>
+        <details class="command-card">
+            <summary>Read the agent setup prompt</summary>
+            <pre><code>{{ documentation.agent_setup_prompt }}</code></pre>
+        </details>
     </section>
 
     <section class="docs-section" id="janitor-ai" aria-labelledby="janitor-ai-title">

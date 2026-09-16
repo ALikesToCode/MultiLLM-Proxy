@@ -9,6 +9,7 @@ from typing import Any
 from providers.image_relays import image_relay_specs
 from providers.registry import get_registry
 from proxy import PROVIDER_DETAILS
+from services.agent_setup_prompt import build_agent_setup_prompt
 from services.auto_route_service import AutoRouteService
 from services.model_catalog_service import build_model_catalog
 from services.provider_catalog_service import PROVIDER_CATALOG_SPECS
@@ -260,6 +261,7 @@ def build_proxy_documentation(
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "base_url": base_url,
+        "agent_setup_prompt": build_agent_setup_prompt(base_url),
         "proxy_credential_env": "ADMIN_API_KEY",
         "summary": {
             "provider_count": len(providers),

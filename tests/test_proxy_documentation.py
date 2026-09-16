@@ -38,6 +38,8 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
         self.assertIn("One proxy. Explicit contracts.", body)
+        self.assertIn("Copy agent prompt", body)
+        self.assertIn("MULTILLM_API_KEY", body)
         self.assertIn("Janitor AI configuration", body)
         self.assertIn("/roleplay/v1/chat/completions", body)
         self.assertIn("roleplay:auto", body)
@@ -82,6 +84,9 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
+        self.assertIn("http://localhost/v1/models", payload["agent_setup_prompt"])
+        self.assertIn("not available", payload["agent_setup_prompt"])
+        self.assertNotIn("opencode-provider-key", payload["agent_setup_prompt"])
         providers = {provider["id"]: provider for provider in payload["providers"]}
         models = {model["id"]: model for model in payload["models"]}
         self.assertTrue(providers["opencode"]["configured"])
