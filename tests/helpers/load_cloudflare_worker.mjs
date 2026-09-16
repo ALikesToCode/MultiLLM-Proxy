@@ -5,6 +5,7 @@ function dataModuleUrl(source) {
 }
 
 export async function roleplayModuleUrl() {
+  const compactionBudgetUrl = new URL("../../worker/roleplay/compaction-budget.mjs", import.meta.url).href;
   const compatibilityUrl = new URL(
     "../../worker/roleplay/compatibility.mjs",
     import.meta.url,
@@ -354,6 +355,7 @@ export async function roleplayModuleUrl() {
   );
   const memoryDataUrl = dataModuleUrl(
     memorySource
+      .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace('from "./message-validation.mjs";', `from "${messageValidationDataUrl}";`)
       .replace(
         'from "./directives.mjs";',
@@ -382,6 +384,7 @@ export async function roleplayModuleUrl() {
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
+      .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace(
         'from "./capacity.mjs";',
         `from "${capacityDataUrl}";`,

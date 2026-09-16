@@ -2,7 +2,7 @@ import {
   buildProviderHeaders,
   isSafeFallbackStatus,
 } from "./config.mjs";
-import { prepareRoleplayCandidates } from "./capacity.mjs";
+import { prepareCompactionCandidates } from "./compaction-budget.mjs";
 import {
   RoleplayRequestError,
   buildCompactionPayload,
@@ -710,10 +710,9 @@ export async function requestCompaction(
   );
   let fallbackCount = 0;
   try {
-    const compactionCandidates = prepareRoleplayCandidates(
+    const compactionCandidates = prepareCompactionCandidates(
       candidates,
       plan.compactableTokens + settings.memoryTargetTokens + 1_024,
-      settings.compactionMaxTokens,
       settings,
     );
     for (const candidate of compactionCandidates) {

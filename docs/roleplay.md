@@ -164,9 +164,11 @@ disabled for this model. Profile previews and request receipts report the
 effective model default or caller override; omitted NanoGPT effort is reported
 as `native`.
 
-OpenCode Go's GLM-5.3-Flash reasoning route requires an output budget greater
-than 1,024 tokens to reserve space for the final answer. Use at least 2,048
-for a small reasoning request. Explicit caller budgets remain caller-controlled.
+OpenCode Go's GLM-5.3-Flash reasoning route requires an output budget of at least
+2,048 tokens: the Go adapter reserves 1,024 for the answer and requires at
+least 1,024 for thinking. Compaction applies this minimum automatically and
+keeps a 30-second total deadline before using local fallback. Explicit caller
+generation budgets remain caller-controlled.
 
 Prompt caching is automatic above `PROMPT_CACHE_MIN_TOKENS` (1,024 estimated
 input tokens by default). NanoGPT receives its `caching: true` routing hint only
@@ -565,8 +567,8 @@ Non-secret tuning variables:
 | `ROLEPLAY_CONTEXT_SAFETY_TOKENS` | `1024` | Combined-context safety margin |
 | `ROLEPLAY_MAX_REQUEST_BYTES` | `8388608` | Bounded JSON ingress |
 | `ROLEPLAY_MAX_STORED_BYTES` | `640000` | Exact raw-message storage budget before forced compaction |
-| `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Digest output ceiling |
-| `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `8000` | Shared model-compaction budget before local fallback |
+| `ROLEPLAY_COMPACTION_MAX_TOKENS` | `1200` | Compaction output budget; OpenCode GLM uses at least 2,048 to fit thinking and the digest |
+| `ROLEPLAY_COMPACTION_TIMEOUT_MS` | `30000` | Shared model-compaction budget before local fallback |
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Maximum wait for provider response headers before advancing to the next tier |
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |

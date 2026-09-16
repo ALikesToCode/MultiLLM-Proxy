@@ -4,6 +4,7 @@ import {
 } from "./directives.mjs";
 import { reinforceRoleplayMessages } from "./output-contract.mjs";
 import { applyReasoningPolicy } from "./reasoning.mjs";
+import { compactionOutputBudget } from "./compaction-budget.mjs";
 import { parseRoleplayOutputBudget } from "./output-budget.mjs";
 import { parseRoleplayModelPreference } from "./model-selection.mjs";
 import { sanitizeRoleplayMessages } from "./message-validation.mjs";
@@ -704,7 +705,7 @@ export function buildCompactionPayload(state, plan, candidate, settings) {
       },
     ],
     temperature: 0.1,
-    max_tokens: settings.compactionMaxTokens,
+    max_tokens: candidate.resolvedMaxOutputTokens ?? compactionOutputBudget(candidate, settings),
     stream: false,
   }, candidate);
 }

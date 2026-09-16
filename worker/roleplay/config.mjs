@@ -482,7 +482,7 @@ export function getRoleplaySettings(env) {
     ),
     compactionTimeoutMs: boundedInteger(
       env.ROLEPLAY_COMPACTION_TIMEOUT_MS,
-      8_000,
+      30_000,
       1_000,
       30_000,
     ),

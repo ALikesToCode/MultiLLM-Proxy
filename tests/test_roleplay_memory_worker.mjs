@@ -83,6 +83,7 @@ test("roleplay asks the model to compact older memory before a forced turn", asy
   assert.equal(requests[0].model, "glm-5.3-flash");
   assert.equal(requests[0].reasoning_effort, "max");
   assert.equal(requests[0].stream, false);
+  assert.equal(requests[0].max_tokens, 2048);
   assert.equal(requests[0].response_format, undefined);
   assert.equal(requests[1].model, "glm-5.3-flash");
   assert.equal(requests[1].reasoning_effort, "none");
