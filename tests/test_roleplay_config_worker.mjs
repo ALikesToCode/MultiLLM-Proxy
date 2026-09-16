@@ -232,11 +232,11 @@ test("Cloudflare forwards NanoGPT key preference into the container", () => {
   assert.equal(container.envVars.NANOGPT_PREFERRED_KEY_INDEX, "1");
 });
 
-test("deployment prefers NanoGPT key index one", async () => {
+test("deployment prefers the primary NanoGPT key", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "1");
+  assert.equal(config.vars?.NANOGPT_PREFERRED_KEY_INDEX, "0");
 });
 
 test("deployment defaults roleplay generation to high reasoning", async () => {

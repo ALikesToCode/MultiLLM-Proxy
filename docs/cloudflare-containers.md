@@ -72,8 +72,8 @@ The committed Worker variables set `NANOGPT_BILLING_MODE=subscription` and
 `NANOGPT_SUBSCRIPTION_BASE_URL=https://nano-gpt.com/api/subscription`. These are
 non-secret routing settings; keep the API keys in Wrangler secrets. Do not add
 an `X-Billing-Mode: paygo` override when the NanoGPT account is subscription
-only. `NANOGPT_PREFERRED_KEY_INDEX=1` makes the deployed `_1` secret the first
-choice while retaining key 0 as an automatic fallback.
+only. `NANOGPT_PREFERRED_KEY_INDEX=0` makes the primary `NANOGPT_API_KEY`
+the first choice while retaining numbered credentials as automatic fallbacks.
 
 ### Native roleplay sessions
 
