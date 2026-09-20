@@ -246,17 +246,16 @@ test("deployment defaults roleplay generation to high reasoning", async () => {
   assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
-test("deployment routes GLM through OpenCode before NavyAI", async () => {
+test("deployment routes GLM through LinkAPI before NavyAI", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
   assert.equal(
     config.vars?.ROLEPLAY_PROVIDER_ORDER,
-    "nanogpt,opencode,linkapi,navyai",
+    "nanogpt,linkapi,navyai",
   );
   assert.deepEqual(JSON.parse(config.vars?.ROLEPLAY_PROVIDER_FAMILIES), {
     nanogpt: ["glm"],
-    opencode: ["glm", "kimi"],
     linkapi: ["kimi"],
     navyai: ["glm"],
   });
@@ -269,9 +268,17 @@ test("deployment routes GLM through OpenCode before NavyAI", async () => {
       "z-ai/glm-5.3",
     ],
   );
-  assert.deepEqual(
-    JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode.glm,
-    ["glm-5.3-flash", "glm-5.2", "glm-5.3"],
+  // OpenCode is retired from the deployment: its workspace credits expired,
+  // and every model answered 401 CreditsError while still consuming a
+  // fallback slot on each turn.
+  assert.equal(
+    JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).opencode,
+    undefined,
+  );
+  assert.equal(config.vars?.ROLEPLAY_PROVIDER_ORDER.includes("opencode"), false);
+  assert.equal(
+    Object.hasOwn(JSON.parse(config.vars?.ROLEPLAY_PROVIDER_FAMILIES), "opencode"),
+    false,
   );
   assert.equal(
     JSON.parse(config.vars?.ROLEPLAY_PROVIDER_MODELS).navyai.glm,

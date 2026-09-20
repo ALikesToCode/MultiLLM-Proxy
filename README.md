@@ -467,7 +467,7 @@ NanoGPT subscription GLM routing prioritizes the 1x models in this order:
 GLM-5.3-Flash, GLM-5.3-Flash Uncensored, then GLM-5.2. Full GLM-5.3 is an
 explicit 2x choice. `roleplay:glm-speed` measures streaming tokens per second
 and ranks that 1x pool for the current session; versioned aliases pin an exact
-variant. OpenCode Go and NavyAI remain later provider tiers. LinkAPI remains a
+variant. NavyAI remains a later provider tier. LinkAPI remains a
 Kimi-only roleplay tier; OpenRouter is omitted from the roleplay chain.
 Automatic fallback handles explicit model, capacity, authentication,
 rate-limit, and service-unavailable rejections. Ambiguous transport and
