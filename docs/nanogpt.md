@@ -123,6 +123,19 @@ NANOGPT_SPEED_ROUTING=fast
 # moonshotai/kimi-k2.6 -> moonshotai/kimi-k2.6:fast
 ```
 
+The deployment leaves this empty. An account with no pay-as-you-go balance
+rejects every suffixed request with `402 Insufficient balance` on both the
+standard and the subscription endpoint, and roleplay treats `402` as a safe
+fallback status, so the NanoGPT candidates silently drop out of rotation. Fund
+the pay-as-you-go balance before enabling it.
+
+Provider selection also accepts `quantizations` and `min_quantization`
+(`int4`, `fp4`, `fp6`, `int8`, `fp8`, `fp16`, `bf16`, `fp32`, `unknown`), and
+`GET /api/models/<url-encoded canonical id>/providers` lists each provider with
+its `quantization`, price and availability. Both are pay-as-you-go features. A
+completed response does not name the provider that served it: the only
+identifying headers are `x-requested-model` and `x-request-id`.
+
 The built-in catalog seeds the current roleplay GLM choices even before a live
 catalog refresh:
 
