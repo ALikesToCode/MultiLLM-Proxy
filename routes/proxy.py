@@ -23,12 +23,14 @@ from providers.image_relays import (
 from providers.nanogpt import (
     apply_nanogpt_speed_routing,
     build_nanogpt_url,
+    is_nanogpt_paygo_rejection,
     is_nanogpt_accountless_request,
     is_nanogpt_interactive_browser_request,
     is_nanogpt_public_request,
     nanogpt_allows_missing_api_key,
     nanogpt_has_caller_auth,
     nanogpt_speed_routing,
+    strip_nanogpt_speed_suffix,
 )
 from providers.navyai import (
     is_navyai_interactive_oauth_request,
@@ -50,6 +52,7 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.provider_access_policy import provider_route_scope
 from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
@@ -367,6 +370,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 else request.args
             )
             raw_request_data = request.get_data()
+            speed_routed_body = None
             if (
                 api_provider == "opencode"
                 and request.method.upper() == "POST"
@@ -385,12 +389,18 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 in {"chat/completions", "v1/chat/completions", "v1/responses"}
                 and isinstance(body, dict)
             ):
+                suffix = (
+                    nanogpt_speed_routing(app.config)
+                    if NanoGPTSpeedBreaker.allows_suffix()
+                    else ""
+                )
                 routed_body = apply_nanogpt_speed_routing(
                     body,
-                    nanogpt_speed_routing(app.config),
+                    suffix,
                     request.headers,
                 )
                 if routed_body != body:
+                    speed_routed_body = routed_body
                     raw_request_data = json.dumps(routed_body).encode("utf-8")
             if (
                 request.method.upper() == "POST"
@@ -442,6 +452,24 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     request_headers=request.headers,
                 )
             else:
+                response = send_to_url(url)
+
+            if speed_routed_body is not None and is_nanogpt_paygo_rejection(
+                getattr(response, "status_code", None),
+                getattr(response, "content", None),
+            ):
+                NanoGPTSpeedBreaker.record_paygo_rejection(
+                    app.config["NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS"]
+                )
+                logger.warning(
+                    "NanoGPT rejected provider selection for lack of balance; "
+                    "retrying without the speed suffix and pausing it",
+                )
+                plain_body = {
+                    **speed_routed_body,
+                    "model": strip_nanogpt_speed_suffix(speed_routed_body.get("model")),
+                }
+                request_data = json.dumps(plain_body).encode("utf-8")
                 response = send_to_url(url)
 
             if configured_nanogpt_key:

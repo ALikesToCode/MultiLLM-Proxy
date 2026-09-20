@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -166,6 +167,47 @@ def apply_nanogpt_speed_suffix(model: Any, suffix: str) -> Any:
     if nanogpt_model_has_speed_suffix(model):
         return model
     return f"{model}:{suffix}"
+
+
+NANOGPT_PAYGO_REJECTION_CODES = frozenset({"insufficient_balance"})
+
+
+def is_nanogpt_paygo_rejection(status_code: Any, body: Any) -> bool:
+    """True when NanoGPT refused a request for lack of pay-as-you-go balance.
+
+    Provider selection leaves subscription coverage, so an account without a
+    funded balance answers 402 no matter which endpoint or model was used.
+    """
+    if status_code != 402:
+        return False
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = json.loads(body)
+        except (ValueError, TypeError):
+            return True
+    elif isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return True
+    if not isinstance(body, Mapping):
+        return True
+    code = body.get("code")
+    if isinstance(code, str) and code.strip().lower() in NANOGPT_PAYGO_REJECTION_CODES:
+        return True
+    error = body.get("error")
+    if isinstance(error, Mapping):
+        nested = error.get("code")
+        if isinstance(nested, str):
+            return nested.strip().lower() in NANOGPT_PAYGO_REJECTION_CODES
+    # A 402 from NanoGPT is a billing refusal even when the shape is unfamiliar.
+    return True
+
+
+def strip_nanogpt_speed_suffix(model: Any) -> Any:
+    if not isinstance(model, str) or not nanogpt_model_has_speed_suffix(model):
+        return model
+    return model.rsplit(":", 1)[0]
 
 
 def apply_nanogpt_speed_routing(

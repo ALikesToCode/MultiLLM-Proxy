@@ -101,6 +101,11 @@ class Config:
         '',
         {'', 'fast', 'latency', 'throughput'},
     )
+    # After a 402 the suffix is dropped for this long, so an unfunded account
+    # degrades to subscription instead of 402ing every request.
+    NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS = load_bounded_env_integer(
+        'NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS', 900, 30, 86400
+    )
     NANOGPT_TEXT_BASE_URL = nanogpt_text_base_url(
         NANOGPT_STANDARD_BASE_URL,
         NANOGPT_SUBSCRIPTION_BASE_URL,

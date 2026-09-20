@@ -1,6 +1,7 @@
 import {
   buildProviderHeaders,
   isSafeFallbackStatus,
+  noteNanogptPaygoRejection,
 } from "./config.mjs";
 import { prepareCompactionCandidates } from "./compaction-budget.mjs";
 import {
@@ -520,6 +521,41 @@ export function applyRoleplayRouteHeaders(
   headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
 }
 
+// NanoGPT answers 402 when provider selection is not covered by a balance. The
+// suffix only rides on the request body, so the same candidate can be retried
+// without it rather than surrendering the provider to the fallback chain.
+async function fetchCandidateWithPaygoFallback(
+  candidate,
+  payload,
+  env,
+  settings,
+  signal,
+  key,
+) {
+  const attempt = await fetchCandidate(candidate, payload, env, settings, signal, key);
+  const suffixed =
+    candidate.provider === "nanogpt" &&
+    typeof candidate.upstreamModel === "string" &&
+    candidate.upstreamModel !== candidate.model;
+  if (!suffixed || attempt?.response?.status !== 402) {
+    return attempt;
+  }
+  noteNanogptPaygoRejection(settings.nanogptPaygoCooldownMs ?? 900_000);
+  try {
+    attempt.cleanup?.();
+  } catch {
+    // The retry supersedes this attempt; a cleanup failure must not mask it.
+  }
+  return fetchCandidate(
+    candidate,
+    { ...payload, model: candidate.model },
+    env,
+    settings,
+    signal,
+    key,
+  );
+}
+
 async function fetchCandidate(candidate, payload, env, settings, signal, key) {
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
@@ -858,7 +894,7 @@ export async function attemptRoleplayCandidates(
       : preparedPayload?.payload ?? preparedPayload;
 
     try {
-      attempted = await fetchCandidate(
+      attempted = await fetchCandidateWithPaygoFallback(
         candidate,
         upstreamPayload,
         env,

@@ -4,6 +4,9 @@ import test from "node:test";
 import {
   buildConfiguredCandidates,
   getRoleplaySettings,
+  nanogptSpeedRoutingAllowed,
+  noteNanogptPaygoRejection,
+  resetNanogptPaygoBreaker,
 } from "../worker/roleplay/config.mjs";
 import { buildUpstreamPayload } from "../worker/roleplay/memory.mjs";
 
@@ -66,4 +69,54 @@ test("a candidate without upstreamModel falls back to the plain model id", () =>
   );
 
   assert.equal(payload.model, "glm-5.3");
+});
+
+test("a pay-as-you-go refusal pauses the suffix, then it resumes", () => {
+  resetNanogptPaygoBreaker();
+  try {
+    assert.equal(nanogptSpeedRoutingAllowed(1_000), true);
+    noteNanogptPaygoRejection(60_000, 1_000);
+    assert.equal(nanogptSpeedRoutingAllowed(60_000), false);
+    assert.equal(nanogptSpeedRoutingAllowed(61_001), true);
+  } finally {
+    resetNanogptPaygoBreaker();
+  }
+});
+
+test("a paused breaker keeps the suffix off candidates", () => {
+  resetNanogptPaygoBreaker();
+  try {
+    noteNanogptPaygoRejection(900_000);
+    const candidate = nanogptCandidate("fast");
+    assert.equal(candidate.upstreamModel, candidate.model);
+    assert.equal(candidate.model.includes(":fast"), false);
+  } finally {
+    resetNanogptPaygoBreaker();
+  }
+});
+
+test("the breaker never shortens an open window", () => {
+  resetNanogptPaygoBreaker();
+  try {
+    noteNanogptPaygoRejection(600_000, 0);
+    noteNanogptPaygoRejection(1_000, 1_000);
+    assert.equal(nanogptSpeedRoutingAllowed(500_000), false);
+  } finally {
+    resetNanogptPaygoBreaker();
+  }
+});
+
+test("the cooldown is configurable and bounded", () => {
+  assert.equal(getRoleplaySettings({}).nanogptPaygoCooldownMs, 900_000);
+  assert.equal(
+    getRoleplaySettings({ NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS: "45" })
+      .nanogptPaygoCooldownMs,
+    45_000,
+  );
+  // Out-of-range values clamp to the bound, so the breaker cannot be disabled.
+  assert.equal(
+    getRoleplaySettings({ NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS: "0" })
+      .nanogptPaygoCooldownMs,
+    30_000,
+  );
 });

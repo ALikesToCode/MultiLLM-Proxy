@@ -237,6 +237,24 @@ function nanogptSpeedRouting(value) {
   return NANOGPT_SPEED_ROUTING_SUFFIXES.has(suffix) ? suffix : "";
 }
 
+// Provider selection is pay-as-you-go. Once the account refuses to pay for it,
+// stop suffixing until the cooldown lapses so the run degrades to subscription
+// instead of 402ing every candidate and tripping the upstream rate limit.
+let nanogptPaygoBlockedUntil = 0;
+
+export function noteNanogptPaygoRejection(cooldownMs = 900_000, now = Date.now()) {
+  nanogptPaygoBlockedUntil = Math.max(nanogptPaygoBlockedUntil, now + cooldownMs);
+  return nanogptPaygoBlockedUntil;
+}
+
+export function nanogptSpeedRoutingAllowed(now = Date.now()) {
+  return now >= nanogptPaygoBlockedUntil;
+}
+
+export function resetNanogptPaygoBreaker() {
+  nanogptPaygoBlockedUntil = 0;
+}
+
 function withNanogptSpeedSuffix(model, suffix) {
   if (!suffix || typeof model !== "string" || !model.trim()) {
     return model;
@@ -534,6 +552,12 @@ export function getRoleplaySettings(env) {
       0,
       2,
     ),
+    nanogptPaygoCooldownMs: boundedInteger(
+      env.NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS,
+      900,
+      30,
+      86400,
+    ) * 1000,
     qualityLatencyPremiumPercent: boundedInteger(
       env.ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT,
       20,
@@ -593,7 +617,7 @@ export function buildConfiguredCandidates(env, settings) {
     }
 
     const speedRouting =
-      provider === "nanogpt"
+      provider === "nanogpt" && nanogptSpeedRoutingAllowed()
         ? nanogptSpeedRouting(env.NANOGPT_SPEED_ROUTING)
         : "";
     const billingMode =

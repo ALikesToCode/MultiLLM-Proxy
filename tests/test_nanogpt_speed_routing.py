@@ -1,6 +1,8 @@
 import json
 import os
 import unittest
+
+import requests
 from unittest.mock import patch
 
 from providers.nanogpt import (
@@ -9,9 +11,12 @@ from providers.nanogpt import (
     nanogpt_model_has_speed_suffix,
     nanogpt_speed_routing,
     nanogpt_speed_routing_conflicts,
+    is_nanogpt_paygo_rejection,
     nanogpt_subscription_only,
     nanogpt_text_base_url,
+    strip_nanogpt_speed_suffix,
 )
+from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 
 STANDARD_BASE_URL = "https://nano-gpt.com/api"
 SUBSCRIPTION_BASE_URL = "https://nano-gpt.com/api/subscription"
@@ -125,6 +130,50 @@ class NanoGPTSpeedRoutingTest(unittest.TestCase):
         )
 
 
+class NanoGPTPaygoFallbackTest(unittest.TestCase):
+    def setUp(self):
+        NanoGPTSpeedBreaker.reset()
+
+    def tearDown(self):
+        NanoGPTSpeedBreaker.reset()
+
+    def test_only_402_billing_refusals_count(self):
+        self.assertTrue(
+            is_nanogpt_paygo_rejection(402, b'{"code":"insufficient_balance"}')
+        )
+        self.assertTrue(
+            is_nanogpt_paygo_rejection(
+                402, b'{"error":{"code":"insufficient_balance"}}'
+            )
+        )
+        # A 402 with an unfamiliar shape is still a billing refusal.
+        self.assertTrue(is_nanogpt_paygo_rejection(402, b"<html>nope</html>"))
+        self.assertFalse(is_nanogpt_paygo_rejection(429, b'{"code":"rate_limited"}'))
+        self.assertFalse(is_nanogpt_paygo_rejection(200, b'{"ok":true}'))
+
+    def test_suffix_is_stripped_back_to_the_base_model(self):
+        self.assertEqual(
+            strip_nanogpt_speed_suffix("zai-org/glm-5.2:thinking:fast"),
+            "zai-org/glm-5.2:thinking",
+        )
+        self.assertEqual(
+            strip_nanogpt_speed_suffix("zai-org/glm-5.2:thinking"),
+            "zai-org/glm-5.2:thinking",
+        )
+        self.assertEqual(strip_nanogpt_speed_suffix(None), None)
+
+    def test_breaker_pauses_then_reopens(self):
+        self.assertTrue(NanoGPTSpeedBreaker.allows_suffix(now=100.0))
+        NanoGPTSpeedBreaker.record_paygo_rejection(60, now=100.0)
+        self.assertFalse(NanoGPTSpeedBreaker.allows_suffix(now=159.0))
+        self.assertTrue(NanoGPTSpeedBreaker.allows_suffix(now=161.0))
+
+    def test_breaker_never_shortens_an_open_window(self):
+        NanoGPTSpeedBreaker.record_paygo_rejection(600, now=100.0)
+        NanoGPTSpeedBreaker.record_paygo_rejection(5, now=101.0)
+        self.assertFalse(NanoGPTSpeedBreaker.allows_suffix(now=650.0))
+
+
 class NanoGPTSpeedRoutingRequestTest(UnifiedApiTestCase):
     """The configured suffix has to survive all the way onto the wire."""
 
@@ -214,6 +263,97 @@ class NanoGPTSpeedRoutingRequestTest(UnifiedApiTestCase):
         self.assertEqual(
             json.loads(request_kwargs["data"])["model"],
             "moonshotai/kimi-k2.6:latency",
+        )
+
+    def test_a_402_retries_without_the_suffix_and_pauses_routing(self):
+        NanoGPTSpeedBreaker.reset()
+        self.addCleanup(NanoGPTSpeedBreaker.reset)
+        self._enable_speed_routing("fast")
+        os.environ["NANOGPT_API_KEY"] = "nanogpt-provider-key"
+
+        refusal = requests.Response()
+        refusal.status_code = 402
+        refusal._content = json.dumps(
+            {"error": "Insufficient balance", "code": "insufficient_balance"}
+        ).encode()
+
+        with patch(
+            "app.ProxyService.make_request",
+            side_effect=[refusal, self._chat_response("served after downgrade")],
+        ) as make_request, patch(
+            "routes.unified.NanoGPTKeyPool.select_key",
+            return_value="nanogpt-provider-key",
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:zai-org/glm-5.2:thinking",
+                    "messages": [{"role": "user", "content": "Continue."}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_count, 2)
+        first, second = make_request.call_args_list
+        self.assertEqual(
+            json.loads(first.kwargs["data"])["model"],
+            "zai-org/glm-5.2:thinking:fast",
+        )
+        self.assertEqual(
+            json.loads(second.kwargs["data"])["model"],
+            "zai-org/glm-5.2:thinking",
+        )
+        # The refusal pauses the suffix so the next call does not 402 again.
+        self.assertFalse(NanoGPTSpeedBreaker.allows_suffix())
+
+    def test_a_routing_402_does_not_cool_down_the_credential(self):
+        """The suffix caused the 402, so the key still serves subscription."""
+        NanoGPTSpeedBreaker.reset()
+        self.addCleanup(NanoGPTSpeedBreaker.reset)
+        self._enable_speed_routing("fast")
+        os.environ["NANOGPT_API_KEY"] = "nanogpt-provider-key"
+
+        refusal = requests.Response()
+        refusal.status_code = 402
+        refusal._content = b'{"code":"insufficient_balance"}'
+
+        from services.nanogpt_key_pool import NanoGPTKeyPool
+
+        NanoGPTKeyPool.reset()
+        self.addCleanup(NanoGPTKeyPool.reset)
+        with patch(
+            "app.ProxyService.make_request",
+            side_effect=[refusal, self._chat_response("ok")],
+        ), patch(
+            "routes.unified.NanoGPTKeyPool.select_key",
+            return_value="nanogpt-provider-key",
+        ), patch(
+            "routes.unified.NanoGPTKeyPool.invalidate"
+        ) as invalidate:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:zai-org/glm-5.2:thinking",
+                    "messages": [{"role": "user", "content": "Continue."}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        invalidate.assert_not_called()
+
+    def test_paused_routing_sends_the_plain_model(self):
+        NanoGPTSpeedBreaker.reset()
+        self.addCleanup(NanoGPTSpeedBreaker.reset)
+        self._enable_speed_routing("fast")
+        NanoGPTSpeedBreaker.record_paygo_rejection(900)
+
+        request_kwargs = self._post_chat()
+
+        self.assertEqual(
+            json.loads(request_kwargs["data"])["model"],
+            "zai-org/glm-5.2:thinking",
         )
 
     def test_a_caller_pinned_provider_is_left_alone(self):

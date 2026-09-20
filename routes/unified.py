@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from collections.abc import Mapping
 
@@ -10,7 +11,10 @@ from providers.aihubmix import build_aihubmix_image_request
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.nanogpt import (
     apply_nanogpt_speed_routing,
+    is_nanogpt_paygo_rejection,
+    nanogpt_model_has_speed_suffix,
     nanogpt_speed_routing,
+    strip_nanogpt_speed_suffix,
     nanogpt_subscription_only,
     sanitize_nanogpt_subscription_headers,
     sanitize_nanogpt_subscription_payload,
@@ -43,6 +47,7 @@ from routes.unified_transport import (
     send_configured_unified_provider_request,
     send_unified_image_request,
 )
+from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
@@ -60,6 +65,9 @@ from services.provider_prompt_cache import (
 from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+
+logger = logging.getLogger(__name__)
+
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 NATIVE_RESPONSES_PROVIDERS = frozenset(
@@ -103,8 +111,13 @@ def _record_nanogpt_token_result(
     provider: str,
     token: str,
     status_code: int,
+    billing_refusal_is_routing: bool = False,
 ) -> None:
     if provider != "nanogpt":
+        return
+    if billing_refusal_is_routing and status_code == 402:
+        # The 402 came from our own provider-selection suffix, not from a bad
+        # credential. Cooling the key down would strand subscription traffic.
         return
     NanoGPTKeyPool.record_result(
         token,
@@ -122,6 +135,7 @@ def _request_with_provider_token_rotation(
     proxy_service_cls,
     provider: str,
     send_request,
+    billing_refusal_is_routing: bool = False,
 ):
     """Send once per usable NanoGPT key after definite pre-generation failures."""
     attempt_limit = 1
@@ -159,7 +173,10 @@ def _request_with_provider_token_rotation(
             provider,
             token,
             response.status_code,
+            billing_refusal_is_routing,
         )
+        if billing_refusal_is_routing and response.status_code == 402:
+            break
         if provider != "nanogpt" or not is_nanogpt_credential_rejection(
             response.status_code
         ):
@@ -213,9 +230,33 @@ def _apply_nanogpt_speed_routing(app, provider: str, payload: dict, headers) -> 
     if provider != "nanogpt":
         return payload
     suffix = nanogpt_speed_routing(app.config)
-    if not suffix:
+    if not suffix or not NanoGPTSpeedBreaker.allows_suffix():
         return payload
     return apply_nanogpt_speed_routing(payload, suffix, headers)
+
+
+def _nanogpt_paygo_downgrade(app, provider: str, response, routed_payload: dict):
+    """Return the un-suffixed payload when NanoGPT refused to bill the suffix."""
+    if provider != "nanogpt":
+        return None
+    model = routed_payload.get("model")
+    if not nanogpt_model_has_speed_suffix(model):
+        return None
+    status = getattr(response, "status_code", None)
+    if status != 402:
+        return None
+    body = getattr(response, "content", None) or getattr(response, "data", None)
+    if not is_nanogpt_paygo_rejection(status, body):
+        return None
+    NanoGPTSpeedBreaker.record_paygo_rejection(
+        app.config["NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS"]
+    )
+    logger.warning(
+        "NanoGPT rejected provider selection for lack of balance; "
+        "retrying %s without the speed suffix and pausing it",
+        model,
+    )
+    return {**routed_payload, "model": strip_nanogpt_speed_suffix(model)}
 
 
 def _provider_model_url(
@@ -420,13 +461,19 @@ def _dispatch_unified_chat_candidate(
         upstream_payload = _apply_nanogpt_speed_routing(
             app, provider, upstream_payload, headers_source
         )
-        raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
-        request_data = (
-            raw_body
-            if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
-            else proxy_service_cls.filter_request_data(provider, raw_body)
-        )
+
+        def _encode(body_payload: dict) -> bytes:
+            serialized = serialize_unified_chat_payload(body_payload)
+            return (
+                serialized
+                if provider in RAW_CHAT_PASSTHROUGH_PROVIDERS
+                else proxy_service_cls.filter_request_data(provider, serialized)
+            )
+
+        # Held in a cell so a NanoGPT pay-as-you-go refusal can resend an
+        # un-suffixed body through the same rotation.
+        outbound = {"data": _encode(upstream_payload)}
 
         def send_request(token: str):
             headers = proxy_service_cls.prepare_headers(
@@ -457,7 +504,7 @@ def _dispatch_unified_chat_candidate(
                 ),
                 "headers": headers,
                 "params": params,
-                "data": request_data,
+                "data": outbound["data"],
                 "api_provider": provider,
                 "use_cache": False,
             }
@@ -478,7 +525,22 @@ def _dispatch_unified_chat_candidate(
             proxy_service_cls,
             provider,
             send_request,
+            billing_refusal_is_routing=nanogpt_model_has_speed_suffix(
+                upstream_payload.get("model")
+            ),
         )
+        downgraded = _nanogpt_paygo_downgrade(app, provider, response, upstream_payload)
+        if downgraded is not None:
+            upstream_payload = downgraded
+            outbound["data"] = _encode(upstream_payload)
+            response, retry_attempts = _request_with_provider_token_rotation(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                provider,
+                send_request,
+            )
+            credential_attempts += retry_attempts
 
         metrics_service_cls.get_instance().track_request(
             provider=provider,
