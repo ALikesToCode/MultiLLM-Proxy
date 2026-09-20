@@ -98,7 +98,7 @@ test("the compaction budget and deadline ceilings admit the deployed values", as
   // Values below the ceiling must survive verbatim, or the deployment is
   // silently running something other than what wrangler.jsonc says.
   assert.equal(settings.compactionMaxTokens, 16_000);
-  assert.equal(settings.compactionTimeoutMs, 1_000_000);
+  assert.equal(settings.compactionTimeoutMs, 100_000);
 
   const clamped = getRoleplaySettings({
     ...config.vars,
