@@ -553,17 +553,22 @@ export function getRoleplaySettings(env) {
       16_000,
       1_800_000,
     ),
+    // Thinking models spend this budget on reasoning before writing the
+    // digest, so the ceiling has to leave room for both.
     compactionMaxTokens: boundedInteger(
       env.ROLEPLAY_COMPACTION_MAX_TOKENS,
       1_200,
       256,
-      4_096,
+      16_384,
     ),
+    // A compaction that runs out of time is abandoned and the turn falls back
+    // to a local extractive digest, so the ceiling is generous. Note the
+    // platform kills a blocking request long before the upper bound.
     compactionTimeoutMs: boundedInteger(
       env.ROLEPLAY_COMPACTION_TIMEOUT_MS,
       30_000,
       1_000,
-      30_000,
+      1_000_000,
     ),
     upstreamHeaderTimeoutMs: boundedInteger(
       env.ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS,

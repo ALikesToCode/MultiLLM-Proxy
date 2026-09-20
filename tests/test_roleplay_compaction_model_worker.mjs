@@ -10,6 +10,7 @@ import {
   buildCompactionPayload,
   buildUpstreamPayload,
 } from "../worker/roleplay/memory.mjs";
+import { prepareCompactionCandidates } from "../worker/roleplay/compaction-budget.mjs";
 
 const BASE = {
   NANOGPT_API_KEY: "k",
@@ -86,4 +87,38 @@ test("the deployment routes NanoGPT compaction to the latest Kimi", async () => 
     "zai-org/glm-5.2:thinking",
     "z-ai/glm-5.3",
   ]);
+});
+
+test("the compaction budget and deadline ceilings admit the deployed values", async () => {
+  const config = JSON.parse(
+    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+  );
+  const settings = getRoleplaySettings(config.vars);
+
+  // Values below the ceiling must survive verbatim, or the deployment is
+  // silently running something other than what wrangler.jsonc says.
+  assert.equal(settings.compactionMaxTokens, 16_000);
+  assert.equal(settings.compactionTimeoutMs, 1_000_000);
+
+  const clamped = getRoleplaySettings({
+    ...config.vars,
+    ROLEPLAY_COMPACTION_MAX_TOKENS: "999999",
+    ROLEPLAY_COMPACTION_TIMEOUT_MS: "99999999",
+  });
+  assert.equal(clamped.compactionMaxTokens, 16_384);
+  assert.equal(clamped.compactionTimeoutMs, 1_000_000);
+});
+
+test("a larger budget still leaves every candidate eligible to compact", async () => {
+  const config = JSON.parse(
+    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+  );
+  const env = { ...config.vars, NANOGPT_API_KEY: "k", LINKAPI_KEY: "k", NAVY_API_KEY: "k" };
+  const settings = getRoleplaySettings(env);
+  const candidates = buildConfiguredCandidates(env, settings);
+  // prepareCompactionCandidates drops any candidate that cannot fund the
+  // budget, so raising it too far would starve compaction entirely.
+  const prepared = prepareCompactionCandidates(candidates, 4_000, settings);
+  assert.equal(prepared.length, candidates.length);
+  assert.ok(prepared.length > 0);
 });
