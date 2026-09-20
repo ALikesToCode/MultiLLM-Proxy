@@ -547,6 +547,7 @@ Non-secret tuning variables:
 | Variable | Default | Purpose |
 | --- | ---: | --- |
 | `ROLEPLAY_PROVIDER_ORDER` | `nanogpt,opencode,linkapi,openrouter,navyai` | Strict provider tiers |
+| `ROLEPLAY_COMPACTION_MODELS` | `{}` | Per-provider model for memory compaction only, e.g. `{"nanogpt":"moonshotai/kimi-k2.6"}`. Generation keeps its own rotation. Keyed by provider because a model name is only valid at the gateway that serves it; an unknown provider, blank name or malformed JSON falls back to the candidate's model. |
 | `ROLEPLAY_KIMI_MODEL` | `kimi-k2.6` | Default Kimi model ID |
 | `ROLEPLAY_GLM_MODEL` | `glm-5.3-flash` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |

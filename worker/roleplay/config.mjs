@@ -288,6 +288,43 @@ function parseProviderOrder(value) {
   return providers.length ? providers : DEFAULT_PROVIDER_ORDER;
 }
 
+// Compaction is a summarisation job, not generation, so it can run on a
+// newer model than the one telling the story. Keyed by provider because each
+// candidate keeps its own endpoint and credential: a model name is only valid
+// for the gateway that serves it.
+function parseCompactionModels(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const models = {};
+    for (const [provider, model] of Object.entries(parsed)) {
+      if (
+        !PROVIDERS[provider] ||
+        typeof model !== "string" ||
+        !model.trim() ||
+        model.length > 200 ||
+        /[\u0000-\u001f\u007f]/.test(model)
+      ) {
+        continue;
+      }
+      models[provider] = model.trim();
+    }
+    return models;
+  } catch {
+    return {};
+  }
+}
+
+export function compactionModelFor(candidate, settings) {
+  const override = settings?.compactionModels?.[candidate?.provider];
+  return override || candidate?.upstreamModel || candidate?.model;
+}
+
 function parseProviderModelOverrides(value) {
   if (typeof value !== "string" || !value.trim()) {
     return {};
@@ -599,6 +636,7 @@ export function getRoleplaySettings(env) {
     providerModelOverrides: parseProviderModelOverrides(
       env.ROLEPLAY_PROVIDER_MODELS,
     ),
+    compactionModels: parseCompactionModels(env.ROLEPLAY_COMPACTION_MODELS),
     providerFamilies: parseProviderFamilies(env.ROLEPLAY_PROVIDER_FAMILIES),
     providerLimits: parseRoleplayProviderLimits(
       env.ROLEPLAY_PROVIDER_LIMITS,

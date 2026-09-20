@@ -693,7 +693,10 @@ export function buildCompactionPayload(state, plan, candidate, settings) {
   ].join("\n");
 
   return applyReasoningPolicy({
-    model: candidate.upstreamModel ?? candidate.model,
+    model:
+      settings?.compactionModels?.[candidate.provider] ||
+      candidate.upstreamModel ||
+      candidate.model,
     messages: [
       { role: "system", content: instruction },
       {
