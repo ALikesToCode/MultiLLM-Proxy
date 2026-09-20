@@ -151,6 +151,24 @@ class NanoGPTPaygoFallbackTest(unittest.TestCase):
         self.assertFalse(is_nanogpt_paygo_rejection(429, b'{"code":"rate_limited"}'))
         self.assertFalse(is_nanogpt_paygo_rejection(200, b'{"ok":true}'))
 
+    def test_403_provider_selected_is_a_routing_refusal(self):
+        """NanoGPT refuses provider selection as 403 when paid use is off."""
+        self.assertTrue(
+            is_nanogpt_paygo_rejection(
+                403, b'{"code":"provider_selected","reason":"provider_selected"}'
+            )
+        )
+        self.assertTrue(
+            is_nanogpt_paygo_rejection(403, b'{"error":{"code":"provider_selected"}}')
+        )
+
+    def test_an_ordinary_403_is_never_swallowed(self):
+        self.assertFalse(is_nanogpt_paygo_rejection(403, b'{"error":{"code":"forbidden"}}'))
+        self.assertFalse(is_nanogpt_paygo_rejection(403, b""))
+        self.assertFalse(
+            is_nanogpt_paygo_rejection(401, b'{"error":{"code":"invalid_api_key"}}')
+        )
+
     def test_suffix_is_stripped_back_to_the_base_model(self):
         self.assertEqual(
             strip_nanogpt_speed_suffix("zai-org/glm-5.2:thinking:fast"),
@@ -354,6 +372,44 @@ class NanoGPTSpeedRoutingRequestTest(UnifiedApiTestCase):
         self.assertEqual(
             json.loads(request_kwargs["data"])["model"],
             "zai-org/glm-5.2:thinking",
+        )
+
+    def test_a_routing_refusal_does_not_rotate_onto_another_key(self):
+        """A dead second key must not mask the refusal with its own 401."""
+        NanoGPTSpeedBreaker.reset()
+        self.addCleanup(NanoGPTSpeedBreaker.reset)
+        self._enable_speed_routing("fast")
+        os.environ["NANOGPT_API_KEY"] = "good-key"
+        os.environ["NANOGPT_API_KEY_1"] = "dead-key"
+        self.addCleanup(os.environ.pop, "NANOGPT_API_KEY_1", None)
+
+        refusal = requests.Response()
+        refusal.status_code = 403
+        refusal._content = b'{"code":"provider_selected"}'
+
+        with patch(
+            "app.ProxyService.make_request",
+            side_effect=[refusal, self._chat_response("served plain")],
+        ) as make_request, patch(
+            "routes.unified.NanoGPTKeyPool.select_key", return_value="good-key"
+        ):
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer admin-test-key"},
+                json={
+                    "model": "nanogpt:zai-org/glm-5.2:thinking",
+                    "messages": [{"role": "user", "content": "Continue."}],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_count, 2)
+        first, second = make_request.call_args_list
+        self.assertEqual(
+            json.loads(first.kwargs["data"])["model"], "zai-org/glm-5.2:thinking:fast"
+        )
+        self.assertEqual(
+            json.loads(second.kwargs["data"])["model"], "zai-org/glm-5.2:thinking"
         )
 
     def test_a_caller_pinned_provider_is_left_alone(self):

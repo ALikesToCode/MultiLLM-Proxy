@@ -170,38 +170,59 @@ def apply_nanogpt_speed_suffix(model: Any, suffix: str) -> Any:
 
 
 NANOGPT_PAYGO_REJECTION_CODES = frozenset({"insufficient_balance"})
+# NanoGPT refuses provider selection two different ways: 402 when the balance
+# cannot cover it, and 403 "provider_selected" when paid API usage is disabled
+# for the key outright.
+NANOGPT_PROVIDER_SELECTION_CODES = frozenset({"provider_selected"})
+
+
+def _decoded_body(body: Any) -> Any:
+    if isinstance(body, (bytes, bytearray, str)):
+        try:
+            return json.loads(body)
+        except (ValueError, TypeError):
+            return None
+    return body
+
+
+def _body_codes(body: Any) -> set[str]:
+    codes: set[str] = set()
+    if not isinstance(body, Mapping):
+        return codes
+    for key in ("code", "reason"):
+        value = body.get(key)
+        if isinstance(value, str):
+            codes.add(value.strip().lower())
+    error = body.get("error")
+    if isinstance(error, Mapping):
+        for key in ("code", "type"):
+            value = error.get(key)
+            if isinstance(value, str):
+                codes.add(value.strip().lower())
+    return codes
 
 
 def is_nanogpt_paygo_rejection(status_code: Any, body: Any) -> bool:
-    """True when NanoGPT refused a request for lack of pay-as-you-go balance.
+    """True when NanoGPT refused the request because of provider selection.
 
-    Provider selection leaves subscription coverage, so an account without a
-    funded balance answers 402 no matter which endpoint or model was used.
+    Provider selection leaves subscription coverage. An unfunded account
+    answers 402, and a key with paid usage disabled answers 403
+    `provider_selected`; both mean the suffix, not the credential, is at fault.
     """
-    if status_code != 402:
-        return False
-    if isinstance(body, (bytes, bytearray)):
-        try:
-            body = json.loads(body)
-        except (ValueError, TypeError):
-            return True
-    elif isinstance(body, str):
-        try:
-            body = json.loads(body)
-        except ValueError:
-            return True
-    if not isinstance(body, Mapping):
+    decoded = _decoded_body(body)
+    if status_code == 402:
+        codes = _body_codes(decoded)
+        if codes:
+            return bool(codes & NANOGPT_PAYGO_REJECTION_CODES) or not (
+                codes - {"invalid_request_error"}
+            )
+        # A 402 from NanoGPT is a billing refusal even in an unfamiliar shape.
         return True
-    code = body.get("code")
-    if isinstance(code, str) and code.strip().lower() in NANOGPT_PAYGO_REJECTION_CODES:
-        return True
-    error = body.get("error")
-    if isinstance(error, Mapping):
-        nested = error.get("code")
-        if isinstance(nested, str):
-            return nested.strip().lower() in NANOGPT_PAYGO_REJECTION_CODES
-    # A 402 from NanoGPT is a billing refusal even when the shape is unfamiliar.
-    return True
+    if status_code == 403:
+        # Never swallow a plain 403: only the documented provider-selection
+        # refusal is ours to retry, anything else is a real authorization fault.
+        return bool(_body_codes(decoded) & NANOGPT_PROVIDER_SELECTION_CODES)
+    return False
 
 
 def strip_nanogpt_speed_suffix(model: Any) -> Any:

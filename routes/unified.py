@@ -106,18 +106,27 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
     return token
 
 
+def _is_nanogpt_routing_refusal(response) -> bool:
+    """True when NanoGPT refused this request over our own speed suffix."""
+    return is_nanogpt_paygo_rejection(
+        getattr(response, "status_code", None),
+        getattr(response, "content", None),
+    )
+
+
 def _record_nanogpt_token_result(
     app,
     provider: str,
     token: str,
     status_code: int,
-    billing_refusal_is_routing: bool = False,
+    routing_refusal: bool = False,
 ) -> None:
     if provider != "nanogpt":
         return
-    if billing_refusal_is_routing and status_code == 402:
-        # The 402 came from our own provider-selection suffix, not from a bad
-        # credential. Cooling the key down would strand subscription traffic.
+    if routing_refusal:
+        # The refusal came from our own provider-selection suffix, not from a
+        # bad credential. Cooling the key down would strand subscription
+        # traffic behind a pool with no usable keys.
         return
     NanoGPTKeyPool.record_result(
         token,
@@ -168,14 +177,19 @@ def _request_with_provider_token_rotation(
 
         response = send_request(token)
         attempts += 1
+        routing_refusal = billing_refusal_is_routing and _is_nanogpt_routing_refusal(
+            response
+        )
         _record_nanogpt_token_result(
             app,
             provider,
             token,
             response.status_code,
-            billing_refusal_is_routing,
+            routing_refusal,
         )
-        if billing_refusal_is_routing and response.status_code == 402:
+        if routing_refusal:
+            # Every key would refuse this suffix identically, so rotating on
+            # would only surface an unrelated key's error to the caller.
             break
         if provider != "nanogpt" or not is_nanogpt_credential_rejection(
             response.status_code
@@ -242,11 +256,7 @@ def _nanogpt_paygo_downgrade(app, provider: str, response, routed_payload: dict)
     model = routed_payload.get("model")
     if not nanogpt_model_has_speed_suffix(model):
         return None
-    status = getattr(response, "status_code", None)
-    if status != 402:
-        return None
-    body = getattr(response, "content", None) or getattr(response, "data", None)
-    if not is_nanogpt_paygo_rejection(status, body):
+    if not _is_nanogpt_routing_refusal(response):
         return None
     NanoGPTSpeedBreaker.record_paygo_rejection(
         app.config["NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS"]
