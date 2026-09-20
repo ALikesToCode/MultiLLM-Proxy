@@ -223,6 +223,30 @@ function nanogptBillingMode(value) {
     : "subscription";
 }
 
+// NanoGPT picks a provider from a `:fast` / `:throughput` / `:latency` model
+// suffix. Those routes leave subscription coverage and bill pay-as-you-go plus
+// a provider-selection markup, so an unset value keeps the subscription route.
+const NANOGPT_SPEED_ROUTING_SUFFIXES = new Set([
+  "fast",
+  "latency",
+  "throughput",
+]);
+
+function nanogptSpeedRouting(value) {
+  const suffix = String(value ?? "").trim().toLowerCase();
+  return NANOGPT_SPEED_ROUTING_SUFFIXES.has(suffix) ? suffix : "";
+}
+
+function withNanogptSpeedSuffix(model, suffix) {
+  if (!suffix || typeof model !== "string" || !model.trim()) {
+    return model;
+  }
+  const tail = model.includes(":")
+    ? model.slice(model.lastIndexOf(":") + 1).trim().toLowerCase()
+    : "";
+  return NANOGPT_SPEED_ROUTING_SUFFIXES.has(tail) ? model : `${model}:${suffix}`;
+}
+
 function defaultReasoningEffort(value) {
   const normalized = String(value ?? "max").trim().toLowerCase();
   return REASONING_EFFORTS.has(normalized) ? normalized : "max";
@@ -568,8 +592,12 @@ export function buildConfiguredCandidates(env, settings) {
       return;
     }
 
-    const billingMode =
+    const speedRouting =
       provider === "nanogpt"
+        ? nanogptSpeedRouting(env.NANOGPT_SPEED_ROUTING)
+        : "";
+    const billingMode =
+      provider === "nanogpt" && !speedRouting
         ? nanogptBillingMode(env.NANOGPT_BILLING_MODE)
         : "standard";
     const subscriptionOnly =
@@ -614,6 +642,9 @@ export function buildConfiguredCandidates(env, settings) {
             family,
             familyRank,
             model,
+            // Routing, stats and telemetry stay keyed on the plain model id;
+            // only the upstream request body carries the speed suffix.
+            upstreamModel: withNanogptSpeedSuffix(model, speedRouting),
             modelRank,
             endpoint: endpoint.toString(),
             catalogEndpoint: catalogEndpoint.toString(),

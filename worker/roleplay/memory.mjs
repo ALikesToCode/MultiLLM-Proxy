@@ -693,7 +693,7 @@ export function buildCompactionPayload(state, plan, candidate, settings) {
   ].join("\n");
 
   return applyReasoningPolicy({
-    model: candidate.model,
+    model: candidate.upstreamModel ?? candidate.model,
     messages: [
       { role: "system", content: instruction },
       {
@@ -850,7 +850,7 @@ export function buildUpstreamPayload(
   settings = {},
 ) {
   const payload = {
-    model: candidate.model,
+    model: candidate.upstreamModel ?? candidate.model,
     messages,
     stream: parsed.stream,
     ...parsed.forwarded,

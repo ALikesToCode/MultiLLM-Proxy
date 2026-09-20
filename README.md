@@ -559,6 +559,21 @@ intentionally permits PAYG. Raw `/nanogpt/*` and NanoGPT media routes retain the
 standard provider contract and remain subject to the account's own billing
 guard.
 
+`NANOGPT_SPEED_ROUTING` opts NanoGPT text routes into provider selection by
+appending a suffix to the upstream model id: `fast` (best estimated completion
+time), `throughput` (highest tokens/second), or `latency` (lowest time to first
+token). It applies to unified `/v1/chat/completions`, unified `/v1/responses`,
+raw `/nanogpt/*` chat and responses calls, and the Worker roleplay endpoint;
+image, audio, video and batch routes are untouched. Only the upstream request
+body carries the suffix, so model ids, routing stats and telemetry stay keyed on
+the plain id, and a request that already pins a provider through `provider`,
+`X-Provider`, `X-Billing-Mode`, `X-BYOK-Provider` or `x-use-byok` is left alone.
+These routes bypass subscription coverage and bill pay-as-you-go at the selected
+provider's rate plus a 5% provider-selection markup, so setting the variable
+also switches the text endpoint to `https://nano-gpt.com/api` and disables the
+subscription-only payload and header guards. Leave it empty to stay on
+subscription.
+
 NanoGPT batch routes are automatically sent to its dedicated batch host.
 Browser-based NanoGPT and NavyAI authorization pages remain direct because the
 proxy deliberately does not retain upstream cookies or follow redirects.

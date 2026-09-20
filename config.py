@@ -9,6 +9,7 @@ from providers.aihubmix import (
     trusted_aihubmix_origin,
 )
 from providers.image_relays import image_relay_base_urls
+from providers.nanogpt import nanogpt_text_base_url
 
 
 load_runtime_env()
@@ -91,10 +92,20 @@ class Config:
         'NANOGPT_SUBSCRIPTION_BASE_URL',
         'https://nano-gpt.com/api/subscription',
     )
-    NANOGPT_TEXT_BASE_URL = (
-        NANOGPT_SUBSCRIPTION_BASE_URL
-        if NANOGPT_BILLING_MODE == 'subscription'
-        else NANOGPT_STANDARD_BASE_URL
+    # NanoGPT picks a provider from a `:fast` / `:throughput` / `:latency`
+    # model suffix. Those routes bypass subscription coverage and bill
+    # pay-as-you-go plus a provider-selection markup, so leave this empty to
+    # stay on the subscription endpoint.
+    NANOGPT_SPEED_ROUTING = load_env_choice(
+        'NANOGPT_SPEED_ROUTING',
+        '',
+        {'', 'fast', 'latency', 'throughput'},
+    )
+    NANOGPT_TEXT_BASE_URL = nanogpt_text_base_url(
+        NANOGPT_STANDARD_BASE_URL,
+        NANOGPT_SUBSCRIPTION_BASE_URL,
+        NANOGPT_BILLING_MODE,
+        NANOGPT_SPEED_ROUTING,
     )
     NANOGPT_KEY_CHECK_TIMEOUT_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_CHECK_TIMEOUT_SECONDS', 5, 1, 30

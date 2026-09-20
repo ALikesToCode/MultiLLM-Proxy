@@ -9,6 +9,8 @@ from error_handlers import APIError
 from providers.aihubmix import build_aihubmix_image_request
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.nanogpt import (
+    apply_nanogpt_speed_routing,
+    nanogpt_speed_routing,
     nanogpt_subscription_only,
     sanitize_nanogpt_subscription_headers,
     sanitize_nanogpt_subscription_payload,
@@ -204,6 +206,16 @@ def _copy_request_payload(payload: dict, provider_model: str) -> dict:
     upstream_payload = dict(payload)
     upstream_payload["model"] = provider_model
     return upstream_payload
+
+
+def _apply_nanogpt_speed_routing(app, provider: str, payload: dict, headers) -> dict:
+    """Opt NanoGPT text requests into the configured fast-provider route."""
+    if provider != "nanogpt":
+        return payload
+    suffix = nanogpt_speed_routing(app.config)
+    if not suffix:
+        return payload
+    return apply_nanogpt_speed_routing(payload, suffix, headers)
 
 
 def _provider_model_url(
@@ -405,6 +417,9 @@ def _dispatch_unified_chat_candidate(
             nanogpt_subscription_only=subscription_only,
         )
         upstream_payload = cache_decision.payload
+        upstream_payload = _apply_nanogpt_speed_routing(
+            app, provider, upstream_payload, headers_source
+        )
         raw_body = serialize_unified_chat_payload(upstream_payload)
         upstream_path = "v1/chat/completions"
         request_data = (
@@ -786,6 +801,9 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
                 )
                 upstream_payload = cache_decision.payload
+                upstream_payload = _apply_nanogpt_speed_routing(
+                    app, provider, upstream_payload, headers_source
+                )
                 raw_body = json.dumps(upstream_payload).encode("utf-8")
 
                 def send_request(token: str):
@@ -884,7 +902,9 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 nanogpt_subscription_only=subscription_only,
             )
             chat_payload = cache_decision.payload
-
+            chat_payload = _apply_nanogpt_speed_routing(
+                app, provider, chat_payload, headers_source
+            )
             raw_body = serialize_unified_chat_payload(chat_payload)
             upstream_path = "v1/chat/completions"
 

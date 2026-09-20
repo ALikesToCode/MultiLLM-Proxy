@@ -25,6 +25,8 @@ NANOGPT_PREFERRED_KEY_INDEX=1
 
 # Optional overrides
 NANOGPT_BILLING_MODE=subscription
+# Empty (default) stays on subscription; fast|throughput|latency is PAYG.
+NANOGPT_SPEED_ROUTING=
 NANOGPT_SUBSCRIPTION_BASE_URL=https://nano-gpt.com/api/subscription
 NANOGPT_BASE_URL=https://nano-gpt.com/api
 NANOGPT_BATCH_BASE_URL=https://api.nano-gpt.com/api/v1
@@ -86,6 +88,40 @@ and converts the successful result back to the Responses shape. Raw
 `/nanogpt/*` and NanoGPT media paths retain the standard provider contract;
 the NanoGPT account's disabled-PAYG setting remains the final billing guard.
 Set `NANOGPT_BILLING_MODE=standard` only when PAYG is intentional.
+
+## Speed routing
+
+`NANOGPT_SPEED_ROUTING` appends NanoGPT's provider-selection suffix to the
+upstream model id:
+
+| Value | NanoGPT selects |
+| --- | --- |
+| `fast` | Best estimated completion time, weighing first-token delay and generation speed |
+| `throughput` | Highest tokens per second |
+| `latency` | Lowest time to first token |
+
+Any other value, including the empty default, leaves the model id untouched.
+
+It covers unified `/v1/chat/completions`, the unified Responses bridge, raw
+`/nanogpt/*` chat and responses calls, and the Worker roleplay endpoint. Image,
+audio, video and batch routes are untouched, and the suffix is added once — a
+model id that already ends in `:fast`, `:throughput` or `:latency` is kept as
+sent. Only the upstream request body carries the suffix, so model ids, routing
+stats and telemetry stay keyed on the plain id. A request that already pins a
+provider through a body `provider` field or the `X-Provider`, `X-Billing-Mode`,
+`X-BYOK-Provider` or `x-use-byok` headers is left alone, because NanoGPT rejects
+a routing suffix combined with another provider selection.
+
+Provider selection bills pay-as-you-go at the selected provider's rate plus a 5%
+provider-selection markup and does not draw on subscription coverage. Setting
+the variable therefore also switches the text endpoint to
+`https://nano-gpt.com/api` and turns off the subscription-only payload and
+header sanitizers, since those guards exist to protect subscription billing.
+
+```bash
+NANOGPT_SPEED_ROUTING=fast
+# moonshotai/kimi-k2.6 -> moonshotai/kimi-k2.6:fast
+```
 
 The built-in catalog seeds the current roleplay GLM choices even before a live
 catalog refresh:

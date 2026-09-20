@@ -88,6 +88,11 @@ NANOGPT_SUBSCRIPTION_PAYGO_HEADERS = frozenset(
     }
 )
 
+# NanoGPT selects a provider from a `:<suffix>` on the model id. These routes
+# leave subscription coverage and bill pay-as-you-go plus a provider-selection
+# markup, so they are opt-in through NANOGPT_SPEED_ROUTING.
+NANOGPT_SPEED_ROUTING_SUFFIXES = frozenset({"fast", "latency", "throughput"})
+
 
 def _header_value(headers: Mapping[str, Any], name: str) -> Optional[str]:
     direct_value = headers.get(name)
@@ -105,8 +110,77 @@ def normalized_nanogpt_path(path: str) -> str:
     return path.strip("/")
 
 
+def nanogpt_speed_routing(config: Mapping[str, Any]) -> str:
+    """Return the configured provider-selection suffix, or "" when disabled."""
+    suffix = str(config.get("NANOGPT_SPEED_ROUTING") or "").strip().lower()
+    return suffix if suffix in NANOGPT_SPEED_ROUTING_SUFFIXES else ""
+
+
 def nanogpt_subscription_only(config: Mapping[str, Any]) -> bool:
+    if nanogpt_speed_routing(config):
+        # Provider selection is pay-as-you-go, so subscription-only guards
+        # would strip fields the caller is now entitled to send.
+        return False
     return str(config.get("NANOGPT_BILLING_MODE") or "").lower() == "subscription"
+
+
+def nanogpt_text_base_url(
+    standard_base_url: str,
+    subscription_base_url: str,
+    billing_mode: str,
+    speed_routing: str,
+) -> str:
+    """Pick the text endpoint, since speed routing is pay-as-you-go only."""
+    if speed_routing:
+        return standard_base_url
+    if str(billing_mode or "").strip().lower() == "subscription":
+        return subscription_base_url
+    return standard_base_url
+
+
+def nanogpt_model_has_speed_suffix(model: Any) -> bool:
+    if not isinstance(model, str) or ":" not in model:
+        return False
+    return model.rsplit(":", 1)[-1].strip().lower() in NANOGPT_SPEED_ROUTING_SUFFIXES
+
+
+def nanogpt_speed_routing_conflicts(
+    payload: Mapping[str, Any],
+    headers: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """True when the caller already pinned a provider for this request."""
+    if payload.get("provider"):
+        return True
+    if headers is None:
+        return False
+    for header in NANOGPT_SUBSCRIPTION_PAYGO_HEADERS:
+        value = _header_value(headers, header)
+        if value and value.strip():
+            return True
+    return False
+
+
+def apply_nanogpt_speed_suffix(model: Any, suffix: str) -> Any:
+    if not suffix or not isinstance(model, str) or not model.strip():
+        return model
+    if nanogpt_model_has_speed_suffix(model):
+        return model
+    return f"{model}:{suffix}"
+
+
+def apply_nanogpt_speed_routing(
+    payload: Mapping[str, Any],
+    suffix: str,
+    headers: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Append NanoGPT's provider-selection suffix to the payload model id."""
+    upstream_payload = dict(payload)
+    if not suffix or nanogpt_speed_routing_conflicts(upstream_payload, headers):
+        return upstream_payload
+    routed_model = apply_nanogpt_speed_suffix(upstream_payload.get("model"), suffix)
+    if routed_model != upstream_payload.get("model"):
+        upstream_payload["model"] = routed_model
+    return upstream_payload
 
 
 def sanitize_nanogpt_subscription_payload(

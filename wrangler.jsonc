@@ -80,6 +80,7 @@
     "PROMPT_CACHE_ENABLED": "true",
     "PROMPT_CACHE_MIN_TOKENS": "1024",
     "NANOGPT_BILLING_MODE": "subscription",
+    "NANOGPT_SPEED_ROUTING": "fast",
     "NANOGPT_SUBSCRIPTION_BASE_URL": "https://nano-gpt.com/api/subscription",
     "NANOGPT_KEY_CHECK_TIMEOUT_SECONDS": "5",
     "NANOGPT_KEY_CHECK_TTL_SECONDS": "300",
