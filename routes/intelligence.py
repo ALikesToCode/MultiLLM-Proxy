@@ -10,6 +10,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 from error_handlers import get_request_id
 from route_helpers import api_auth_required
+from services.intelligence_cancellation import CallerCancellation
 from services.intelligence_contract import ChatRequest, GatewayError
 from services.intelligence_gateway import ChatGateway
 from services.intelligence_output import sse
@@ -146,6 +147,7 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
             g.authenticated_user["username"],
             get_request_id(),
             metrics,
+            cancelled=CallerCancellation(request.environ),
         )
         if parsed.payload.get("stream"):
             return stream_response(gateway)

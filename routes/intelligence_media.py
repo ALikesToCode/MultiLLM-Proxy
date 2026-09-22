@@ -3,7 +3,6 @@
 import json
 import math
 import re
-import threading
 import time
 
 import requests
@@ -13,6 +12,7 @@ from error_handlers import get_request_id
 from route_helpers import api_authenticate_only
 from routes.auto_routes import _is_fallback_response
 from routes.intelligence import error_response, load_policy, reject_idempotency
+from services.intelligence_cancellation import CallerCancellation
 from services.intelligence_contract import GatewayError
 from services.intelligence_gateway import rejection
 from services.intelligence_output import decode_completion
@@ -268,7 +268,7 @@ def _dispatch(operation, app, auth, proxy):
             body,
             token,
             time.monotonic() + policy["deadline_ms"] / 1000,
-            threading.Event(),
+            CallerCancellation(request.environ),
             policy["max_response_bytes"],
             path=path,
             data=data,

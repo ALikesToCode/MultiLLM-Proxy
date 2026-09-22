@@ -49,12 +49,21 @@ def rejection(head):
 
 
 class ChatGateway:
-    def __init__(self, request, policy, transport, principal, request_id, metrics=None):
+    def __init__(
+        self,
+        request,
+        policy,
+        transport,
+        principal,
+        request_id,
+        metrics=None,
+        cancelled=None,
+    ):
         self.request, self.policy, self.transport = request, policy, transport
         self.request_id, self.metrics = request_id, metrics
         self.created = int(time.time())
         self.deadline = time.monotonic() + request.deadline_ms / 1000
-        self.cancelled = threading.Event()
+        self.cancelled = cancelled if cancelled is not None else threading.Event()
         self.candidates = select_candidates(policy, request, transport.config)
         if not self.candidates:
             raise GatewayError(
