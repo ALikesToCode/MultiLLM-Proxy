@@ -10,6 +10,7 @@ from flask import Response, g, has_request_context, jsonify, redirect, request, 
 
 from config import Config
 from services.auth_service import AuthService
+from services.intelligence_route_policy import authorize_integration_route
 from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES
 from services.cost_service import CostService
 from services.metrics_service import MetricsService
@@ -489,6 +490,8 @@ def _authorize_api_scope(required_scope: str):
                 "message": "The authenticated key is not authorized for this operation",
             }
         ), 403
+
+    authorize_integration_route(user)
 
     scopes_value = user.get("scopes")
     scopes = (
