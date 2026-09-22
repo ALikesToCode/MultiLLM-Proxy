@@ -130,6 +130,7 @@ export function collectContainerEnv(source = {}) {
     HOME: "/tmp",
     MULTILLM_TRUST_PROXY_HEADERS: "true",
     INTELLIGENCE_REQUIRE_DURABLE_STORAGE: "true",
+    ...(source.INTELLIGENCE_DB ? { INTELLIGENCE_STORAGE_BACKEND: "d1" } : {}),
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
     PYTHONUNBUFFERED: "1",

@@ -1,5 +1,8 @@
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
+import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
+
+export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
 import { CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, withClientDefaults, withOpencodeSession } from "./worker/client-headers.mjs";
 import { withOpencodeRequestSession } from "./worker/opencode-session.mjs";
@@ -1810,6 +1813,10 @@ export class MultiLLMProxyContainer extends Container {
     logStructuredError("container_start_failed", error);
   }
 }
+
+MultiLLMProxyContainer.outboundByHost = {
+  "intelligence.internal": handleIntelligenceOutbound,
+};
 
 export default {
   async fetch(request, env) {

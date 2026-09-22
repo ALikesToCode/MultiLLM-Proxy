@@ -19,6 +19,14 @@
       "instance_type": "basic"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "INTELLIGENCE_DB",
+      "database_name": "multillm-intelligence",
+      "database_id": "0e64ec48-b454-4876-a4aa-3fb2c240fd3d",
+      "migrations_dir": "intelligence-migrations"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
