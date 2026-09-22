@@ -36,6 +36,12 @@ def policy(**overrides):
     )
 
 
+def test_model_identifiers_fit_the_shared_client_contract():
+    assert policy(candidates=[candidate("openai:" + "m" * 121)])
+    with pytest.raises(ValueError):
+        policy(candidates=[candidate("openai:" + "m" * 122)])
+
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTROL_PLANE_DATABASE_URL", "")

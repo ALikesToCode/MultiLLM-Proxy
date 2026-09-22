@@ -84,7 +84,7 @@ def integer(value, name, *, minimum=1, maximum=2**31 - 1):
 
 
 def identifier(value):
-    if not isinstance(value, str) or not MODEL_ID.fullmatch(value):
+    if not isinstance(value, str) or len(value) > 128 or not MODEL_ID.fullmatch(value):
         raise ValueError("Invalid model identifier")
     return value
 
