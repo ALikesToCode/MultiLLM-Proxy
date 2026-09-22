@@ -15,10 +15,15 @@ replica's changes are visible. Short control-plane transactions use a database-w
 advisory lock, matching SQLite's single-writer semantics for quota reservations.
 Provider streaming does not hold that lock.
 
-The intelligence gateway also stores its reviewed policy and allowance reservations
-here. Container mode requires the external database for intelligence requests.
-Encrypted backups include these additive tables; older version-one backups restore
-with empty intelligence tables. See [intelligence configuration](intelligence-gateway.md).
+The intelligence gateway can store its reviewed policy and allowance reservations
+here. Containers may instead use the dedicated [D1 intelligence store](intelligence-d1.md)
+for policy, reservations and integration principals. This D1 binding does not move
+the rest of the control plane out of SQLite or PostgreSQL.
+
+Encrypted control-plane backups include the SQLite/PostgreSQL intelligence tables;
+older version-one backups restore with empty intelligence tables. They do not capture
+or restore D1 records. Manage D1 recovery separately through Cloudflare. See
+[intelligence configuration](intelligence-gateway.md).
 
 ## Encrypted backups and an empty-destination migration
 

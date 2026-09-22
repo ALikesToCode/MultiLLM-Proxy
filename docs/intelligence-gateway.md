@@ -161,14 +161,17 @@ backup before any operator correction; changing policy JSON or restarting is not
 a reconciliation mechanism. No reconciliation endpoint is exposed in version one.
 
 Local installations use the existing model-registry SQLite database. The Worker
-sets `INTELLIGENCE_REQUIRE_DURABLE_STORAGE=true` for Containers; intelligence then
-requires an external `CONTROL_PLANE_DATABASE_URL`. Changing a `/tmp` pathname is
-insufficient. An unavailable database fails closed. Users/scopes, automatic route
-priorities, intelligence policy and reservations use the same PostgreSQL control
-plane. Migrate existing records using the [encrypted empty-destination procedure](control-plane-storage.md)
-before switching the connection. Backups include the new tables and still accept
-older backups without them. Existing users and priorities are not replaced by
-seeding the gateway policy.
+requires durable storage for Containers. Its `INTELLIGENCE_DB` binding selects
+[D1 intelligence storage](intelligence-d1.md), accessed through a private Container
+outbound handler. D1 stores the reviewed policy, reservations and separately
+provisioned integration credentials; it does not migrate dashboard users, model
+overrides or automatic route priorities. These retain their existing storage.
+
+Without the D1 binding, Container intelligence requires an external
+`CONTROL_PLANE_DATABASE_URL`. PostgreSQL remains available for the full control
+plane using the [encrypted empty-destination procedure](control-plane-storage.md).
+Changing a `/tmp` pathname is insufficient. A configured database failure never
+falls back to local storage. Seeding does not replace existing policy or users.
 
 ## Audio and embeddings
 
@@ -213,11 +216,13 @@ The focused tests use synthetic credentials, Flask HTTP routes and a real loopba
 HTTP provider. They cover payload fidelity across fallback, eligibility, explicit
 effort, JSON/tool escalation, payment/rate limits, uncertain timeouts, SSE
 interruption/cancellation, aggregate usage, concurrent admission and persisted
-reservations. PostgreSQL integration tests additionally require an isolated
+reservations. Real local D1 tests exercise concurrent Worker replicas, persistence,
+credential rotation and revocation. PostgreSQL integration tests additionally require an isolated
 `TEST_CONTROL_PLANE_DATABASE_URL`; synthetic SQLite tests do not prove a production
 database migration. No provider generation or deployment is performed by tests.
 
-Before deployment, supply an external database and migrate existing records;
+Before deployment, apply the D1 migrations or supply an external PostgreSQL database
+and migrate existing records;
 review exact models/accounts and task evaluations; set bounded principal/global
 allowances; provision existing credential variables through the secret manager;
 configure voice/model/dimension pins; and arrange approved scopes for Omni's key.
