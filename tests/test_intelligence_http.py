@@ -86,6 +86,18 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
         assert response.json["multillm"]["reason"] == "explicit"
         assert json.loads(send.call_args.kwargs["data"])["reasoning_effort"] == "max"
 
+    def test_retry_after_date_cannot_carry_upstream_prose(self):
+        self.seed()
+        with self.requests(
+            return_value=upstream(
+                {}, 429, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT private-canary"}
+            )
+        ):
+            response = self.post(model="openai:small", routing={})
+        assert response.status_code == 429
+        assert response.headers["Retry-After"] == "Wed, 21 Oct 2015 07:28:00 GMT"
+        assert b"private-canary" not in response.data
+
     def test_failed_json_escalates_once_and_aggregates_usage(self):
         self.seed()
         with self.requests(

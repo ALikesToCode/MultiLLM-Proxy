@@ -3,7 +3,8 @@
 import logging
 import threading
 import time
-from email.utils import parsedate_to_datetime
+from datetime import timezone
+from email.utils import format_datetime, parsedate_to_datetime
 
 from routes.auto_routes import _is_fallback_response
 from services.intelligence_contract import GatewayError
@@ -36,7 +37,12 @@ def rejection(head):
             if len(retry_after) > 64:
                 raise ValueError("Invalid retry header")
             if not retry_after.isdigit():
-                parsedate_to_datetime(retry_after)
+                timestamp = parsedate_to_datetime(retry_after)
+                if timestamp.tzinfo is None:
+                    raise ValueError("Invalid retry date")
+                retry_after = format_datetime(
+                    timestamp.astimezone(timezone.utc), usegmt=True
+                )
         except (TypeError, ValueError, OverflowError):
             retry_after = None
     return GatewayError(
