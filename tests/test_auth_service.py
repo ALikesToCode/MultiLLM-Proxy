@@ -479,8 +479,7 @@ class AuthServicePersistenceTest(unittest.TestCase):
             clear=False,
         ):
             self.AuthService.initialize()
-
-        self.assertEqual(self.AuthService.get_api_key("groq"), "groq-first")
+            self.assertEqual(self.AuthService.get_api_key("groq"), "groq-first")
 
 
 if __name__ == "__main__":
