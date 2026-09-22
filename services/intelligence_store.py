@@ -7,6 +7,11 @@ import uuid
 from contextlib import closing
 
 from services.intelligence_contract import GatewayError
+from services.intelligence_d1_store import (
+    D1IntelligenceStore,
+    storage_unavailable,
+    using_d1,
+)
 from services.intelligence_policy import DEFAULT_POLICY, validate_policy
 from services.sqlite_store import connect, storage_path
 
@@ -14,6 +19,8 @@ from services.sqlite_store import connect, storage_path
 class IntelligenceStore:
     @staticmethod
     def connect():
+        if using_d1():
+            raise storage_unavailable()
         if (
             os.environ.get("INTELLIGENCE_REQUIRE_DURABLE_STORAGE", "").lower() == "true"
             and not os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip()
@@ -38,6 +45,8 @@ class IntelligenceStore:
 
     @classmethod
     def seed(cls, document):
+        if using_d1():
+            return D1IntelligenceStore.seed(document)
         policy = validate_policy(document)
         with closing(cls.connect()) as connection:
             cls.ensure(connection)
@@ -50,6 +59,8 @@ class IntelligenceStore:
 
     @classmethod
     def policy(cls):
+        if using_d1():
+            return D1IntelligenceStore.policy()
         with closing(cls.connect()) as connection:
             cls.ensure(connection)
             row = connection.execute(
@@ -66,6 +77,8 @@ class IntelligenceStore:
 
     @classmethod
     def reserve(cls, principal, amount, policy, *, kind="chat", now=None):
+        if using_d1():
+            return D1IntelligenceStore.reserve(principal, amount, kind=kind)
         timestamp = time.time() if now is None else now
         cutoff = timestamp - 86400
         principal_limit, global_limit = (
@@ -113,6 +126,9 @@ class IntelligenceStore:
 
     @classmethod
     def settle(cls, reservation, used, complete):
+        if using_d1():
+            D1IntelligenceStore.settle(reservation, used, complete)
+            return
         with closing(cls.connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             # Unknown outcomes retain the entire reservation, including after
