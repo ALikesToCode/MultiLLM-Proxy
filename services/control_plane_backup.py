@@ -22,7 +22,10 @@ TABLES = {
     "login_attempts": ("limits", "identity_hash failures window_started locked_until updated_at"),
     "connection_profiles": ("workbench", "id owner name settings created_at"),
     "comparison_results": ("workbench", "id owner created_at data"),
+    "intelligence_policy": ("models", "id document"),
+    "intelligence_reservations": ("models", "id principal kind created_at reserved charged state"),
 }
+ADDITIVE_TABLES = {"intelligence_policy", "intelligence_reservations"}
 STORES = {
     "auth": ("AUTH_DB_PATH", "auth.sqlite3"),
     "models": ("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3"),
@@ -81,10 +84,11 @@ def validate(document):
     if not isinstance(document, dict) or document.get("format") != "multillm-control-plane" or document.get("version") != 1:
         raise ValueError("Unsupported backup format")
     tables = document.get("tables")
-    if not isinstance(tables, dict) or set(tables) != set(TABLES):
+    if (not isinstance(tables, dict) or set(tables) - set(TABLES)
+            or (set(TABLES) - set(tables)) - ADDITIVE_TABLES):
         raise ValueError("Backup table inventory does not match")
     for table, (_, fields) in TABLES.items():
-        rows = tables[table]
+        rows = tables.get(table, [])
         if not isinstance(rows, list) or len(rows) > 100_000:
             raise ValueError("Invalid backup row count")
         for row in rows:
@@ -133,6 +137,7 @@ def _initialize(connections):
     from services.model_registry import ModelRegistry
     from services.rate_limit_service import RateLimitService
     from services.connection_profiles import WorkbenchStore
+    from services.intelligence_store import IntelligenceStore
 
     AuthService._create_users_table(connections["auth"])
     AuthService._ensure_users_indexes(connections["auth"])
@@ -140,6 +145,7 @@ def _initialize(connections):
     RateLimitService._ensure_storage(connections["limits"])
     LoginAttemptService._ensure_storage(connections["limits"])
     WorkbenchStore.ensure(connections["workbench"])
+    IntelligenceStore.ensure(connections["models"])
     connections["models"].execute("CREATE TABLE IF NOT EXISTS auto_routes (route_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL)")
     connections["models"].execute("""CREATE TABLE IF NOT EXISTS auto_route_candidates (
         route_id TEXT NOT NULL REFERENCES auto_routes(route_id) ON DELETE CASCADE,
@@ -164,7 +170,7 @@ def restore_empty(document):
             for table, (store, fields) in TABLES.items():
                 columns = fields.split()
                 sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})"  # nosec B608
-                connections[store].executemany(sql, [tuple(row[column] for column in columns) for row in document["tables"][table]])
+                connections[store].executemany(sql, [tuple(row[column] for column in columns) for row in document["tables"].get(table, [])])
             if getattr(connections["limits"], "dialect", "sqlite") == "postgresql":
                 connections["limits"].execute("SELECT setval(pg_get_serial_sequence('request_usage', 'id'), COALESCE(MAX(id), 0) + 1, false) FROM request_usage")
             for connection in unique:
