@@ -15,6 +15,11 @@ replica's changes are visible. Short control-plane transactions use a database-w
 advisory lock, matching SQLite's single-writer semantics for quota reservations.
 Provider streaming does not hold that lock.
 
+The intelligence gateway also stores its reviewed policy and allowance reservations
+here. Container mode requires the external database for intelligence requests.
+Encrypted backups include these additive tables; older version-one backups restore
+with empty intelligence tables. See [intelligence configuration](intelligence-gateway.md).
+
 ## Encrypted backups and an empty-destination migration
 
 These are operator-only commands, not dashboard downloads. Backups include key
