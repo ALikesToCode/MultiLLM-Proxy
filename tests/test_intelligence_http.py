@@ -161,6 +161,16 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
         assert response.json["multillm"]["usage_complete"] is False
         assert capture()["tables"]["intelligence_reservations"][0]["state"] == "unknown"
 
+    def test_inconsistent_usage_does_not_settle_the_reservation(self):
+        self.seed()
+        payload = completion()
+        payload["usage"]["total_tokens"] = 100
+        with self.requests(return_value=upstream(payload)):
+            response = self.post()
+        assert response.status_code == 200
+        assert not response.json["multillm"]["usage_complete"]
+        assert capture()["tables"]["intelligence_reservations"][0]["state"] == "unknown"
+
     def test_upstream_cannot_forge_local_circuit_evidence_to_replay_a_503(self):
         self.seed()
         with self.requests(

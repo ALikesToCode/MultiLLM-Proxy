@@ -25,7 +25,7 @@ class Usage:
         consistent = (
             len(valid) == 3
             and valid["total_tokens"]
-            >= valid["prompt_tokens"] + valid["completion_tokens"]
+            == valid["prompt_tokens"] + valid["completion_tokens"]
         )
         self.complete = self.complete and consistent
         for key, count in valid.items():

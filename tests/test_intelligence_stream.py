@@ -181,6 +181,42 @@ class IntelligenceStreamTests(IntelligenceApiTestCase):
             send.call_count == 1 and output[-1]["error"]["code"] == "stream_interrupted"
         )
 
+    def test_provisional_usage_cannot_settle_a_completed_stream(self):
+        self.seed()
+        stream = frames(
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                },
+            },
+            delta({"content": "hello"}),
+            delta({}, "stop"),
+            "[DONE]",
+        )
+        with self.requests(return_value=upstream(chunks=stream)):
+            response = self.post(stream=True)
+            output = events(response)
+        assert output[-1]["usage"] is None
+        assert not output[-1]["multillm"]["usage_complete"]
+
+    def test_output_after_finish_is_an_interruption_and_is_not_appended(self):
+        self.seed()
+        stream = frames(
+            delta({"content": "first answer"}),
+            delta({}, "stop"),
+            delta({"content": "replacement answer"}),
+            "[DONE]",
+        )
+        with self.requests(return_value=upstream(chunks=stream)) as send:
+            response = self.post(stream=True)
+            output = events(response)
+        assert output[-1]["error"]["code"] == "stream_interrupted"
+        assert b"replacement answer" not in response.data
+        assert send.call_count == 1
+
     def test_caller_cancellation_during_header_wait_never_fails_over(self):
         self.seed()
         entered, release = threading.Event(), threading.Event()

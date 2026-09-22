@@ -33,22 +33,29 @@ class ChatStream:
                     or event.event == "error"
                 ):
                     raise ValueError("Upstream stream failure")
-                if body.get("usage") is not None:
-                    self.usage = body["usage"]
                 choices = body.get("choices", [])
                 if not isinstance(choices, list) or len(choices) > 1:
                     raise ValueError("Invalid streaming choices")
                 if not choices:
+                    if self.finish is not None and body.get("usage") is not None:
+                        self.usage = body["usage"]
                     continue
                 choice = choices[0]
                 if not isinstance(choice, dict) or choice.get("index", 0) != 0:
                     raise ValueError("Invalid stream index")
                 delta = self._delta(choice.get("delta", {}))
+                if self.finish is not None and any(
+                    delta.get(key)
+                    for key in ("content", "refusal", "audio", "tool_calls")
+                ):
+                    raise ValueError("Output after completion")
                 finish = choice.get("finish_reason")
                 if finish is not None:
                     if finish not in {"stop", "length", "tool_calls", "content_filter"}:
                         raise ValueError("Invalid finish reason")
                     self.finish = finish
+                if self.finish is not None and body.get("usage") is not None:
+                    self.usage = body["usage"]
                 if not delta and finish is None:
                     continue
                 yield {
