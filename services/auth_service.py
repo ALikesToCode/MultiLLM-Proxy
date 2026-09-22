@@ -38,6 +38,9 @@ from services.auth_primitives import (
 )
 from services.nanogpt_key_pool import configured_nanogpt_keys
 from services.sqlite_store import connect, storage_path
+from services.intelligence_auth import (
+    KEY_NAMESPACE, reject_local_integration_management, verify_integration_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -832,6 +835,9 @@ class AuthService:
             )
             return None
 
+        if api_key.startswith(KEY_NAMESPACE):
+            return verify_integration_key(api_key)
+
         for username, user in cls._load_users_by_api_key_prefix(
             build_api_key_prefix(api_key)
         ):
@@ -898,6 +904,7 @@ class AuthService:
         """Create a new user and persist it."""
         cls._require_admin()
         username = require_valid_username(username)
+        reject_local_integration_management(username)
         if username in cls._users:
             raise APIError("User already exists", status_code=409)
 
@@ -931,6 +938,7 @@ class AuthService:
         """Delete an existing user."""
         current_user = cls._require_admin()
         username = require_valid_username(username)
+        reject_local_integration_management(username)
         cls._load_user_by_username(username)
         if username not in cls._users:
             raise APIError("User not found", status_code=404)
@@ -950,6 +958,7 @@ class AuthService:
         """Rotate a user's API key."""
         cls._require_admin()
         username = require_valid_username(username)
+        reject_local_integration_management(username)
         cls._load_user_by_username(username)
         user = cls._users.get(username)
         if not user:
