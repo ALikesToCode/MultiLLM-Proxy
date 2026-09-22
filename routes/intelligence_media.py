@@ -30,7 +30,17 @@ AUDIO_TYPES = {
     "audio/flac",
     "audio/aac",
     "audio/opus",
+    "audio/pcm",
+    "audio/l16",
     "application/octet-stream",
+}
+SPEECH_TYPES = {
+    "mp3": "audio/mpeg",
+    "opus": "audio/ogg",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "wav": "audio/wav",
+    "pcm": "audio/pcm",
 }
 
 
@@ -224,6 +234,8 @@ def _result(operation, raw, head, settings, submitted):
                 "The speech provider did not return binary audio.",
                 502,
             )
+        if media_type == "application/octet-stream":
+            media_type = SPEECH_TYPES[submitted.get("response_format", "mp3")]
         return Response(raw, content_type=media_type)
     payload = decode_completion(raw)
     if operation == "transcriptions":

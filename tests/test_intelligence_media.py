@@ -94,6 +94,25 @@ class IntelligenceMediaTests(IntelligenceApiTestCase):
         assert response.json["error"]["code"] == "upstream_error"
         assert b"private-provider-error" not in response.data
 
+    def test_speech_binary_content_type_matches_requested_format(self):
+        self.media()
+        with self.requests(
+            return_value=upstream(
+                b"synthetic-pcm", headers={"Content-Type": "application/octet-stream"}
+            )
+        ):
+            response = self.client.post(
+                "/v1/audio/speech",
+                headers=self.headers,
+                json={
+                    "model": "openai:speak",
+                    "input": "hello",
+                    "response_format": "pcm",
+                },
+            )
+        assert response.status_code == 200 and response.data == b"synthetic-pcm"
+        assert response.content_type == "audio/pcm"
+
     def test_transcription_limit_includes_prompt_bytes(self):
         self.media()
         with self.requests() as send:
