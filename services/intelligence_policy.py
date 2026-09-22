@@ -219,7 +219,16 @@ def model_advertisement(policy, config=None):
         and (config is None or eligible(c, policy["allow_paid_overage"], config))
     ]
     supported = sorted(
-        set().union(*(set(c.get("capabilities", [])) for c in reviewed)) & CAPABILITIES
+        {
+            capability
+            for candidate in reviewed
+            for capability in candidate.get("capabilities", [])
+            if capability in CAPABILITIES
+            and (
+                capability not in {"vision", "audio"}
+                or candidate.get("media_input_tokens")
+            )
+        }
     )
     return {
         "id": "auto:intelligence",

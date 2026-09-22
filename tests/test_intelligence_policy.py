@@ -9,6 +9,7 @@ from services.control_plane_backup import capture, restore_empty
 from services.intelligence_contract import ChatRequest, GatewayError
 from services.intelligence_policy import (
     DEFAULT_POLICY,
+    model_advertisement,
     select_candidates,
     validate_policy,
 )
@@ -40,6 +41,22 @@ def test_model_identifiers_fit_the_shared_client_contract():
     assert policy(candidates=[candidate("openai:" + "m" * 121)])
     with pytest.raises(ValueError):
         policy(candidates=[candidate("openai:" + "m" * 122)])
+
+
+@pytest.mark.parametrize("capability", ["vision", "audio"])
+def test_catalog_only_advertises_media_with_a_reviewed_input_ceiling(capability):
+    for ceiling in (0, 8192):
+        configured = policy(
+            candidates=[
+                candidate(
+                    capabilities=["streaming", capability], media_input_tokens=ceiling
+                )
+            ]
+        )
+        advertised = model_advertisement(configured)
+        assert (capability in advertised["capabilities"]) == bool(ceiling)
+        assert "streaming" in advertised["capabilities"]
+        assert advertised["availability"] == "unverified"
 
 
 @pytest.fixture
