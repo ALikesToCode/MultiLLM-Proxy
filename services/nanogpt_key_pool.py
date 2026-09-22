@@ -102,6 +102,17 @@ class NanoGPTKeyPool:
     _rejected_until: ClassVar[dict[str, float]] = {}
 
     @classmethod
+    def select_available_key(cls, keys: Sequence[str]) -> str | None:
+        """Select an uncooled credential without claiming a successful probe."""
+        configured = list(dict.fromkeys(key.strip() for key in keys if key.strip()))
+        now = time.monotonic()
+        with cls._lock:
+            cls._prune(configured, now)
+            ordered = ([cls._active_key] if cls._active_key in configured else [])
+            ordered.extend(key for key in configured if key not in ordered)
+            return next((key for key in ordered if cls._rejected_until.get(key, 0) <= now), None)
+
+    @classmethod
     def select_key(
         cls,
         keys: Sequence[str],

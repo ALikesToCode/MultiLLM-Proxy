@@ -10,6 +10,8 @@ from services.free_model_policy import free_model_aliases
 from services.image_relay_catalog import refresh_image_relay_catalog
 from services.model_catalog_service import build_model_catalog, unified_model_payload
 from services.model_registry import ModelRegistry
+from services.intelligence_policy import DEFAULT_POLICY, model_advertisement
+from services.intelligence_store import IntelligenceStore
 
 
 def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls):
@@ -30,6 +32,13 @@ def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cl
         ]
         models.extend(openai_auto_route_models())
         models.extend(free_model_aliases())
+        models = [model for model in models if model["id"] != "auto:intelligence"]
+        try:
+            intelligence = model_advertisement(IntelligenceStore.policy(), app.config)
+        except Exception:
+            intelligence = model_advertisement(DEFAULT_POLICY)
+            intelligence["status"] = "storage_unavailable"
+        models.append(intelligence)
         return jsonify({"object": "list", "data": models})
 
     @app.route("/admin/models", methods=["GET"])

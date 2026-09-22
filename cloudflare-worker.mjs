@@ -1,5 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
+import { isApiRequestPath } from "./worker/api-paths.mjs";
 import { CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, withClientDefaults, withOpencodeSession } from "./worker/client-headers.mjs";
 import { withOpencodeRequestSession } from "./worker/opencode-session.mjs";
 import { withOpencodeGlmReasoning } from "./worker/opencode/reasoning-request.mjs";
@@ -24,35 +25,6 @@ import { withJanitorGlmReasoningNormalization } from "./worker/janitor-reasoning
 
 export { RoleplaySession };
 
-const API_ROUTE_PREFIXES = new Set([
-  "aihubmix",
-  "azure",
-  "cerebras",
-  "chutes",
-  "codex-easy",
-  "gemini",
-  "gemma",
-  "googleai",
-  "groq",
-  "hyperbolic",
-  "kimi-code",
-  "linkapi",
-  "mimo",
-  "nanogpt",
-  "navyai",
-  "nineteen",
-  "openai",
-  "opencode",
-  "openrouter",
-  "optimize",
-  "palm",
-  "roleplay",
-  "sambanova",
-  "scaleway",
-  "together",
-  "v1",
-  "xai",
-]);
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, X-Roleplay-Session-ID, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
@@ -183,20 +155,6 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 
-
-function isApiRequestPath(pathname) {
-  const stripped = pathname.replace(/^\/+|\/+$/g, "");
-  if (!stripped) {
-    return false;
-  }
-
-  if (stripped === "health" || stripped === "ready") {
-    return true;
-  }
-
-  const [firstSegment] = stripped.split("/", 1);
-  return API_ROUTE_PREFIXES.has(firstSegment);
-}
 
 function isDirectHealthPath(pathname) {
   return pathname === "/health";

@@ -722,6 +722,10 @@ export async function loadWorkerModule() {
       `from "${new URL("../../worker/container-env.mjs", import.meta.url)}";`,
     )
     .replace(
+      'from "./worker/api-paths.mjs";',
+      `from "${new URL("../../worker/api-paths.mjs", import.meta.url)}";`,
+    )
+    .replace(
       /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
       "class Container {}\nconst getContainer = (binding, name) => binding.getByName(name);\nconst switchPort = (request) => request;",
     )

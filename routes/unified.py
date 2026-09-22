@@ -36,6 +36,7 @@ from routes.auto_routes import (
 )
 from routes.free_routes import dispatch_free_chat
 from routes.model_discovery import register_model_discovery_route
+from routes.intelligence import dispatch_intelligence_chat, register_intelligence_routes
 from routes.responses_compat import (
     chat_response_to_responses_payload,
     responses_input_to_messages,
@@ -481,6 +482,10 @@ def dispatch_unified_chat_completion(
 ):
     """Dispatch an explicit model or a server-owned chat routing alias."""
     model = payload.get("model")
+    if model == "auto:intelligence" or "routing" in payload:
+        return dispatch_intelligence_chat(
+            app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
+        )
     if isinstance(model, str) and model.startswith("free:"):
         return dispatch_free_chat(
             app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
@@ -635,6 +640,7 @@ def dispatch_unified_image_generation(
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
+    register_intelligence_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls)
     register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls)
     register_auto_route_admin_routes(
         app,
