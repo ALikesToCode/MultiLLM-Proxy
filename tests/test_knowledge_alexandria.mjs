@@ -60,7 +60,7 @@ test("discovery and exact capability inspection are free even when spending is d
   assert.deepEqual(f.calls[1].body.alexandria, { provider: "firecrawl", capability: "find-tools",
     options: { providers: ["particle"], capabilities: [tool.capability], level: "tools", expand: ["options", "response", "examples"], limit: 1 } });
   assert.equal((await usage(f)).total, 0);
-  assert.equal(f.calls[0].options.redirect, "error");
+  assert.equal(f.calls[0].options.redirect, "manual");
   assert.equal(f.calls[0].options.headers.Authorization, "Bearer synthetic-firecrawl-key");
   assert.ok(!JSON.stringify(found).includes("synthetic-firecrawl-key"));
 });

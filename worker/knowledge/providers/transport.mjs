@@ -66,7 +66,8 @@ async function fetchBounded(provider, url, options, { fetchImpl, signal }) {
   const timer = setTimeout(cancel, REQUEST_TIMEOUT_MS);
   try {
     if (controller.signal.aborted) throw new Error("aborted");
-    const response = await fetchImpl(url, { ...options, redirect: "error", signal: controller.signal });
+    // Workers supports manual redirects; the non-2xx check rejects them before any follow-up.
+    const response = await fetchImpl(url, { ...options, redirect: "manual", signal: controller.signal });
     if (response.status < 200 || response.status >= 300) {
       let body = null;
       if ([402, 429].includes(response.status) || (provider === "alexandria" && response.status === 403)) {

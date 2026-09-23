@@ -19,7 +19,7 @@ function fixture(responses, env = ENV) {
     },
     async fetchImpl(url, options) {
       calls.push({ url: String(url), options, body: options.body ? JSON.parse(options.body) : null });
-      assert.equal(options.redirect, "error");
+      assert.equal(options.redirect, "manual");
       assert.ok(options.signal instanceof AbortSignal);
       const next = responses.shift();
       assert.notEqual(next, undefined, "unexpected provider request");
