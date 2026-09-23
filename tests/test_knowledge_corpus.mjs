@@ -126,6 +126,7 @@ test("search disables generated stages and semantic caching and preserves failur
 
 test("upload checks snapshot bytes and returns only matching item identity", async () => {
   const f = fixture();
+  f.item = { id: "item-one", key: artifact().index_key };
   await f.corpus.uploadRevision(artifact(), text);
   assert.equal(f.uploads.length, 1);
   assert.equal(f.uploads[0].options.metadata.version, "unknown");

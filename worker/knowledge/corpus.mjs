@@ -70,9 +70,14 @@ async function readBounded(object) {
   catch { throw invalid(); }
 }
 
+function itemReference(value, key) {
+  if (!value || typeof value.id !== "string" || !value.id || value.key !== key) throw invalid("invalid_index_response");
+  return value;
+}
+
 function itemInfo(value, key) {
-  if (!value || typeof value.id !== "string" || !value.id || value.key !== key
-    || !ITEM_STATES.has(value.status)) throw invalid("invalid_index_response");
+  itemReference(value, key);
+  if (!ITEM_STATES.has(value.status)) throw invalid("invalid_index_response");
   return value;
 }
 
@@ -163,7 +168,7 @@ export class KnowledgeCorpus {
         version: artifact.version.version ?? "unknown",
       },
     });
-    return itemInfo(result, artifact.index_key);
+    return itemReference(result, artifact.index_key);
   }
 
   async reconcileRevision(artifact, itemId) {
