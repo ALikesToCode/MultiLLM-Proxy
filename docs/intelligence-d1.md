@@ -88,6 +88,39 @@ optimizer, image generation and administrative routes are denied, even when thei
 ordinary scope name matches. This keeps every integration inference inside the
 reviewed policy and durable allowance boundary.
 
+### Operator CLI
+
+`scripts/intelligence_operator.mjs` runs the Worker's own store and auth handlers
+in the operator's process against the remote D1 binding from Wrangler's
+`getPlatformProxy`, using the existing Wrangler login. It exposes no endpoint and
+accepts no SQL, policy JSON or credential on the command line. Each run writes a
+temporary configuration containing only `INTELLIGENCE_DB` (`remote: true`), loads
+no `.env` or `.dev.vars`, persists no local state and removes the configuration.
+
+```sh
+node scripts/intelligence_operator.mjs status --account-id <account> --database-id <database_id>
+node scripts/intelligence_operator.mjs seed --account-id <account> --database-id <database_id> \
+  --policy-file /private/reviewed-policy.json
+node scripts/intelligence_operator.mjs provision --account-id <account> --database-id <database_id> \
+  --principal integration:omni --scopes chat,models --credential-file /private/omni.key
+```
+
+`seed` and `provision` are dry runs until `--apply` is added; dry runs validate
+with the domain handlers but make no remote call and create no file. `status`
+reports only whether a policy is `unseeded`, `configured` or `invalid`, plus table
+row counts. `seed` is insert-only: `inserted: false` means the stored policy was
+kept. The Worker checks only ledger limits, so validate the file with the Python
+command above first.
+
+`provision` generates the key in memory and saves it to a new owner-only (`0600`)
+file before sending only its prefix and scrypt hash. Existing paths and links are
+refused. Output is one sanitized JSON line without keys, hashes, prefixes or policy
+values. Exit status 0 means success, 1 a refusal or failure that changed nothing
+remotely, 2 a usage error and 3 an uncertain outcome. After an uncertain outcome
+the saved key is retained and nothing is retried: run `status` and inspect durable
+state first. A conflict means the principal already exists or was revoked. This
+CLI does not rotate or revoke credentials.
+
 ## Scope and recovery
 
 D1 here does not migrate existing dashboard users, model overrides, automatic
