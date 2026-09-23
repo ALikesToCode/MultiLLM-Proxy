@@ -1,6 +1,7 @@
 """Single-submission adapter transport with one deadline and bounded buffering."""
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -177,6 +178,14 @@ class IntelligenceTransport:
     def credential(self, candidate):
         provider = candidate["model"].split(":", 1)[0]
         if provider == "nanogpt":
+            # Reviewed subscription calls use only a configured isolated key, even
+            # while it is rejected or rate limited. Shared-pool selection would
+            # rotate to general keys and prune their cooldowns.
+            pinned = os.environ.get(
+                "INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY", ""
+            ).strip()
+            if pinned and candidate["billing"] == "subscription":
+                return pinned
             return NanoGPTUnifiedKeyPool.select_available_key(
                 self.auth.get_api_keys(provider)
             )

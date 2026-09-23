@@ -17,3 +17,12 @@ test("containers require durable intelligence storage and pass through reviewed 
   assert.equal(env.INTELLIGENCE_POLICY_JSON, policy);
   assert.equal(env.INTELLIGENCE_REQUIRE_DURABLE_STORAGE, "true");
 });
+
+test("containers receive the isolated NanoGPT subscription key under its own name only", () => {
+  const key = "synthetic-subscription-key";
+  const env = collectContainerEnv({ INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY: key, NANOGPT_API_KEY: "synthetic-pool-key" });
+  assert.equal(env.INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY, key);
+  assert.equal(env.NANOGPT_API_KEY, "synthetic-pool-key");
+  assert.deepEqual(Object.keys(env).filter((name) => env[name] === key), ["INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY"]);
+  assert.equal(collectContainerEnv({}).INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY, undefined);
+});

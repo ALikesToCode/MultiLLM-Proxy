@@ -33,6 +33,24 @@ Container's private network; it cannot reach D1 from an ordinary local terminal.
 Review model entitlement, privacy, capabilities and bounded allowances before
 setting the deployment seed. No model/provider credentials are stored in D1.
 
+### Subscription credential
+
+The optional Worker secret `INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY` isolates
+reviewed NanoGPT `subscription` chat candidates from the general NanoGPT key pool.
+The Worker passes it into the Container environment; it is never stored in D1.
+Setting a secret publishes a new Worker version, so run this only when ready:
+
+```sh
+node node_modules/wrangler/bin/wrangler.js secret put INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY
+```
+
+When it is set, those candidates send only this key. It is not probed, rotated or
+replaced by a general key, even after a rejection or rate limit; availability
+fallback moves to the next reviewed candidate within the policy's attempt limit.
+Other billing modes, other providers, non-subscription media and general proxy
+traffic keep their current credentials; subscription media is still refused before
+sending. Without the secret, subscription candidates keep using the general pool.
+
 ## Private storage boundary
 
 Python sends bounded JSON to `http://intelligence.internal/v1/store` or `/v1/auth`.
