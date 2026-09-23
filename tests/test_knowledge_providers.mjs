@@ -374,3 +374,12 @@ test("failed live acquisition never promotes a cached fallback to fresh evidence
   await assert.rejects(retrieve("firecrawl", { ...INTENT, source_url: SOURCE, freshness: "force" }, context), { code: "provider_invalid_response" });
   assert.equal(context.calls.length, 1);
 });
+
+test("provider source policy accepts the full operator policy host limit", async () => {
+  const allowed_hosts = Array.from({ length: 100 }, (_, index) => `docs${index}.example.com`);
+  const context = fixture([{ results: [] }]);
+  await retrieve("exa", { ...INTENT, allowed_hosts }, context);
+  assert.equal(context.calls[0].body.includeDomains.length, 100);
+  await assert.rejects(retrieve("exa", { ...INTENT, allowed_hosts: [...allowed_hosts, "extra.example.com"] }, context), { code: "invalid_source_policy" });
+  assert.equal(context.calls.length, 1);
+});

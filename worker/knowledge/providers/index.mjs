@@ -26,7 +26,7 @@ export async function retrieve(provider, intent, { env = {}, fetchImpl = fetch, 
   const status = providerStatus(env).find((item) => item.id === provider);
   if (!status) throw new ProviderError("unknown", "unknown_knowledge_provider", "The requested knowledge provider is not supported.", 400);
   if (!status.configured) throw new ProviderError(provider, "provider_not_configured", "The knowledge provider credential is not configured.", 503);
-  if (!intent || typeof intent !== "object" || !Array.isArray(intent.allowed_hosts) || intent.allowed_hosts.length > 50
+  if (!intent || typeof intent !== "object" || !Array.isArray(intent.allowed_hosts) || intent.allowed_hosts.length > 100
       || intent.allowed_hosts.some((host) => typeof host !== "string" || !sourceURL(`https://${host}/`, [host]))) {
     throw new ProviderError(provider, "invalid_source_policy", "Knowledge retrieval requires an explicit list of public source hosts.", 400);
   }
