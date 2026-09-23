@@ -103,7 +103,7 @@ async function acquire(context) {
   const observation = matchingObservation(response?.observations, source);
   if (!observation) throw ingestionError("primary_source_unavailable");
   const text = normalizeSourceText(observation.text);
-  const artifact = await createArtifact({ ...source, origin_checked: observation.freshness === "live" },
+  const artifact = await createArtifact({ ...source, retention_hours: policy.retention_hours, origin_checked: observation.freshness === "live" },
     text, source.provider, context.now());
   return persistSnapshot(context, artifact, text);
 }

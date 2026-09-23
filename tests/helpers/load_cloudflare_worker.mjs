@@ -719,6 +719,7 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)

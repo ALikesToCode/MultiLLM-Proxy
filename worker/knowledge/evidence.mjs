@@ -38,7 +38,7 @@ export async function createArtifact(source, rawText, provider, now = Date.now()
   const text = normalizeSourceText(rawText);
   const canonicalUrl = publicUrl(source.url);
   const contentHash = await digest(text);
-  const id = await digest(`${source.id}\0${canonicalUrl}\0${contentHash}\0projection-1`);
+  const id = await digest(`${source.id}\0${canonicalUrl}\0${contentHash}\0${provider}\0projection-1`);
   return { id, source_id: source.id, canonical_url: canonicalUrl, title: source.title || source.product || canonicalUrl,
     product: source.product || "", requested_version: source.version || "", version: versionEvidence(canonicalUrl, source.version, source),
     provider, content_hash: contentHash, snapshot_key: `snapshots/${id}.txt`, index_key: `revisions/${id}.txt`,

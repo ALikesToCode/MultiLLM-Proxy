@@ -1,6 +1,7 @@
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
+import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
@@ -1816,6 +1817,7 @@ export class MultiLLMProxyContainer extends Container {
 
 MultiLLMProxyContainer.outboundByHost = {
   "intelligence.internal": handleIntelligenceOutbound,
+  "knowledge.internal": handleKnowledgeOutbound,
 };
 
 export default {

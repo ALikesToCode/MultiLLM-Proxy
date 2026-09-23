@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
+import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 test("the container selects D1 only when the Worker holds its binding", () => {
@@ -16,8 +17,9 @@ test("the container selects D1 only when the Worker holds its binding", () => {
 test("the Worker exports the private container egress entrypoint", async () => {
   const module = await loadWorkerModule();
   assert.equal(typeof module.ContainerProxy, "function");
-  assert.deepEqual(Object.keys(module.MultiLLMProxyContainer.outboundByHost), ["intelligence.internal"]);
+  assert.deepEqual(Object.keys(module.MultiLLMProxyContainer.outboundByHost), ["intelligence.internal", "knowledge.internal"]);
   assert.equal(module.MultiLLMProxyContainer.outboundByHost["intelligence.internal"], handleIntelligenceOutbound);
+  assert.equal(module.MultiLLMProxyContainer.outboundByHost["knowledge.internal"], handleKnowledgeOutbound);
 });
 
 test("private storage rejects other targets, paths and methods before accessing D1", async () => {

@@ -1,4 +1,4 @@
-import { fail, fields, integer, parseSource, validId, PROVIDER_IDS } from "./contracts.mjs";
+import { fail, fields, integer, parseSource, publicUrl, validId, PROVIDER_IDS } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { defaultPolicy, validatePolicy } from "./policy.mjs";
 import { reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
@@ -9,6 +9,13 @@ const policyOf = async tx => await tx.get("policy") ?? defaultPolicy();
 const generationOf = async tx => await tx.get("generation") ?? 0;
 const bump = async tx => tx.put("generation", (await generationOf(tx)) + 1);
 const values = async (tx, prefix) => [...(await tx.list({ prefix })).values()];
+
+function retainedByPolicy(artifact, policy) {
+  if (!policy.enabled || !policy.providers[artifact.provider]?.enabled || !policy.providers[artifact.provider]?.retention_allowed) {
+    fail("provider_disabled", "The revision is not eligible under the current provider policy.", 409);
+  }
+  publicUrl(artifact.canonical_url, policy.allowed_hosts);
+}
 
 async function sourceFor(tx, id) {
   if (!validId(id)) fail("invalid_source", "Invalid source identifier.");
@@ -71,9 +78,33 @@ async function enqueue(tx, input, now) {
   const id = crypto.randomUUID();
   const job = { id, source_id: source.id, fence: source.fence + 1, status: "queued", reason: null,
     artifact_id: null, item_id: null, index_key: null, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString() };
+  if (input.artifact_id) {
+    const artifact = await tx.get(`artifact:${input.artifact_id}`);
+    if (!artifact || artifact.source_id !== source.id || artifact.status === "expiring" || Date.parse(artifact.expires_at) <= now) {
+      fail("invalid_artifact", "Indexing requires a retained revision of this source.", 409);
+    }
+    retainedByPolicy(artifact, await policyOf(tx));
+    Object.assign(job, { status: "snapshot", artifact_id: artifact.id, index_key: artifact.index_key });
+  }
   await tx.put(`source:${source.id}`, { ...source, fence: job.fence });
   await tx.put(`job:${id}`, job);
   return job;
+}
+
+async function dueSources(tx, now) {
+  const policy = await policyOf(tx);
+  if (!policy.enabled) return [];
+  const eligible = (await values(tx, "source:")).filter(source => source.enabled
+    && [source.provider, "ai_search"].every(id => policy.providers[id].enabled
+      && policy.providers[id].background_limit >= policy.providers[id].units_per_call)
+    && (!source.last_refreshed_at || now - Date.parse(source.last_refreshed_at) >= source.refresh_hours * 3600000))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const cursor = await tx.get("maintenance_cursor") ?? "";
+  const next = eligible.findIndex(source => source.id > cursor);
+  const offset = next < 0 ? 0 : next;
+  const selected = [...eligible.slice(offset), ...eligible.slice(0, offset)].slice(0, 5);
+  if (selected.length) await tx.put("maintenance_cursor", selected.at(-1).id);
+  return selected;
 }
 
 async function updateJob(tx, input, now) {
@@ -134,6 +165,7 @@ async function publish(tx, input, now) {
   if (!artifact || artifact.source_id !== source.id || artifact.index_key !== input.index_key
     || artifact.status === "expiring" || !input.item_id || Date.parse(artifact.expires_at) <= now) fail("invalid_publication", "A verified, retained artifact is required for publication.", 409);
   const timestamp = new Date(now).toISOString();
+  retainedByPolicy(artifact, await policyOf(tx));
   await tx.put(`artifact:${artifact.id}`, { ...artifact, status: "published", published_at: timestamp, item_id: input.item_id });
   await tx.put(`source:${source.id}`, { ...source, current_artifact: artifact.id, last_checked_at: artifact.checked_at, last_refreshed_at: timestamp });
   const completed = { ...job, status: "completed", reason: null, artifact_id: artifact.id, item_id: input.item_id,
@@ -166,6 +198,7 @@ export class KnowledgeAuthority {
       if (operation === "source.create") return createSource(tx, input, now);
       if (operation === "source.discover") return createSource(tx, input, now, true);
       if (operation === "source.update") return updateSource(tx, input);
+      if (operation === "sources.due") return dueSources(tx, now);
       if (operation === "job.enqueue") return enqueue(tx, input, now);
       if (operation === "job.get") {
         const job = await jobFor(tx, input.id);

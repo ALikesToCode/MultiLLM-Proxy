@@ -11,6 +11,7 @@
     "enable_request_signal",
     "request_signal_passthrough"
   ],
+  "services": [{ "binding": "KNOWLEDGE_SERVICE", "service": "multillm-knowledge" }],
   "containers": [
     {
       "class_name": "MultiLLMProxyContainer",
