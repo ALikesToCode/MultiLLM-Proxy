@@ -120,6 +120,31 @@ test("the Firecrawl adapter carries a forced live acquisition through ingestion"
   assert.ok(artifact.checked_at);
 });
 
+test("indexing continues with the next Firecrawl key after a definitive credit rejection", async () => {
+  const f = await fixture();
+  const keys = [];
+  f.deps.retrieve = (provider, intent, context) => {
+    assert.equal(context.authority, f.authority);
+    return retrieve(provider, intent, {
+      ...context, env: { FIRECRAWL_API_KEY: "synthetic-empty", FIRECRAWL_API_KEY_1: "synthetic-next" },
+      fetchImpl: async (_url, options) => {
+        keys.push(options.headers.Authorization);
+        if (keys.length === 1) return Response.json({ success: false, error: "Insufficient credits" }, { status: 402 });
+        assert.equal(JSON.parse(options.body).maxAge, 0);
+        return Response.json({ success: true, data: { markdown: f.text, metadata: { sourceURL: f.source.url, statusCode: 200 } } });
+      },
+    });
+  };
+  const result = await f.run();
+  assert.equal(result.status, "completed");
+  assert.deepEqual(keys, ["Bearer synthetic-empty", "Bearer synthetic-next"]);
+  const usage = (await f.authority.call("snapshot")).usage.find(row => row.provider === "firecrawl");
+  assert.equal(usage.confirmed, 1);
+  assert.equal(usage.unknown, 0);
+  assert.equal(f.counts.upload, 1);
+  assert.equal((await f.authority.call("job.get", { id: f.job.id })).source.current_artifact, result.artifact_id);
+});
+
 test("derived answers and source URL substitution cannot become snapshots", async () => {
   for (const observation of [
     { kind: "derived_context", text: "An answer", url: "https://flask.palletsprojects.com/en/3.1.3/limits/" },

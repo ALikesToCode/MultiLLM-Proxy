@@ -78,6 +78,35 @@ test("SQLite Durable Object serializes concurrent reservations and survives reop
   assert.equal((await f.call("reserve", { operation_id: "query-0", provider: "exa", background: false })).status, 409);
 });
 
+test("credential failover persists across SQLite restarts and concurrent selection", async t => {
+  const f = await fixture(t);
+  const fingerprints = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
+  const selection = { provider: "context7", fingerprints, excluded: [] };
+  const select = () => f.call("credentials.select", selection);
+  const reject = fingerprint => f.call("credentials.reject", {
+    provider: "context7", fingerprint, reason: "quota", cooldown_seconds: 120,
+  });
+  assert.equal((await select()).result.fingerprint, fingerprints[0]);
+  await reject(fingerprints[0]);
+  const concurrent = await Promise.all(Array.from({ length: 10 }, select));
+  assert.ok(concurrent.every(item => item.result.fingerprint === fingerprints[1]));
+  await f.reopen();
+  assert.equal((await select()).result.fingerprint, fingerprints[1]);
+  // A request from another deployment with a different list cannot clear a cooldown.
+  await f.call("credentials.select", { ...selection, fingerprints: [fingerprints[1]] });
+  await reject(fingerprints[1]);
+  assert.equal((await select()).result.fingerprint, fingerprints[2]);
+  await reject(fingerprints[2]);
+  assert.equal((await select()).result.fingerprint, null);
+  await f.reopen();
+  assert.equal((await select()).result.fingerprint, null);
+  f.advance(121000);
+  assert.equal((await select()).result.fingerprint, fingerprints[0]);
+  assert.equal((await f.call("credentials.select", { ...selection, key: "not-accepted" })).status, 400);
+  assert.equal((await f.call("credentials.select", { ...selection, fingerprints: ["raw-secret"] })).status, 400);
+  assert.equal((await f.call("credentials.select", { ...selection, provider: "alexandria" })).status, 400);
+});
+
 test("background work preserves interactive reserve and uncertain work outlives the daily window", async t => {
   const f = await fixture(t);
   const policy = enabledPolicy(4);

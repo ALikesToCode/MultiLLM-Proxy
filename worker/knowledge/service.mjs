@@ -6,6 +6,7 @@ import { retrieveKnowledge } from "./retrieval.mjs";
 import { metered } from "./operations.mjs";
 import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs";
 import { dispatchAlexandria } from "./alexandria/service.mjs";
+import { configuredKeys } from "./providers/keys.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
   "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS]);
@@ -25,7 +26,8 @@ async function status(env, authority) {
   const providers = [...providerStatus(env), { id: "alexandria", label: "Firecrawl Alexandria",
     credential_env: "FIRECRAWL_API_KEY", docs_url: "https://docs.firecrawl.dev/features/alexandria",
     capabilities: ["capability_discovery", "structured_data"], kind: "catalogue",
-    configured: Boolean(env.FIRECRAWL_API_KEY?.trim()) }, { id: "ai_search", label: "Cloudflare AI Search + storage",
+    configured_key_count: configuredKeys("alexandria", env).length,
+    configured: configuredKeys("alexandria", env).length > 0 }, { id: "ai_search", label: "Cloudflare AI Search + storage",
     credential_env: null, docs_url: "https://developers.cloudflare.com/ai-search/", capabilities: ["index", "storage"],
     kind: "corpus", configured: Boolean(env.KNOWLEDGE_INDEX && env.KNOWLEDGE_SNAPSHOTS) }].map(provider => ({
     ...provider, enabled: snapshot.policy.providers[provider.id].enabled, connectivity: "not_checked",

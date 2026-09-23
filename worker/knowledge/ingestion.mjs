@@ -95,6 +95,7 @@ async function acquire(context) {
     freshness: "fresh",
   }, {
     env: context.env,
+    authority: context.authority,
     invoke: (provider, suffix, callback) => context.metered(context.authority, {
       provider, operation_id: `${context.jobId}:${suffix}`, background: true, job_id: context.jobId,
     }, callback),

@@ -61,6 +61,7 @@ export function renderReadiness(data) {
     card.append(node("p", `${status} · live connection not checked`));
     if (provider.enabled !== undefined) card.append(node("p", provider.enabled ? "Policy enabled" : "Policy disabled", "knowledge-metadata"));
     if (provider.credential_env) card.append(node("code", provider.credential_env));
+    if (provider.configured_key_count) card.append(node("p", `${provider.configured_key_count} configured key${provider.configured_key_count === 1 ? "" : "s · automatic quota failover"}`, "knowledge-metadata"));
     const capabilities = Array.isArray(provider.capabilities) ? provider.capabilities.join(", ")
       : Object.entries(provider.capabilities || {}).filter(([, value]) => value).map(([key]) => key).join(", ");
     card.append(node("p", capabilities || provider.kind || "Capabilities unavailable", "knowledge-metadata"));

@@ -21,15 +21,14 @@ export async function retrieveContext7(intent, context) {
   if (typeof product !== "string" || !product.trim() || product.length > 500) {
     throw new ProviderError("context7", "provider_product_required", "Context7 requires a product or public repository name.", 400);
   }
-  const headers = { Authorization: `Bearer ${context.env.CONTEXT7_API_KEY}` };
   const search = new URL("https://context7.com/api/v2/libs/search");
   search.search = new URLSearchParams({ libraryName: product, query }).toString();
-  const data = await requestJSON("context7", "search", search.href, { headers }, context);
+  const data = await requestJSON("context7", "search", search.href, {}, context);
   const library = selectLibrary(requireArray(data?.results, "context7"), intent);
   if (!library) return { observations: [], warnings: ["context7_library_not_found"] };
   const endpoint = new URL("https://context7.com/api/v2/context");
   endpoint.search = new URLSearchParams({ libraryId: targetLibrary(library, intent.version), query, type: "json" }).toString();
-  const docs = await requestJSON("context7", "context", endpoint.href, { headers }, context);
+  const docs = await requestJSON("context7", "context", endpoint.href, {}, context);
   if (!docs || !Array.isArray(docs.codeSnippets) || !Array.isArray(docs.infoSnippets)) throw invalidResponse("context7");
   const candidates = [
     ...docs.infoSnippets.map((item) => ({ url: item?.pageId, title: item?.breadcrumb })),

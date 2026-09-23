@@ -1,30 +1,14 @@
+import { invalidResponse, ProviderError, upstreamError } from "./errors.mjs";
+import { withProviderKey } from "./keys.mjs";
+
+export { invalidResponse, ProviderError } from "./errors.mjs";
+
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15000;
 const ORIGINS = new Set([
   "https://context7.com", "https://api.firecrawl.dev", "https://api.exa.ai",
   "https://index.mintlify.com", "https://mcp.deepwiki.com",
 ]);
-
-export class ProviderError extends Error {
-  constructor(provider, code, message, status = 502) {
-    super(message);
-    this.name = "ProviderError";
-    this.provider = provider;
-    this.code = code;
-    this.status = status;
-  }
-}
-
-export function invalidResponse(provider) {
-  return new ProviderError(provider, "provider_invalid_response", "The knowledge provider returned an invalid response.");
-}
-
-function upstreamError(provider, status) {
-  const code = status === 429 ? "provider_rate_limited"
-    : status === 402 ? "provider_allowance_exhausted"
-      : [401, 403].includes(status) ? "provider_access_denied" : "provider_request_failed";
-  return new ProviderError(provider, code, "The knowledge provider could not complete the request.", status);
-}
 
 async function readBounded(response, provider) {
   if (Number(response.headers.get("content-length")) > MAX_RESPONSE_BYTES) {
@@ -84,16 +68,14 @@ async function fetchBounded(provider, url, options, { fetchImpl, signal }) {
     if (controller.signal.aborted) throw new Error("aborted");
     const response = await fetchImpl(url, { ...options, redirect: "error", signal: controller.signal });
     if (response.status < 200 || response.status >= 300) {
-      if (provider === "alexandria" && response.status === 403) {
-        const body = parseResponse(await readBounded(response, provider), response.headers.get("content-type") || "", provider);
-        if (body?.code === "THIRD_PARTY_DATA_TERMS_REQUIRED") {
-          const error = new ProviderError(provider, "provider_terms_required", "An organization admin must review and accept this provider's terms in Firecrawl before execution.", 403);
-          error.requires_action = { type: "accept_terms", url: "https://www.firecrawl.dev/app/settings?tab=data-sources" };
-          throw error;
-        }
+      let body = null;
+      if ([402, 429].includes(response.status) || (provider === "alexandria" && response.status === 403)) {
+        const text = await readBounded(response, provider);
+        try { body = JSON.parse(text); } catch { /* An unstructured error cannot authorize another paid request. */ }
+      } else {
+        await response.body?.cancel();
       }
-      await response.body?.cancel();
-      throw upstreamError(provider, response.status);
+      throw upstreamError(provider, response.status, response.headers, body);
     }
     const text = await readBounded(response, provider);
     return parseResponse(text, response.headers.get("content-type") || "", provider);
@@ -119,7 +101,8 @@ export async function requestJSON(provider, operation, url, options, context) {
   if (context.signal?.aborted) {
     throw new ProviderError(provider, "provider_timeout", "The knowledge provider request was cancelled or timed out.", 504);
   }
-  return context.invoke(provider, operation, () => fetchBounded(provider, url, options, context));
+  return context.invoke(provider, operation, () => withProviderKey(provider, options, context,
+    selected => fetchBounded(provider, url, selected, context)));
 }
 
 export function jsonPost(body, headers = {}) {

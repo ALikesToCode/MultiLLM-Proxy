@@ -4,6 +4,7 @@ import { retrieveFirecrawl } from "./firecrawl.mjs";
 import { retrieveDeepWiki, retrieveMintlify } from "./mcp.mjs";
 import { ProviderError } from "./transport.mjs";
 import { sourceURL } from "./source-policy.mjs";
+import { configuredKeys } from "./keys.mjs";
 
 export const PROVIDERS = Object.freeze([
   { id: "context7", label: "Context7", credential_env: "CONTEXT7_API_KEY", docs_url: "https://github.com/upstash/context7/blob/master/docs/api-guide.mdx", capabilities: ["library_context"], kind: "discovery" },
@@ -18,11 +19,12 @@ const ADAPTERS = { context7: retrieveContext7, exa: retrieveExa, firecrawl: retr
 export function providerStatus(env = {}) {
   return PROVIDERS.map((provider) => ({
     ...provider,
-    configured: provider.credential_env === null || (typeof env[provider.credential_env] === "string" && Boolean(env[provider.credential_env].trim())),
+    configured_key_count: configuredKeys(provider.id, env).length,
+    configured: provider.credential_env === null || configuredKeys(provider.id, env).length > 0,
   }));
 }
 
-export async function retrieve(provider, intent, { env = {}, fetchImpl = fetch, invoke, signal } = {}) {
+export async function retrieve(provider, intent, { env = {}, fetchImpl = fetch, invoke, signal, authority } = {}) {
   const status = providerStatus(env).find((item) => item.id === provider);
   if (!status) throw new ProviderError("unknown", "unknown_knowledge_provider", "The requested knowledge provider is not supported.", 400);
   if (!status.configured) throw new ProviderError(provider, "provider_not_configured", "The knowledge provider credential is not configured.", 503);
@@ -33,7 +35,7 @@ export async function retrieve(provider, intent, { env = {}, fetchImpl = fetch, 
   if (intent.source_url && !status.capabilities.includes("source_acquisition")) {
     return { observations: [], warnings: ["provider_does_not_acquire_sources"] };
   }
-  return ADAPTERS[provider](intent, { env, fetchImpl, invoke, signal });
+  return ADAPTERS[provider](intent, { env, fetchImpl, invoke, signal, authority });
 }
 
 export { ProviderError } from "./transport.mjs";

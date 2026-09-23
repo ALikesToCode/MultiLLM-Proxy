@@ -113,7 +113,7 @@ async function liveEvidence(state, env, retrieveFn) {
   const batches = await Promise.all(providers.map(async provider => {
     state.attempts += 1;
     try {
-      const batch = await untilDeadline(() => retrieveFn(provider, intent, { env, signal,
+      const batch = await untilDeadline(() => retrieveFn(provider, intent, { env, signal, authority: state.authority,
         invoke: (id, suffix, callback) => state.invoke(id, `${provider}-${suffix}`, callback) }), signal);
       state.successes += 1;
       state.providersUsed.add(provider);
@@ -141,7 +141,7 @@ async function liveEvidence(state, env, retrieveFn) {
         if (await storeObservation(state, observation, stored++)) seen.add(url);
       } else if (acquisitionProvider) {
         state.attempts += 1;
-        const batch = await untilDeadline(() => retrieveFn(acquisitionProvider, { ...intent, source_url: url }, { env, signal,
+        const batch = await untilDeadline(() => retrieveFn(acquisitionProvider, { ...intent, source_url: url }, { env, signal, authority: state.authority,
           invoke: (id, suffix, callback) => state.invoke(id, `acquire-${stored}-${suffix}`, callback) }), signal);
         state.successes += 1;
         state.providersUsed.add(acquisitionProvider);
@@ -225,6 +225,9 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     await liveEvidence(state, env, options.retrieve || retrieve);
   }
   if (!state.successes && state.attempts) {
+    if (state.gaps.some(gap => gap.code === "provider_keys_exhausted")) {
+      fail("provider_keys_exhausted", "A Knowledge provider has no available API keys. Add capacity or wait for its reset window.", 429);
+    }
     const limit = state.gaps.some(gap => gap.code === "allowance_exhausted");
     fail(limit ? "allowance_exhausted" : "retrieval_failed", limit ? "The configured Knowledge allowance is exhausted."
       : "All attempted retrieval providers failed; no successful empty result was recorded.", limit ? 429 : 502);

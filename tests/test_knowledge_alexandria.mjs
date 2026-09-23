@@ -3,6 +3,7 @@ import test from "node:test";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";
+import { retrieve } from "../worker/knowledge/providers/index.mjs";
 import { fixture, principal } from "./knowledge_fixture.mjs";
 
 // Matches the public Firecrawl SDK v4.40.0 tools contract; no live provider calls.
@@ -86,6 +87,57 @@ test("execution returns the record and actual credits, with a persistent retry f
   assert.deepEqual(receipt.call_cost, { credits: 0, state: "confirmed" });
   assert.ok(!("fingerprint" in receipt) && !("principal_id" in receipt));
   await assert.rejects(f.run("execute", { ...payload, options: { semantic_search: "different" } }), { code: "request_conflict" });
+});
+
+test("Alexandria switches only rejected keys, reports one charge and shares Firecrawl key state", async () => {
+  const f = await setup({ reply: (_url, options) => options.headers.Authorization === "Bearer synthetic-firecrawl-key"
+    ? Response.json({ success: false, code: "insufficient_credits", error: "No provider was executed." }, { status: 402 })
+    : Response.json(scraped()) });
+  f.env.FIRECRAWL_API_KEY_1 = "synthetic-next";
+  const payload = await requestFor(f);
+  const result = await f.run("execute", payload);
+  assert.deepEqual(result.cost, { credits: 15, state: "confirmed" });
+  assert.equal((await usage(f)).total, 15);
+  const attempts = f.calls.slice(1);
+  assert.deepEqual(attempts.map(row => row.options.headers.Authorization), ["Bearer synthetic-firecrawl-key", "Bearer synthetic-next"]);
+  assert.equal(attempts[0].options.headers["x-request-id"], attempts[1].options.headers["x-request-id"]);
+  assert.deepEqual(attempts[0].body, attempts[1].body);
+  await f.run("execute", payload);
+  assert.equal(f.calls.length, 3, "receipt replay never repeats either attempt");
+  await retrieve("firecrawl", { source_url: f.source.url, allowed_hosts: ["flask.palletsprojects.com"] }, {
+    env: f.env, authority: f.authority, invoke: (_provider, _operation, callback) => callback(),
+    fetchImpl: async (_url, options) => {
+      assert.equal(options.headers.Authorization, "Bearer synthetic-next");
+      return Response.json({ success: true, data: { markdown: f.text, metadata: { sourceURL: f.source.url } } });
+    },
+  });
+});
+
+test("definitive Alexandria credit rejections settle at zero after every configured key is exhausted", async () => {
+  const f = await setup({ reply: () => Response.json({ success: false, code: "insufficient_credits" }, { status: 402 }) });
+  f.env.FIRECRAWL_API_KEY_1 = "synthetic-next";
+  const payload = await requestFor(f);
+  const result = await f.run("execute", payload);
+  assert.equal(result.status, "failed");
+  assert.deepEqual(result.cost, { credits: 0, state: "confirmed" });
+  assert.equal(result.error.code, "provider_keys_exhausted");
+  assert.equal((await usage(f)).total, 0);
+  await f.run("execute", payload);
+  assert.equal(f.calls.length, 3);
+});
+
+test("ambiguous paid Alexandria failures never advance to another configured key", async () => {
+  for (const [status, body] of [[402, { code: "insufficient_credits", chargeId: "accepted-charge" }],
+    [503, { code: "request_unresolved", creditsCost: 2 }], [429, { error: "capability quota exceeded" }]]) {
+    const f = await setup({ reply: () => Response.json(body, { status }) });
+    f.env.FIRECRAWL_API_KEY_1 = "synthetic-next";
+    const payload = await requestFor(f);
+    const result = await f.run("execute", payload);
+    assert.deepEqual(result.cost, { credits: null, state: "unknown" });
+    assert.equal((await usage(f)).unknown, 15);
+    await f.run("execute", payload);
+    assert.equal(f.calls.length, 2);
+  }
 });
 
 test("replays remain readable after discovery expires without another network request", async () => {

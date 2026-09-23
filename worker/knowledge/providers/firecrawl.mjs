@@ -8,7 +8,7 @@ export async function retrieveFirecrawl(intent, context) {
   const result = await requestJSON("firecrawl", await sourceOperation("scrape", source), "https://api.firecrawl.dev/v2/scrape", jsonPost({
     url: source, formats: ["markdown"], onlyMainContent: true,
     parsers: [], proxy: "basic", timeout: 10000, maxAge: live ? 0 : 172800000,
-  }, { Authorization: `Bearer ${context.env.FIRECRAWL_API_KEY}` }), context);
+  }), context);
   const data = result?.data;
   const metadata = data?.metadata;
   if (result?.success !== true || typeof data?.markdown !== "string" || !metadata || metadata.error

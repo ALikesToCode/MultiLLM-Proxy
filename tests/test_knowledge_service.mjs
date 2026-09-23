@@ -24,6 +24,20 @@ test("private dispatcher enforces read/manage capabilities and strict operation 
   assert.ok(!JSON.stringify(result).includes("synthetic-test-key"));
 });
 
+test("readiness reports distinct numbered key counts without exposing secrets or fingerprints", async () => {
+  const f = await fixture();
+  Object.assign(f.env, { CONTEXT7_API_KEY_1: "synthetic-context-one", CONTEXT7_API_KEY_7: "synthetic-context-seven",
+    FIRECRAWL_API_KEY_2: "synthetic-firecrawl", FIRECRAWL_API_KEY_3: "synthetic-firecrawl", EXA_API_KEY_1: " " });
+  const result = await submit(f, "status");
+  for (const [id, count] of [["context7", 2], ["firecrawl", 1], ["alexandria", 1], ["exa", 1]]) {
+    const provider = result.providers.find(row => row.id === id);
+    assert.equal(provider.configured, true);
+    assert.equal(provider.configured_key_count, count);
+  }
+  assert.ok(!JSON.stringify(result).includes("synthetic"));
+  await assert.rejects(submit(f, "credentials.select", {}), { code: "unknown_operation" });
+});
+
 test("saving sources has no implicit paid work; refresh is idempotent and resumes pending reconciliation", async () => {
   const f = await fixture();
   let created = 0;

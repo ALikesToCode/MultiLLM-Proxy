@@ -71,7 +71,8 @@ export async function settle(tx, input, now) {
   const receipt = await tx.get(key);
   if (!receipt) fail("reservation_missing", "The operation reservation was not found.", 404);
   if (receipt.state !== "pending") return receipt;
-  const units = receipt.provider === "alexandria" && input.outcome === "confirmed"
+  const units = input.outcome === "confirmed" && input.unused === true ? 0
+    : receipt.provider === "alexandria" && input.outcome === "confirmed"
     ? integer(input.credits, 0, Number.MAX_SAFE_INTEGER, "charged credits") : receipt.units;
   const updated = { ...receipt, units, state: input.outcome, updated_at: now };
   await tx.put(key, updated);

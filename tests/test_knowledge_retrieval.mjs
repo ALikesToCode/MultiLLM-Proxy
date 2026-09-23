@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
+import { retrieve } from "../worker/knowledge/providers/index.mjs";
 import { fixture, principal, request } from "./knowledge_fixture.mjs";
 
 const run = (f, query = request(), extra = {}) => retrieveKnowledge(f.env, f.authority, principal, query,
@@ -75,6 +76,38 @@ test("live acquisition retains source provenance, warnings and configured usage 
   const usage = (await f.authority.call("snapshot")).usage;
   assert.equal(usage.find(item => item.provider === "exa").confirmed, 1);
   assert.equal(usage.find(item => item.provider === "ai_search").confirmed, 1);
+});
+
+test("live retrieval uses numbered Exa credentials after the primary account is exhausted", async () => {
+  const f = await fixture();
+  f.env.EXA_API_KEY_1 = "synthetic-next";
+  const keys = [];
+  f.retrieve = (provider, intent, context) => {
+    return retrieve(provider, intent, { ...context, fetchImpl: async (_url, options) => {
+      keys.push(options.headers["x-api-key"]);
+      if (keys.length === 1) return Response.json({ error: "Insufficient credits" }, { status: 402 });
+      return Response.json({ results: [{ id: f.source.url, url: f.source.url, text: f.text }] });
+    } });
+  };
+  const result = await run(f, request({ version: "3.1.3" }));
+  assert.equal(result.path, "live");
+  assert.equal(result.excerpts[0].text, f.text);
+  assert.deepEqual(keys, ["synthetic-test-key", "synthetic-next"]);
+  assert.equal(Object.keys((await f.storage.get("credentials:exa")).blocked).length, 1);
+  assert.equal((await f.authority.call("snapshot")).usage.find(row => row.provider === "exa").confirmed, 1);
+});
+
+test("exhausted live key pools return an actionable quota error without consuming allowance", async () => {
+  const f = await fixture();
+  f.env.EXA_API_KEY_1 = "synthetic-next";
+  let calls = 0;
+  f.retrieve = (provider, intent, context) => retrieve(provider, intent, { ...context, fetchImpl: async () => {
+    calls++;
+    return Response.json({ error: "Insufficient credits" }, { status: 402 });
+  } });
+  await assert.rejects(run(f), { code: "provider_keys_exhausted", status: 429 });
+  assert.equal(calls, 2);
+  assert.equal((await f.authority.call("snapshot")).usage.find(row => row.provider === "exa").total, 0);
 });
 
 test("requested versions and incidental URL segments never prove a discovered product version", async () => {

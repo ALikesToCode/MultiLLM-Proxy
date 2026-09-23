@@ -101,8 +101,18 @@ does not depend on the quote still being valid. Lookup and replay responses cont
 the original retrieval's `cost` and a separate zero-credit `call_cost` for the lookup.
 A pending receipt means work may
 still complete; a missing receipt also does not prove an in-flight request was not
-accepted. The gateway does not retry, refund unknown reservations, or recover a
-lost provider record automatically. Replays return `data_retained: false`.
+accepted. The gateway does not repeat accepted or uncertain work, refund unknown
+reservations, or recover a lost provider record automatically. Replays return
+`data_retained: false`.
+
+Numbered `FIRECRAWL_API_KEY_N` secrets share the Firecrawl scraping key pool.
+Before execution, a structured `402 insufficient_credits` refusal or a recognized
+HTTP 429 rate-limit refusal without any charge/execution identifiers can advance
+to the next configured key. All attempts retain the same request ID and one
+reservation. A successful execution reports its actual credits once; exhausting
+every key through definitive refusals records a failed, zero-credit receipt.
+An uncertain outcome or a capability failure never advances to another key.
+See [key order and cooldowns](knowledge-providers.md#numbered-keys-and-quota-failover).
 
 The catalogue retains at most 500 unexpired quotes and 5,000 execution receipts.
 Expired quotes are pruned. Receipt identities survive regular ledger maintenance

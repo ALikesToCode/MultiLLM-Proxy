@@ -2,6 +2,7 @@ import { fail, isRecord, KnowledgeError } from "../contracts.mjs";
 import { digest } from "../evidence.mjs";
 import { jsonPost, requestJSON, ProviderError, invalidResponse } from "../providers/transport.mjs";
 import { discoveredTools, FREE_COST, parseRequest, scrapeResult } from "./contracts.mjs";
+import { configuredKeys } from "../providers/keys.mjs";
 
 function publicReceipt(receipt) {
   const { principal_id, fingerprint, id, ...result } = receipt;
@@ -16,13 +17,12 @@ function safeError(error) {
 }
 
 function transport(env, options) {
-  if (!env.FIRECRAWL_API_KEY?.trim()) fail("provider_not_configured", "Configure FIRECRAWL_API_KEY on the private Knowledge Worker.", 503);
+  if (!configuredKeys("alexandria", env).length) fail("provider_not_configured", "Configure FIRECRAWL_API_KEY or its numbered keys on the private Knowledge Worker.", 503);
   // Callers admit paid requests durably before invoking this fixed transport.
   // Search restricted to Alexandria and find-tools are free catalogue operations.
   return (path, body, requestId = crypto.randomUUID()) => requestJSON("alexandria", path,
-    `https://api.firecrawl.dev/v2/${path}`, jsonPost(body, {
-      Authorization: `Bearer ${env.FIRECRAWL_API_KEY}`, "x-request-id": requestId,
-    }), { fetchImpl: options.fetchImpl ?? fetch, signal: options.signal, invoke: (_provider, _operation, run) => run() });
+    `https://api.firecrawl.dev/v2/${path}`, jsonPost(body, { "x-request-id": requestId }),
+    { env, authority: options.authority, fetchImpl: options.fetchImpl ?? fetch, signal: options.signal, invoke: (_provider, _operation, run) => run() });
 }
 
 async function discover(authority, identity, payload, send) {
@@ -65,7 +65,9 @@ async function execute(authority, identity, payload, send) {
       scrape_id: result.scrape_id, error });
     data = result.item.data;
   } catch (error) {
-    receipt = await authority.call("alexandria.finish", { ...identity, credits: null, status: "unknown", error: safeError(error) });
+    const rejected = error instanceof ProviderError && error.no_charge === true;
+    receipt = await authority.call("alexandria.finish", { ...identity, credits: rejected ? 0 : null,
+      status: rejected ? "failed" : "unknown", error: safeError(error) });
   }
   return { ...publicReceipt(receipt), ...(data === undefined ? {} : { data }) };
 }
@@ -75,7 +77,7 @@ export async function dispatchAlexandria(env, authority, principal, operation, b
   const identity = { principal_id: principal.id };
   if (payload.request_id) identity.receipt_id = `alexandria:${await digest(`${principal.id}\0${payload.request_id}`)}`;
   if (operation === "alexandria.receipt") return { ...publicReceipt(await authority.call("alexandria.receipt", identity)), call_cost: FREE_COST };
-  const send = transport(env, options);
+  const send = transport(env, { ...options, authority });
   if (operation === "alexandria.execute") return execute(authority, identity, payload, send);
   try {
     return operation === "alexandria.search" ? await discover(authority, identity, payload, send)

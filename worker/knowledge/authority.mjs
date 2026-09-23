@@ -3,6 +3,7 @@ import { digest } from "./evidence.mjs";
 import { defaultPolicy, validatePolicy, withProviderDefaults } from "./policy.mjs";
 import { reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
 import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
+import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
 const STATES = new Set([...ACTIVE, "completed", "failed", "cancelled"]);
@@ -182,6 +183,7 @@ export class KnowledgeAuthority {
   async call(operation, input = {}) {
     return this.storage.transaction(async tx => {
       const now = this.now();
+      if (operation.startsWith("credentials.")) return credentialOperation(tx, operation, input, now);
       if (operation.startsWith("alexandria.")) return alexandriaCatalogue(tx, operation, input, await policyOf(tx), now);
       if (operation === "snapshot") {
         const policy = await policyOf(tx);

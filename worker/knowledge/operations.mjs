@@ -1,4 +1,5 @@
 import { fail } from "./contracts.mjs";
+import { ProviderError } from "./providers/errors.mjs";
 
 export async function metered(authority, operation, callback) {
   const reservation = await authority.call("reserve", operation);
@@ -6,8 +7,9 @@ export async function metered(authority, operation, callback) {
   let result;
   try { result = await callback(); }
   catch (error) {
-    // A timeout or provider error does not establish that no work was charged.
-    await authority.call("settle", { id: reservation.id, outcome: "unknown" }).catch(() => {});
+    // Only a definitive pre-dispatch quota refusal can release this allowance.
+    const rejected = error instanceof ProviderError && error.no_charge === true;
+    await authority.call("settle", { id: reservation.id, outcome: rejected ? "confirmed" : "unknown", unused: rejected }).catch(() => {});
     throw error;
   }
   await authority.call("settle", { id: reservation.id, outcome: "confirmed" });

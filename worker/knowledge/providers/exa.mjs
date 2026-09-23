@@ -15,7 +15,7 @@ export async function retrieveExa(intent, context) {
   const suffix = acquisition ? "contents" : "search";
   const operation = acquisition ? await sourceOperation(suffix, source) : suffix;
   const data = await requestJSON("exa", operation, `https://api.exa.ai/${suffix}`,
-    jsonPost(body, { "x-api-key": context.env.EXA_API_KEY }), context);
+    jsonPost(body), context);
   const results = requireArray(data?.results, "exa");
   if (acquisition && results.some((item) => sourceURL(item?.id || item?.url, intent.allowed_hosts) !== source)) {
     throw invalidResponse("exa");
