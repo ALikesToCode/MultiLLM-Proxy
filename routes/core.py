@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import psutil
-from flask import Response, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Response, abort, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -441,6 +441,16 @@ def register_core_routes(app) -> None:
         sanitized_path = request.path.rstrip("/")
         if sanitized_path in [f"/{prov}" for prov in app.config["API_BASE_URLS"]]:
             return app.view_functions["proxy"](sanitized_path.strip("/"))
+
+        # Browser navigation to a path outside every provider namespace would
+        # otherwise fall into the proxy catch-all and return an API error.
+        if (
+            request.endpoint == "proxy"
+            and request.method == "GET"
+            and not is_api_request_path(request.path)
+            and "text/html" in request.headers.get("Accept", "")
+        ):
+            abort(404)
 
         return None
 

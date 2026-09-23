@@ -132,6 +132,17 @@ class LoginRedirectSecurityTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual(response.headers["Location"], destination)
 
+    def test_unknown_dashboard_paths_render_not_found_for_signed_in_browsers(self):
+        self._set_admin_session()
+        page = self.client.get("/no-such-page", headers={"Accept": "text/html"})
+        self.assertEqual(page.status_code, 404)
+        self.assertIn("text/html", page.content_type)
+        self.assertIn("/no-such-page", page.get_data(as_text=True))
+
+        api = self.client.get("/no-such-page", headers={"Authorization": "Bearer admin-test-key"})
+        self.assertNotEqual(api.status_code, 404)
+        self.assertEqual(api.content_type, "application/json")
+
     def test_session_cookie_is_hardened_in_production(self):
         self.flask_app.config["SESSION_COOKIE_SECURE"] = True
         response = self.client.post(
