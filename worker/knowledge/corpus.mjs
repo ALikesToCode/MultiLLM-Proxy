@@ -81,6 +81,17 @@ function itemInfo(value, key) {
   return value;
 }
 
+async function readIndex(callback) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await callback(); }
+    catch (error) {
+      // The binding intermittently rejects its own account context before a metadata read.
+      // Uploads, deletions and billable search requests never use this retry path.
+      if (attempt >= 2 || error?.message !== "Invalid ctx.props: missing accountId or accountTag") throw error;
+    }
+  }
+}
+
 function chunkMatches(chunk, bytes) {
   if (!chunk || typeof chunk.text !== "string" || !chunk.text
     || !Number.isSafeInteger(chunk.start_byte) || !Number.isSafeInteger(chunk.end_byte)
@@ -173,14 +184,14 @@ export class KnowledgeCorpus {
 
   async reconcileRevision(artifact, itemId) {
     validateArtifact(artifact);
-    const items = this.requireIndex().items;
+    const index = this.requireIndex();
     if (itemId) {
-      const item = itemInfo(await items.get(itemId).info(), artifact.index_key);
+      const item = itemInfo(await readIndex(() => index.items.get(itemId).info()), artifact.index_key);
       if (item.id !== itemId) throw invalid("invalid_index_response");
       return item;
     }
     for (let page = 1; page <= MAX_RECONCILE_PAGES; page += 1) {
-      const response = await items.list({ search: artifact.index_key, source: "builtin", page, per_page: INDEX_PAGE_SIZE });
+      const response = await readIndex(() => index.items.list({ search: artifact.index_key, source: "builtin", page, per_page: INDEX_PAGE_SIZE }));
       if (!response || !Array.isArray(response.result) || response.result.length > INDEX_PAGE_SIZE) {
         throw invalid("invalid_index_response");
       }
@@ -200,11 +211,11 @@ export class KnowledgeCorpus {
     const text = await this.getSnapshot(artifact);
     if (text === null) return false;
     const bytes = encoder.encode(text);
-    const indexedItem = this.requireIndex().items.get(item.id);
+    const index = this.requireIndex();
     let offset = 0;
     let expectedTotal;
     for (let page = 0; page < MAX_CHUNK_PAGES; page += 1) {
-      const response = await indexedItem.chunks({ limit: 100, offset });
+      const response = await readIndex(() => index.items.get(item.id).chunks({ limit: 100, offset }));
       if (!response || !Array.isArray(response.result) || response.result.length > 100
         || !Number.isSafeInteger(response.result_info?.total) || response.result_info.total < 1
         || response.result_info.total > 1024 || response.result_info.offset !== offset) return false;

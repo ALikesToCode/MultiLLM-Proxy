@@ -134,6 +134,34 @@ test("upload checks snapshot bytes and returns only matching item identity", asy
   await assert.rejects(f.corpus.uploadRevision(artifact(), text), { code: "invalid_index_response" });
 });
 
+test("binding context failures retry metadata reads only and remain bounded", async () => {
+  const f = fixture();
+  let calls = 0;
+  const contextError = () => new Error("Invalid ctx.props: missing accountId or accountTag");
+  f.index.items.list = async () => {
+    if (++calls < 3) throw contextError();
+    return { result: [{ id: "item-one", key: artifact().index_key, status: "completed" }] };
+  };
+  assert.equal((await f.corpus.reconcileRevision(artifact())).id, "item-one");
+  assert.equal(calls, 3);
+  calls = 0;
+  f.index.items.list = async () => { calls += 1; throw contextError(); };
+  await assert.rejects(f.corpus.reconcileRevision(artifact()), /missing accountId/);
+  assert.equal(calls, 3);
+  calls = 0;
+  f.index.items.list = async () => { calls += 1; throw new Error("other failure"); };
+  await assert.rejects(f.corpus.reconcileRevision(artifact()), /other failure/);
+  assert.equal(calls, 1);
+  calls = 0;
+  f.index.items.upload = async () => { calls += 1; throw contextError(); };
+  await assert.rejects(f.corpus.uploadRevision(artifact(), text), /missing accountId/);
+  assert.equal(calls, 1);
+  calls = 0;
+  f.index.search = async () => { calls += 1; throw contextError(); };
+  await assert.rejects(f.corpus.search({ query: "limits" }), /missing accountId/);
+  assert.equal(calls, 1);
+});
+
 test("reconciliation uses item info and exact built-in key matches without uploading", async () => {
   const f = fixture();
   assert.equal((await f.corpus.reconcileRevision(artifact(), "item-one")).id, "item-one");
