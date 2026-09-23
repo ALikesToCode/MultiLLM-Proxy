@@ -102,11 +102,30 @@ function chunkMatches(chunk, bytes) {
   return textBytes.every((byte, index) => byte === bytes[chunk.start_byte + index]);
 }
 
+function legacySearchChunks(response) {
+  if (!response || !Array.isArray(response.data) || response.data.length > MAX_INDEX_RESULTS) {
+    throw invalid("invalid_index_response");
+  }
+  const chunks = [];
+  for (const item of response.data) {
+    if (!item || !validKey(item.filename) || !Number.isFinite(item.score)
+      || !Array.isArray(item.content) || !item.content.length
+      || chunks.length + item.content.length > MAX_INDEX_RESULTS) throw invalid("invalid_index_response");
+    for (const content of item.content) {
+      if (content?.type !== "text") throw invalid("invalid_index_response");
+      chunks.push({ text: content.text, score: content.score ?? item.score, item: { key: item.filename } });
+    }
+  }
+  return { chunks };
+}
+
 /** Immutable evidence storage and the managed index's provider-specific contract. */
 export class KnowledgeCorpus {
   constructor(env) {
     this.bucket = env.KNOWLEDGE_SNAPSHOTS;
     this.index = env.KNOWLEDGE_INDEX;
+    this.searchAI = env.KNOWLEDGE_SEARCH_AI;
+    this.searchInstance = env.KNOWLEDGE_SEARCH_INSTANCE;
   }
 
   requireBucket() {
@@ -150,7 +169,8 @@ export class KnowledgeCorpus {
     };
     if (typeof request.product === "string" && request.product
       && encoder.encode(request.product).byteLength <= 64) retrieval.filters = { product: request.product };
-    const response = await this.requireIndex().search({
+    const response = this.searchAI ? await this.searchWithAI(request, retrieval.filters)
+      : await this.requireIndex().search({
       query: request.query,
       ai_search_options: {
         retrieval, query_rewrite: { enabled: false }, reranking: { enabled: false },
@@ -168,6 +188,21 @@ export class KnowledgeCorpus {
       if (bytes > MAX_SNAPSHOT_BYTES) throw invalid("index_response_too_large");
       return { text: chunk.text, index_key: chunk.item.key, score: chunk.score };
     });
+  }
+
+  async searchWithAI(request, filters) {
+    if (typeof this.searchAI.autorag !== "function"
+      || typeof this.searchInstance !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(this.searchInstance)) {
+      throw invalid("index_unavailable");
+    }
+    // Select one transport before dispatch. Never retry a billable query through
+    // another binding when the first request has an unknown outcome.
+    const response = await this.searchAI.autorag(this.searchInstance).search({
+      query: request.query, rewrite_query: false, max_num_results: MAX_INDEX_RESULTS,
+      reranking: { enabled: false },
+      ...(filters ? { filters: { type: "eq", key: "product", value: filters.product } } : {}),
+    });
+    return legacySearchChunks(response);
   }
 
   async uploadRevision(artifact, text) {

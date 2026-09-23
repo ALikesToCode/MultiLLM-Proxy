@@ -48,6 +48,14 @@ Use the existing Cloudflare account and authentication. Review resource names in
 The Knowledge Worker has no public route, `workers.dev` URL or preview URL.
 Deploy it before the main Worker, which requires the service to exist.
 
+Search uses the supported `KNOWLEDGE_SEARCH_AI.autorag()` binding against
+`KNOWLEDGE_SEARCH_INSTANCE`; keep that name aligned with `KNOWLEDGE_INDEX`.
+The instance binding still handles uploads, item metadata and chunk verification.
+This separates queries from the instance binding's observed account-context
+failures. Each query uses one transport and is never retried after an unknown
+outcome. Removing the search AI binding selects the native instance search API.
+See Cloudflare's [binding compatibility reference](https://developers.cloudflare.com/ai-search/api/migration/workers-binding/).
+
 1. Create the private R2 bucket and AI Search instance. Use **built-in storage**
    for AI Search; do not connect the snapshot bucket as an automatic crawler.
    Enable hybrid keyword/vector indexing and declare the five metadata fields:

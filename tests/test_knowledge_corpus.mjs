@@ -134,6 +134,63 @@ test("upload checks snapshot bytes and returns only matching item identity", asy
   await assert.rejects(f.corpus.uploadRevision(artifact(), text), { code: "invalid_index_response" });
 });
 
+test("AI binding search preserves chunk identity and scores without calling instance search", async () => {
+  const f = fixture();
+  const calls = [];
+  const corpus = new KnowledgeCorpus({ KNOWLEDGE_INDEX: f.index, KNOWLEDGE_SEARCH_INSTANCE: "knowledge-test",
+    KNOWLEDGE_SEARCH_AI: { autorag(name) {
+      assert.equal(name, "knowledge-test");
+      return { async search(query) {
+        calls.push(query);
+        return { data: [{ filename: artifact().index_key, score: 0.8,
+          content: [{ type: "text", text, score: 0.9 }, { type: "text", text: "東京" }] }] };
+      } };
+    } },
+  });
+  assert.deepEqual(await corpus.search({ query: "request limits", product: "flask" }), [
+    { text, index_key: artifact().index_key, score: 0.9 },
+    { text: "東京", index_key: artifact().index_key, score: 0.8 },
+  ]);
+  assert.equal(f.searches.length, 0);
+  assert.deepEqual(calls[0], { query: "request limits", rewrite_query: false, max_num_results: 20,
+    reranking: { enabled: false }, filters: { type: "eq", key: "product", value: "flask" } });
+  await corpus.search({ query: "limits" });
+  assert.equal(calls[1].filters, undefined);
+});
+
+test("AI binding failures never fall back or retry and malformed responses fail closed", async () => {
+  const f = fixture();
+  let calls = 0;
+  let response;
+  const corpus = new KnowledgeCorpus({ KNOWLEDGE_INDEX: f.index, KNOWLEDGE_SEARCH_INSTANCE: "knowledge-test",
+    KNOWLEDGE_SEARCH_AI: { autorag() { return { async search() {
+      calls += 1;
+      if (response instanceof Error) throw response;
+      return response;
+    } }; } },
+  });
+  response = new Error("Invalid ctx.props: missing accountId or accountTag");
+  await assert.rejects(corpus.search({ query: "limits" }), /missing accountId/);
+  assert.equal(calls, 1);
+  assert.equal(f.searches.length, 0);
+  const item = { filename: artifact().index_key, score: 0.8, content: [{ type: "text", text }] };
+  for (response of [{}, { data: [null] }, { data: [{ ...item, filename: "" }] },
+    { data: [{ ...item, score: NaN }] }, { data: [{ ...item, content: [] }] },
+    { data: [{ ...item, content: [{ type: "image", text }] }] },
+    { data: [{ ...item, content: [{ type: "text", text, score: Infinity }] }] },
+    { data: [{ ...item, content: [{ type: "text", text: "" }] }] },
+    { data: Array(21).fill(item) }, { data: [{ ...item, content: Array(21).fill(item.content[0]) }] },
+    { data: [{ ...item, content: [{ type: "text", text: "x".repeat(256 * 1024 + 1) }] }] }]) {
+    await assert.rejects(corpus.search({ query: "limits" }), error =>
+      ["invalid_index_response", "index_response_too_large"].includes(error.code));
+  }
+  response = { data: [] };
+  assert.deepEqual(await corpus.search({ query: "limits" }), []);
+  corpus.searchInstance = "../other-instance";
+  await assert.rejects(corpus.search({ query: "limits" }), { code: "index_unavailable" });
+  assert.equal(f.searches.length, 0);
+});
+
 test("binding context failures retry metadata reads only and remain bounded", async () => {
   const f = fixture();
   let calls = 0;

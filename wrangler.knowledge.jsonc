@@ -12,6 +12,8 @@
   "migrations": [{ "tag": "knowledge-v1", "new_sqlite_classes": ["KnowledgeCatalogue"] }],
   "r2_buckets": [{ "binding": "KNOWLEDGE_SNAPSHOTS", "bucket_name": "multillm-knowledge-snapshots" }],
   "ai_search": [{ "binding": "KNOWLEDGE_INDEX", "instance_name": "multillm-knowledge" }],
+  "ai": { "binding": "KNOWLEDGE_SEARCH_AI" },
+  "vars": { "KNOWLEDGE_SEARCH_INSTANCE": "multillm-knowledge" },
   "workflows": [{ "binding": "KNOWLEDGE_INGESTION", "name": "multillm-knowledge-ingestion", "class_name": "KnowledgeIngestion" }],
   "triggers": { "crons": ["17 * * * *"] },
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }
