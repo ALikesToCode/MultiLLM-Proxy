@@ -590,7 +590,8 @@ def register_core_routes(app) -> None:
                 request_id=get_request_id(),
             ), 500
 
-    @app.route("/openrouter")
+    # "/openrouter" belongs to the provider proxy namespace, so the lab lives beside it.
+    @app.route("/openrouter-lab")
     @login_required
     def openrouter_dashboard():
         """

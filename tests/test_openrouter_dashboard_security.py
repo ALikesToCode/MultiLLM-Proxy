@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from flask import url_for
+
 
 class FakeOpenRouterResponse:
     def __init__(self, content=b'{"ok": true}', status_code=200, headers=None, chunks=None):
@@ -63,6 +65,26 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
     def tearDown(self):
         self.env_patch.stop()
         self.tempdir.cleanup()
+
+    def test_lab_page_is_reachable_outside_the_provider_namespace(self):
+        page = self.client.get("/openrouter-lab", headers={"Accept": "text/html"})
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="openrouter-lab"', page.get_data(as_text=True))
+        with self.flask_app.test_request_context():
+            self.assertEqual(url_for("openrouter_dashboard"), "/openrouter-lab")
+        # The bare provider root stays an authenticated proxy route for API clients.
+        provider_root = self.client.get("/openrouter", headers={"Accept": "application/json"})
+        self.assertEqual(provider_root.status_code, 401)
+        self.assertEqual(provider_root.content_type, "application/json")
+
+    def test_install_shortcuts_open_dashboard_pages(self):
+        manifest = self.client.get("/manifest.webmanifest").get_json()
+        with self.flask_app.test_request_context():
+            pages = {url_for(endpoint) for endpoint in (
+                "status_page", "openrouter_dashboard", "manage_users",
+            )}
+        self.assertEqual({shortcut["url"] for shortcut in manifest["shortcuts"]}, pages)
 
     def test_dashboard_chat_completions_uses_server_side_openrouter_key(self):
         fake_response = FakeOpenRouterResponse(content=b'{"choices":[]}')
