@@ -49,6 +49,10 @@ export function queryText(intent, provider, maximum = 2000) {
   return intent.query.trim();
 }
 
+export function liveAcquisition(intent) {
+  return intent.freshness === "fresh" || intent.freshness === "force";
+}
+
 export function observation(provider, result, allowedHosts, maximum = 100000) {
   const url = sourceURL(result?.url, allowedHosts);
   if (!url) return null;
@@ -56,6 +60,6 @@ export function observation(provider, result, allowedHosts, maximum = 100000) {
   return {
     kind: text.trim() ? "source_excerpt" : "discovery", url,
     title: typeof result.title === "string" ? result.title.slice(0, 500) : url,
-    text, provider,
+    text, provider, ...(text.trim() ? { freshness: "cached_or_unknown" } : {}),
   };
 }

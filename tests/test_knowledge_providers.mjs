@@ -123,6 +123,7 @@ test("Exa search is bounded and only source text becomes an excerpt", async () =
   assert.equal(body.numResults, 5);
   assert.deepEqual(body.contents, { text: { maxCharacters: 100000 }, highlights: false, subpages: 0 });
   assert.equal(result.observations[0].text, "Original source text");
+  assert.equal(result.observations[0].freshness, "cached_or_unknown");
   assert.equal(result.observations[1].kind, "discovery");
   assert.equal(result.observations.length, 2);
   assert.equal(JSON.stringify(result).includes("Generated"), false);
@@ -135,6 +136,7 @@ test("Exa contents acquires one approved source and verifies the returned source
   assert.deepEqual(context.operations, [["exa", await sourceOperation("contents", SOURCE)]]);
   assert.deepEqual(context.calls[0].body.urls, [SOURCE]);
   assert.equal(result.observations[0].kind, "source_excerpt");
+  assert.equal(result.observations[0].freshness, "cached_or_unknown");
   for (const response of [
     { results: [{ url: "https://docs.example.com/unrelated", text: "wrong document" }] },
     { results: [], statuses: [{ id: SOURCE, status: "error", error: { tag: SECRET } }] },
@@ -332,4 +334,43 @@ test("schema failures and unexpectedly long source text remain bounded", async (
   const result = await retrieve("exa", INTENT, fixture([{ results: [{ url: SOURCE, text: "x".repeat(100005) }] }]));
   assert.equal(result.observations[0].text.length, 100000);
   assert.ok(result.warnings.includes("exa_content_truncated"));
+});
+
+test("fresh and forced Firecrawl acquisition explicitly bypasses cached content", async () => {
+  for (const freshness of ["fresh", "force"]) {
+    const context = fixture([firecrawlDoc()]);
+    const result = await retrieve("firecrawl", { ...INTENT, source_url: SOURCE, freshness }, context);
+    assert.equal(context.calls[0].body.maxAge, 0);
+    assert.equal(result.observations[0].freshness, "live");
+    assert.equal(result.observations[0].checked_at, undefined);
+  }
+  const normal = await retrieve("firecrawl", { ...INTENT, source_url: SOURCE }, fixture([firecrawlDoc()]));
+  assert.equal(normal.observations[0].freshness, "cached_or_unknown");
+});
+
+test("fresh Exa search and contents require live crawling without fallback", async () => {
+  for (const freshness of ["fresh", "force"]) {
+    for (const source_url of [undefined, SOURCE]) {
+      const context = fixture([{ results: [{ url: SOURCE, text: "live source" }], statuses: [{ id: SOURCE, status: "success" }] }]);
+      const result = await retrieve("exa", { ...INTENT, freshness, source_url }, context);
+      const options = source_url ? context.calls[0].body : context.calls[0].body.contents;
+      assert.equal(options.livecrawl, "always");
+      assert.equal(options.livecrawlTimeout, 10000);
+      assert.equal(result.observations[0].freshness, "live");
+      assert.equal(result.observations[0].checked_at, undefined);
+    }
+  }
+});
+
+test("failed live acquisition never promotes a cached fallback to fresh evidence", async () => {
+  const exa = { results: [{ url: SOURCE, text: "cached fallback" }], statuses: [{ id: SOURCE, status: "error", error: { tag: "CRAWL_LIVECRAWL_TIMEOUT" } }] };
+  for (const source_url of [undefined, SOURCE]) {
+    const context = fixture([exa]);
+    await assert.rejects(retrieve("exa", { ...INTENT, source_url, freshness: "fresh" }, context), { code: "provider_invalid_response" });
+    assert.equal(context.calls.length, 1);
+  }
+  const firecrawl = firecrawlDoc({ metadata: { sourceURL: SOURCE, statusCode: 504, error: "origin timeout" } });
+  const context = fixture([firecrawl]);
+  await assert.rejects(retrieve("firecrawl", { ...INTENT, source_url: SOURCE, freshness: "force" }, context), { code: "provider_invalid_response" });
+  assert.equal(context.calls.length, 1);
 });

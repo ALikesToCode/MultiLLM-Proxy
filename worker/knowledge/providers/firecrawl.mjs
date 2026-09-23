@@ -1,12 +1,13 @@
 import { invalidResponse, jsonPost, requestJSON } from "./transport.mjs";
-import { observation, requireSourceURL, sourceOperation } from "./source-policy.mjs";
+import { liveAcquisition, observation, requireSourceURL, sourceOperation } from "./source-policy.mjs";
 
 export async function retrieveFirecrawl(intent, context) {
   if (!intent.source_url) return { observations: [], warnings: ["firecrawl_requires_source_url"] };
   const source = requireSourceURL(intent.source_url, intent.allowed_hosts, "firecrawl");
+  const live = liveAcquisition(intent);
   const result = await requestJSON("firecrawl", await sourceOperation("scrape", source), "https://api.firecrawl.dev/v2/scrape", jsonPost({
     url: source, formats: ["markdown"], onlyMainContent: true,
-    parsers: [], proxy: "basic", timeout: 10000, maxAge: 172800000,
+    parsers: [], proxy: "basic", timeout: 10000, maxAge: live ? 0 : 172800000,
   }, { Authorization: `Bearer ${context.env.FIRECRAWL_API_KEY}` }), context);
   const data = result?.data;
   const metadata = data?.metadata;
@@ -24,5 +25,6 @@ export async function retrieveFirecrawl(intent, context) {
     text: data.markdown,
   }, intent.allowed_hosts);
   if (!item) return { observations: [], warnings: ["firecrawl_redirect_outside_source_policy"] };
+  if (item.kind === "source_excerpt" && live) item.freshness = "live";
   return { observations: [item], warnings: data.markdown.length > 100000 ? ["firecrawl_content_truncated"] : [] };
 }

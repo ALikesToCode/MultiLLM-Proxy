@@ -32,7 +32,9 @@ and [API guide](https://github.com/upstash/context7/blob/master/docs/api-guide.m
 
 Firecrawl uses `POST https://api.firecrawl.dev/v2/scrape` and a bearer key.
 The request sets `formats: ["markdown"]`, `onlyMainContent: true`, `parsers: []`,
-`proxy: "basic"`, a 10-second provider timeout, and a two-day maximum cache age.
+`proxy: "basic"`, a 10-second provider timeout, and a two-day maximum cache age
+for ordinary retrieval. Fresh queries and forced background refresh set
+`maxAge: 0` to require a new acquisition.
 No crawl, browser action, AI extraction, or multi-page PDF parsing is requested.
 The adapter checks `success`, page status, MIME type, original `metadata.sourceURL`,
 and final `metadata.url`; a redirect outside approved hosts is not published.
@@ -46,6 +48,17 @@ array. Both ask for at most 100,000 characters of text per document, disable
 highlights, and request no subpages. Only `results[].text` becomes source evidence;
 summaries and synthesized outputs are ignored. Acquisition verifies the returned
 source identity. See the [official Exa API schema](https://github.com/exa-labs/openapi-spec/blob/master/exa-openapi-spec.yaml).
+
+Fresh queries and forced refresh set Exa's `livecrawl: "always"` with a
+10-second timeout. This supported parameter forbids cached fallback; the schema
+marks it deprecated in favor of `maxAgeHours`, so its compatibility should be
+checked during provider upgrades. An explicit failed content status fails the
+operation even if the provider also returns text. There is no retry using cache.
+Successful forced acquisitions carry `freshness: "live"`; ordinary source
+observations carry `freshness: "cached_or_unknown"`. These flags describe the
+acquisition contract. The adapters supply no inferred source-check timestamp:
+provider retrieval time alone does not establish when cached content was last
+checked at its original source.
 
 Mintlify uses the stateless MCP endpoint `https://index.mintlify.com/mcp`, tool
 `context`, with `query`, optional `product`, approved `includeDomains`, and
