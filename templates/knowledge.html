@@ -9,7 +9,7 @@
 <div id="knowledge-console" class="knowledge-console">
   <header class="knowledge-heading">
     <div><p class="eyebrow">Technical evidence</p><h1>Knowledge</h1><p>Keep public documentation, inspect its version coverage, and retrieve cited excerpts.</p></div>
-    <button id="knowledge-refresh" class="button button--quiet" type="button">Refresh status</button>
+    <div class="knowledge-actions"><a class="button button--primary" href="{{ url_for('knowledge_agent_setup') }}">Connect Codex or Claude</a><button id="knowledge-refresh" class="button button--quiet" type="button">Refresh status</button></div>
   </header>
   <p id="knowledge-status" class="knowledge-banner" role="status" aria-live="polite">Loading Knowledge service status…</p>
   <nav class="knowledge-sections" aria-label="Knowledge sections"><a href="#knowledge-query">Ask a question</a><a href="#knowledge-alexandria">Alexandria</a><a href="#knowledge-sources">Sources</a><a href="#knowledge-setup">Setup</a><a href="#knowledge-policy">Allowances</a></nav>

@@ -8,10 +8,27 @@ from flask import Response, g, jsonify, render_template, request
 
 from route_helpers import api_authenticate_only, login_required
 from routes import knowledge_alexandria as alexandria
+from routes import knowledge_management as management
+from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
 from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26")
+_MCP_INSTRUCTIONS = (
+    "Use knowledge_context or knowledge_search for source evidence, including the actual "
+    "product and dependency version when known. Read excerpts, original citations, related "
+    "versions and coverage gaps before answering; insufficient evidence is not a verified answer. "
+    "For Alexandria, first use knowledge_alexandria_search, then knowledge_alexandria_inspect "
+    "on a returned quote. These catalogue calls cost zero credits. Execute only a discovered "
+    "quote with authorized spending, contract-valid options and a unique request_id. "
+    "Report each call's actual cost and cost state; reserve_credits is not an upstream price cap. "
+    "After interruption use knowledge_alexandria_receipt or replay the identical payload with "
+    "the same request_id; never purchase again under a new ID to resolve an unknown outcome. "
+    "Use knowledge_status and the available source, job and policy tools for administration. "
+    "Management tools require knowledge:manage; retrieval tools require knowledge:read. "
+    "Registering a source does not fetch it; refresh and verify publication before querying. "
+    "Read /llms.txt and /agent-onboarding/SKILL.md on this server for complete setup."
+)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _QUERY_SCHEMA = {
     "type": "object", "required": ["query"], "additionalProperties": False,
@@ -130,21 +147,32 @@ def _mcp_initialize(identifier, params):
     return _rpc_result(identifier, {"protocolVersion": version,
                        "capabilities": {"tools": {}},
                        "serverInfo": {"name": "multillm-knowledge", "version": "1.0.0"},
-                       "instructions": "Returns source evidence and version gaps. Read excerpts and citations before relying on a result."})
+                       "instructions": _MCP_INSTRUCTIONS})
 
 
 def _mcp_tool(identifier, params, protocol):
     tool_name = params.get("name")
     operations = {"knowledge_context": "context", "knowledge_search": "search",
-                  **{"knowledge_" + name.replace(".", "_"): name for name in alexandria.OPERATIONS}}
+                  **{"knowledge_" + name.replace(".", "_"): name for name in alexandria.OPERATIONS},
+                  **management.OPERATIONS}
     operation = operations.get(tool_name) if isinstance(tool_name, str) else None
     if operation is None:
         return _rpc_error(identifier, -32602, "Unknown Knowledge tool.")
+    if not management.permits(g.authenticated_user, management.required_scope(tool_name)):
+        return _rpc_result(identifier, {"isError": True, "content": [{"type": "text", "text": json.dumps({
+            "error": {"code": "insufficient_scope", "message": "The key is not authorized for this Knowledge tool."},
+        })}]})
     arguments = params.get("arguments", {})
     if not isinstance(arguments, dict):
         return _rpc_error(identifier, -32602, "Tool arguments must be an object.")
     try:
-        payload = alexandria.parse_request(operation, arguments) if operation in alexandria.OPERATIONS else _query(arguments)
+        if operation in alexandria.OPERATIONS:
+            payload = alexandria.parse_request(operation, arguments)
+        elif tool_name in management.OPERATIONS:
+            # The private service validates management contracts identically for REST and MCP.
+            payload = arguments
+        else:
+            payload = _query(arguments)
         result = dispatch(operation, g.authenticated_user, payload)
         tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": bool(result.get("error"))}
         if protocol == "2025-06-18":
@@ -186,20 +214,23 @@ def _mcp():
     if method == "ping":
         return _rpc_result(identifier, {})
     if method == "tools/list":
-        return _rpc_result(identifier, {"tools": [{
+        tools = [{
             "name": f"knowledge_{operation}",
             "description": description, "inputSchema": _QUERY_SCHEMA,
             "annotations": {"readOnlyHint": True, "openWorldHint": True},
         } for operation, description in (
             ("context", "Retrieve cited technical excerpts with explicit version evidence and gaps."),
             ("search", "Search technical sources and inspect normalized retrieval diagnostics."),
-        )] + alexandria.TOOLS})
+        )] + alexandria.TOOLS + management.TOOLS
+        return _rpc_result(identifier, {"tools": [tool for tool in tools
+            if management.permits(g.authenticated_user, management.required_scope(tool["name"]))]})
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     return _mcp_tool(identifier, params, protocol)
 
 
 def register_knowledge_routes(app, csrf):
+    register_knowledge_onboarding_routes(app)
     @app.after_request
     def private_knowledge_response(response):
         if request.path == "/mcp" or request.path.startswith(("/knowledge", "/v1/knowledge/", "/admin/knowledge/")):
@@ -228,7 +259,9 @@ def register_knowledge_routes(app, csrf):
         return jsonify(dispatch("artifact", g.authenticated_user, {"id": _identifier(artifact_id)}))
 
     app.add_url_rule("/mcp", "knowledge_mcp",
-                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(_mcp)),
+                     csrf.exempt(api_authenticate_only(required_scope=lambda:
+                         "knowledge:read" if management.permits(g.authenticated_user, "knowledge:read")
+                         else "knowledge:manage")(_mcp)),
                      methods=["POST", "GET", "DELETE"])
 
     @app.get("/knowledge")

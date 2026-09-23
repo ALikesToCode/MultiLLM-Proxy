@@ -1,5 +1,9 @@
 # Knowledge Gateway
 
+For complete agent setup and daily operations, see
+[Knowledge access for agents](knowledge-agents.md) and the portable
+[MultiLLM Knowledge skill](../skills/multillm-knowledge/SKILL.md).
+
 For structured provider data with discovery and explicit credit-priced execution,
 see [Firecrawl Alexandria](knowledge-alexandria.md). It shares `FIRECRAWL_API_KEY`
 and has a separate allowance from ordinary source scraping.
@@ -136,7 +140,9 @@ route:
 ```
 
 The MCP endpoint is `/mcp`, using streamable HTTP with a privately configured
-bearer key. It exposes `knowledge_context` and `knowledge_search`. Send
+bearer key. It exposes seven read tools (context, search, artifacts and the four
+[Alexandria tools](knowledge-alexandria.md#discover-inspect-execute)) and six
+[management tools](knowledge-agents.md#connect-to-the-gateway), filtered by scope. Send
 `Accept: application/json, text/event-stream`, initialize normally, and include
 the negotiated `MCP-Protocol-Version` on later requests. Supported versions are
 `2025-06-18` and `2025-03-26`. Responses are JSON; no persistent session or GET

@@ -133,10 +133,54 @@ def test_mcp_initialize_and_discovery(app, keys):
     assert response.headers["Content-Type"].startswith("application/json")
     tools = mcp(client, keys["reader"], "tools/list").json["result"]["tools"]
     assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search",
-        "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt"]
+        "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt", "knowledge_artifact"]
     assert tools[4]["annotations"]["readOnlyHint"] is False
     assert mcp(client, keys["reader"], "ping").json["result"] == {}
     assert mcp(client, keys["reader"], "missing").json["error"]["code"] == -32601
+
+
+def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app, keys):
+    client = app.test_client()
+    tools = mcp(client, keys["manager"], "tools/list").json["result"]["tools"]
+    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_source_register",
+        "knowledge_source_update", "knowledge_source_refresh", "knowledge_job_cancel", "knowledge_policy_update"]
+    assert tools[0]["annotations"]["readOnlyHint"] is True
+    assert all(not tool["annotations"]["readOnlyHint"] for tool in tools[1:])
+    with patch.object(knowledge, "dispatch") as remote:
+        for key, tool in ((keys["reader"], "knowledge_policy_update"), (keys["manager"], "knowledge_context")):
+            response = mcp(client, key, "tools/call", {"name": tool, "arguments": {}})
+            assert response.json["result"]["isError"] is True
+            assert "insufficient_scope" in response.json["result"]["content"][0]["text"]
+        assert mcp(client, keys["chat"], "tools/list").status_code == 403
+    remote.assert_not_called()
+
+
+@pytest.mark.parametrize("tool,operation,payload", [
+    ("knowledge_status", "status", {}),
+    ("knowledge_source_register", "sources.create", {"url": "https://docs.python.org/3/", "product": "python"}),
+    ("knowledge_source_update", "sources.update", {"id": "source-1", "expected_revision": 2, "enabled": False}),
+    ("knowledge_source_refresh", "sources.refresh", {"id": "source-1"}),
+    ("knowledge_job_cancel", "jobs.cancel", {"id": "job-1"}),
+    ("knowledge_policy_update", "policy.update", {"expected_revision": 2, "enabled": False}),
+])
+def test_mcp_management_uses_existing_domain_contract(app, keys, tool, operation, payload):
+    with patch.object(knowledge, "dispatch", return_value={"status": "accepted"}) as remote:
+        response = mcp(app.test_client(), keys["manager"], "tools/call", {"name": tool, "arguments": payload},
+                       **{"MCP-Protocol-Version": "2025-06-18"})
+    assert response.json["result"]["structuredContent"] == {"status": "accepted"}
+    assert remote.call_args.args[0] == operation
+    assert remote.call_args.args[1]["username"] == "manager"
+    assert remote.call_args.args[2] == payload
+
+
+def test_mcp_management_surfaces_revision_conflict_without_retry(app, keys):
+    with patch.object(knowledge, "dispatch", side_effect=knowledge_client.KnowledgeError("revision_conflict", "Reload the policy.", 409)) as remote:
+        response = mcp(app.test_client(), keys["manager"], "tools/call", {
+            "name": "knowledge_policy_update", "arguments": {"expected_revision": 1},
+        })
+    assert response.json["result"]["isError"] is True
+    assert "revision_conflict" in response.json["result"]["content"][0]["text"]
+    assert remote.call_count == 1
 
 
 def test_mcp_calls_share_domain_operation_and_surface_tool_failures(app, keys):

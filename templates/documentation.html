@@ -7,6 +7,7 @@
 {% endblock %}
 
 {% block content %}
+<p><a class="button button--quiet" href="{{ url_for('knowledge_agent_setup') }}">Connect your agent to MultiLLM Knowledge</a></p>
 <div id="proxy-documentation">
     <script id="proxy-documentation-state" type="application/json">
         {{ documentation | tojson }}

@@ -14,6 +14,7 @@ from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, int
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from routes.csrf_errors import handle_csrf_error
+from routes.knowledge_onboarding import PUBLIC_ENDPOINTS as KNOWLEDGE_PUBLIC_ENDPOINTS
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -409,7 +410,7 @@ def register_core_routes(app) -> None:
         if request.headers.get("Authorization") or request_api_key():
             return None
 
-        if request.endpoint in [
+        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS or request.endpoint in [
             "login",
             "static_files",
             "favicon",

@@ -1,0 +1,11 @@
+.knowledge-agent-setup { max-width: 1180px; margin-inline: auto; }
+.knowledge-agent-setup h1 { max-width: 22ch; }
+.knowledge-agent-setup pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; border: 1px solid var(--border-color, #334155); border-radius: .75rem; background: rgba(15, 23, 42, .55); font-size: .85rem; }
+.knowledge-agent-setup code { overflow-wrap: anywhere; }
+.agent-prompt { display: block; width: 100%; box-sizing: border-box; margin-block: .75rem 1rem; padding: 1rem; border: 1px solid var(--border-color, #334155); border-radius: .75rem; background: rgba(15, 23, 42, .55); color: inherit; font: inherit; line-height: 1.65; resize: vertical; }
+.agent-prompt:focus-visible { outline: 2px solid #38bdf8; outline-offset: 3px; }
+.agent-table-wrap { overflow-x: auto; }
+.agent-table { width: 100%; border-collapse: collapse; text-align: left; }
+.agent-table caption { text-align: left; margin-bottom: 1rem; }
+.agent-table th, .agent-table td { padding: .7rem .5rem; border-bottom: 1px solid var(--border-color, #334155); }
+@media (max-width: 640px) { .knowledge-agent-setup .knowledge-heading { align-items: flex-start; } .agent-table { font-size: .85rem; } }
