@@ -132,7 +132,9 @@ def test_mcp_initialize_and_discovery(app, keys):
     assert response.json["result"]["protocolVersion"] == "2025-06-18"
     assert response.headers["Content-Type"].startswith("application/json")
     tools = mcp(client, keys["reader"], "tools/list").json["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search"]
+    assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search",
+        "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt"]
+    assert tools[4]["annotations"]["readOnlyHint"] is False
     assert mcp(client, keys["reader"], "ping").json["result"] == {}
     assert mcp(client, keys["reader"], "missing").json["error"]["code"] == -32601
 
@@ -251,3 +253,62 @@ def test_transport_preserves_structured_failure_and_unknown_timeout(monkeypatch)
         knowledge_client.dispatch("context", {"username": "reader", "scopes": ["knowledge:read"]}, {"query": "test"})
     assert failure.value.code == "knowledge_timeout"
     assert "may still finish" in failure.value.message
+
+
+@pytest.mark.parametrize("operation,payload", [
+    ("search", {"query": "podcasts"}), ("inspect", {"quote_id": "quote-1"}),
+    ("execute", {"quote_id": "quote-1", "request_id": "request-1", "options": {}, "reserve_credits": 15}),
+    ("receipt", {"request_id": "request-1"}),
+])
+def test_alexandria_rest_and_mcp_share_scoped_contract(app, keys, operation, payload):
+    client = app.test_client()
+    with patch.object(knowledge, "dispatch", return_value={"cost": {"credits": 15, "state": "confirmed"}}) as remote:
+        response = client.post(f"/v1/knowledge/alexandria/{operation}", json=payload, headers=bearer(keys["reader"]))
+        assert response.status_code == 200
+        assert remote.call_args.args[0] == "alexandria." + operation
+        assert remote.call_args.args[2] == payload
+        tool = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_alexandria_" + operation, "arguments": payload},
+                   **{"MCP-Protocol-Version": "2025-06-18"})
+        assert tool.json["result"]["structuredContent"] == response.json
+        assert client.post(f"/v1/knowledge/alexandria/{operation}", json=payload, headers=bearer(keys["chat"])).status_code == 403
+        assert client.post(f"/v1/knowledge/alexandria/{operation}", json=payload).status_code == 401
+    admin_session(client)
+    app.config["WTF_CSRF_ENABLED"] = True
+    with patch.object(knowledge, "dispatch") as remote:
+        assert client.post(f"/admin/knowledge/alexandria/{operation}", json=payload).status_code == 400
+        remote.assert_not_called()
+
+
+@pytest.mark.parametrize("operation,payload", [
+    ("search", {"query": "x", "sources": ["web"]}), ("search", {"query": "x", "limit": True}),
+    ("search", {"query": "x\n"}), ("inspect", {"provider": "invented", "capability": "secret"}),
+    ("receipt", {"request_id": "../other"}),
+    ("execute", {"quote_id": "q", "request_id": "r", "options": [], "reserve_credits": 15}),
+    ("execute", {"quote_id": "q", "request_id": "r", "options": {}, "reserve_credits": True}),
+    ("execute", {"quote_id": "q", "request_id": "r", "options": {}, "reserve_credits": 15, "accept_variable_cost": "true"}),
+])
+def test_alexandria_invalid_inputs_never_reach_private_service(app, keys, operation, payload):
+    with patch.object(knowledge, "dispatch") as remote:
+        response = app.test_client().post(f"/v1/knowledge/alexandria/{operation}", json=payload, headers=bearer(keys["reader"]))
+        assert response.status_code == 400
+        remote.assert_not_called()
+
+
+def test_alexandria_mcp_surfaces_unknown_cost_as_tool_error(app, keys):
+    result = {"status": "unknown", "cost": {"credits": None, "state": "unknown"},
+              "error": {"code": "provider_timeout", "message": "Cost unknown; check the receipt."}}
+    with patch.object(knowledge, "dispatch", return_value=result):
+        response = mcp(app.test_client(), keys["reader"], "tools/call", {"name": "knowledge_alexandria_receipt", "arguments": {"request_id": "r"}},
+                       **{"MCP-Protocol-Version": "2025-06-18"})
+    assert response.json["result"]["isError"] is True
+    assert response.json["result"]["structuredContent"] == result
+
+
+def test_alexandria_private_operation_is_allowlisted(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_ENABLED", "true")
+    with patch.object(knowledge_client.requests, "Session") as factory:
+        session = factory.return_value.__enter__.return_value
+        session.post.return_value = FakeResponse({"version": 1, "result": {"tools": [], "cost": {"credits": 0, "state": "confirmed"}}})
+        result = knowledge_client.dispatch("alexandria.search", {"username": "reader", "scopes": ["knowledge:read"]}, {"query": "podcasts"})
+    assert result["cost"]["credits"] == 0
+    assert json.loads(session.post.call_args.kwargs["data"])["operation"] == "alexandria.search"

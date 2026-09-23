@@ -12,6 +12,10 @@ export function defaultPolicy() {
   };
 }
 
+export function withProviderDefaults(policy) {
+  return { ...policy, providers: { ...defaultPolicy().providers, ...policy.providers } };
+}
+
 export function validatePolicy(body) {
   fields(body, ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "allowed_hosts", "providers"],
     ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "allowed_hosts", "providers"]);
@@ -23,8 +27,8 @@ export function validatePolicy(body) {
   }
   integer(body.cache_ttl_seconds, 0, 3600, "cache_ttl_seconds");
   integer(body.retention_hours, 1, 720, "retention_hours");
-  if (!isRecord(body.providers) || Object.keys(body.providers).length !== PROVIDER_IDS.length
-    || PROVIDER_IDS.some(id => !Object.hasOwn(body.providers, id))) fail("invalid_policy", "Configure every provider allocation.");
+  if (!isRecord(body.providers) || Object.keys(body.providers).some(id => !PROVIDER_IDS.includes(id))
+    || PROVIDER_IDS.filter(id => id !== "alexandria").some(id => !Object.hasOwn(body.providers, id))) fail("invalid_policy", "Configure every provider allocation.");
   for (const allocation of Object.values(body.providers)) {
     fields(allocation, ["enabled", "limit", "background_limit", "interactive_reserve", "units_per_call", "hard_limit_confirmed", "retention_allowed"],
       ["enabled", "limit", "background_limit", "interactive_reserve", "units_per_call", "hard_limit_confirmed", "retention_allowed"]);
@@ -41,5 +45,5 @@ export function validatePolicy(body) {
     }
   }
   const { expected_revision, ...policy } = structuredClone(body);
-  return { ...policy, revision: expected_revision + 1 };
+  return { ...withProviderDefaults(policy), revision: expected_revision + 1 };
 }

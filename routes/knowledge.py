@@ -7,8 +7,9 @@ from urllib.parse import urlsplit
 from flask import Response, g, jsonify, render_template, request
 
 from route_helpers import api_authenticate_only, login_required
+from routes import knowledge_alexandria as alexandria
 from routes.core import require_admin_dashboard_user
-from services.knowledge_client import KnowledgeError, MAX_REQUEST_BYTES, dispatch
+from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
@@ -134,15 +135,18 @@ def _mcp_initialize(identifier, params):
 
 def _mcp_tool(identifier, params, protocol):
     tool_name = params.get("name")
-    operation = {"knowledge_context": "context", "knowledge_search": "search"}.get(tool_name) if isinstance(tool_name, str) else None
+    operations = {"knowledge_context": "context", "knowledge_search": "search",
+                  **{"knowledge_" + name.replace(".", "_"): name for name in alexandria.OPERATIONS}}
+    operation = operations.get(tool_name) if isinstance(tool_name, str) else None
     if operation is None:
         return _rpc_error(identifier, -32602, "Unknown Knowledge tool.")
     arguments = params.get("arguments", {})
     if not isinstance(arguments, dict):
         return _rpc_error(identifier, -32602, "Tool arguments must be an object.")
     try:
-        result = dispatch(operation, g.authenticated_user, _query(arguments))
-        tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": False}
+        payload = alexandria.parse_request(operation, arguments) if operation in alexandria.OPERATIONS else _query(arguments)
+        result = dispatch(operation, g.authenticated_user, payload)
+        tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": bool(result.get("error"))}
         if protocol == "2025-06-18":
             tool_result["structuredContent"] = result
         return _rpc_result(identifier, tool_result)
@@ -189,7 +193,7 @@ def _mcp():
         } for operation, description in (
             ("context", "Retrieve cited technical excerpts with explicit version evidence and gaps."),
             ("search", "Search technical sources and inspect normalized retrieval diagnostics."),
-        )]})
+        )] + alexandria.TOOLS})
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     return _mcp_tool(identifier, params, protocol)
@@ -208,12 +212,14 @@ def register_knowledge_routes(app, csrf):
 
     def query_api(operation):
         def handle():
-            return jsonify(dispatch(operation, g.authenticated_user, _query(_body())))
-        handle.__name__ = "knowledge_" + operation
+            body = _body()
+            payload = alexandria.parse_request(operation, body) if operation in alexandria.OPERATIONS else _query(body)
+            return jsonify(dispatch(operation, g.authenticated_user, payload))
+        handle.__name__ = "knowledge_" + operation.replace(".", "_")
         return csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(handle))
 
-    for operation in ("context", "search"):
-        app.add_url_rule(f"/v1/knowledge/{operation}", f"knowledge_{operation}",
+    for operation in ("context", "search", *alexandria.OPERATIONS):
+        app.add_url_rule("/v1/knowledge/" + operation.replace(".", "/"), "knowledge_" + operation.replace(".", "_"),
                          query_api(operation), methods=["POST", "OPTIONS"])
 
     @app.get("/v1/knowledge/artifacts/<artifact_id>")
@@ -236,6 +242,8 @@ def register_knowledge_routes(app, csrf):
         def handle(identifier=None):
             user = require_admin_dashboard_user()
             payload = _body() if parse_body else {}
+            if operation in alexandria.OPERATIONS:
+                payload = alexandria.parse_request(operation, payload)
             if identifier is not None:
                 if "id" in payload:
                     raise KnowledgeError("invalid_request", "Source and job ids belong in the URL.", 400)
@@ -243,7 +251,7 @@ def register_knowledge_routes(app, csrf):
             return jsonify(dispatch(operation, user, _query(payload) if query else payload))
         handle.__name__ = "knowledge_admin_" + operation.replace(".", "_")
         app.add_url_rule(path, handle.__name__, handle, methods=methods)
-        if operation not in {"context", "artifact"}:
+        if operation not in {"context", "artifact", *alexandria.OPERATIONS}:
             def public_handle(identifier=None):
                 payload = _body() if parse_body else {}
                 if identifier is not None:
@@ -265,3 +273,5 @@ def register_knowledge_routes(app, csrf):
     admin_operation("jobs.cancel", "/admin/knowledge/jobs/<identifier>/cancel", ["POST"])
     admin_operation("policy.update", "/admin/knowledge/policy", ["PUT"], parse_body=True)
     admin_operation("artifact", "/admin/knowledge/artifacts/<identifier>", ["GET"])
+    for operation in alexandria.OPERATIONS:
+        admin_operation(operation, "/admin/knowledge/" + operation.replace(".", "/"), ["POST"], parse_body=True)

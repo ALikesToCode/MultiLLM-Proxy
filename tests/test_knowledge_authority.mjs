@@ -149,6 +149,27 @@ test("source policy rejects credentials, private origins and significant invalid
   }
 });
 
+test("Alexandria prices and replay fences survive SQLite restart and ledger maintenance", async t => {
+  const f = await fixture(t);
+  const policy = enabledPolicy(30);
+  policy.providers.alexandria = { ...policy.providers.firecrawl };
+  await f.call("policy.update", policy);
+  const tool = { provider: "particle", capability: "podcasts/episodes/search", creditsCost: 15, perRecord: false, options: [] };
+  const quotes = (await f.call("alexandria.quotes", { principal_id: "reader", tools: [tool] })).result;
+  const input = { principal_id: "reader", receipt_id: "alexandria:test", request_id: "request-1", quote_id: quotes[0].quote_id,
+    fingerprint: "same-request", reserve_credits: 20, options: {} };
+  assert.equal((await f.call("alexandria.begin", input)).result.replay, false);
+  await f.call("alexandria.finish", { ...input, status: "ok", credits: 15, scrape_id: "scrape-1" });
+  await f.reopen();
+  assert.equal((await f.call("alexandria.receipt", input)).result.cost.credits, 15);
+  assert.equal((await f.call("snapshot")).result.usage.find(row => row.provider === "alexandria").confirmed, 15);
+  f.advance(35 * 86400000);
+  await f.call("maintenance");
+  await f.reopen();
+  assert.equal((await f.call("alexandria.begin", input)).result.replay, true);
+  assert.equal((await f.call("alexandria.receipt", { ...input, principal_id: "other" })).status, 404);
+});
+
 test("source spans use exact UTF-8 bytes and version requests are never treated as proof", async () => {
   const text = normalizeSourceText("  Title\r\nCafé 東京 documentation.  ");
   const source = { id: "a".repeat(64), url: "https://flask.palletsprojects.com/en/stable/", product: "flask", version: "3.1.3" };

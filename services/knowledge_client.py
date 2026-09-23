@@ -18,6 +18,7 @@ _SLOTS = threading.BoundedSemaphore(8)
 _OPERATIONS = frozenset({
     "context", "search", "artifact", "status", "sources.create", "sources.update",
     "sources.refresh", "jobs.cancel", "policy.update",
+    "alexandria.search", "alexandria.inspect", "alexandria.execute", "alexandria.receipt",
 })
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")
 

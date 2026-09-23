@@ -1,11 +1,12 @@
 import { fail, fields, integer, parseSource, publicUrl, validId, PROVIDER_IDS } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
-import { defaultPolicy, validatePolicy } from "./policy.mjs";
+import { defaultPolicy, validatePolicy, withProviderDefaults } from "./policy.mjs";
 import { reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
+import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
 const STATES = new Set([...ACTIVE, "completed", "failed", "cancelled"]);
-const policyOf = async tx => await tx.get("policy") ?? defaultPolicy();
+const policyOf = async tx => withProviderDefaults(await tx.get("policy") ?? defaultPolicy());
 const generationOf = async tx => await tx.get("generation") ?? 0;
 const bump = async tx => tx.put("generation", (await generationOf(tx)) + 1);
 const values = async (tx, prefix) => [...(await tx.list({ prefix })).values()];
@@ -181,6 +182,7 @@ export class KnowledgeAuthority {
   async call(operation, input = {}) {
     return this.storage.transaction(async tx => {
       const now = this.now();
+      if (operation.startsWith("alexandria.")) return alexandriaCatalogue(tx, operation, input, await policyOf(tx), now);
       if (operation === "snapshot") {
         const policy = await policyOf(tx);
         const receipts = await values(tx, "reservation:");
@@ -221,7 +223,7 @@ export class KnowledgeAuthority {
       }
       if (operation === "reserve") return reserve(tx, await policyOf(tx), input, now);
       if (operation === "settle") return settle(tx, input, now);
-      if (operation === "maintenance") { await pruneSettled(tx, now); return { complete: true }; }
+      if (operation === "maintenance") { await pruneSettled(tx, now); await pruneAlexandria(tx, now); return { complete: true }; }
       if (operation === "artifacts.expired") return (await values(tx, "artifact:")).filter(item => Date.parse(item.expires_at) <= now).slice(0, 10);
       if (operation === "artifact.expiration_claim") {
         const artifact = await tx.get(`artifact:${input.id}`);

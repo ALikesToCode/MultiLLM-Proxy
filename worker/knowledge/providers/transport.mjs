@@ -84,6 +84,14 @@ async function fetchBounded(provider, url, options, { fetchImpl, signal }) {
     if (controller.signal.aborted) throw new Error("aborted");
     const response = await fetchImpl(url, { ...options, redirect: "error", signal: controller.signal });
     if (response.status < 200 || response.status >= 300) {
+      if (provider === "alexandria" && response.status === 403) {
+        const body = parseResponse(await readBounded(response, provider), response.headers.get("content-type") || "", provider);
+        if (body?.code === "THIRD_PARTY_DATA_TERMS_REQUIRED") {
+          const error = new ProviderError(provider, "provider_terms_required", "An organization admin must review and accept this provider's terms in Firecrawl before execution.", 403);
+          error.requires_action = { type: "accept_terms", url: "https://www.firecrawl.dev/app/settings?tab=data-sources" };
+          throw error;
+        }
+      }
       await response.body?.cancel();
       throw upstreamError(provider, response.status);
     }

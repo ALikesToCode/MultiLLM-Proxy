@@ -1,7 +1,7 @@
 import { element, node } from "./render.mjs";
 
-const PROVIDERS = ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search"];
-const LABELS = { context7: "Context7", firecrawl: "Firecrawl", exa: "Exa", mintlify: "Mintlify Index", deepwiki: "DeepWiki", ai_search: "AI Search" };
+const PROVIDERS = ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria"];
+const LABELS = { context7: "Context7", firecrawl: "Firecrawl", exa: "Exa", mintlify: "Mintlify Index", deepwiki: "DeepWiki", ai_search: "AI Search", alexandria: "Alexandria · Firecrawl credits" };
 
 function input(label, name, value, checkbox = false) {
   const wrapper = node("label", undefined, checkbox ? "knowledge-check" : undefined);
@@ -30,9 +30,12 @@ export function renderPolicy(policy) {
     const allocation = policy.providers[id] || {};
     const card = node("div", undefined, "knowledge-card knowledge-provider-policy");
     card.append(node("h3", LABELS[id]), input("Enable provider", `${id}.enabled`, allocation.enabled, true));
+    if (id === "alexandria") card.append(node("p", "Free discovery works while disabled. Each retrieval reserves credits and records the actual charge; variable per-record totals can exceed the reservation."));
     for (const [name, label] of [["limit", "Total units / rolling 24h"], ["background_limit", "Background cap"],
       ["interactive_reserve", "Reserve for interactive queries"], ["units_per_call", "Conservative units per operation"]]) {
-      card.append(input(label, `${id}.${name}`, allocation[name]));
+      const field = input(id === "alexandria" && name === "limit" ? "Credits / rolling 24h" : label, `${id}.${name}`, allocation[name]);
+      if (id === "alexandria" && name !== "limit") field.hidden = true;
+      card.append(field);
     }
     card.append(input("Upstream billing hard stop confirmed", `${id}.hard_limit_confirmed`, allocation.hard_limit_confirmed, true),
       input("Retention of source content is permitted", `${id}.retention_allowed`, allocation.retention_allowed, true));

@@ -1,6 +1,7 @@
 import { api, queryPayload, sourcePayload } from "./api.mjs";
 import { element, renderReadiness, renderSources, renderJobs, renderUsage, renderEvidence } from "./render.mjs";
 import { renderPolicy, policyPayload } from "./policy.mjs";
+import { initializeAlexandria } from "./alexandria.mjs";
 
 let serviceConnected = false;
 let statusInFlight = false;
@@ -116,4 +117,5 @@ element("knowledge-jobs").addEventListener("click", async (event) => {
   finally { button.disabled = false; }
 });
 
+initializeAlexandria(formAction, loadStatus);
 await loadStatus();

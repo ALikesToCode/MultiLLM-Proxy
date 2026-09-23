@@ -3,6 +3,7 @@ import test from "node:test";
 import { api, queryPayload, sourcePayload } from "../static/js/knowledge/api.mjs";
 import { policyPayload, renderPolicy } from "../static/js/knowledge/policy.mjs";
 import { safeUrl, renderEvidence, renderSources, renderJobs, renderReadiness } from "../static/js/knowledge/render.mjs";
+import { costText, executionPayload, renderTools } from "../static/js/knowledge/alexandria.mjs";
 
 class Element {
   constructor(tag = "div") { this.tag = tag; this.children = []; this.dataset = {}; this.value = ""; this.checked = false; }
@@ -93,13 +94,13 @@ test("form payloads retain exact versions and omit blank optional fields", () =>
 
 test("policy serializes all providers with finite numeric fields and unchecked acknowledgements false", () => {
   const values = new Map(Object.entries({ enabled: "on", cache_ttl_seconds: "300", retention_hours: "168", allowed_hosts: "docs.example\nrelease.example" }));
-  for (const id of ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search"]) {
+  for (const id of ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria"]) {
     for (const key of ["limit", "background_limit", "interactive_reserve"]) values.set(`${id}.${key}`, "0");
     values.set(`${id}.units_per_call`, "1");
   }
   const policy = policyPayload(values, "5");
   assert.equal(policy.expected_revision, 5);
-  assert.equal(Object.keys(policy.providers).length, 6);
+  assert.equal(Object.keys(policy.providers).length, 7);
   assert.deepEqual(policy.allowed_hosts, ["docs.example", "release.example"]);
   assert.deepEqual(policy.providers.exa, { enabled: false, hard_limit_confirmed: false, retention_allowed: false,
     limit: 0, background_limit: 0, interactive_reserve: 0, units_per_call: 1 });
@@ -129,4 +130,29 @@ test("admin transport reports a conflict and never retries automatically", async
   globalThis.fetch = async () => { calls += 1; return Response.json({ error: { code: "revision_conflict", message: "Reload the current policy." } }, { status: 409 }); };
   await assert.rejects(api("policy", { method: "PUT", body: {} }), /Reload the current policy/);
   assert.equal(calls, 1);
+});
+
+test("Alexandria prices and hostile catalogue descriptions render as text", () => {
+  const element = dom();
+  renderTools([{ quote_id: "q", name: "<script>bad</script>", description: "<img onerror=bad>",
+    provider: "particle", capability: "episodes", creditsCost: 15, perRecord: true }]);
+  const root = element("alexandria-tools");
+  assert.match(root.textContent, /15 credits per record/);
+  assert.match(root.textContent, /<script>bad<\/script>/);
+  assert.equal(descendants(root).find(item => item.tag === "button").dataset.quoteId, "q");
+  assert.equal(costText({ cost: { credits: 0, state: "confirmed" } }), "Cost: 0 Firecrawl credits.");
+  assert.match(costText({ cost: { credits: null, state: "unknown" } }), /Cost: unknown/);
+  assert.match(costText({ cost: { credits: 40, state: "confirmed" }, reservation_exceeded: true }), /exceeded/);
+});
+
+test("Alexandria execution uses only the selected quote and preserves its receipt id", () => {
+  const fields = { options: { value: '{"limit":2}' }, request_id: { value: "request-1" },
+    reserve_credits: { value: "15" }, accept_variable_cost: { checked: false } };
+  const form = { elements: { namedItem: name => fields[name] } };
+  assert.deepEqual(executionPayload(form, { quote_id: "q" }), { quote_id: "q", request_id: "request-1",
+    options: { limit: 2 }, reserve_credits: 15, accept_variable_cost: false });
+  for (const value of ["[]", "null", "bad JSON"]) {
+    fields.options.value = value;
+    assert.throws(() => executionPayload(form, { quote_id: "q" }));
+  }
 });

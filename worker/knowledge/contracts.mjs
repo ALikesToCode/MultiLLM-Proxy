@@ -6,7 +6,7 @@ export class KnowledgeError extends Error {
   }
 }
 
-export const PROVIDER_IDS = ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search"];
+export const PROVIDER_IDS = ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria"];
 export const MAX_SNAPSHOT_BYTES = 256 * 1024;
 export const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
 export const validId = value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value);

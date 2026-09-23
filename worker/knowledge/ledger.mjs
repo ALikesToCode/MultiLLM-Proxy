@@ -1,4 +1,4 @@
-import { fail, PROVIDER_IDS, string } from "./contracts.mjs";
+import { fail, integer, PROVIDER_IDS, string } from "./contracts.mjs";
 
 const DAY = 86400000;
 
@@ -50,7 +50,7 @@ export async function reserve(tx, policy, input, now) {
   const records = [...(await tx.list({ prefix: "reservation:" })).values()];
   if (records.length >= 5000) fail("ledger_full", "Reservation history needs maintenance before new work can be admitted.", 503);
   const used = usageFor(records, input.provider, now);
-  const units = allocation.units_per_call;
+  const units = input.provider === "alexandria" ? integer(input.credits, 0, 100000, "reserved credits") : allocation.units_per_call;
   if (used.total + units > allocation.limit || (input.background && (
     used.background + units > allocation.background_limit || used.total + units > allocation.limit - allocation.interactive_reserve))) {
     fail("allowance_exhausted", "This operation exceeds the configured provider or background allowance.", 429);
@@ -71,7 +71,9 @@ export async function settle(tx, input, now) {
   const receipt = await tx.get(key);
   if (!receipt) fail("reservation_missing", "The operation reservation was not found.", 404);
   if (receipt.state !== "pending") return receipt;
-  const updated = { ...receipt, state: input.outcome, updated_at: now };
+  const units = receipt.provider === "alexandria" && input.outcome === "confirmed"
+    ? integer(input.credits, 0, Number.MAX_SAFE_INTEGER, "charged credits") : receipt.units;
+  const updated = { ...receipt, units, state: input.outcome, updated_at: now };
   await tx.put(key, updated);
   return updated;
 }

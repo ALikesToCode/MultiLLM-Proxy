@@ -4,10 +4,12 @@ import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus } from "./providers/index.mjs";
 import { retrieveKnowledge } from "./retrieval.mjs";
 import { metered } from "./operations.mjs";
+import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs";
+import { dispatchAlexandria } from "./alexandria/service.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update"]);
-const READ = new Set(["context", "search", "artifact"]);
+  "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS]);
+const READ = new Set(["context", "search", "artifact", ...ALEXANDRIA_OPERATIONS]);
 
 export function setupStatus(env) {
   return [
@@ -20,7 +22,10 @@ export function setupStatus(env) {
 
 async function status(env, authority) {
   const snapshot = await authority.call("snapshot");
-  const providers = [...providerStatus(env), { id: "ai_search", label: "Cloudflare AI Search + storage",
+  const providers = [...providerStatus(env), { id: "alexandria", label: "Firecrawl Alexandria",
+    credential_env: "FIRECRAWL_API_KEY", docs_url: "https://docs.firecrawl.dev/features/alexandria",
+    capabilities: ["capability_discovery", "structured_data"], kind: "catalogue",
+    configured: Boolean(env.FIRECRAWL_API_KEY?.trim()) }, { id: "ai_search", label: "Cloudflare AI Search + storage",
     credential_env: null, docs_url: "https://developers.cloudflare.com/ai-search/", capabilities: ["index", "storage"],
     kind: "corpus", configured: Boolean(env.KNOWLEDGE_INDEX && env.KNOWLEDGE_SNAPSHOTS) }].map(provider => ({
     ...provider, enabled: snapshot.policy.providers[provider.id].enabled, connectivity: "not_checked",
@@ -89,6 +94,7 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
   const { operation, principal, payload } = envelope;
   authorize(principal, READ.has(operation) ? "knowledge:read" : "knowledge:manage");
   const authority = options.authority || getAuthority(env);
+  if (ALEXANDRIA_OPERATIONS.includes(operation)) return dispatchAlexandria(env, authority, principal, operation, payload, options);
   if (operation === "status") { fields(payload, []); return status(env, authority); }
   if (operation === "context" || operation === "search") {
     return retrieveKnowledge(env, authority, principal, parseQuery(payload), {

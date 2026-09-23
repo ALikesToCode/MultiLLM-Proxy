@@ -1,0 +1,26 @@
+<section id="knowledge-alexandria" class="panel" aria-labelledby="alexandria-title">
+  <header class="panel__header"><div><h2 id="alexandria-title">Alexandria data catalogue</h2><p>Discover a provider, inspect its contract and price, then choose whether to retrieve its data.</p></div><span class="panel-tag">Firecrawl credits</span></header>
+  <div class="panel__body">
+    <form id="alexandria-search-form" class="knowledge-form">
+      <label class="knowledge-wide">What data do you need?<input name="query" maxlength="500" required placeholder="Podcast conversations about AI agents"></label>
+      <div class="knowledge-actions"><button class="button" type="submit" data-needs-service disabled>Discover tools · free</button></div>
+    </form>
+    <p id="alexandria-status" role="status" aria-live="polite">Discovery and contract inspection cost 0 credits. Retrieval uses each capability's published price.</p>
+    <div id="alexandria-tools" class="knowledge-cards"></div>
+    <div id="alexandria-selected" hidden>
+      <h3 id="alexandria-selection"></h3>
+      <p id="alexandria-price" class="knowledge-note"></p>
+      <details><summary>Input and response contract</summary><pre id="alexandria-contract"></pre></details>
+      <form id="alexandria-execute-form" class="knowledge-form">
+        <label class="knowledge-wide">Capability options (JSON)<textarea name="options" rows="6" maxlength="16000" required spellcheck="false">{}</textarea></label>
+        <label>Credits to reserve<input name="reserve_credits" type="number" min="0" max="100000" step="1" required></label>
+        <label class="knowledge-wide">Request receipt ID<input name="request_id" readonly></label>
+        <label id="alexandria-variable" class="knowledge-check knowledge-wide" hidden><input name="accept_variable_cost" type="checkbox">I understand per-record charges can exceed this reservation.</label>
+        <p class="knowledge-note knowledge-wide">The reservation controls local admission. Firecrawl's account billing limit controls upstream spending. Keep the receipt ID if the response is interrupted.</p>
+        <div class="knowledge-wide knowledge-actions"><button id="alexandria-execute" class="button button--primary" type="submit" disabled>Retrieve data · spends credits</button><button id="alexandria-receipt" class="button button--quiet" type="button" disabled>Check receipt · free</button></div>
+      </form>
+    </div>
+    <p id="alexandria-cost" role="status" aria-live="polite"></p>
+    <pre id="alexandria-result" hidden></pre>
+  </div>
+</section>

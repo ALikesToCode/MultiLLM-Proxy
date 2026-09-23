@@ -12,7 +12,7 @@
     <button id="knowledge-refresh" class="button button--quiet" type="button">Refresh status</button>
   </header>
   <p id="knowledge-status" class="knowledge-banner" role="status" aria-live="polite">Loading Knowledge service status…</p>
-  <nav class="knowledge-sections" aria-label="Knowledge sections"><a href="#knowledge-query">Ask a question</a><a href="#knowledge-sources">Sources</a><a href="#knowledge-setup">Setup</a><a href="#knowledge-policy">Allowances</a></nav>
+  <nav class="knowledge-sections" aria-label="Knowledge sections"><a href="#knowledge-query">Ask a question</a><a href="#knowledge-alexandria">Alexandria</a><a href="#knowledge-sources">Sources</a><a href="#knowledge-setup">Setup</a><a href="#knowledge-policy">Allowances</a></nav>
 
   <section id="knowledge-query" class="panel" aria-labelledby="query-title">
     <header class="panel__header"><div><h2 id="query-title">Find source evidence</h2><p>Requested versions stay separate from observed versions. Missing evidence remains visible.</p></div><span class="panel-tag">REST + MCP</span></header>
@@ -31,6 +31,8 @@
       <div id="knowledge-results" class="knowledge-results"></div>
     </div>
   </section>
+
+  {% include "knowledge_alexandria.html" %}
 
   <section id="knowledge-sources" class="panel" aria-labelledby="sources-title">
     <header class="panel__header"><div><h2 id="sources-title">Sources and version coverage</h2><p>Register one public upstream source at a time. Only hosts approved in the policy can be fetched.</p></div></header>
