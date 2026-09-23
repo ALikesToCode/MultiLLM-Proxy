@@ -255,14 +255,19 @@ export function resetNanogptPaygoBreaker() {
   nanogptPaygoBlockedUntil = 0;
 }
 
+export function nanogptModelHasSpeedSuffix(model) {
+  if (typeof model !== "string" || !model.includes(":")) {
+    return false;
+  }
+  const tail = model.slice(model.lastIndexOf(":") + 1).trim().toLowerCase();
+  return NANOGPT_SPEED_ROUTING_SUFFIXES.has(tail);
+}
+
 function withNanogptSpeedSuffix(model, suffix) {
   if (!suffix || typeof model !== "string" || !model.trim()) {
     return model;
   }
-  const tail = model.includes(":")
-    ? model.slice(model.lastIndexOf(":") + 1).trim().toLowerCase()
-    : "";
-  return NANOGPT_SPEED_ROUTING_SUFFIXES.has(tail) ? model : `${model}:${suffix}`;
+  return nanogptModelHasSpeedSuffix(model) ? model : `${model}:${suffix}`;
 }
 
 function defaultReasoningEffort(value) {

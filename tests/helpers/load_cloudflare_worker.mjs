@@ -334,7 +334,12 @@ export async function roleplayModuleUrl() {
       `from "${validationDataUrl}";`,
     ),
   );
-  const promptCacheDataUrl = dataModuleUrl(promptCacheSource);
+  const promptCacheDataUrl = dataModuleUrl(
+    promptCacheSource.replace(
+      'from "./config.mjs";',
+      `from "${configDataUrl}";`,
+    ),
+  );
   const providerErrorsDataUrl = dataModuleUrl(providerErrorsSource);
   const reasoningDataUrl = dataModuleUrl(reasoningSource.replace(
     'from "../opencode/reasoning-policy.mjs";',

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from providers.nanogpt import nanogpt_model_has_speed_suffix
 from services.context_optimizer import estimate_payload_tokens
 
 _CACHE_KEY_CHAT_PROVIDERS = frozenset({"kimi-code", "openai"})
@@ -111,6 +112,19 @@ def apply_prompt_cache_policy(
         else {"input": payload.get("input", "")}
     )
     estimated_tokens = estimate_payload_tokens(cacheable_input)
+    if provider == "nanogpt" and nanogpt_model_has_speed_suffix(
+        copied.get("model", model)
+    ):
+        # caching=true selects a provider too, and conflicts with speed routing.
+        if copied.get("caching") is True:
+            copied.pop("caching")
+        return PromptCacheDecision(
+            payload=copied,
+            request_headers={},
+            status="skipped",
+            mode="nanogpt-speed-routing",
+            estimated_input_tokens=estimated_tokens,
+        )
     if _caller_controls_cache(copied, request_headers):
         return PromptCacheDecision(
             payload=copied,

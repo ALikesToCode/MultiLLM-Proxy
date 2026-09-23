@@ -112,6 +112,14 @@ provider through a body `provider` field or the `X-Provider`, `X-Billing-Mode`,
 `X-BYOK-Provider` or `x-use-byok` headers is left alone, because NanoGPT rejects
 a routing suffix combined with another provider selection.
 
+Speed routing takes priority over cache-provider selection. When the upstream
+model ends in `:fast`, `:throughput` or `:latency`, the proxy removes
+`caching: true` and skips automatic cache routing, including when the caller
+supplies the suffix. This prevents NanoGPT's `Invalid provider selection`
+error. Thinking model suffixes, explicit thinking and reasoning settings, and
+cache annotations remain intact; `caching: false` is preserved. Unified and
+roleplay responses report `X-MultiLLM-Prompt-Cache-Mode: nanogpt-speed-routing`.
+
 Provider selection bills pay-as-you-go at the selected provider's rate plus a 5%
 provider-selection markup and does not draw on subscription coverage. Setting
 the variable therefore also switches the text endpoint to
@@ -123,8 +131,8 @@ NANOGPT_SPEED_ROUTING=fast
 # moonshotai/kimi-k2.6 -> moonshotai/kimi-k2.6:fast
 ```
 
-The deployment leaves this empty. An account with no pay-as-you-go balance
-rejects every suffixed request with `402 Insufficient balance` on both the
+The empty setting retains subscription routing. An account with no pay-as-you-go
+balance rejects every suffixed request with `402 Insufficient balance` on both the
 standard and the subscription endpoint, and roleplay treats `402` as a safe
 fallback status, so the NanoGPT candidates silently drop out of rotation. Fund
 the pay-as-you-go balance before enabling it.

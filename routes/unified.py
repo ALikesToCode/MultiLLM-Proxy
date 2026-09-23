@@ -108,9 +108,9 @@ def _apply_nanogpt_speed_routing(app, provider: str, payload: dict, headers) -> 
     """Opt NanoGPT text requests into the configured fast-provider route."""
     if provider != "nanogpt":
         return payload
-    suffix = nanogpt_speed_routing(app.config)
-    if not suffix or not NanoGPTSpeedBreaker.allows_suffix():
-        return payload
+    suffix = (
+        nanogpt_speed_routing(app.config) if NanoGPTSpeedBreaker.allows_suffix() else ""
+    )
     return apply_nanogpt_speed_routing(payload, suffix, headers)
 
 
@@ -322,6 +322,9 @@ def _dispatch_unified_chat_candidate(
             provider,
             provider_model,
         )
+        upstream_payload = _apply_nanogpt_speed_routing(
+            app, provider, upstream_payload, headers_source
+        )
         cache_decision = apply_prompt_cache_policy(
             upstream_payload,
             provider=provider,
@@ -333,9 +336,6 @@ def _dispatch_unified_chat_candidate(
             nanogpt_subscription_only=subscription_only,
         )
         upstream_payload = cache_decision.payload
-        upstream_payload = _apply_nanogpt_speed_routing(
-            app, provider, upstream_payload, headers_source
-        )
         upstream_path = "v1/chat/completions"
 
         def _encode(body_payload: dict) -> bytes:
@@ -733,6 +733,9 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     provider,
                     provider_model,
                 )
+                upstream_payload = _apply_nanogpt_speed_routing(
+                    app, provider, upstream_payload, headers_source
+                )
                 cache_decision = apply_prompt_cache_policy(
                     upstream_payload,
                     provider=provider,
@@ -743,9 +746,6 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                     minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
                 )
                 upstream_payload = cache_decision.payload
-                upstream_payload = _apply_nanogpt_speed_routing(
-                    app, provider, upstream_payload, headers_source
-                )
                 raw_body = json.dumps(upstream_payload).encode("utf-8")
 
                 def send_request(token: str):
@@ -833,6 +833,9 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 provider,
                 provider_model,
             )
+            chat_payload = _apply_nanogpt_speed_routing(
+                app, provider, chat_payload, headers_source
+            )
             cache_decision = apply_prompt_cache_policy(
                 chat_payload,
                 provider=provider,
@@ -844,9 +847,6 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
                 nanogpt_subscription_only=subscription_only,
             )
             chat_payload = cache_decision.payload
-            chat_payload = _apply_nanogpt_speed_routing(
-                app, provider, chat_payload, headers_source
-            )
             raw_body = serialize_unified_chat_payload(chat_payload)
             upstream_path = "v1/chat/completions"
 

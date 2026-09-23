@@ -400,7 +400,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                     request.headers,
                 )
                 if routed_body != body:
-                    speed_routed_body = routed_body
+                    speed_routed_body = routed_body if routed_body.get("model") != body.get("model") else None
                     raw_request_data = json.dumps(routed_body).encode("utf-8")
             if (
                 request.method.upper() == "POST"

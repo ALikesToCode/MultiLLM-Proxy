@@ -236,13 +236,17 @@ def apply_nanogpt_speed_routing(
     suffix: str,
     headers: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Append NanoGPT's provider-selection suffix to the payload model id."""
+    """Prefer speed selection over incompatible cache-provider selection."""
     upstream_payload = dict(payload)
-    if not suffix or nanogpt_speed_routing_conflicts(upstream_payload, headers):
-        return upstream_payload
-    routed_model = apply_nanogpt_speed_suffix(upstream_payload.get("model"), suffix)
-    if routed_model != upstream_payload.get("model"):
-        upstream_payload["model"] = routed_model
+    if suffix and not nanogpt_speed_routing_conflicts(upstream_payload, headers):
+        routed_model = apply_nanogpt_speed_suffix(upstream_payload.get("model"), suffix)
+        if routed_model != upstream_payload.get("model"):
+            upstream_payload["model"] = routed_model
+    if (
+        nanogpt_model_has_speed_suffix(upstream_payload.get("model"))
+        and upstream_payload.get("caching") is True
+    ):
+        upstream_payload.pop("caching")
     return upstream_payload
 
 

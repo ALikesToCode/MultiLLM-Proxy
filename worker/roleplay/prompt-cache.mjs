@@ -1,3 +1,5 @@
+import { nanogptModelHasSpeedSuffix } from "./config.mjs";
+
 function estimateInputTokens(messages) {
   const bytes = new TextEncoder().encode(
     JSON.stringify({ messages }),
@@ -29,6 +31,20 @@ export function applyRoleplayPromptCache(
     precomputedInputTokens > 0
       ? precomputedInputTokens
       : estimateInputTokens(messages);
+  if (
+    candidate.provider === "nanogpt" &&
+    nanogptModelHasSpeedSuffix(payload.model)
+  ) {
+    // caching=true selects a provider too, and conflicts with speed routing.
+    const speedPayload = { ...payload };
+    if (speedPayload.caching === true) delete speedPayload.caching;
+    return result(
+      speedPayload,
+      "skipped",
+      "nanogpt-speed-routing",
+      estimatedInputTokens,
+    );
+  }
   if (!settings.promptCacheEnabled || !requestEnabled) {
     return result(
       payload,
