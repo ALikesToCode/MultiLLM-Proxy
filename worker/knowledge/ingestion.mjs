@@ -2,7 +2,7 @@ import { publicUrl } from "./contracts.mjs";
 import { createArtifact, normalizeSourceText } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 
-const NO_RETRY = { retries: { limit: 0 }, timeout: "2 minutes" };
+const NO_RETRY = { retries: { limit: 0, delay: "1 second" }, timeout: "2 minutes" };
 const READ_RETRY = { retries: { limit: 2, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" };
 const MAX_POLLS = 6;
 const TERMINAL = new Set(["completed", "cancelled", "failed"]);
