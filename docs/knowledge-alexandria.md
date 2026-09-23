@@ -38,8 +38,9 @@ token. Corresponding dashboard routes use `/admin/knowledge/alexandria/`.
 | `/v1/knowledge/alexandria/receipt` | `knowledge_alexandria_receipt` | No new provider call |
 
 Search accepts `{"query":"podcast conversations about AI agents","limit":5}`.
-It calls Firecrawl `/v2/search` with **only** `sources: ["alexandria"]`; ordinary
-web search is not included. Results include `provider`, `capability`, `creditsCost`,
+It calls Firecrawl `/v2/search` with **only** `sources: ["alexandria"]` and
+`toolDetail: "full"`; ordinary web search is not included. The default compact
+response omits prices and option contracts. Full results include `provider`, `capability`, `creditsCost`,
 `perRecord`, input and response contracts, a `quote_id`, and `expires_at`.
 
 Inspect accepts `{"quote_id":"<returned quote_id>"}` and calls Firecrawl's native
@@ -127,7 +128,7 @@ keys in command arguments or shell history. If installed alongside an older CLI 
 `firecrawl-alexandria`, substitute that command name in these examples.
 
 ```sh
-firecrawl search "podcast conversations about AI agents" --sources alexandria --json
+firecrawl search "podcast conversations about AI agents" --sources alexandria --tool-detail full --json
 firecrawl find-tools --options '{"providers":["<discovered provider>"],"capabilities":["<discovered capability>"],"level":"tools","expand":["options","response"]}' --json
 firecrawl scrape '<discovered provider>/<discovered capability>' --options '{"<discovered option>":"<value>"}' --request-id '<unique request ID>' --json
 ```

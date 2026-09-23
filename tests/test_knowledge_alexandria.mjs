@@ -23,7 +23,8 @@ async function setup({ enabled = true, limit = 100, tools = [tool], reply = () =
   const fetchImpl = async (url, options) => {
     const body = JSON.parse(options.body);
     calls.push({ url, options, body });
-    if (url.endsWith("/search")) return Response.json(search(tools));
+    if (url.endsWith("/search")) return Response.json(search(body.toolDetail === "full" ? tools
+      : tools.map(({ provider, capability, description }) => ({ provider, capability, description }))));
     if (body.alexandria.capability === "find-tools") return Response.json(scraped(0, {
       provider: "firecrawl", capability: "find-tools", data: { level: "tools", items: [tool], total: 1, next: null },
     }));
@@ -49,7 +50,7 @@ test("discovery and exact capability inspection are free even when spending is d
   f.policy.enabled = false;
   await f.storage.put("policy", f.policy);
   const found = await f.run("search", { query: "podcasts", limit: 2 });
-  assert.deepEqual(f.calls[0].body, { query: "podcasts", limit: 2, sources: ["alexandria"] });
+  assert.deepEqual(f.calls[0].body, { query: "podcasts", limit: 2, sources: ["alexandria"], toolDetail: "full" });
   assert.deepEqual(found.cost, { credits: 0, state: "confirmed" });
   assert.equal(found.tools[0].creditsCost, 15);
   assert.ok(found.tools[0].quote_id);

@@ -26,7 +26,7 @@ function transport(env, options) {
 }
 
 async function discover(authority, identity, payload, send) {
-  const response = await send("search", { ...payload, sources: ["alexandria"] });
+  const response = await send("search", { ...payload, sources: ["alexandria"], toolDetail: "full" });
   if (Number.isSafeInteger(response?.creditsUsed) && response.creditsUsed > 0) return unexpectedCharge(response.creditsUsed);
   const tools = discoveredTools(response);
   return { status: "ok", tools: await authority.call("alexandria.quotes", { ...identity, tools }), cost: FREE_COST };
