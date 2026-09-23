@@ -1,0 +1,42 @@
+.knowledge-console { display: grid; gap: 1.4rem; max-width: 1400px; margin: 0 auto; }
+.knowledge-heading, .knowledge-actions, .knowledge-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.knowledge-heading h1 { margin: .35rem 0; font-size: clamp(2rem, 4vw, 3rem); }
+.knowledge-heading p, .knowledge-console .panel__header p { color: var(--text-muted, #a7b5c5); max-width: 75ch; }
+.knowledge-banner { border: 1px solid var(--border, #2c465c); background: #102538; border-radius: .75rem; padding: 1rem 1.2rem; margin: 0; }
+.knowledge-banner[data-state="error"] { border-color: #bc6262; }
+.knowledge-banner[data-state="ready"] { border-color: #399e85; }
+.knowledge-sections { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; }
+.knowledge-sections a, .knowledge-console a { color: #8cc9ff; }
+.knowledge-console section { scroll-margin-top: 6rem; }
+.knowledge-grid, .knowledge-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.knowledge-provider-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); margin-block: 1rem; }
+.knowledge-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.knowledge-form label, .knowledge-provider-policy label { display: grid; gap: .4rem; font-size: .9rem; color: #c3d2df; }
+.knowledge-wide { grid-column: 1 / -1; }
+.knowledge-console input:not([type="checkbox"]), .knowledge-console select, .knowledge-console textarea { width: 100%; color: #e8f1f8; background: #0a1a29; border: 1px solid #3f586e; border-radius: .5rem; padding: .65rem .8rem; font: inherit; box-sizing: border-box; }
+.knowledge-console textarea { resize: vertical; }
+.knowledge-console input:focus-visible, .knowledge-console select:focus-visible, .knowledge-console textarea:focus-visible, .knowledge-console button:focus-visible { outline: 2px solid #91d6ff; outline-offset: 3px; }
+.knowledge-console .knowledge-check { display: flex; align-items: center; gap: .6rem; }
+.knowledge-check input { width: 1.1rem; height: 1.1rem; flex: 0 0 auto; }
+.knowledge-console fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.knowledge-console fieldset:disabled { opacity: .65; }
+.knowledge-note { padding: .9rem 1rem; border-left: 3px solid #5c98bc; background: #102435; color: #c7d8e5; overflow-wrap: anywhere; }
+.knowledge-cards, .knowledge-results { display: grid; gap: 1rem; }
+.knowledge-card { border: 1px solid #30495d; border-radius: .7rem; padding: 1rem; min-width: 0; }
+.knowledge-card h3 { margin: 0 0 .5rem; font-size: 1.05rem; }
+.knowledge-card p { margin: .55rem 0; overflow-wrap: anywhere; }
+.knowledge-card .knowledge-actions { justify-content: flex-start; margin-top: .75rem; }
+.knowledge-card code, .knowledge-connection-guide code { overflow-wrap: anywhere; }
+.knowledge-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; margin: 1rem 0; border-left: 3px solid #539eb5; padding-left: 1rem; line-height: 1.65; }
+.knowledge-metadata { color: #9fb5c8; font-size: .85rem; }
+.knowledge-gap { color: #f6d69c; }
+.knowledge-provider-policy { display: grid; gap: .8rem; }
+.knowledge-console pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #0a1a29; padding: 1rem; border-radius: .5rem; font-size: .85rem; }
+.knowledge-console table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+.knowledge-console td, .knowledge-console th { text-align: left; padding: .6rem; border-bottom: 1px solid #2c4256; }
+.knowledge-table-shell { overflow-x: auto; }
+.knowledge-console button:disabled { cursor: not-allowed; opacity: .55; }
+.knowledge-connection-guide { margin-top: 1.25rem; }
+.knowledge-connection-guide summary { cursor: pointer; font-weight: 650; }
+@media (max-width: 850px) { .knowledge-grid { grid-template-columns: 1fr; } .knowledge-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { .knowledge-form { grid-template-columns: 1fr; } .knowledge-heading .button { width: 100%; } .knowledge-console .panel__body { padding: 1rem; } }

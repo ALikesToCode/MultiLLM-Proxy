@@ -286,7 +286,8 @@ def register_core_routes(app) -> None:
                 if not username:
                     raise APIError("Username is required", status_code=400)
 
-                user = AuthService.create_user(username, is_admin)
+                scopes = payload.get("scopes") if payload else request.form.getlist("scopes") or None
+                user = AuthService.create_user(username, is_admin, scopes=scopes)
                 return jsonify(
                     {
                         "status": "success",

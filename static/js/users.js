@@ -75,6 +75,12 @@
         }
     }
 
+    const scopeFields = document.getElementById('account-scopes');
+    const adminChoice = document.getElementById('is_admin');
+    adminChoice?.addEventListener('change', () => {
+        if (scopeFields) scopeFields.disabled = adminChoice.checked;
+    });
+
     document.getElementById('create-user-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -87,11 +93,13 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     username: String(formData.get('username') || '').trim(),
-                    is_admin: formData.get('is_admin') === 'on'
+                    is_admin: formData.get('is_admin') === 'on',
+                    ...(formData.get('is_admin') === 'on' ? {} : { scopes: formData.getAll('scopes') })
                 })
             });
             showSecret(payload.user.api_key);
             form.reset();
+            if (scopeFields) scopeFields.disabled = false;
             secretDialog?.addEventListener('close', () => window.location.reload(), { once: true });
         } catch (error) {
             window.MultiLLM?.showToast(error.message, 'error');

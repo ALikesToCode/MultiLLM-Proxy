@@ -85,7 +85,10 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertIn("http://localhost/v1/models", payload["agent_setup_prompt"])
-        self.assertIn("not available", payload["agent_setup_prompt"])
+        self.assertIn("http://localhost/v1/knowledge/context", payload["agent_setup_prompt"])
+        self.assertIn("http://localhost/mcp", payload["agent_setup_prompt"])
+        self.assertIn("knowledge:read", payload["agent_setup_prompt"])
+        self.assertIn("disabled until", payload["agent_setup_prompt"])
         self.assertNotIn("opencode-provider-key", payload["agent_setup_prompt"])
         providers = {provider["id"]: provider for provider in payload["providers"]}
         models = {model["id"]: model for model in payload["models"]}

@@ -60,6 +60,14 @@
                         </span>
                     </label>
 
+                    <fieldset id="account-scopes">
+                        <legend class="field-label">API permissions</legend>
+                        <p class="field-hint">Choose only Knowledge permissions for a key that cannot call chat routes.</p>
+                        {% for scope, label in [('chat', 'Chat'), ('models', 'Model discovery'), ('knowledge:read', 'Read Knowledge'), ('knowledge:manage', 'Manage Knowledge')] %}
+                        <label class="switch-field"><input type="checkbox" name="scopes" value="{{ scope }}" {% if scope in ['chat', 'models'] %}checked{% endif %}><span>{{ label }}</span></label>
+                        {% endfor %}
+                    </fieldset>
+
                     <button class="button button--primary" type="submit">Create account</button>
                 </form>
             </div>
@@ -107,6 +115,7 @@
                                 <span class="status-pill {{ 'tone-warning' if user.is_admin else 'tone-neutral' }}">
                                     {{ 'Admin' if user.is_admin else 'Operator' }}
                                 </span>
+                                <small>{{ user.scopes | join(', ') }}</small>
                             </td>
                             <td><code>{{ user.api_key_prefix }}</code></td>
                             <td>{{ user.created_at or 'Unknown' }}</td>
