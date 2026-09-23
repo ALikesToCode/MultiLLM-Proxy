@@ -120,6 +120,18 @@ class LoginRedirectSecurityTest(unittest.TestCase):
         self.assertEqual(signed_in.status_code, 302)
         self.assertEqual(signed_in.headers["Location"], "/users?role=admin")
 
+    def test_signed_in_visitors_skip_the_sign_in_form(self):
+        self._set_admin_session()
+        for path, destination in (
+            ("/login", "/"),
+            ("/login?next=/docs", "/docs"),
+            ("/login?next=https://evil.example/path", "/"),
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], destination)
+
     def test_session_cookie_is_hardened_in_production(self):
         self.flask_app.config["SESSION_COOKIE_SECURE"] = True
         response = self.client.post(

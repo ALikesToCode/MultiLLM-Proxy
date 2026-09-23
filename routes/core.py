@@ -243,6 +243,10 @@ def register_core_routes(app) -> None:
                 response.headers["Retry-After"] = str(decision.retry_after)
             return response
 
+        if AuthService.is_authenticated():
+            next_page = request.args.get("next")  # nosemgrep
+            return redirect(next_page if is_safe_redirect_target(next_page) else url_for("status_page"))
+
         logger.info("Rendering login template")
         return render_template(
             "login.html",
