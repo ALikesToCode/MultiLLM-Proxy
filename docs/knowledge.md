@@ -1,5 +1,9 @@
 # Knowledge Gateway
 
+For structured provider data with discovery and explicit credit-priced execution,
+see [Firecrawl Alexandria](knowledge-alexandria.md). It shares `FIRECRAWL_API_KEY`
+and has a separate allowance from ordinary source scraping.
+
 Open **Knowledge** (`/knowledge`) in the administrator dashboard to manage public
 documentation, inspect indexing jobs and allowances, and test cited retrieval.
 The implementation includes REST, stateless remote MCP, five provider adapters,
