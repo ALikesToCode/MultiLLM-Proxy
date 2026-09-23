@@ -42,7 +42,11 @@ function fixture() {
         uploads.push({ key, content, options });
         return currentItem;
       },
-      async list(params) { lists.push(params); return { result: [currentItem] }; },
+      async list(params) {
+        assert.ok(params.per_page <= 50, "AI Search limits item pages to 50 records");
+        lists.push(params);
+        return { result: [currentItem] };
+      },
       get(id) {
         assert.equal(id, "item-one");
         return {
@@ -137,8 +141,21 @@ test("reconciliation uses item info and exact built-in key matches without uploa
   f.index.items.list = async () => ({ result: [{ id: "similar", key: `${artifact().index_key}-other`, status: "completed" }] });
   assert.equal(await f.corpus.reconcileRevision(artifact()), null);
   assert.equal(f.uploads.length, 0);
-  f.index.items.list = async () => ({ result: Array.from({ length: 100 }, (_, i) => ({ key: `other-${i}` })) });
+  f.index.items.list = async () => ({ result: Array.from({ length: 50 }, (_, i) => ({ key: `other-${i}` })) });
   await assert.rejects(f.corpus.reconcileRevision(artifact()), { code: "index_reconciliation_incomplete" });
+});
+
+test("reconciliation follows full 50-item pages to find a later exact revision", async () => {
+  const f = fixture();
+  const pages = [];
+  f.index.items.list = async ({ page, per_page }) => {
+    assert.equal(per_page, 50);
+    pages.push(page);
+    return { result: page === 1 ? Array.from({ length: 50 }, (_, i) => ({ key: `other-${i}` }))
+      : [{ id: "item-one", key: artifact().index_key, status: "completed" }], result_info: { total_count: 51 } };
+  };
+  assert.equal((await f.corpus.reconcileRevision(artifact())).id, "item-one");
+  assert.deepEqual(pages, [1, 2]);
 });
 
 test("readiness requires completed status and exact indexed UTF-8 byte spans", async () => {

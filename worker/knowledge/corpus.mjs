@@ -1,6 +1,7 @@
 const MAX_SNAPSHOT_BYTES = 256 * 1024;
 const MAX_INDEX_RESULTS = 20;
-const MAX_RECONCILE_PAGES = 5;
+const INDEX_PAGE_SIZE = 50;
+const MAX_RECONCILE_PAGES = 10;
 const MAX_CHUNK_PAGES = 11;
 const ITEM_STATES = new Set(["completed", "error", "skipped", "queued", "running", "outdated"]);
 const encoder = new TextEncoder();
@@ -174,15 +175,15 @@ export class KnowledgeCorpus {
       return item;
     }
     for (let page = 1; page <= MAX_RECONCILE_PAGES; page += 1) {
-      const response = await items.list({ search: artifact.index_key, source: "builtin", page, per_page: 100 });
-      if (!response || !Array.isArray(response.result) || response.result.length > 100) {
+      const response = await items.list({ search: artifact.index_key, source: "builtin", page, per_page: INDEX_PAGE_SIZE });
+      if (!response || !Array.isArray(response.result) || response.result.length > INDEX_PAGE_SIZE) {
         throw invalid("invalid_index_response");
       }
       const matches = response.result.filter(item => item?.key === artifact.index_key);
       if (matches.length > 1) throw invalid("ambiguous_index_revision");
       if (matches.length === 1) return itemInfo(matches[0], artifact.index_key);
       const total = response.result_info?.total_count;
-      if (response.result.length < 100 || Number.isSafeInteger(total) && page * 100 >= total) return null;
+      if (response.result.length < INDEX_PAGE_SIZE || Number.isSafeInteger(total) && page * INDEX_PAGE_SIZE >= total) return null;
     }
     throw invalid("index_reconciliation_incomplete");
   }
