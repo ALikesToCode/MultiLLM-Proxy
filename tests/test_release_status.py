@@ -20,3 +20,14 @@ def test_fingerprint_tracks_sources_not_generated_stamp_or_private_configuration
     assert fingerprint(tmp_path) == before
     (tmp_path / "worker/runtime.mjs").write_text("export const compatibility = 1;\n")
     assert fingerprint(tmp_path) != before
+
+
+def test_fingerprint_tracks_published_skill_content(tmp_path):
+    for name in ("cloudflare-worker.mjs", "Dockerfile", "requirements.lock"):
+        (tmp_path / name).write_text("synthetic fixture\n")
+    skill = tmp_path / "skills/multillm-knowledge/SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("Initial client instructions\n")
+    before = fingerprint(tmp_path)
+    skill.write_text("Updated client instructions\n")
+    assert fingerprint(tmp_path) != before

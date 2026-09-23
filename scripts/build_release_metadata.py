@@ -11,6 +11,7 @@ SUFFIXES = {".py", ".mjs", ".js", ".css", ".html", ".sh"}
 def fingerprint(root=ROOT):
     paths = set(root.glob("*.py"))
     paths.update(root / name for name in ("cloudflare-worker.mjs", "Dockerfile", "requirements.lock"))
+    paths.update((root / "skills").rglob("SKILL.md"))
     for directory in DIRECTORIES:
         paths.update(path for path in (root / directory).rglob("*") if path.is_file() and path.suffix in SUFFIXES)
     digest = hashlib.sha256()
