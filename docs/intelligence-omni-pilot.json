@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "enabled": true,
+  "allow_paid_overage": false,
+  "max_attempts": 3,
+  "max_escalations": 1,
+  "deadline_ms": 45000,
+  "max_total_tokens": 131072,
+  "max_output_tokens": 4096,
+  "principal_daily_tokens": 262144,
+  "global_daily_tokens": 262144,
+  "max_inflight": 2,
+  "max_request_bytes": 1048576,
+  "max_response_bytes": 4194304,
+  "candidates": [
+    {
+      "model": "nanogpt:z-ai/glm-5.3-flash",
+      "capabilities": [
+        "tools",
+        "json",
+        "streaming",
+        "reasoning"
+      ],
+      "enabled": true,
+      "entitled": true,
+      "privacy_allowed": true,
+      "billing": "subscription",
+      "context_window": 1048576,
+      "max_output_tokens": 4096,
+      "quality_tier": 1
+    },
+    {
+      "model": "nanogpt:z-ai/glm-5.3",
+      "capabilities": [
+        "tools",
+        "json",
+        "streaming",
+        "reasoning"
+      ],
+      "enabled": true,
+      "entitled": true,
+      "privacy_allowed": true,
+      "billing": "subscription",
+      "context_window": 1048576,
+      "max_output_tokens": 4096,
+      "quality_tier": 2
+    }
+  ],
+  "media": {}
+}
