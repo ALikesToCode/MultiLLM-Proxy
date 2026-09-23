@@ -1,5 +1,7 @@
 # Documentation
 
+- [Knowledge Gateway setup and production APIs](knowledge.md)
+- [Knowledge provider contracts](knowledge-providers.md)
 - [Knowledge Gateway design](plans/2026-09-15-knowledge-gateway-design.md)
 - [GPT Image 2 relay research and setup](gpt-image-2-reseller-research.md)
 - [GPT Image moderation defaults](gpt-image-moderation.md)

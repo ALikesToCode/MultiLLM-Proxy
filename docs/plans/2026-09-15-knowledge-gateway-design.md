@@ -1,6 +1,8 @@
 # Knowledge Gateway design
 
-Status: product scope agreed; implementation and live validation remain pending.
+Status: dashboard, scoped APIs, retrieval and durable indexing implemented locally;
+deployment and live acceptance remain pending. See the [setup guide](../knowledge.md)
+and [implementation boundaries](2026-09-23-knowledge-implementation.md).
 
 ## Purpose and scope
 
