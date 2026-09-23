@@ -53,11 +53,8 @@
             </div>
             {% endif %}
 
-            <form method="post" action="{{ url_for('login') }}">
+            <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                {% if request.args.get('next') %}
-                <input type="hidden" name="next" value="{{ request.args.get('next') }}">
-                {% endif %}
 
                 <label>
                     <span class="field-label">Username</span>

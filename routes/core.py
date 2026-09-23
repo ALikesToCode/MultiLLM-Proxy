@@ -430,7 +430,9 @@ def register_core_routes(app) -> None:
                 or "application/json" in request.headers.get("Accept", "")
             ):
                 raise APIError("Authentication required", status_code=401)
-            return redirect(url_for("login", next=request.url))
+            # A local path survives is_safe_redirect_target; request.url would not.
+            query = request.query_string.decode("utf-8", "replace")
+            return redirect(url_for("login", next=f"{request.path}?{query}" if query else request.path))
 
         sanitized_path = request.path.rstrip("/")
         if sanitized_path in [f"/{prov}" for prov in app.config["API_BASE_URLS"]]:
