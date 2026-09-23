@@ -181,11 +181,9 @@ class IntelligenceTransport:
             # Reviewed subscription calls use only a configured isolated key, even
             # while it is rejected or rate limited. Shared-pool selection would
             # rotate to general keys and prune their cooldowns.
-            pinned = os.environ.get(
-                "INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY", ""
-            ).strip()
-            if pinned and candidate["billing"] == "subscription":
-                return pinned
+            pinned = os.environ.get("INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY")
+            if pinned is not None and candidate["billing"] == "subscription":
+                return pinned.strip() or None
             return NanoGPTUnifiedKeyPool.select_available_key(
                 self.auth.get_api_keys(provider)
             )

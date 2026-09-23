@@ -87,16 +87,23 @@ def test_subscription_uses_only_the_isolated_key_while_the_shared_pool_is_unavai
     assert NanoGPTUnifiedKeyPool.select_available_key(POOL) is None
 
 
-@pytest.mark.parametrize("value", [None, "", " \n"])
-def test_without_an_isolated_key_subscription_keeps_the_shared_pool(value):
+def test_without_an_isolated_key_subscription_keeps_the_shared_pool():
     gateway = transport()
-    with isolated_key(value):
+    with isolated_key(None):
         assert gateway.credential(subscription()) == POOL[0]
         NanoGPTUnifiedKeyPool.record_result(POOL[0], 429)
         assert gateway.credential(subscription()) == POOL[1]
         NanoGPTUnifiedKeyPool.record_result(POOL[1], 401)
         assert gateway.credential(subscription()) is None
     assert gateway.auth.lookups == ["nanogpt"] * 3
+
+
+@pytest.mark.parametrize("value", ["", " \n"])
+def test_an_explicitly_empty_isolated_key_refuses_shared_pool_fallback(value):
+    gateway = transport()
+    with isolated_key(value):
+        assert gateway.credential(subscription()) is None
+    assert gateway.auth.lookups == []
 
 
 @pytest.mark.parametrize("billing", ["payg", "allowance", "free"])
@@ -237,3 +244,12 @@ class IsolatedSubscriptionGatewayTests(IntelligenceApiTestCase):
         assert SUBSCRIPTION_URL not in {
             call.kwargs["url"] for call in send.call_args_list
         }
+
+    def test_empty_isolated_key_refuses_dispatch_with_general_keys_available(self):
+        IntelligenceStore.seed(policy(candidates=[subscription()]))
+        os.environ[ISOLATED] = " \n"
+        with self.requests() as send:
+            response = self.post()
+        assert response.status_code == 503
+        assert response.json["error"]["code"] == "missing_credentials"
+        send.assert_not_called()

@@ -50,6 +50,7 @@ fallback moves to the next reviewed candidate within the policy's attempt limit.
 Other billing modes, other providers, non-subscription media and general proxy
 traffic keep their current credentials; subscription media is still refused before
 sending. Without the secret, subscription candidates keep using the general pool.
+An explicitly empty secret refuses dispatch instead of selecting a general key.
 
 ## Private storage boundary
 

@@ -25,4 +25,5 @@ test("containers receive the isolated NanoGPT subscription key under its own nam
   assert.equal(env.NANOGPT_API_KEY, "synthetic-pool-key");
   assert.deepEqual(Object.keys(env).filter((name) => env[name] === key), ["INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY"]);
   assert.equal(collectContainerEnv({}).INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY, undefined);
+  assert.equal(collectContainerEnv({ INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY: "" }).INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY, "");
 });

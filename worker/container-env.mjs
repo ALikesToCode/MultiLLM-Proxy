@@ -142,7 +142,8 @@ export function collectContainerEnv(source = {}) {
       continue;
     }
 
-    if (value === undefined || value === null || value === "") {
+    if (value === undefined || value === null
+      || (value === "" && key !== "INTELLIGENCE_NANOGPT_SUBSCRIPTION_API_KEY")) {
       continue;
     }
 
