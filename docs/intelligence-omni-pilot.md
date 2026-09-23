@@ -43,3 +43,26 @@ model capabilities before reusing this dated review for another deployment.
 Public metadata: [NanoGPT model catalog](https://nano-gpt.com/api/v1/models?detailed=true).
 Account entitlement was checked through the authenticated subscription usage and
 model endpoints; no credential or account identifier is recorded here.
+
+## Activation evidence
+
+The reviewed policy and the `integration:omni` principal were provisioned in D1 on
+2026-09-23. The isolated subscription credential is configured in the Container.
+Worker version `c0cc7cdb-dade-4a12-bae2-8f897af08700` and Container version 174
+served the live checks; the Container reported source fingerprint
+`95762f6d02fe184b8dfb8942eed8e477a77e9b4016f599aa53a33343ff9c30af`.
+
+Chat, streaming, a synthetic tool call and matching tool-result follow-up passed.
+The quality route returned a JSON schema response from GLM-5.3. An insufficient
+request allowance was refused before generation. Cancelling an incomplete stream
+retained an `unknown` reservation charged at 8,192 tokens.
+
+Omni's deployed web chat then completed two contextual turns on GLM-5.3 Flash.
+Both had one attempt and complete usage; their 5,315 and 6,497 tokens matched
+Omni's durable settlements. At that checkpoint D1 had seven settled requests
+charged at 12,228 tokens and the one unknown request above. Jev classification is
+metered separately by Omni and does not appear in this gateway ledger.
+
+Provider fallback has synthetic regression coverage; no live provider outage was
+induced. Audio remains unconfigured, and these checks do not establish an
+end-to-end approval-gated external action or subject-matter accuracy.
