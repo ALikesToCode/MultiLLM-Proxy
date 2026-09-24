@@ -74,6 +74,18 @@ test("revoking a host during a live snapshot write removes only bytes that write
   }
 });
 
+test("a failed indexing schedule is not cached as a complete answer", async () => {
+  const f = await fixture();
+  const query = request({ version: "3.1.3" });
+  const first = await run(f, query, { schedule: async () => { throw new Error("workflow unavailable"); } });
+  assert.equal(first.status, "partial");
+  assert.ok(first.gaps.some(gap => gap.code === "indexing_not_scheduled"));
+  const scheduled = [];
+  const retried = await run(f, query, { schedule: async (...args) => scheduled.push(args) });
+  assert.notEqual(retried.path, "cache");
+  assert.equal(scheduled.length, 1, "the next request retries indexing");
+});
+
 test("cache reads fail closed when policy or sources are revoked during lookup", async () => {
   for (const revokePolicy of [false, true]) {
     const f = await fixture();

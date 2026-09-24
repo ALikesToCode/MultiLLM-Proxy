@@ -265,15 +265,17 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     path: state.paths.size > 1 ? "mixed" : [...state.paths][0] || "live", elapsed_ms: Math.round(performance.now() - state.started),
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
-  // Publication/policy races never create cache entries for an obsolete generation.
-  if (latest.generation === snapshot.generation) {
-    await untilDeadline(() => writeCache(cache, key, bundle, snapshot.policy.cache_ttl_seconds), signal);
-  }
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {
     for (const [sourceId, artifactId] of state.sourcesToIndex) await untilDeadline(() => options.schedule(sourceId, signal, artifactId), signal).catch(() => {
       bundle.gaps.push({ code: "indexing_not_scheduled", message: "Live evidence is retained; indexing could not be scheduled." });
       if (bundle.status === "ok") bundle.status = "partial";
     });
+  }
+  // Cache only the finished bundle: a failed schedule leaves it partial, which is not
+  // cached, so the next request retries. Publication/policy races never create cache
+  // entries for an obsolete generation.
+  if (latest.generation === snapshot.generation) {
+    await untilDeadline(() => writeCache(cache, key, bundle, snapshot.policy.cache_ttl_seconds), signal);
   }
   checkAbort(signal);
   return bundle;
