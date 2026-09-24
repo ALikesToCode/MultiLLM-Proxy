@@ -1,0 +1,31 @@
+{# Shared error card: one message, the request ID for log correlation, and auth-aware recovery. #}
+{% macro error_card(label, heading, message, request_id=None, detail=None, retry=False) %}
+{% set signed_in = session.get('authenticated') %}
+<div class="error-layout">
+    <section class="error-card" aria-labelledby="error-heading">
+        <p class="error-code">{{ label }}</p>
+        <h1 id="error-heading">{{ heading }}</h1>
+        <p>{{ message }}</p>
+        {% if detail %}{{ detail }}{% endif %}
+        {% if request_id %}
+        <p class="error-meta">
+            <span>Request ID</span>
+            <code id="error-request-id">{{ request_id }}</code>
+            <button class="copy-button" type="button" data-copy-target="error-request-id" aria-label="Copy request ID">Copy</button>
+        </p>
+        {% endif %}
+        <div class="error-actions">
+            {% if retry %}
+            <a class="button button--primary" href="{{ request.full_path if request.query_string else request.path }}">Try again</a>
+            {% endif %}
+            {% if signed_in %}
+            <a class="button {{ 'button--secondary' if retry else 'button--primary' }}" href="{{ url_for('status_page') }}">Go to Operations</a>
+            <a class="button button--secondary" href="{{ url_for('proxy_documentation') }}">Setup guide</a>
+            {% else %}
+            <a class="button {{ 'button--secondary' if retry else 'button--primary' }}" href="{{ url_for('product_overview') }}">Product overview</a>
+            <a class="button button--secondary" href="{{ url_for('login') }}">Sign in</a>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endmacro %}

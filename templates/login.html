@@ -2,92 +2,58 @@
 
 {% block title %}Sign in · MultiLLM Proxy{% endblock %}
 
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='1') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='2') }}">{% endblock %}
 {% block main_class %}app-main--bare{% endblock %}
 
 {% block content %}
 <div class="auth-layout">
-    <section class="auth-context" aria-labelledby="welcome-heading">
-        <a href="{{ url_for('login') }}" class="brand-lockup" aria-label="MultiLLM Proxy sign in">
-            <span class="brand-mark" aria-hidden="true">
-                <span></span><span></span><span></span>
-            </span>
-            <span>
-                <strong style="color: white;">MultiLLM</strong>
-                <small>Route control</small>
-            </span>
-        </a>
-
-        <div>
-            <p class="eyebrow" style="color: #70ddd5;">Operator control plane</p>
-            <h1 id="welcome-heading">Every route.<br>One clear view.</h1>
-            <p>
-                Inspect provider health, recovery state, latency, request traces, and
-                configured cost exposure without hiding protocol decisions.
-            </p>
-        </div>
-
-        <div class="auth-proof" aria-label="Platform safeguards">
-            <div>
-                <strong>Explicit routing</strong>
-                <small>Provider and model decisions stay inspectable.</small>
-            </div>
-            <div>
-                <strong>Protocol fidelity</strong>
-                <small>Provider-specific transports keep their semantics.</small>
-            </div>
-            <div>
-                <strong>Body-safe telemetry</strong>
-                <small>Request metrics do not retain prompt or response bodies.</small>
-            </div>
-        </div>
-    </section>
-
     <section class="auth-form-side" aria-labelledby="signin-heading">
         <div class="auth-card">
-            <p class="eyebrow">Secure access</p>
-            <h2 id="signin-heading">Sign in to operate</h2>
-            <p>Use your MultiLLM username and API key. Provider credentials stay server-side.</p>
+            <p class="eyebrow">Operator console</p>
+            <h1 id="signin-heading">Sign in</h1>
+            <p class="auth-card__lede">Use your MultiLLM username and API key. Provider credentials never leave the server.</p>
 
             {% if error %}
-            <div class="alert" role="alert">
+            <div class="callout {{ 'callout--warning' if csrf_recovery else 'callout--danger' }}" role="alert">
                 <strong>{{ 'Refresh your sign-in.' if csrf_recovery else 'Sign-in failed.' }}</strong>
-                <span>{{ error }}</span>
+                <p>{{ error }}</p>
             </div>
             {% endif %}
 
-            <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}">
+            <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}" class="auth-form" data-submit-once>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                <label>
-                    <span class="field-label">Username</span>
-                    <input
-                        id="username"
-                        class="field"
-                        name="username"
-                        type="text"
-                        autocomplete="username"
-                        required
-                        autofocus
-                    >
+                <label class="form-field" for="username">
+                    Username
+                    <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
                 </label>
 
-                <label>
-                    <span class="field-label">API key</span>
-                    <input
-                        id="api_key"
-                        class="field"
-                        name="api_key"
-                        type="password"
-                        autocomplete="current-password"
-                        required
-                    >
-                    <span class="field-hint">Keys are submitted only to this deployment.</span>
-                </label>
+                <div class="form-field">
+                    <label for="api_key">API key</label>
+                    <div class="reveal-field">
+                        <input id="api_key" name="api_key" type="password" autocomplete="current-password" spellcheck="false" required aria-describedby="api-key-hint">
+                        <button class="button button--quiet button--sm" type="button" data-reveal-target="api_key" aria-pressed="false">Show</button>
+                    </div>
+                    <span class="field-hint" id="api-key-hint">Keys are sent only to this deployment.</span>
+                </div>
 
-                <button class="button button--primary" type="submit">Open control plane</button>
+                <button class="button button--primary button--block" type="submit">Sign in</button>
             </form>
+
+            <p class="auth-card__aside">Connecting a coding agent? <a href="{{ url_for('knowledge_agent_setup') }}">Agent setup</a> needs no sign-in.</p>
         </div>
+    </section>
+
+    <section class="auth-context on-dark" aria-labelledby="context-heading">
+        <p class="eyebrow">MultiLLM Proxy</p>
+        <h2 id="context-heading">Every route, key and source in one console.</h2>
+        <p>Watch provider evidence and circuit state, set automatic model priorities, issue scoped keys and administer Knowledge sources for this deployment.</p>
+        <ul class="auth-proof" aria-label="Platform safeguards">
+            <li><strong>Explicit routing</strong><span>Provider and model decisions stay inspectable.</span></li>
+            <li><strong>Protocol fidelity</strong><span>Native routes keep each provider's semantics.</span></li>
+            <li><strong>Body-free telemetry</strong><span>Request records never store prompts or responses.</span></li>
+        </ul>
+        <a class="auth-context__link" href="{{ url_for('product_overview') }}">Read the product overview</a>
     </section>
 </div>
 {% endblock %}

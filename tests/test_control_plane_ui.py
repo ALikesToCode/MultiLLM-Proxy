@@ -88,7 +88,7 @@ class ControlPlaneUiTest(unittest.TestCase):
             "/static/css/controls.css?v=1",
             "/static/css/components.css?v=1",
             "/static/css/content.css?v=1",
-            "/static/css/public.css?v=1",
+            "/static/css/public.css?v=2",
             "/static/js/app.js?v=2",
             "/static/css/auto-routes.css?v=8",
             "/static/css/documentation.css?v=9",

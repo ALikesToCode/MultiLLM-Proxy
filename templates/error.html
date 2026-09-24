@@ -1,30 +1,10 @@
 {% extends "base.html" %}
+{% from "partials/error_card.html" import error_card with context %}
 
 {% block title %}Request failed · MultiLLM Proxy{% endblock %}
-
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='1') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='2') }}">{% endblock %}
 
 {% block content %}
-<div class="error-layout">
-    <section class="error-card" aria-labelledby="error-heading">
-        <span class="error-code">Request interrupted</span>
-        <h1 id="error-heading">This request could not be completed.</h1>
-        <p>The control plane is still available. Review the message below, then retry from the relevant surface.</p>
-
-        <div class="error-detail" role="alert">{{ error or 'An unexpected error occurred.' }}</div>
-
-        {% if request_id %}
-        <div class="error-meta">
-            <span>Request ID: {{ request_id }}</span>
-        </div>
-        {% endif %}
-
-        <div class="error-actions">
-            <a class="button button--primary" href="{{ url_for('status_page') }}">Open operations</a>
-            {% if not session.get('authenticated') %}
-            <a class="button button--secondary" href="{{ url_for('login') }}">Sign in</a>
-            {% endif %}
-        </div>
-    </section>
-</div>
+{% set detail %}<p class="error-detail callout callout--warning" role="alert">{{ error or 'An unexpected error occurred.' }}</p>{% endset %}
+{{ error_card('Request not completed', 'This request could not be completed.', 'Review the message below, then retry from the page you were using.', request_id=request_id, detail=detail) }}
 {% endblock %}

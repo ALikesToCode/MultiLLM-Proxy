@@ -1,33 +1,9 @@
 {% extends "base.html" %}
+{% from "partials/error_card.html" import error_card with context %}
 
 {% block title %}Server error · MultiLLM Proxy{% endblock %}
-
-{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='1') }}">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='2') }}">{% endblock %}
 
 {% block content %}
-<div class="error-layout">
-    <section class="error-card" aria-labelledby="server-error-heading">
-        <span class="error-code">HTTP 500</span>
-        <h1 id="server-error-heading">The server hit an internal fault.</h1>
-        <p>
-            Retry after a moment. If the fault continues, use the request ID to correlate
-            this event with server logs; internal exception details are not exposed here.
-        </p>
-
-        <div class="error-detail" role="alert">An unexpected error occurred.</div>
-
-        {% if request_id %}
-        <div class="error-meta">
-            <span>Request ID: {{ request_id }}</span>
-        </div>
-        {% endif %}
-
-        <div class="error-actions">
-            <a class="button button--primary" href="{{ url_for('status_page') }}">Retry operations</a>
-            {% if not session.get('authenticated') %}
-            <a class="button button--secondary" href="{{ url_for('login') }}">Sign in</a>
-            {% endif %}
-        </div>
-    </section>
-</div>
+{{ error_card('HTTP 500', 'Something went wrong on the server.', 'Try again in a moment. If it keeps happening, share the request ID with the operator so the event can be found in the logs; internal details are not shown here.', request_id=request_id, retry=True) }}
 {% endblock %}

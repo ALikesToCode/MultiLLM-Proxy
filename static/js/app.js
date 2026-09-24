@@ -197,6 +197,20 @@ function initializeLocalNavigation() {
     links.forEach((_link, section) => observer.observe(section));
 }
 
+function initializeRevealButtons() {
+    document.querySelectorAll('[data-reveal-target]').forEach((button) => {
+        const input = document.getElementById(button.getAttribute('data-reveal-target'));
+        if (!input) return;
+        button.addEventListener('click', () => {
+            const reveal = input.type === 'password';
+            input.type = reveal ? 'text' : 'password';
+            button.setAttribute('aria-pressed', String(reveal));
+            button.textContent = reveal ? 'Hide' : 'Show';
+            input.focus();
+        });
+    });
+}
+
 function initializeSubmitOnce() {
     document.querySelectorAll('form[data-submit-once]').forEach((form) => {
         form.addEventListener('submit', () => {
@@ -215,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeTabs();
     initializeLocalNavigation();
     initializeSubmitOnce();
+    initializeRevealButtons();
     registerServiceWorker();
 });
 
