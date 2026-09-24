@@ -127,6 +127,59 @@ test("exhausted live key pools return an actionable quota error without consumin
   assert.equal((await f.authority.call("snapshot")).usage.find(row => row.provider === "exa").total, 0);
 });
 
+test("refused sources do not use the live retention slots", async () => {
+  const f = await fixture();
+  const base = "https://flask.palletsprojects.com/en/3.1.x/";
+  for (const name of ["a", "b", "c"]) {
+    const source = await f.authority.call("source.create", { url: `${base}${name}/`, product: "flask" });
+    await f.authority.call("source.update", { id: source.id, expected_revision: source.revision, enabled: false });
+  }
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => ({
+    observations: ["a", "b", "c", "d"].map(name => ({ kind: "source_excerpt", provider, url: `${base}${name}/`, text: f.text, freshness: "live" })),
+    warnings: [],
+  }));
+  const result = await run(f);
+  assert.deepEqual(result.excerpts.map(item => item.url), [`${base}d/`]);
+});
+
+test("a failed acquisition does not block the next discovered source", async () => {
+  const f = await fixture();
+  f.env.CONTEXT7_API_KEY = "synthetic-test-key";
+  f.policy.providers.context7 = { ...f.policy.providers.exa };
+  await f.storage.put("policy", f.policy);
+  const base = "https://flask.palletsprojects.com/en/3.1.x/";
+  const acquired = [];
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
+    if (provider === "context7") {
+      return { observations: ["broken", "working"].map(name => ({ kind: "discovery", provider, url: `${base}${name}/` })), warnings: [] };
+    }
+    if (!intent.source_url) return { observations: [], warnings: [] };
+    acquired.push(intent.source_url);
+    if (intent.source_url.endsWith("broken/")) throw new Error("acquisition failed");
+    return { observations: [{ kind: "source_excerpt", provider, url: intent.source_url, text: f.text, freshness: "live" }], warnings: [] };
+  });
+  const result = await run(f, request({ mode: "smart" }));
+  assert.deepEqual(acquired, [`${base}broken/`, `${base}working/`], "each attempt reserves its own operation");
+  assert.deepEqual(result.excerpts.map(item => item.url), [`${base}working/`]);
+});
+
+test("economy mode never adds an acquisition provider beyond its one provider", async () => {
+  const f = await fixture();
+  Object.assign(f.env, { CONTEXT7_API_KEY: "synthetic-test-key", FIRECRAWL_API_KEY: "synthetic-test-key" });
+  f.policy.providers.context7 = { ...f.policy.providers.exa };
+  f.policy.providers.exa.enabled = false;
+  await f.storage.put("policy", f.policy);
+  const calls = [];
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
+    calls.push(provider);
+    return { observations: [{ kind: "discovery", provider, url: f.source.url }], warnings: [] };
+  });
+  const result = await run(f, request({ mode: "economy" }));
+  assert.deepEqual(calls, ["context7"]);
+  assert.deepEqual(result.providers_used, ["context7"]);
+  assert.equal(result.discoveries[0].url, f.source.url);
+});
+
 test("requested versions and incidental URL segments never prove a discovered product version", async () => {
   const f = await fixture();
   f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => ({

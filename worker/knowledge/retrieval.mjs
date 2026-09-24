@@ -6,6 +6,10 @@ import { metered } from "./operations.mjs";
 import { cacheKey, readCache, writeCache } from "./cache.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
+const MODE_PROVIDER_LIMITS = { economy: 1, smart: 2, deep: 4 };
+const MAX_RETAINED_SOURCES = 3;
+// Failed or refused sources do not fill a retention slot, so bound the paid attempts separately.
+const MAX_LIVE_ATTEMPTS = 6;
 const nowIso = () => new Date().toISOString();
 
 function eligibleArtifact(artifact, snapshot, now) {
@@ -21,9 +25,16 @@ function candidateProviders(env, request, policy) {
   const configured = new Set(providerStatus(env).filter(item => item.configured && policy.providers[item.id]?.enabled).map(item => item.id));
   const order = request.mode === "economy" ? ["exa", "context7", "mintlify", "deepwiki"]
     : request.product ? ["context7", "exa", "mintlify", "deepwiki"] : ["exa", "mintlify", "deepwiki"];
-  const maximum = { economy: 1, smart: 2, deep: 4 }[request.mode];
   return order.filter(id => configured.has(id) && (id !== "deepwiki" || request.repository)
-    && (id !== "context7" || request.product)).slice(0, maximum);
+    && (id !== "context7" || request.product)).slice(0, MODE_PROVIDER_LIMITS[request.mode]);
+}
+
+// Acquisition counts toward the mode's provider limit: reuse a selected provider,
+// or add one only while the mode has room. Otherwise discoveries stay unacquired.
+function acquisitionProviderFor(env, request, policy, providers) {
+  const room = providers.length < MODE_PROVIDER_LIMITS[request.mode];
+  return ["firecrawl", "exa"].find(id => providerStatus(env).some(item => item.id === id && item.configured)
+    && policy.providers[id]?.enabled && (providers.includes(id) || room));
 }
 
 function checkAbort(signal) {
@@ -127,28 +138,34 @@ async function liveEvidence(state, env, retrieveFn) {
   }));
   const seen = new Set();
   let stored = 0;
-  const acquisitionProvider = ["firecrawl", "exa"].find(id => providerStatus(env).some(item => item.id === id && item.configured)
-    && snapshot.policy.providers[id]?.enabled);
+  let attempts = 0;
+  const acquisitionProvider = acquisitionProviderFor(env, request, snapshot.policy, providers);
   const observations = batches.flat().sort((a, b) => Number(b.kind === "source_excerpt") - Number(a.kind === "source_excerpt"));
   for (const observation of observations) {
-    if (signal.aborted || stored >= 3) break;
+    if (signal.aborted || stored >= MAX_RETAINED_SOURCES || attempts >= MAX_LIVE_ATTEMPTS) break;
     let url;
     try { url = publicUrl(observation.url, snapshot.policy.allowed_hosts); }
     catch { continue; }
     if (seen.has(url)) continue;
     state.discoveries.push({ url, title: (observation.title || url).slice(0, 200), provider: observation.provider, kind: observation.kind });
+    const excerpt = observation.kind === "source_excerpt";
+    if (!excerpt && !acquisitionProvider) continue;
+    // Every attempt has its own operation IDs; only a retained source fills a slot.
+    const sequence = attempts++;
     try {
-      if (observation.kind === "source_excerpt") {
-        if (await storeObservation(state, observation, stored++)) seen.add(url);
-      } else if (acquisitionProvider) {
+      let original = observation;
+      if (!excerpt) {
         state.attempts += 1;
         const batch = await untilDeadline(() => retrieveFn(acquisitionProvider, { ...intent, source_url: url }, { env, signal, authority: state.authority,
-          invoke: (id, suffix, callback) => state.invoke(id, `acquire-${stored}-${suffix}`, callback) }), signal);
+          invoke: (id, suffix, callback) => state.invoke(id, `acquire-${sequence}-${suffix}`, callback) }), signal);
         state.successes += 1;
         state.providersUsed.add(acquisitionProvider);
         providerWarnings(state, acquisitionProvider, batch);
-        const original = batch.observations.find(item => item.kind === "source_excerpt" && item.url === url);
-        if (original && await storeObservation(state, original, stored++)) seen.add(url);
+        original = batch.observations.find(item => item.kind === "source_excerpt" && item.url === url);
+      }
+      if (original && await storeObservation(state, original, sequence)) {
+        seen.add(url);
+        stored += 1;
       }
     } catch (error) {
       state.gaps.push({ code: safeCode(error), message: "A discovered source could not be acquired and retained." });
