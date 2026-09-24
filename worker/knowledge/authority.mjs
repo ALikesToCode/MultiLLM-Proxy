@@ -6,7 +6,10 @@ import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs
 import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
-const STATES = new Set([...ACTIVE, "completed", "failed", "cancelled"]);
+const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const STATES = new Set([...ACTIVE, ...TERMINAL]);
+const JOB_LIMIT = 1000;
+const JOB_RETENTION_MS = 30 * 24 * 3600000;
 const policyOf = async tx => withProviderDefaults(await tx.get("policy") ?? defaultPolicy());
 const generationOf = async tx => await tx.get("generation") ?? 0;
 const bump = async tx => tx.put("generation", (await generationOf(tx)) + 1);
@@ -70,13 +73,26 @@ async function updateSource(tx, input) {
   return updated;
 }
 
+const jobTime = job => Date.parse(job.updated_at ?? job.created_at);
+
+// Terminal jobs are history: prune them after the retention window, and oldest first
+// when the catalogue needs room. Active jobs are never pruned.
+async function pruneJobs(tx, jobs, now, room = 0) {
+  const terminal = jobs.filter(job => TERMINAL.has(job.status)).sort((a, b) => jobTime(a) - jobTime(b));
+  const expired = terminal.filter(job => now - jobTime(job) >= JOB_RETENTION_MS).length;
+  const removed = new Set(terminal.slice(0, Math.max(expired, jobs.length + room - JOB_LIMIT)));
+  for (const job of removed) await tx.delete(`job:${job.id}`);
+  return jobs.filter(job => !removed.has(job));
+}
+
 async function enqueue(tx, input, now) {
   const source = await sourceFor(tx, input.source_id);
   if (!source.enabled) fail("source_disabled", "Enable the source before scheduling a refresh.", 409);
-  const jobs = await values(tx, "job:");
+  let jobs = await values(tx, "job:");
   const current = jobs.find(job => job.source_id === source.id && job.fence === source.fence && ACTIVE.has(job.status));
   if (current) return current;
-  if (jobs.length >= 1000) fail("job_limit", "The job catalogue needs maintenance before more jobs can be scheduled.", 409);
+  jobs = await pruneJobs(tx, jobs, now, 1);
+  if (jobs.length >= JOB_LIMIT) fail("job_limit", "Active jobs fill the job catalogue. Cancel or finish work before scheduling more.", 409);
   const id = crypto.randomUUID();
   const job = { id, source_id: source.id, fence: source.fence + 1, status: "queued", reason: null,
     artifact_id: null, item_id: null, index_key: null, created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString() };
@@ -225,7 +241,12 @@ export class KnowledgeAuthority {
       }
       if (operation === "reserve") return reserve(tx, await policyOf(tx), input, now);
       if (operation === "settle") return settle(tx, input, now);
-      if (operation === "maintenance") { await pruneSettled(tx, now); await pruneAlexandria(tx, now); return { complete: true }; }
+      if (operation === "maintenance") {
+        await pruneSettled(tx, now);
+        await pruneAlexandria(tx, now);
+        await pruneJobs(tx, await values(tx, "job:"), now);
+        return { complete: true };
+      }
       if (operation === "artifacts.expired") return (await values(tx, "artifact:")).filter(item => Date.parse(item.expires_at) <= now).slice(0, 10);
       if (operation === "artifact.expiration_claim") {
         const artifact = await tx.get(`artifact:${input.id}`);

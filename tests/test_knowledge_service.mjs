@@ -3,6 +3,7 @@ import test from "node:test";
 import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { dispatchKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
+import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { fixture, manager, principal } from "./knowledge_fixture.mjs";
@@ -99,6 +100,24 @@ test("maintenance rotates eligible due sources so failed scheduling cannot starv
   assert.equal(first.length, 5);
   assert.ok([...first, ...second].every(item => item.provider === "exa"));
   assert.equal(new Set([...first, ...second].map(item => item.id)).size, 7);
+});
+
+test("terminal jobs make room for new work and expire after thirty days", async () => {
+  const f = await fixture();
+  let now = Date.parse("2026-09-23T00:00:00Z");
+  const authority = new KnowledgeAuthority(f.storage, () => now);
+  for (let i = 0; i < 1000; i++) {
+    const stamp = new Date(now - (1000 - i) * 60000).toISOString();
+    await f.storage.put(`job:old-${i}`, { id: `old-${i}`, source_id: f.source.id, fence: 0, status: i % 2 ? "completed" : "failed",
+      reason: null, artifact_id: null, item_id: null, index_key: null, created_at: stamp, updated_at: stamp });
+  }
+  const job = await authority.call("job.enqueue", { source_id: f.source.id });
+  const jobs = [...(await f.storage.list({ prefix: "job:" })).keys()];
+  assert.equal(jobs.length, 1000);
+  assert.ok(!jobs.includes("job:old-0"), "the oldest terminal job made room");
+  now += 31 * 24 * 3600000;
+  await authority.call("maintenance");
+  assert.deepEqual([...(await f.storage.list({ prefix: "job:" })).keys()], [`job:${job.id}`], "active work is never pruned");
 });
 
 test("live acquisitions can be indexed without paying to acquire the source again", async () => {
