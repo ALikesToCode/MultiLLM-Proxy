@@ -449,6 +449,11 @@ samp {
     padding: 0;
 }
 
+/* The skip link moves focus to <main> so the next Tab starts in the content; it is not a control. */
+.app-main:focus {
+    outline: none;
+}
+
 .page-header {
     display: flex;
     margin-bottom: 1.5rem;
