@@ -1,14 +1,18 @@
-const CACHE_NAME = 'multillm-proxy-v12';
+const CACHE_NAME = 'multillm-proxy-v13';
 const OFFLINE_URL = '/static/offline.html';
 const PRECACHE_URLS = [
   OFFLINE_URL,
   '/static/css/style.css',
-  '/static/css/shell.css',
+  '/static/css/shell.css?v=2',
+  '/static/css/controls.css?v=1',
+  '/static/css/components.css?v=1',
+  '/static/css/content.css?v=1',
+  '/static/css/public.css?v=1',
   '/static/css/auto-routes.css?v=7',
   '/static/css/documentation.css?v=9',
   '/static/css/operations.css',
   '/static/css/surfaces.css',
-  '/static/js/app.js',
+  '/static/js/app.js?v=2',
   '/static/js/auto-route-catalog.js?v=8',
   '/static/js/auto-routes.js?v=7',
   '/static/js/dashboard.js',

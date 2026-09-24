@@ -2,6 +2,8 @@
 
 {% block title %}Request failed · MultiLLM Proxy{% endblock %}
 
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='1') }}">{% endblock %}
+
 {% block content %}
 <div class="error-layout">
     <section class="error-card" aria-labelledby="error-heading">

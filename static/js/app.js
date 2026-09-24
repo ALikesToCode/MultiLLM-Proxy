@@ -43,7 +43,69 @@ function showToast(message, type = 'success') {
     toast.className = type === 'error' ? 'toast toast--error' : 'toast';
     toast.textContent = message;
     region.appendChild(toast);
-    window.setTimeout(() => toast.remove(), 3200);
+    window.setTimeout(() => toast.remove(), type === 'error' ? 6000 : 3200);
+}
+
+function copySource(button) {
+    const value = button.getAttribute('data-copy-value');
+    if (value !== null) {
+        return { text: value, target: null };
+    }
+    const target = document.getElementById(button.getAttribute('data-copy-target') || '');
+    return { text: target ? (target.value ?? target.textContent ?? '') : '', target };
+}
+
+function selectContents(target) {
+    if (!target) {
+        return;
+    }
+    if (typeof target.select === 'function') {
+        target.focus();
+        target.select();
+        return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function showCopyState(button, state) {
+    if (typeof button.setAttribute !== 'function') {
+        return;
+    }
+    const label = button.getAttribute('data-copy-label') || button.textContent;
+    button.setAttribute('data-copy-label', label);
+    button.setAttribute('data-copy-state', state);
+    button.textContent = state === 'copied' ? 'Copied' : 'Copy failed';
+    window.clearTimeout(button.copyResetTimer);
+    button.copyResetTimer = window.setTimeout(() => {
+        button.removeAttribute('data-copy-state');
+        button.textContent = label;
+    }, 2000);
+}
+
+function initializeCopyButtons() {
+    document.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-copy-value], [data-copy-target]');
+        if (!button) {
+            return;
+        }
+        const { text, target } = copySource(button);
+        try {
+            if (!await copyText(text)) throw new Error('Clipboard copy was rejected');
+            showCopyState(button, 'copied');
+            showToast(button.getAttribute('data-copy-message') || 'Copied to clipboard');
+        } catch (error) {
+            console.error('Clipboard copy failed:', error);
+            showCopyState(button, 'failed');
+            selectContents(target);
+            showToast(target
+                ? 'Could not copy automatically. The text is selected; copy it manually.'
+                : 'Could not copy to clipboard', 'error');
+        }
+    });
 }
 
 function initializeMobileNavigation() {
@@ -53,33 +115,106 @@ function initializeMobileNavigation() {
         return;
     }
 
+    const setOpen = (open, { restoreFocus = false } = {}) => {
+        menuButton.setAttribute('aria-expanded', String(open));
+        mobileMenu.hidden = !open;
+        if (!open && restoreFocus) {
+            menuButton.focus();
+        }
+    };
+
     menuButton.addEventListener('click', () => {
-        const expanded = menuButton.getAttribute('aria-expanded') === 'true';
-        menuButton.setAttribute('aria-expanded', String(!expanded));
-        mobileMenu.hidden = expanded;
+        setOpen(menuButton.getAttribute('aria-expanded') !== 'true');
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !mobileMenu.hidden) {
+            setOpen(false, { restoreFocus: true });
+        }
+    });
+    document.addEventListener('click', (event) => {
+        if (!mobileMenu.hidden && !mobileMenu.contains(event.target) && !menuButton.contains(event.target)) {
+            setOpen(false);
+        }
+    });
+    window.matchMedia?.('(min-width: 75.0625rem)').addEventListener?.('change', (query) => {
+        if (query.matches) setOpen(false);
     });
 }
 
-function initializeCopyButtons() {
-    document.addEventListener('click', async (event) => {
-        const button = event.target.closest('[data-copy-value]');
-        if (!button) {
+function selectTab(tabs, tab, { focus = false } = {}) {
+    tabs.forEach((candidate) => {
+        const selected = candidate === tab;
+        candidate.setAttribute('aria-selected', String(selected));
+        candidate.tabIndex = selected ? 0 : -1;
+        const panel = document.getElementById(candidate.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !selected;
+    });
+    if (focus) tab.focus();
+}
+
+function initializeTabs() {
+    document.querySelectorAll('[data-tabs]').forEach((container) => {
+        const tabs = [...container.querySelectorAll('[role="tab"]')];
+        if (!tabs.length) {
             return;
         }
-        const value = button.getAttribute('data-copy-value') || '';
-        try {
-            if (!await copyText(value)) throw new Error('Clipboard copy was rejected');
-            showToast('Copied to clipboard');
-        } catch (error) {
-            console.error('Clipboard copy failed:', error);
-            showToast('Could not copy to clipboard', 'error');
-        }
+        container.classList.add('is-enhanced');
+        selectTab(tabs, tabs.find((tab) => tab.getAttribute('aria-selected') === 'true') || tabs[0]);
+        tabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => selectTab(tabs, tab));
+            tab.addEventListener('keydown', (event) => {
+                const moves = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 };
+                if (!(event.key in moves)) return;
+                event.preventDefault();
+                selectTab(tabs, tabs[(moves[event.key] + tabs.length) % tabs.length], { focus: true });
+            });
+        });
+    });
+}
+
+function initializeLocalNavigation() {
+    const nav = document.querySelector('[data-local-nav]');
+    if (!nav || !('IntersectionObserver' in window)) {
+        return;
+    }
+    const links = new Map();
+    nav.querySelectorAll('a[href^="#"]').forEach((link) => {
+        const section = document.getElementById(link.getAttribute('href').slice(1));
+        if (section) links.set(section, link);
+    });
+    const visible = new Set();
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+            if (entry.isIntersecting) visible.add(entry.target);
+            else visible.delete(entry.target);
+        });
+        const current = [...links.keys()].find((section) => visible.has(section));
+        links.forEach((link, section) => {
+            if (section === current) link.setAttribute('aria-current', 'true');
+            else link.removeAttribute('aria-current');
+        });
+    }, { rootMargin: '-20% 0px -60% 0px' });
+    links.forEach((_link, section) => observer.observe(section));
+}
+
+function initializeSubmitOnce() {
+    document.querySelectorAll('form[data-submit-once]').forEach((form) => {
+        form.addEventListener('submit', () => {
+            const submit = form.querySelector('button[type="submit"]');
+            if (submit) {
+                submit.setAttribute('aria-busy', 'true');
+                window.setTimeout(() => { submit.disabled = true; });
+            }
+        });
     });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeMobileNavigation();
     initializeCopyButtons();
+    initializeTabs();
+    initializeLocalNavigation();
+    initializeSubmitOnce();
     registerServiceWorker();
 });
 

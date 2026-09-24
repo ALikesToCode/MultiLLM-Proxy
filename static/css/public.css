@@ -1,0 +1,221 @@
+/* Sign-in and error page layouts. */
+
+.auth-layout {
+    display: grid;
+    min-height: 100vh;
+    grid-template-columns: minmax(20rem, 1.08fr) minmax(23rem, 0.92fr);
+    background: var(--white);
+}
+
+.auth-context {
+    position: relative;
+    display: flex;
+    min-height: 100%;
+    padding: clamp(2.2rem, 6vw, 6.5rem);
+    flex-direction: column;
+    justify-content: space-between;
+    background:
+        radial-gradient(circle at 20% 15%, rgb(8 145 164 / 19%), transparent 30rem),
+        var(--ink-950);
+    color: var(--white);
+    overflow: hidden;
+}
+
+.auth-context::after {
+    position: absolute;
+    right: -8rem;
+    bottom: -8rem;
+    width: 24rem;
+    height: 24rem;
+    border: 1px solid rgb(255 255 255 / 13%);
+    border-radius: 50%;
+    box-shadow:
+        0 0 0 4rem rgb(255 255 255 / 3%),
+        0 0 0 8rem rgb(255 255 255 / 2%);
+    content: "";
+}
+
+.auth-context > * {
+    position: relative;
+    z-index: 1;
+}
+
+.auth-context h1 {
+    max-width: 44rem;
+    margin: 2rem 0 1rem;
+    font-size: clamp(2.6rem, 5vw, 5.4rem);
+    line-height: 0.97;
+    letter-spacing: -0.065em;
+}
+
+.auth-context p {
+    max-width: 38rem;
+    margin: 0;
+    color: var(--ink-300);
+    font-size: clamp(1rem, 1.4vw, 1.2rem);
+    line-height: 1.7;
+}
+
+.auth-proof {
+    display: grid;
+    max-width: 43rem;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    border: 1px solid rgb(255 255 255 / 12%);
+    border-radius: var(--radius-lg);
+    background: rgb(255 255 255 / 12%);
+    overflow: hidden;
+}
+
+.auth-proof div {
+    padding: 1rem;
+    background: rgb(7 19 31 / 76%);
+}
+
+.auth-proof strong,
+.auth-proof small {
+    display: block;
+}
+
+.auth-proof strong {
+    font-size: 0.82rem;
+}
+
+.auth-proof small {
+    margin-top: 0.3rem;
+    color: var(--ink-300);
+    font-size: 0.68rem;
+    line-height: 1.4;
+}
+
+.auth-form-side {
+    display: grid;
+    min-height: 100%;
+    padding: clamp(2rem, 6vw, 6rem);
+    place-items: center;
+}
+
+.auth-card {
+    width: min(100%, 29rem);
+}
+
+.auth-card h2 {
+    margin: 0;
+    font-size: 2rem;
+    letter-spacing: -0.045em;
+}
+
+.auth-card > p {
+    margin: 0.55rem 0 2rem;
+    color: var(--ink-500);
+    line-height: 1.6;
+}
+
+.auth-card form {
+    display: grid;
+    gap: 1.15rem;
+}
+
+.auth-card .button {
+    width: 100%;
+    margin-top: 0.2rem;
+}
+
+.error-layout {
+    display: grid;
+    min-height: calc(100vh - 4.5rem);
+    padding: 2rem;
+    place-items: center;
+}
+
+.error-card {
+    width: min(100%, 42rem);
+    padding: clamp(1.5rem, 5vw, 3.5rem);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-lg);
+    background: var(--white);
+    box-shadow: var(--shadow-md);
+}
+
+.error-code {
+    display: inline-flex;
+    margin-bottom: 1.1rem;
+    color: var(--cyan-700);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.error-card h1 {
+    margin: 0;
+    font-size: clamp(2rem, 5vw, 3.8rem);
+    letter-spacing: -0.055em;
+}
+
+.error-card > p {
+    margin: 0.85rem 0 0;
+    color: var(--ink-600);
+    line-height: 1.65;
+}
+
+.error-detail {
+    margin: 1.6rem 0;
+    padding: 1rem;
+    border-left: 3px solid var(--rose-700);
+    background: var(--rose-100);
+    color: var(--rose-700);
+    font-size: 0.8rem;
+    line-height: 1.55;
+}
+
+.error-meta {
+    display: grid;
+    margin: 1.5rem 0;
+    gap: 0.55rem;
+    color: var(--ink-500);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+}
+
+.error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+}
+
+@media (max-width: 64rem) {
+    .auth-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .auth-context {
+        min-height: 30rem;
+    }
+}
+
+@media (max-width: 48rem) {
+    .auth-context {
+        min-height: 26rem;
+        padding: 2rem;
+    }
+
+    .auth-proof {
+        grid-template-columns: 1fr;
+    }
+
+    .auth-form-side {
+        padding: 3rem 1.25rem;
+    }
+
+    .error-layout {
+        padding: 1rem;
+    }
+}
+
+.auth-context .brand-lockup small {
+    display: block;
+    color: var(--text-inverse-muted);
+    font-size: var(--text-xs);
+}

@@ -2,6 +2,9 @@
 
 {% block title %}Sign in · MultiLLM Proxy{% endblock %}
 
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/public.css', v='1') }}">{% endblock %}
+{% block main_class %}app-main--bare{% endblock %}
+
 {% block content %}
 <div class="auth-layout">
     <section class="auth-context" aria-labelledby="welcome-heading">
