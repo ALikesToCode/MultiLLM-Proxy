@@ -15,6 +15,7 @@ from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from routes.csrf_errors import handle_csrf_error
 from routes.knowledge_onboarding import PUBLIC_ENDPOINTS as KNOWLEDGE_PUBLIC_ENDPOINTS
+from routes.public_pages import PUBLIC_ENDPOINTS as PRODUCT_PUBLIC_ENDPOINTS, register_public_routes
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -197,6 +198,7 @@ def register_core_routes(app) -> None:
     )
 
     app.register_error_handler(CSRFError, handle_csrf_error)
+    register_public_routes(app)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -414,7 +416,7 @@ def register_core_routes(app) -> None:
         if request.headers.get("Authorization") or request_api_key():
             return None
 
-        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS or request.endpoint in [
+        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS or request.endpoint in [
             "login",
             "static_files",
             "favicon",

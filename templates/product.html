@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}MultiLLM Proxy · Model routing, technical knowledge and agent integration{% endblock %}
+{% block description %}MultiLLM Proxy gives applications and coding agents one scoped key for many LLM providers, keeps provider credentials on the server, and serves cited technical evidence over REST and MCP.{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/product.css', v='1') }}">{% endblock %}
+{% block content %}
+<div class="product">
+  <section class="product-hero" aria-labelledby="product-title">
+    <div class="product-hero__copy">
+      <p class="eyebrow">MultiLLM Proxy</p>
+      <h1 id="product-title">One gateway for model routing, technical knowledge and coding agents.</h1>
+      <p class="product-hero__lede">Give applications and agents one scoped key for {{ integrations | length }} provider integrations. Provider credentials stay on the server, routing stays explicit, and technical evidence arrives with its sources.</p>
+      <div class="button-row">
+        <a class="button button--primary" href="{{ url_for('knowledge_agent_setup') }}">Connect an agent</a>
+        <a class="button button--secondary" href="{{ url_for('login') }}">Sign in to the console</a>
+      </div>
+      <p class="product-hero__meta">For agents: <a href="{{ url_for('knowledge_llms') }}">llms.txt</a> · <a href="{{ url_for('knowledge_agent_config') }}">config.json</a> · <a href="{{ url_for('knowledge_agent_skill') }}">SKILL.md</a></p>
+    </div>
+    <figure class="route-map on-dark">
+      <div class="route-map__node"><strong>Your application or agent</strong><span>One scoped proxy key</span></div>
+      <div class="route-map__hub"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><strong>MultiLLM Proxy</strong><span>Provider keys stay here</span></div>
+      <ul class="route-map__routes" aria-label="Request contracts">
+        <li><code>provider:model</code><span>One explicit provider</span></li>
+        <li><code>auto:name</code><span>Ordered, safe chat failover</span></li>
+        <li><code>/provider/…</code><span>Native protocol, unchanged</span></li>
+        <li><code>/mcp</code><span>Knowledge tools for agents</span></li>
+      </ul>
+      <figcaption>Every request carries a MultiLLM key; the proxy chooses the matching server-side credential.</figcaption>
+    </figure>
+  </section>
+
+  <nav class="local-nav" aria-label="Overview sections" data-local-nav>
+    <a href="#routing">LLM routing</a>
+    <a href="#knowledge">Knowledge retrieval</a>
+    <a href="#agents">Agent integration</a>
+    <a href="#console">Operator console</a>
+    <a href="#safeguards">Safeguards</a>
+  </nav>
+
+  <section id="routing" class="product-section" aria-labelledby="routing-title">
+    <header class="product-section__header">
+      <p class="eyebrow">LLM routing</p>
+      <h2 id="routing-title">Choose how each request is routed</h2>
+      <p>OpenAI-compatible clients keep their request and streaming format. The model value decides the contract, so nothing is substituted silently.</p>
+    </header>
+    <div class="contract-grid">
+      <article class="card contract-card">
+        <code>provider:model</code>
+        <h3>Explicit</h3>
+        <p>Chat, Responses and images go to exactly one provider through <code>/v1/chat/completions</code>, <code>/v1/responses</code> or <code>/v1/images/generations</code>.</p>
+      </article>
+      <article class="card contract-card">
+        <code>auto:name</code>
+        <h3>Automatic chat</h3>
+        <p>An operator-ordered list of candidates. The next one is tried only after a definite rejection before generation: 401, 402, 403, 404, 429 or an open circuit. Timeouts and generic 5xx responses are not replayed.</p>
+      </article>
+      <article class="card contract-card">
+        <code>/provider/…</code>
+        <h3>Provider native</h3>
+        <p>Provider-specific paths preserve each upstream protocol, such as Anthropic Messages, Gemini or the Responses API, with no cross-provider substitution.</p>
+      </article>
+    </div>
+    <div class="product-split">
+      <div class="code-block">
+        <div class="code-block__header"><span class="code-block__title">Unified chat request<small>Replace YOUR_API_KEY with a MultiLLM key</small></span><button class="copy-button" type="button" data-copy-target="product-curl">Copy</button></div>
+        <pre id="product-curl">curl {{ origin }}/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "openrouter:openai/gpt-4.1-mini",
+       "messages": [{"role": "user", "content": "Ping"}],
+       "stream": true}'</pre>
+      </div>
+      <div class="integration-list">
+        <h3>Supported integrations</h3>
+        <p>Available in this build. Each deployment decides which ones to configure.</p>
+        <ul class="tag-list">{% for name in integrations %}<li class="tag">{{ name }}</li>{% endfor %}</ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="knowledge" class="product-section" aria-labelledby="knowledge-title">
+    <header class="product-section__header">
+      <p class="eyebrow">Knowledge retrieval</p>
+      <h2 id="knowledge-title">Evidence with its sources, versions and gaps</h2>
+      <p>Knowledge returns cited excerpts rather than generated answers. Requested and observed versions stay separate, and missing evidence is reported instead of filled in.</p>
+    </header>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>Cited excerpts</h3>
+        <p>Each excerpt links to its original source with the observed version, the evidence for that version and a byte range in the retained snapshot.</p>
+      </div>
+      <div class="feature">
+        <h3>Retained sources</h3>
+        <p>Operators register public documentation, refresh it through Firecrawl or Exa, and query the indexed snapshots. Only approved hosts are fetched.</p>
+      </div>
+      <div class="feature">
+        <h3>Allowances first</h3>
+        <p>Every provider allowance starts at zero. Confirmed, pending and unknown outcomes all count, so an uncertain call is never assumed free.</p>
+      </div>
+      <div class="feature">
+        <h3>Alexandria structured data</h3>
+        <p>Discovering and inspecting a capability is free. Retrieval spends its published Firecrawl credits and returns a receipt you can check again without paying twice.</p>
+      </div>
+    </div>
+    <ul class="provider-strip" aria-label="Knowledge providers">
+      {% for name, detail in knowledge_providers %}<li><strong>{{ name }}</strong><span>{{ detail }}</span></li>{% endfor %}
+    </ul>
+  </section>
+
+  <section id="agents" class="product-section product-section--dark on-dark" aria-labelledby="agents-title">
+    <div class="agents-layout">
+      <header class="product-section__header">
+        <p class="eyebrow">Agent integration</p>
+        <h2 id="agents-title">Give Codex or Claude one knowledge connection</h2>
+        <p>A remote MCP server with scoped access: <code>knowledge:read</code> exposes {{ read_tool_count }} evidence and Alexandria tools; adding <code>knowledge:manage</code> exposes all {{ tool_count }}, including source and allowance administration.</p>
+        <div class="button-row">
+          <a class="button button--primary product-invert" href="{{ url_for('knowledge_agent_setup') }}">Open agent setup</a>
+          <a class="button button--secondary" href="{{ url_for('knowledge_agent_prompt') }}">Setup prompt as text</a>
+        </div>
+      </header>
+      <ol class="steps agents-steps">
+        <li><strong>Get a scoped proxy key</strong><p>An administrator issues it; provider keys never leave the server.</p></li>
+        <li><strong>Connect the MCP endpoint</strong><p><code>{{ origin }}/mcp</code> over Streamable HTTP, with the key read from your environment.</p></li>
+        <li><strong>Install the skill</strong><p>The skill teaches the agent to cite sources, state coverage gaps and ask before spending credits.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="console" class="product-section" aria-labelledby="console-title">
+    <header class="product-section__header">
+      <p class="eyebrow">Operator console</p>
+      <h2 id="console-title">See what the proxy is actually doing</h2>
+      <p>Signed-in operators get one console for the whole deployment.</p>
+    </header>
+    <div class="feature-grid">
+      <div class="feature"><h3>Operations</h3><p>Traffic, response classes, circuit state, request traces and cost estimates from configured prices. Prompt and response bodies are never stored.</p></div>
+      <div class="feature"><h3>Access</h3><p>Accounts with scoped keys. A new key is shown once; rotation invalidates the previous key immediately.</p></div>
+      <div class="feature"><h3>Knowledge administration</h3><p>Sources, indexing jobs, allowances and Alexandria, with configuration and live access kept distinct.</p></div>
+      <div class="feature"><h3>Workbench</h3><p>Saved connection profiles, blind route comparisons and session diagnostics, with billed calls confirmed first.</p></div>
+    </div>
+  </section>
+
+  <section id="safeguards" class="product-section" aria-labelledby="safeguards-title">
+    <header class="product-section__header">
+      <p class="eyebrow">Safeguards</p>
+      <h2 id="safeguards-title">Defaults that keep keys and costs contained</h2>
+    </header>
+    <ul class="safeguard-list">
+      <li><strong>Server-side credentials.</strong> Browsers and clients never receive provider keys; the dashboard calls providers through the server.</li>
+      <li><strong>Single-attempt images.</strong> Image requests never fail over automatically, so a timeout cannot trigger a second paid generation elsewhere.</li>
+      <li><strong>Body-free telemetry.</strong> Request records keep route, status, latency and cost estimates, not prompts or responses.</li>
+      <li><strong>Public pages stay public.</strong> This page and the agent resources contain no account, source or configuration state.</li>
+    </ul>
+  </section>
+
+  <section class="product-cta" aria-labelledby="cta-title">
+    <h2 id="cta-title">Ready to connect?</h2>
+    <p>Set up an agent in a few minutes, or sign in to operate this deployment.</p>
+    <div class="button-row">
+      <a class="button button--primary" href="{{ url_for('knowledge_agent_setup') }}">Connect an agent</a>
+      <a class="button button--secondary" href="{{ url_for('login') }}">Sign in</a>
+    </div>
+  </section>
+</div>
+{% endblock %}

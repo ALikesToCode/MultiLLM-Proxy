@@ -21,7 +21,7 @@ _RESOURCES = [
     ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
     ("/agent-onboarding/config.json", "Endpoint, protocol versions, scopes and tool catalogue."),
 ]
-_PROVIDERS = [
+KNOWLEDGE_PROVIDERS = [
     ("Context7", "Version-aware library documentation discovery"),
     ("Exa", "Source discovery and original source acquisition"),
     ("Firecrawl", "Acquire and refresh registered public documentation"),
@@ -37,7 +37,7 @@ def _origin():
     return request.url_root.rstrip("/")
 
 
-def _tools():
+def tool_catalogue():
     return [
         {"name": name, "scope": "knowledge:read"}
         for name in ("knowledge_context", "knowledge_search")
@@ -107,13 +107,14 @@ def register_knowledge_onboarding_routes(app):
     def knowledge_agent_setup():
         origin = _origin()
         response = Response(render_template("knowledge_agents.html", origin=origin,
-            setup_prompt=_setup_prompt(), providers=_PROVIDERS, tools=_tools(),
+            setup_prompt=_setup_prompt(), providers=KNOWLEDGE_PROVIDERS, tools=tool_catalogue(),
             resources=_RESOURCES, **_client_setup(origin)))
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    @app.get("/llms.txt")
+    # Decorators register bottom-up; /llms.txt first makes it the canonical url_for target.
     @app.get("/llm.txt")
+    @app.get("/llms.txt")
     def knowledge_llms():
         origin = _origin()
         return _text(f"""# MultiLLM Knowledge Gateway
@@ -164,4 +165,4 @@ report actual receipt costs and keep the same request ID after uncertain outcome
             "authentication": {"type": "bearer", "env": "MULTILLM_KNOWLEDGE_API_KEY"},
             "skill_url": url_for("knowledge_agent_skill", _external=True),
             "prompt_url": url_for("knowledge_agent_prompt", _external=True),
-            "tools": _tools(), "providers": [name for name, _ in _PROVIDERS]})
+            "tools": tool_catalogue(), "providers": [name for name, _ in KNOWLEDGE_PROVIDERS]})
