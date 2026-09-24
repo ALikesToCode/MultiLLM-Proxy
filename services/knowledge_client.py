@@ -10,6 +10,8 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 
+from services.knowledge_native import NATIVE_OPERATIONS
+
 ENDPOINT = "http://knowledge.internal/v1/dispatch"
 MAX_REQUEST_BYTES = 65536
 # Provider and Alexandria transports accept at most 1 MiB of upstream JSON. The Worker
@@ -18,12 +20,14 @@ MAX_REQUEST_BYTES = 65536
 # would lose a result that has already been charged.
 UPSTREAM_JSON_BYTES = 1048576
 MAX_RESPONSE_BYTES = 6 * UPSTREAM_JSON_BYTES
-DEADLINE_SECONDS = 35
+# Provider tools may wait up to 45 s upstream (for example a DeepWiki answer).
+DEADLINE_SECONDS = 55
 _SLOTS = threading.BoundedSemaphore(8)
 _OPERATIONS = frozenset({
     "context", "search", "artifact", "status", "sources.create", "sources.update",
     "sources.refresh", "jobs.cancel", "policy.update",
     "alexandria.search", "alexandria.inspect", "alexandria.execute", "alexandria.receipt",
+    *NATIVE_OPERATIONS,
 })
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")
 

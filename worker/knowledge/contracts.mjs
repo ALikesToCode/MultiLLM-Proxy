@@ -40,6 +40,18 @@ export function string(value, maximum, name, { optional = false } = {}) {
 // One rule for policy validation and the provider layer, so an approved host is always fetchable.
 const RESERVED_HOST = /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid|example|onion)$/;
 
+// "*" in the policy's host list admits any public host; private and reserved names never pass.
+export const ANY_PUBLIC_HOST = "*";
+
+export function anyPublicHost(allowedHosts) {
+  return Array.isArray(allowedHosts) && allowedHosts.includes(ANY_PUBLIC_HOST);
+}
+
+export function hostAllowed(hostname, allowedHosts) {
+  return !allowedHosts || anyPublicHost(allowedHosts)
+    || allowedHosts.some(host => typeof host === "string" && host.toLowerCase() === hostname);
+}
+
 export function publicHost(value) {
   return typeof value === "string" && value.length <= 253
     && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value)
@@ -52,7 +64,7 @@ export function publicUrl(value, allowedHosts) {
   catch { fail("invalid_source_url", "Use an approved public HTTPS source URL."); }
   if (url.protocol !== "https:" || !publicHost(url.hostname) || url.username || url.password || url.port
     || [...url.searchParams.keys()].some(key => /(?:token|secret|password|credential|signature|api[_-]?key|^key$|^sig$)/i.test(key))
-    || (allowedHosts && !allowedHosts.includes(url.hostname))) {
+    || !hostAllowed(url.hostname, allowedHosts)) {
     fail("source_not_allowed", "The source must use HTTPS on an approved public host, without credentials.");
   }
   url.hash = "";

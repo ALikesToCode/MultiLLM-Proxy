@@ -248,3 +248,20 @@ test("dashboard accounts stored in D1 are verified at the edge with their Knowle
   const external = { ...env, CONTROL_PLANE_DATABASE_URL: "postgresql://control" };
   assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(reader.key, "ping"), external), null, "PostgreSQL accounts stay in the Container");
 });
+
+test("provider tools are served at the edge over MCP and REST", async () => {
+  const { env, dispatched } = environment({ result: { provider: "exa", result: { results: [] } } });
+  const tools = (await (await call(env, mcpRequest(reader.key, "tools/list"))).json()).result.tools.map(tool => tool.name);
+  for (const name of ["knowledge_exa_search", "knowledge_firecrawl_scrape", "knowledge_context7_docs", "knowledge_deepwiki_ask", "knowledge_mintlify_context"]) {
+    assert.ok(tools.includes(name), name);
+  }
+  await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_exa_code_context", arguments: { query: "hono middleware" } }));
+  assert.deepEqual(dispatched.at(-1).operation, "native.exa_code_context");
+  const rest = await call(env, new Request(`${ORIGIN}/v1/knowledge/native/firecrawl_map`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" }, body: JSON.stringify({ url: "https://docs.python.org/3/" }) }));
+  assert.equal(rest.status, 200);
+  assert.deepEqual(dispatched.at(-1), { version: 1, operation: "native.firecrawl_map",
+    principal: { id: "integration:agents", scopes: ["knowledge:read"] }, payload: { url: "https://docs.python.org/3/" } });
+  assert.equal(await handleKnowledgeEdgeRequest(new Request(`${ORIGIN}/v1/knowledge/native/unknown_tool`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}` } }), env), null);
+});

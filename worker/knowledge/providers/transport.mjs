@@ -10,8 +10,8 @@ const ORIGINS = new Set([
   "https://index.mintlify.com", "https://mcp.deepwiki.com",
 ]);
 
-async function readBounded(response, provider) {
-  if (Number(response.headers.get("content-length")) > MAX_RESPONSE_BYTES) {
+async function readBounded(response, provider, maxBytes = MAX_RESPONSE_BYTES) {
+  if (Number(response.headers.get("content-length")) > maxBytes) {
     await response.body?.cancel();
     throw new ProviderError(provider, "provider_response_too_large", "The knowledge provider response exceeded the size limit.");
   }
@@ -24,7 +24,7 @@ async function readBounded(response, provider) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_RESPONSE_BYTES) {
+      if (size > maxBytes) {
         await reader.cancel();
         throw new ProviderError(provider, "provider_response_too_large", "The knowledge provider response exceeded the size limit.");
       }
@@ -42,8 +42,10 @@ async function readBounded(response, provider) {
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
-function parseResponse(text, type, provider) {
+function parseResponse(text, type, provider, acceptText = false) {
   try {
+    // Native calls may request plain-text documentation (for example Context7 type=txt).
+    if (acceptText && /^text\/(?:plain|markdown)\b/i.test(type)) return { text };
     if (!type.includes("text/event-stream")) return JSON.parse(text);
     const messages = text.split(/\r?\n\r?\n/).flatMap((event) => {
       const data = event.split(/\r?\n/).filter((line) => line.startsWith("data:"))
@@ -58,12 +60,12 @@ function parseResponse(text, type, provider) {
   }
 }
 
-async function fetchBounded(provider, url, options, { fetchImpl, signal }) {
+async function fetchBounded(provider, url, options, { fetchImpl = fetch, signal, timeoutMs = REQUEST_TIMEOUT_MS, maxResponseBytes, acceptText }) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   if (signal?.aborted) cancel();
   signal?.addEventListener("abort", cancel, { once: true });
-  const timer = setTimeout(cancel, REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(cancel, timeoutMs);
   try {
     if (controller.signal.aborted) throw new Error("aborted");
     // Workers supports manual redirects; the non-2xx check rejects them before any follow-up.
@@ -78,8 +80,8 @@ async function fetchBounded(provider, url, options, { fetchImpl, signal }) {
       }
       throw upstreamError(provider, response.status, response.headers, body);
     }
-    const text = await readBounded(response, provider);
-    return parseResponse(text, response.headers.get("content-type") || "", provider);
+    const text = await readBounded(response, provider, maxResponseBytes);
+    return parseResponse(text, response.headers.get("content-type") || "", provider, acceptText);
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     if (controller.signal.aborted) {

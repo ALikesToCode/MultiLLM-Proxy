@@ -5,6 +5,7 @@ import { retrieveDeepWiki, retrieveMintlify } from "./mcp.mjs";
 import { ProviderError } from "./transport.mjs";
 import { sourceURL } from "./source-policy.mjs";
 import { configuredKeys } from "./keys.mjs";
+import { ANY_PUBLIC_HOST } from "../contracts.mjs";
 
 export const PROVIDERS = Object.freeze([
   { id: "context7", label: "Context7", credential_env: "CONTEXT7_API_KEY", docs_url: "https://github.com/upstash/context7/blob/master/docs/api-guide.mdx", capabilities: ["library_context"], kind: "discovery" },
@@ -29,7 +30,8 @@ export async function retrieve(provider, intent, { env = {}, fetchImpl = fetch, 
   if (!status) throw new ProviderError("unknown", "unknown_knowledge_provider", "The requested knowledge provider is not supported.", 400);
   if (!status.configured) throw new ProviderError(provider, "provider_not_configured", "The knowledge provider credential is not configured.", 503);
   if (!intent || typeof intent !== "object" || !Array.isArray(intent.allowed_hosts) || intent.allowed_hosts.length > 100
-      || intent.allowed_hosts.some((host) => typeof host !== "string" || !sourceURL(`https://${host}/`, [host]))) {
+      || intent.allowed_hosts.some((host) => typeof host !== "string"
+        || (host !== ANY_PUBLIC_HOST && !sourceURL(`https://${host}/`, [host])))) {
     throw new ProviderError(provider, "invalid_source_policy", "Knowledge retrieval requires an explicit list of public source hosts.", 400);
   }
   if (intent.source_url && !status.capabilities.includes("source_acquisition")) {

@@ -141,6 +141,9 @@ def _mcp_tool(identifier, params, protocol):
     try:
         if operation in alexandria.OPERATIONS:
             payload = alexandria.parse_request(operation, arguments)
+        elif operation in mcp.NATIVE_OPERATIONS:
+            # The Knowledge service validates provider tools against their shared contract.
+            payload = arguments
         elif tool_name in management.OPERATIONS:
             # The private service validates management contracts identically for REST and MCP.
             payload = arguments
@@ -217,6 +220,16 @@ def register_knowledge_routes(app, csrf):
     for operation in ("context", "search", *alexandria.OPERATIONS):
         app.add_url_rule("/v1/knowledge/" + operation.replace(".", "/"), "knowledge_" + operation.replace(".", "_"),
                          query_api(operation), methods=["POST", "OPTIONS"])
+
+    def native_api(tool):
+        operation = "native." + tool
+        if operation not in mcp.NATIVE_OPERATIONS:
+            raise KnowledgeError("unknown_operation", "Unknown Knowledge provider tool.", 404)
+        return jsonify(dispatch(operation, g.authenticated_user, _body()))
+
+    app.add_url_rule("/v1/knowledge/native/<tool>", "knowledge_native",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(native_api)),
+                     methods=["POST", "OPTIONS"])
 
     @app.get("/v1/knowledge/artifacts/<artifact_id>")
     @api_authenticate_only(required_scope="knowledge:read")

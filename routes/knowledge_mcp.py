@@ -9,6 +9,7 @@ from pathlib import Path
 
 from routes import knowledge_alexandria as alexandria
 from routes import knowledge_management as management
+from services.knowledge_native import NATIVE_OPERATIONS, NATIVE_TOOLS
 
 CATALOGUE_PATH = Path(__file__).resolve().parents[1] / "worker" / "knowledge-mcp-catalogue.json"
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26")
@@ -23,6 +24,10 @@ INSTRUCTIONS = (
     "Report each call's actual cost and cost state; reserve_credits is not an upstream price cap. "
     "After interruption use knowledge_alexandria_receipt or replay the identical payload with "
     "the same request_id; never purchase again under a new ID to resolve an unknown outcome. "
+    "Provider tools expose each provider's own features through this gateway: knowledge_context7_*, "
+    "knowledge_exa_*, knowledge_firecrawl_*, knowledge_deepwiki_* and knowledge_mintlify_context accept the "
+    "provider's native parameters, spend its allowance and return its raw, unverified output. "
+    "Prefer knowledge_context for cited answers and the provider tools for provider-specific work. "
     "Use knowledge_status and the available source, job and policy tools for administration. "
     "Management tools require knowledge:manage; retrieval tools require knowledge:read. "
     "Registering a source does not fetch it; refresh and verify publication before querying. "
@@ -53,6 +58,9 @@ def catalogue():
         (_query_tool("context", "Retrieve cited technical excerpts with explicit version evidence and gaps."), "context"),
         (_query_tool("search", "Search technical sources and inspect normalized retrieval diagnostics."), "search"),
         *((tool, "alexandria." + tool["name"].removeprefix("knowledge_alexandria_")) for tool in alexandria.TOOLS),
+        *(({"name": f"knowledge_{name}", "description": spec["description"], "inputSchema": spec["input"],
+            "annotations": {"readOnlyHint": True, "openWorldHint": True}}, f"native.{name}")
+          for name, spec in NATIVE_TOOLS.items()),
         *((tool, management.OPERATIONS[tool["name"]]) for tool in management.TOOLS),
     ]
     return {

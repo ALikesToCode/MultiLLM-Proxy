@@ -442,3 +442,56 @@ test("a cancelled reservation wait never dispatches late provider work", async (
   assert.equal(f.counts.providers, 0);
   assert.equal(f.counts.writes, 0);
 });
+
+test("smart retrieval asks every eligible provider and keeps their context out of excerpts", async () => {
+  const f = await fixture();
+  for (const id of ["context7", "mintlify", "deepwiki"]) f.policy.providers[id] = { ...f.policy.providers.exa };
+  await f.storage.put("policy", f.policy);
+  f.env.CONTEXT7_API_KEY = "synthetic-test-key";
+  const asked = [];
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
+    asked.push(provider);
+    if (provider === "exa") return { observations: [{ kind: "source_excerpt", provider, url: f.source.url, text: f.text, freshness: "live" }], warnings: [] };
+    const kind = provider === "context7" ? "provider_documentation" : "derived_context";
+    return { observations: [{ kind, provider, url: `https://${provider}.example.com/answer`, title: `${provider} answer`, text: `${provider} says limits are configurable.` }],
+      warnings: [] };
+  });
+  const result = await run(f, request({ version: "3.1.3", mode: "smart", repository: "pallets/flask" }));
+  assert.deepEqual([...asked].sort(), ["context7", "deepwiki", "exa", "mintlify"]);
+  assert.deepEqual(result.provider_context.map(item => item.provider).sort(), ["context7", "deepwiki", "mintlify"]);
+  assert.ok(result.provider_context.every(item => item.verification === "provider_generated_unverified"));
+  assert.ok(result.excerpts.every(item => item.provider === "exa"), "provider answers never become excerpts");
+  assert.ok(result.token_count <= 6000);
+});
+
+test("a provider that misses its budget becomes a gap instead of failing the answer", async () => {
+  const f = await fixture();
+  f.policy.providers.mintlify = { ...f.policy.providers.exa };
+  await f.storage.put("policy", f.policy);
+  f.retrieve = async (provider, intent, { invoke, signal }) => invoke(provider, "lookup", async () => {
+    if (provider === "mintlify") {
+      await new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("slow"), { code: "provider_timeout" })), { once: true }));
+    }
+    return { observations: [{ kind: "source_excerpt", provider, url: f.source.url, text: f.text, freshness: "live" }], warnings: [] };
+  });
+  const result = await run(f, request({ version: "3.1.3", mode: "smart" }), { providerBudgetMs: 30 });
+  assert.equal(result.excerpts[0].provider, "exa");
+  assert.ok(result.gaps.some(gap => gap.code === "provider_timeout"));
+  assert.equal(result.status, "partial");
+});
+
+test("an any-public-host policy admits every public source but never private names", async () => {
+  const f = await fixture();
+  const { revision, ...policy } = f.policy;
+  await f.authority.call("policy.update", { ...policy, allowed_hosts: ["*"], expected_revision: revision });
+  const url = "https://docs.example-public-docs.dev/guide/";
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
+    assert.deepEqual(intent.allowed_hosts, ["*"]);
+    return { observations: [{ kind: "source_excerpt", provider, url, text: f.text, freshness: "live" },
+      { kind: "source_excerpt", provider, url: "https://intranet.local/secret", text: f.text, freshness: "live" }], warnings: [] };
+  });
+  const result = await run(f, request({ mode: "smart" }));
+  assert.deepEqual(result.excerpts.map(item => item.url), [url]);
+  await assert.rejects(f.authority.call("policy.update", { ...policy, allowed_hosts: ["*", "localhost"], expected_revision: revision + 1 }),
+    { code: "invalid_policy" });
+});

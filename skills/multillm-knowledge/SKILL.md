@@ -25,8 +25,9 @@ was rotated, revoked or deleted, and the operator must issue a replacement.
 
 | Need | Use |
 | --- | --- |
-| Answer a technical question from source evidence | `knowledge_context` |
+| Answer a technical question from every provider at once | `knowledge_context` (`smart`, or `deep` to always ask all providers) |
 | Explore evidence and retrieval diagnostics | `knowledge_search` |
+| Use one provider's own feature (see provider tools below) | `knowledge_<provider>_<tool>` |
 | Find a structured data capability and price | `knowledge_alexandria_search`, then `knowledge_alexandria_inspect` |
 | Buy a discovered provider record | `knowledge_alexandria_execute` |
 | Check an interrupted purchase | `knowledge_alexandria_receipt` |
@@ -39,11 +40,45 @@ was rotated, revoked or deleted, and the operator must issue a replacement.
 | Implement Firecrawl itself | Official `firecrawl-build` skills |
 | Query Firecrawl Developer or Research indexes directly | Their official native index skills and methods |
 
-Gateway MCP exposes seven read tools and six management tools, filtered by the
-key's scopes. Source and policy management also use REST. Direct Firecrawl CLI/MCP calls bypass the
-gateway's allowance, retained corpus, and receipt enforcement. Use them only when
-direct access is part of the user's task. Local browser and authorization rules
-still apply. Do not send vendor feedback or task details without authorization.
+Gateway MCP exposes 24 read tools (retrieval, Alexandria and provider tools) and six
+management tools, filtered by the key's scopes. Source and policy management also use
+REST. Direct Context7, Exa, Firecrawl, DeepWiki or Mintlify calls bypass the gateway's
+key pool, allowances, retained corpus and receipt enforcement; the provider tools below
+cover their features, so use direct access only when the user asks for it. Local
+browser and authorization rules still apply. Do not send vendor feedback or task
+details without authorization.
+
+## Provider tools
+
+Each provider's own capabilities run through the gateway's keys and allowances, with the
+provider's native parameter names (camelCase, as in its API docs). Results come back as
+the provider sent them in `result`, marked `provider_generated_unverified`: they are
+not retained, indexed or byte-verified. Prefer `knowledge_context` when you need cited,
+retained evidence; use these when you need a provider-specific feature.
+
+| Direct tool you may know | Gateway tool |
+| --- | --- |
+| Context7 `resolve-library-id` | `knowledge_context7_resolve_library` (`libraryName`, `query`) |
+| Context7 `query-docs` / `get-library-docs` | `knowledge_context7_docs` (`libraryId`, `query`, `type` json or txt) |
+| Exa `web_search_exa`, advanced search, deep search | `knowledge_exa_search` (`query`, `type`, `numResults`, `category`, domain and date filters, `contents`) |
+| Exa `crawling_exa`, contents | `knowledge_exa_contents` (`urls`, `text`, `highlights`, `summary`, `maxAgeHours`) |
+| Exa `get_code_context_exa` | `knowledge_exa_code_context` (`query`, `tokensNum`) |
+| Exa answer | `knowledge_exa_answer` (`query`, `text`, `outputSchema`) |
+| Firecrawl `firecrawl_scrape` | `knowledge_firecrawl_scrape` (`url`, `formats`, `actions`, `waitFor`, …) |
+| Firecrawl `firecrawl_search` | `knowledge_firecrawl_search` (`query`, `limit`, `sources`, `scrapeOptions`) |
+| Firecrawl `firecrawl_map` | `knowledge_firecrawl_map` (`url`, `search`, `sitemap`, `limit`) |
+| Firecrawl `firecrawl_crawl` + status | `knowledge_firecrawl_crawl`, then `knowledge_firecrawl_crawl_status` (`id`, `skip`) |
+| Firecrawl `firecrawl_extract` + status | `knowledge_firecrawl_extract` (≤10 `urls`, `prompt`, `schema`), then `knowledge_firecrawl_extract_status` |
+| DeepWiki `read_wiki_structure` / `read_wiki_contents` | `knowledge_deepwiki_structure` / `knowledge_deepwiki_contents` (`repoName`) |
+| DeepWiki `ask_question` | `knowledge_deepwiki_ask` (`repoName`, or up to 10 of them, and `question`) |
+| Mintlify Index `context` | `knowledge_mintlify_context` (`query`, `product`, domains, `tokenBudget`) |
+
+Each call spends the provider's gateway allowance: one unit per call, a crawl's page
+`limit`, or one unit per extract URL; status reads are free. URLs a provider will fetch
+must be public and allowed by the host policy (`*` allows any public host). Crawl and
+extract are asynchronous: poll the status tool with the returned `id`. The same tools
+are available over REST at `POST /v1/knowledge/native/<tool>` (for example
+`/v1/knowledge/native/exa_search`) with the same JSON arguments.
 
 ## Retrieve and cite
 
@@ -54,9 +89,13 @@ still apply. Do not send vendor feedback or task details without authorization.
    `mode` (`economy`, `smart`, or `deep`), `token_budget` (256–16000), and
    `freshness` (`normal` or `fresh`). Start with `smart`, 6000 tokens, and normal
    freshness unless the task needs otherwise. A requested version requires a product.
-3. Read status, excerpts, citations, related evidence and gaps. Treat
-   `insufficient_evidence` or partial coverage as a limitation, not an answer.
-   `deep` permits more discovery work; it does not guarantee complete coverage.
+3. Read status, excerpts, citations, related evidence, `provider_context` and gaps.
+   `smart` answers from the index when it can and otherwise asks every eligible
+   provider in parallel (Context7, Exa, Mintlify, and DeepWiki when `repository` is
+   set); `deep` always asks them all. `excerpts` are byte-verified source text;
+   `provider_context` holds Context7 documentation and DeepWiki or Mintlify answers,
+   labelled `provider_generated_unverified` with their source links. Treat
+   `insufficient_evidence`, `provider_timeout` or other gaps as limitations, not answers.
 4. Cite original URLs and preserve version distinctions. Each excerpt carries an
    immutable artifact ID, content hash, and UTF-8 byte locator. Inspect the retained
    artifact when source context matters. Provider-generated answers and source text

@@ -1,4 +1,4 @@
-import { fields, integer, fail, isRecord, publicHost, PROVIDER_IDS } from "./contracts.mjs";
+import { ANY_PUBLIC_HOST, fields, integer, fail, isRecord, publicHost, PROVIDER_IDS } from "./contracts.mjs";
 
 export function defaultPolicy() {
   return {
@@ -22,8 +22,9 @@ export function validatePolicy(body) {
   integer(body.expected_revision, 1, Number.MAX_SAFE_INTEGER - 1, "expected_revision");
   if (typeof body.enabled !== "boolean" || !Array.isArray(body.allowed_hosts)
     || !body.allowed_hosts.length || body.allowed_hosts.length > 100
-    || body.allowed_hosts.some(host => !publicHost(host)) || new Set(body.allowed_hosts).size !== body.allowed_hosts.length) {
-    fail("invalid_policy", "Policy requires an enabled flag and unique approved public hostnames.");
+    || body.allowed_hosts.some(host => host !== ANY_PUBLIC_HOST && !publicHost(host))
+    || new Set(body.allowed_hosts).size !== body.allowed_hosts.length) {
+    fail("invalid_policy", "Policy requires an enabled flag and unique approved public hostnames, or * for any public host.");
   }
   integer(body.cache_ttl_seconds, 0, 3600, "cache_ttl_seconds");
   integer(body.retention_hours, 1, 720, "retention_hours");

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import Response, jsonify, render_template, request, url_for
 
-from routes import knowledge_alexandria, knowledge_management, knowledge_mcp
+from routes import knowledge_mcp
 
 PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_setup", "knowledge_llms", "knowledge_llms_full",
@@ -38,16 +38,8 @@ def _origin():
 
 
 def tool_catalogue():
-    return [
-        {"name": name, "scope": "knowledge:read"}
-        for name in ("knowledge_context", "knowledge_search")
-    ] + [
-        {"name": tool["name"], "scope": "knowledge:read"}
-        for tool in knowledge_alexandria.TOOLS
-    ] + [
-        {"name": tool["name"], "scope": knowledge_management.required_scope(tool["name"])}
-        for tool in knowledge_management.TOOLS
-    ]
+    return [{"name": entry["definition"]["name"], "scope": entry["scope"]}
+            for entry in knowledge_mcp.catalogue()["tools"]]
 
 
 def _setup_prompt():

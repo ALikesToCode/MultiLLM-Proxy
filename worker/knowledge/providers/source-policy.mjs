@@ -1,4 +1,4 @@
-import { publicHost } from "../contracts.mjs";
+import { hostAllowed, publicHost } from "../contracts.mjs";
 import { ProviderError } from "./transport.mjs";
 
 const SENSITIVE_QUERY = /^(?:api[-_]?key|key|token|access[-_]?token|auth|authorization|password|secret|signature|sig)$/i;
@@ -9,7 +9,7 @@ export function sourceURL(value, allowedHosts = []) {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
     if (!publicHost(url.hostname)) return null;
-    if (!allowedHosts.some((host) => typeof host === "string" && host.toLowerCase() === url.hostname)) return null;
+    if (!hostAllowed(url.hostname, allowedHosts)) return null;
     if ([...url.searchParams.keys()].some((name) => SENSITIVE_QUERY.test(name))) return null;
     url.hash = "";
     return url.href;

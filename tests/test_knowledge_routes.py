@@ -139,8 +139,11 @@ def test_mcp_initialize_and_discovery(app, keys):
     assert response.json["result"]["protocolVersion"] == "2025-06-18"
     assert response.headers["Content-Type"].startswith("application/json")
     tools = mcp(client, keys["reader"], "tools/list").json["result"]["tools"]
+    from services.knowledge_native import NATIVE_TOOLS
+
     assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search",
-        "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt", "knowledge_artifact"]
+        "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt",
+        *(f"knowledge_{name}" for name in NATIVE_TOOLS), "knowledge_artifact"]
     assert tools[4]["annotations"]["readOnlyHint"] is False
     assert mcp(client, keys["reader"], "ping").json["result"] == {}
     assert mcp(client, keys["reader"], "missing").json["error"]["code"] == -32601
@@ -380,3 +383,28 @@ def test_alexandria_private_operation_is_allowlisted(monkeypatch):
         result = knowledge_client.dispatch("alexandria.search", {"username": "reader", "scopes": ["knowledge:read"]}, {"query": "podcasts"})
     assert result["cost"]["credits"] == 0
     assert json.loads(session.post.call_args.kwargs["data"])["operation"] == "alexandria.search"
+
+
+def test_provider_tools_forward_native_arguments_over_mcp_and_rest(app, keys):
+    client = app.test_client()
+    arguments = {"query": "rust async", "type": "deep", "numResults": 20, "contents": {"highlights": True}}
+    with patch.object(knowledge, "dispatch", return_value={"provider": "exa", "result": {"results": []}}) as remote:
+        response = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_exa_search", "arguments": arguments},
+                       **{"MCP-Protocol-Version": "2025-06-18"})
+        assert response.json["result"]["structuredContent"]["provider"] == "exa"
+        assert remote.call_args.args[0] == "native.exa_search"
+        assert remote.call_args.args[2] == arguments
+        rest = client.post("/v1/knowledge/native/firecrawl_map", json={"url": "https://docs.python.org/3/"},
+                           headers=bearer(keys["reader"]))
+        assert rest.status_code == 200
+        assert remote.call_args.args[:3][0] == "native.firecrawl_map"
+        assert client.post("/v1/knowledge/native/unknown_tool", json={}, headers=bearer(keys["reader"])).status_code == 404
+        assert client.post("/v1/knowledge/native/exa_search", json={"query": "x"}, headers=bearer(keys["chat"])).status_code == 403
+    assert remote.call_count == 2
+
+
+def test_container_transport_accepts_every_provider_operation():
+    from services.knowledge_native import NATIVE_OPERATIONS
+
+    assert set(NATIVE_OPERATIONS) <= knowledge_client._OPERATIONS
+    assert knowledge_client.DEADLINE_SECONDS >= 50

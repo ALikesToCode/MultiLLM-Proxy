@@ -166,8 +166,9 @@ route:
 ```
 
 The MCP endpoint is `/mcp`, using streamable HTTP with a privately configured
-bearer key. It exposes seven read tools (context, search, artifacts and the four
-[Alexandria tools](knowledge-alexandria.md#discover-inspect-execute)) and six
+bearer key. It exposes 24 read tools (context, search, artifacts, the four
+[Alexandria tools](knowledge-alexandria.md#discover-inspect-execute) and 17 provider
+tools) and six
 [management tools](knowledge-agents.md#connect-to-the-gateway), filtered by scope. Send
 `Accept: application/json, text/event-stream` (clients that accept only JSON also
 work), initialize with at least `protocolVersion`, and include the negotiated
@@ -177,6 +178,31 @@ required. Cross-origin browser MCP requests are refused. The edge Worker and Fla
 serve the same catalogue: `routes/knowledge_mcp.py` is the source and
 `python scripts/build_knowledge_mcp_catalogue.py` regenerates
 `worker/knowledge-mcp-catalogue.json` (a test fails when they differ).
+
+## Providers, host policy and provider tools
+
+`allowed_hosts` lists the public hosts sources may come from; `*` admits any public
+host (private, reserved and credential-bearing URLs are always refused). With `*`, Exa
+and Mintlify search the whole web instead of the listed domains.
+
+`economy` asks one provider. `smart` answers from the index when an indexed revision
+matches and otherwise asks every eligible provider in parallel (Context7 needs a
+product or repository; DeepWiki needs a repository); `deep` always asks them all and
+retains up to five sources. Providers have a 14 s budget and acquisition 19 s inside
+the 24 s deadline: a provider that misses it becomes a `provider_timeout` gap and the
+answer is built from the rest. Context7 documentation and DeepWiki or Mintlify answers
+are returned in `provider_context` (up to 40% of the token budget, or all of it when no
+source excerpt exists), marked `provider_generated_unverified` and never cited as
+excerpts.
+
+Provider tools (`knowledge_<provider>_<tool>`, or `POST /v1/knowledge/native/<tool>`)
+expose each provider's own features with its native parameters. Their contracts live in
+`worker/knowledge/native-tools.json`, which the Knowledge Worker validates and the MCP
+catalogue publishes. Each call reserves the provider's allowance (one unit per call, a
+crawl's page limit or one unit per extract URL; status reads are free), uses the
+numbered key pool, may wait up to 45 s and returns at most 4 MiB. Results are not
+retained or indexed. Firecrawl crawl and extract jobs belong to the Firecrawl account
+that started them; with several Firecrawl keys, a status read may reach another account.
 
 ## Evidence, freshness and recovery
 

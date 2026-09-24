@@ -43,7 +43,42 @@ export async function retrieveContext7(intent, context) {
     observations.push({ kind: "discovery", url, title: typeof item.title === "string" ? item.title.slice(0, 500) : url, text: "", provider: "context7" });
     if (observations.length === 10) break;
   }
+  const documentation = context7Documentation(library, docs, intent.allowed_hosts);
+  if (documentation) observations.unshift(documentation);
   const warnings = ["context7_sources_require_acquisition"];
   if (intent.version) warnings.push("context7_source_version_unverified");
   return { observations, warnings };
+}
+
+const MAX_DOCUMENTATION_CHARACTERS = 60000;
+
+// Context7's snippets are provider-extracted documentation, not byte-exact source text:
+// they are returned as provider context with their source links, never as excerpts.
+export function context7Documentation(library, docs, allowedHosts) {
+  const sections = [];
+  for (const item of docs.infoSnippets) {
+    if (typeof item?.content !== "string" || !item.content.trim()) continue;
+    const source = sourceURL(item.pageId, allowedHosts);
+    sections.push([typeof item.breadcrumb === "string" ? `### ${item.breadcrumb}` : "", item.content.trim(),
+      source ? `Source: ${source}` : ""].filter(Boolean).join("\n"));
+  }
+  for (const item of docs.codeSnippets) {
+    const code = Array.isArray(item?.codeList) ? item.codeList.filter(entry => typeof entry?.code === "string" && entry.code.trim()) : [];
+    if (!code.length) continue;
+    const source = sourceURL(item.codeId, allowedHosts);
+    sections.push([
+      typeof item.codeTitle === "string" ? `### ${item.codeTitle}` : "",
+      typeof item.codeDescription === "string" ? item.codeDescription.trim() : "",
+      ...code.map(entry => `\`\`\`${typeof entry.language === "string" ? entry.language.replace(/[^\w+#.-]/g, "") : ""}\n${entry.code}\n\`\`\``),
+      source ? `Source: ${source}` : "",
+    ].filter(Boolean).join("\n"));
+  }
+  if (!sections.length) return null;
+  let text = "";
+  for (const section of sections) {
+    if (text.length + section.length + 2 > MAX_DOCUMENTATION_CHARACTERS) break;
+    text += (text ? "\n\n" : "") + section;
+  }
+  return { kind: "provider_documentation", provider: "context7", url: `https://context7.com${library.id}`,
+    title: `Context7: ${typeof library.title === "string" ? library.title.slice(0, 200) : library.id}`, text: text || sections[0].slice(0, MAX_DOCUMENTATION_CHARACTERS) };
 }

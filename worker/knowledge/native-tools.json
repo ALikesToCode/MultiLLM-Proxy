@@ -1,0 +1,907 @@
+{
+  "context7_resolve_library": {
+    "provider": "context7",
+    "description": "Context7: find libraries by name and return their Context7 IDs, versions, snippet counts and trust scores. Use the returned id with knowledge_context7_docs.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "libraryName",
+        "query"
+      ],
+      "properties": {
+        "libraryName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Library or product name, for example react, next.js or express."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "The task or question, used to rank matching libraries."
+        },
+        "fast": {
+          "type": "boolean",
+          "description": "Skip Context7's reranking for lower latency."
+        }
+      }
+    }
+  },
+  "context7_docs": {
+    "provider": "context7",
+    "description": "Context7: up-to-date documentation and code examples for one library, ranked for a question. Accepts /owner/repo or /owner/repo/version IDs from knowledge_context7_resolve_library.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "libraryId",
+        "query"
+      ],
+      "properties": {
+        "libraryId": {
+          "type": "string",
+          "pattern": "^/[^\\s?#]{1,300}$",
+          "description": "Context7 library ID such as /vercel/next.js or /vercel/next.js/v15.1.8."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "What you need from the documentation."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "json",
+            "txt"
+          ],
+          "default": "json",
+          "description": "json returns structured snippets; txt returns LLM-ready text."
+        },
+        "fast": {
+          "type": "boolean",
+          "description": "Skip Context7's reranking for lower latency."
+        }
+      }
+    }
+  },
+  "exa_search": {
+    "provider": "exa",
+    "description": "Exa: web search with full Exa options (search type, result count, categories, domain and date filters, and page text, highlights or summaries under contents).",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "fast",
+            "instant",
+            "deep",
+            "deep-reasoning"
+          ],
+          "default": "auto"
+        },
+        "numResults": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "company",
+            "research paper",
+            "news",
+            "pdf",
+            "github",
+            "personal site",
+            "people",
+            "financial report"
+          ]
+        },
+        "includeDomains": {
+          "type": "array",
+          "maxItems": 1200,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "excludeDomains": {
+          "type": "array",
+          "maxItems": 1200,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "startPublishedDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "endPublishedDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "startCrawlDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "endCrawlDate": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "includeText": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "excludeText": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "userLocation": {
+          "type": "string",
+          "maxLength": 8
+        },
+        "moderation": {
+          "type": "boolean"
+        },
+        "additionalQueries": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "contents": {
+          "type": "object",
+          "description": "Exa contents options, for example {\"highlights\": true} or {\"text\": {\"maxCharacters\": 10000}, \"summary\": true, \"maxAgeHours\": 0}."
+        }
+      }
+    }
+  },
+  "exa_contents": {
+    "provider": "exa",
+    "description": "Exa: fetch clean page text, highlights or summaries for known URLs (crawl), optionally forcing a fresh crawl with maxAgeHours 0.",
+    "units": {
+      "per_call": true
+    },
+    "url_fields": [
+      "urls"
+    ],
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "urls"
+      ],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "text": {
+          "type": [
+            "boolean",
+            "object"
+          ]
+        },
+        "highlights": {
+          "type": [
+            "boolean",
+            "object"
+          ]
+        },
+        "summary": {
+          "type": [
+            "boolean",
+            "object"
+          ]
+        },
+        "maxAgeHours": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 100000
+        },
+        "livecrawlTimeout": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 90000
+        },
+        "subpages": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "subpageTarget": {
+          "type": [
+            "string",
+            "array"
+          ]
+        },
+        "extras": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "exa_code_context": {
+    "provider": "exa",
+    "description": "Exa Code: code examples and API usage context for libraries, SDKs and frameworks, gathered from GitHub, docs and Q&A.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "tokensNum": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 50,
+              "maximum": 100000
+            },
+            {
+              "type": "string",
+              "enum": [
+                "dynamic"
+              ]
+            }
+          ],
+          "default": "dynamic"
+        }
+      }
+    }
+  },
+  "exa_answer": {
+    "provider": "exa",
+    "description": "Exa: a generated answer to a question with the web sources it cites; optionally structured by outputSchema.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "text": {
+          "type": "boolean",
+          "description": "Include full text of the cited sources."
+        },
+        "systemPrompt": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "outputSchema": {
+          "type": "object"
+        },
+        "userLocation": {
+          "type": "string",
+          "maxLength": 8
+        }
+      }
+    }
+  },
+  "firecrawl_scrape": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: scrape one page into markdown, HTML, links, screenshots, summaries or JSON, with actions, waits, location and proxy options.",
+    "units": {
+      "per_call": true
+    },
+    "url_fields": [
+      "url"
+    ],
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "formats": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "onlyMainContent": {
+          "type": "boolean"
+        },
+        "includeTags": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "excludeTags": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "maxAge": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headers": {
+          "type": "object"
+        },
+        "waitFor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "mobile": {
+          "type": "boolean"
+        },
+        "skipTlsVerification": {
+          "type": "boolean"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "parsers": {
+          "type": "array",
+          "maxItems": 10
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object"
+          }
+        },
+        "location": {
+          "type": "object"
+        },
+        "removeBase64Images": {
+          "type": "boolean"
+        },
+        "blockAds": {
+          "type": "boolean"
+        },
+        "proxy": {
+          "type": "string",
+          "enum": [
+            "basic",
+            "stealth",
+            "enhanced",
+            "auto"
+          ]
+        },
+        "storeInCache": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "firecrawl_search": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: search the web, news, images or GitHub/research categories and optionally scrape each result with scrapeOptions.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 5
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "categories": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": [
+              "string",
+              "object"
+            ]
+          }
+        },
+        "tbs": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 8
+        },
+        "includeDomains": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "excludeDomains": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "ignoreInvalidURLs": {
+          "type": "boolean"
+        },
+        "scrapeOptions": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "firecrawl_map": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: list the URLs of a website from its sitemap, search results and links, optionally ranked by a search term.",
+    "units": {
+      "per_call": true
+    },
+    "url_fields": [
+      "url"
+    ],
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "search": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "sitemap": {
+          "type": "string",
+          "enum": [
+            "skip",
+            "include",
+            "only"
+          ]
+        },
+        "includeSubdomains": {
+          "type": "boolean"
+        },
+        "ignoreQueryParameters": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000
+        },
+        "location": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "firecrawl_crawl": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: start an asynchronous crawl of a website and return its job id; read pages with knowledge_firecrawl_crawl_status. Units are charged per page limit.",
+    "units": {
+      "field": "limit",
+      "default": 10
+    },
+    "url_fields": [
+      "url"
+    ],
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "includePaths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "excludePaths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "maxDiscoveryDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "sitemap": {
+          "type": "string",
+          "enum": [
+            "skip",
+            "include",
+            "only"
+          ]
+        },
+        "ignoreQueryParameters": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "default": 10
+        },
+        "crawlEntireDomain": {
+          "type": "boolean"
+        },
+        "allowExternalLinks": {
+          "type": "boolean"
+        },
+        "allowSubdomains": {
+          "type": "boolean"
+        },
+        "delay": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "scrapeOptions": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "firecrawl_crawl_status": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: status and scraped pages of a crawl started with knowledge_firecrawl_crawl. No allowance units.",
+    "units": {
+      "free": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{1,80}$"
+        },
+        "skip": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "Pages to skip, from the previous response's next link."
+        }
+      }
+    }
+  },
+  "firecrawl_extract": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: start an asynchronous LLM extraction of structured data from up to 10 URLs (globs allowed) with a prompt or JSON schema; read it with knowledge_firecrawl_extract_status. Units are charged per URL.",
+    "units": {
+      "count": "urls"
+    },
+    "url_fields": [
+      "urls"
+    ],
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "urls"
+      ],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "prompt": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "systemPrompt": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "schema": {
+          "type": "object"
+        },
+        "enableWebSearch": {
+          "type": "boolean"
+        },
+        "ignoreSitemap": {
+          "type": "boolean"
+        },
+        "includeSubdomains": {
+          "type": "boolean"
+        },
+        "allowExternalLinks": {
+          "type": "boolean"
+        },
+        "showSources": {
+          "type": "boolean"
+        },
+        "ignoreInvalidURLs": {
+          "type": "boolean"
+        },
+        "scrapeOptions": {
+          "type": "object"
+        }
+      }
+    }
+  },
+  "firecrawl_extract_status": {
+    "provider": "firecrawl",
+    "description": "Firecrawl: status and data of an extraction started with knowledge_firecrawl_extract. No allowance units.",
+    "units": {
+      "free": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{1,80}$"
+        }
+      }
+    }
+  },
+  "deepwiki_structure": {
+    "provider": "deepwiki",
+    "description": "DeepWiki: the documentation topics DeepWiki has generated for a public GitHub repository.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repoName"
+      ],
+      "properties": {
+        "repoName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+        }
+      }
+    }
+  },
+  "deepwiki_contents": {
+    "provider": "deepwiki",
+    "description": "DeepWiki: the full generated documentation of a public GitHub repository.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repoName"
+      ],
+      "properties": {
+        "repoName": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+        }
+      }
+    }
+  },
+  "deepwiki_ask": {
+    "provider": "deepwiki",
+    "description": "DeepWiki: an AI answer grounded in the DeepWiki of one or up to 10 public GitHub repositories.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repoName",
+        "question"
+      ],
+      "properties": {
+        "repoName": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+              }
+            }
+          ]
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    }
+  },
+  "mintlify_context": {
+    "provider": "mintlify",
+    "description": "Mintlify Index: research an implementation question across indexed product documentation and return a compact answer with primary-source citations.",
+    "units": {
+      "per_call": true
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "product": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "includeDomains": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "excludeDomains": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "tokenBudget": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 20000,
+          "default": 3000
+        }
+      }
+    }
+  }
+}

@@ -70,7 +70,7 @@ test("provider calls cannot bypass the allowance wrapper", async () => {
   assert.equal(context.calls.length, 0);
 });
 
-test("Context7 resolves first, selects advertised version and acquires no generated text", async () => {
+test("Context7 resolves first, selects advertised version and returns its snippets only as provider context", async () => {
   const context = fixture([
     { results: [{ id: "/other/product", title: "Other" }, { id: "/example/docs", title: "Example", versions: ["v3.1.3"] }] },
     {
@@ -84,8 +84,14 @@ test("Context7 resolves first, selects advertised version and acquires no genera
   assert.equal(target.searchParams.get("libraryId"), "/example/docs/v3.1.3");
   assert.equal(target.searchParams.get("type"), "json");
   assert.equal(context.calls[0].options.headers.Authorization, `Bearer ${SECRET}`);
-  assert.equal(result.observations.length, 2);
-  assert.ok(result.observations.every((item) => item.kind === "discovery" && item.text === "" && !item.version_evidence));
+  const [documentation, ...discoveries] = result.observations;
+  assert.equal(documentation.kind, "provider_documentation");
+  assert.equal(documentation.url, "https://context7.com/example/docs");
+  for (const text of ["possibly_transformed()", "Unverified provider snippet", "Snippet without a source", `Source: ${SOURCE}`]) {
+    assert.ok(documentation.text.includes(text), text);
+  }
+  assert.equal(discoveries.length, 2);
+  assert.ok(discoveries.every((item) => item.kind === "discovery" && item.text === "" && !item.version_evidence));
   assert.ok(result.warnings.includes("context7_source_version_unverified"));
 });
 
@@ -96,7 +102,10 @@ test("Context7 does not invent unsupported versions or promote unapproved citati
   ]);
   const result = await retrieve("context7", INTENT, context);
   assert.equal(new URL(context.calls[1].url).searchParams.get("libraryId"), "/example/docs");
-  assert.equal(result.observations.length, 1);
+  const [documentation, ...discoveries] = result.observations;
+  assert.equal(documentation.kind, "provider_documentation");
+  assert.ok(!documentation.text.includes("unapproved.example.org"), "unapproved hosts are never cited as sources");
+  assert.equal(discoveries.length, 1);
 });
 
 test("Context7 empty search avoids another billable call and enforces provider input bounds", async () => {
@@ -120,7 +129,7 @@ test("Exa search is bounded and only source text becomes an excerpt", async () =
   assert.equal(url, "https://api.exa.ai/search");
   assert.equal(options.headers["x-api-key"], SECRET);
   assert.equal(body.type, "fast");
-  assert.equal(body.numResults, 5);
+  assert.equal(body.numResults, 6);
   assert.deepEqual(body.contents, { text: { maxCharacters: 100000 }, highlights: false, subpages: 0 });
   assert.equal(result.observations[0].text, "Original source text");
   assert.equal(result.observations[0].freshness, "cached_or_unknown");
@@ -367,7 +376,8 @@ test("fresh Exa search and contents require live crawling without fallback", asy
       const context = fixture([{ results: [{ url: SOURCE, text: "live source" }], statuses: [{ id: SOURCE, status: "success" }] }]);
       const result = await retrieve("exa", { ...INTENT, freshness, source_url }, context);
       const options = source_url ? context.calls[0].body : context.calls[0].body.contents;
-      assert.equal(options.livecrawl, "always");
+      assert.equal(options.maxAgeHours, 0, "livecrawl is deprecated; maxAgeHours 0 forces a fresh crawl");
+      assert.equal(options.livecrawl, undefined);
       assert.equal(options.livecrawlTimeout, 10000);
       assert.equal(result.observations[0].freshness, "live");
       assert.equal(result.observations[0].checked_at, undefined);

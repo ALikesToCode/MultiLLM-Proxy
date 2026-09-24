@@ -26,7 +26,7 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
    use the negotiated `MCP-Protocol-Version` thereafter. This server returns JSON
    without a persistent session or GET event stream.
 4. Confirm the tools permitted by the key are discoverable. A key with both scopes
-   sees all thirteen tools below. Ask a small evidence question
+   sees all thirty tools below. Ask a small evidence question
    before using results in a larger task. Scope errors require a correctly scoped
    proxy key; provider keys cannot authenticate to this endpoint.
 
@@ -38,6 +38,11 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 | `knowledge_alexandria_inspect` | Free inspection of a discovered capability |
 | `knowledge_alexandria_execute` | Explicit credit-priced retrieval |
 | `knowledge_alexandria_receipt` | Lookup without purchasing again |
+| `knowledge_context7_resolve_library`, `knowledge_context7_docs` | Context7 library lookup and documentation |
+| `knowledge_exa_search`, `knowledge_exa_contents`, `knowledge_exa_code_context`, `knowledge_exa_answer` | Exa search, page contents, code context and cited answers |
+| `knowledge_firecrawl_scrape`, `_search`, `_map`, `_crawl`, `_crawl_status`, `_extract`, `_extract_status` | Firecrawl scraping, search, site maps, crawls and structured extraction |
+| `knowledge_deepwiki_structure`, `knowledge_deepwiki_contents`, `knowledge_deepwiki_ask` | DeepWiki repository documentation and answers |
+| `knowledge_mintlify_context` | Mintlify Index research with citations |
 | `knowledge_artifact` | Retained source text and citation manifest |
 | `knowledge_status` | Source, job, configuration and allowance status (manage) |
 | `knowledge_source_register` | Register public documentation without fetching (manage) |

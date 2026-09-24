@@ -83,6 +83,36 @@ export function selectPassage(text, query, maxCharacters = 2400) {
   return text.slice(bestStart, end);
 }
 
+const PROVIDER_CONTEXT_KINDS = new Set(["derived_context", "provider_documentation"]);
+
+export function isProviderContext(observation) {
+  return PROVIDER_CONTEXT_KINDS.has(observation?.kind);
+}
+
+/**
+ * Provider-generated answers and extracted documentation, bounded by a token budget.
+ * They are useful context but not byte-verified evidence, so they never become excerpts.
+ */
+export function packProviderContext(items, tokenBudget) {
+  const packed = [];
+  let estimate = 0;
+  for (const item of items) {
+    const remainingBytes = Math.max(0, (tokenBudget - estimate - 60) * 3);
+    if (remainingBytes < 120 || typeof item.text !== "string" || !item.text.trim()) continue;
+    let text = item.text;
+    let truncated = false;
+    if (encoder.encode(text).length > remainingBytes) {
+      let used = 0;
+      text = Array.from(text).filter(character => (used += encoder.encode(character).length) <= remainingBytes).join("");
+      truncated = true;
+    }
+    estimate += Math.ceil(encoder.encode(text).length / 3) + 60;
+    packed.push({ provider: item.provider, kind: item.kind, title: item.title, url: item.url, text, truncated,
+      verification: "provider_generated_unverified" });
+  }
+  return { items: packed, token_count: estimate };
+}
+
 export function packEvidence(candidates, request) {
   const excerpts = [];
   const related = [];

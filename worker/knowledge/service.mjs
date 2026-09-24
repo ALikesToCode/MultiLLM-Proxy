@@ -6,10 +6,11 @@ import { retrieveKnowledge } from "./retrieval.mjs";
 import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs";
 import { dispatchAlexandria } from "./alexandria/service.mjs";
 import { configuredKeys } from "./providers/keys.mjs";
+import { dispatchNative, NATIVE_OPERATIONS } from "./native.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS]);
-const READ = new Set(["context", "search", "artifact", ...ALEXANDRIA_OPERATIONS]);
+  "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+const READ = new Set(["context", "search", "artifact", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 
 export function setupStatus(env) {
   return [
@@ -96,6 +97,7 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
   authorize(principal, READ.has(operation) ? "knowledge:read" : "knowledge:manage");
   const authority = options.authority || getAuthority(env);
   if (ALEXANDRIA_OPERATIONS.includes(operation)) return dispatchAlexandria(env, authority, principal, operation, payload, options);
+  if (NATIVE_OPERATIONS.includes(operation)) return dispatchNative(env, authority, principal, operation, payload, options);
   if (operation === "status") { fields(payload, []); return status(env, authority); }
   if (operation === "context" || operation === "search") {
     return retrieveKnowledge(env, authority, principal, parseQuery(payload), {

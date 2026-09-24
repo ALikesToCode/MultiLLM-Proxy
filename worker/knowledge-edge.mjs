@@ -21,10 +21,12 @@ const PRINCIPAL_FIELDS = ["createdAt", "credentialVersion", "id", "keyHash", "ke
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,80}$/;
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,79}$/;
 const MAX_REQUEST_BYTES = 65536;
-const DEADLINE_MS = 35000;
+// Provider tools may wait up to 45 s upstream (for example a DeepWiki answer).
+const DEADLINE_MS = 55000;
 const MAX_VERIFIED = 256;
 const MAX_KEY_LENGTH = 1024;
 const TOOLS = new Map(catalogue.tools.map(entry => [entry.definition.name, entry]));
+const NATIVE_OPERATIONS = new Set(catalogue.tools.map(entry => entry.operation).filter(operation => operation.startsWith("native.")));
 const ALEXANDRIA_OPERATIONS = ["search", "inspect", "execute", "receipt"];
 // Werkzeug scrypt:32768:8:1 needs 32 MiB, above Node's default ceiling.
 const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
@@ -300,6 +302,9 @@ function restRoute(method, pathname) {
     return { operation: `alexandria.${second}`, scope: "knowledge:read", body: true };
   }
   if (path.length === 2 && method === "GET" && first === "artifacts") return { operation: "artifact", scope: "knowledge:read", id: second };
+  if (path.length === 2 && method === "POST" && first === "native" && NATIVE_OPERATIONS.has(`native.${second}`)) {
+    return { operation: `native.${second}`, scope: "knowledge:read", body: true };
+  }
   if (path.length === 1 && method === "GET" && first === "status") return { operation: "status", scope: "knowledge:manage" };
   if (path.length === 1 && method === "PUT" && first === "policy") return { operation: "policy.update", scope: "knowledge:manage", body: true };
   if (first === "sources") {

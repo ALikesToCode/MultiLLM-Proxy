@@ -1,15 +1,22 @@
 import { fail, KnowledgeError, publicUrl } from "./contracts.mjs";
-import { createArtifact, evidenceMatch, normalizeSourceText, packEvidence, selectPassage, validateChunk } from "./evidence.mjs";
+import { createArtifact, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
 import { confirmSnapshot, metered } from "./operations.mjs";
 import { cacheKey, readCache, writeCache } from "./cache.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
-const MODE_PROVIDER_LIMITS = { economy: 1, smart: 2, deep: 4 };
-const MAX_RETAINED_SOURCES = 3;
+// Economy asks one provider; smart and deep ask every eligible provider in parallel.
+const MODE_PROVIDER_LIMITS = { economy: 1, smart: Infinity, deep: Infinity };
+const OBSERVATIONS_PER_PROVIDER = { economy: 5, smart: 6, deep: 10 };
+const MAX_RETAINED_SOURCES = { economy: 3, smart: 3, deep: 5 };
 // Failed or refused sources do not fill a retention slot, so bound the paid attempts separately.
-const MAX_LIVE_ATTEMPTS = 6;
+const MAX_LIVE_ATTEMPTS = { economy: 6, smart: 6, deep: 10 };
+// Soft budgets inside the 24 s retrieval deadline: a slow provider or acquisition is
+// reported as a gap, and the answer is built from everything that arrived in time.
+const PROVIDER_BUDGET_MS = 14000;
+const LIVE_BUDGET_MS = 19000;
+const RETRIEVAL_DEADLINE_MS = 24000;
 const nowIso = () => new Date().toISOString();
 
 function eligibleArtifact(artifact, snapshot, now) {
@@ -24,9 +31,9 @@ function eligibleArtifact(artifact, snapshot, now) {
 function candidateProviders(env, request, policy) {
   const configured = new Set(providerStatus(env).filter(item => item.configured && policy.providers[item.id]?.enabled).map(item => item.id));
   const order = request.mode === "economy" ? ["exa", "context7", "mintlify", "deepwiki"]
-    : request.product ? ["context7", "exa", "mintlify", "deepwiki"] : ["exa", "mintlify", "deepwiki"];
+    : ["context7", "exa", "mintlify", "deepwiki"];
   return order.filter(id => configured.has(id) && (id !== "deepwiki" || request.repository)
-    && (id !== "context7" || request.product)).slice(0, MODE_PROVIDER_LIMITS[request.mode]);
+    && (id !== "context7" || request.product || request.repository)).slice(0, MODE_PROVIDER_LIMITS[request.mode]);
 }
 
 // Acquisition counts toward the mode's provider limit: reuse a selected provider,
@@ -35,6 +42,10 @@ function acquisitionProviderFor(env, request, policy, providers) {
   const room = providers.length < MODE_PROVIDER_LIMITS[request.mode];
   return ["firecrawl", "exa"].find(id => providerStatus(env).some(item => item.id === id && item.configured)
     && policy.providers[id]?.enabled && (providers.includes(id) || room));
+}
+
+function budgetSignal(state, milliseconds) {
+  return AbortSignal.any([state.signal, AbortSignal.timeout(Math.max(0, Math.round(state.started + milliseconds - performance.now())))]);
 }
 
 function checkAbort(signal) {
@@ -160,17 +171,20 @@ async function liveEvidence(state, env, retrieveFn) {
   const { request, snapshot, signal } = state;
   const providers = candidateProviders(env, request, snapshot.policy);
   const intent = { ...request, allowed_hosts: snapshot.policy.allowed_hosts };
+  const providerSignal = budgetSignal(state, state.budgets.provider);
   const batches = await Promise.all(providers.map(async provider => {
     state.attempts += 1;
     try {
-      const batch = await untilDeadline(() => retrieveFn(provider, intent, { env, signal, authority: state.authority,
-        invoke: (id, suffix, callback) => state.invoke(id, `${provider}-${suffix}`, callback) }), signal);
+      const batch = await untilDeadline(() => retrieveFn(provider, intent, { env, signal: providerSignal, authority: state.authority,
+        invoke: (id, suffix, callback) => state.invoke(id, `${provider}-${suffix}`, callback) }), providerSignal);
       state.successes += 1;
       state.providersUsed.add(provider);
       providerWarnings(state, provider, batch);
-      return batch.observations.slice(0, 5);
+      state.providerContext.push(...batch.observations.filter(isProviderContext));
+      return batch.observations.filter(item => !isProviderContext(item)).slice(0, OBSERVATIONS_PER_PROVIDER[request.mode]);
     } catch (error) {
-      failed(state, safeCode(error), `${provider} could not supply evidence.`);
+      if (providerSignal.aborted && !signal.aborted) failed(state, "provider_timeout", `${provider} did not answer within the retrieval budget.`);
+      else failed(state, safeCode(error), `${provider} could not supply evidence.`);
       return [];
     }
   }));
@@ -179,8 +193,13 @@ async function liveEvidence(state, env, retrieveFn) {
   let attempts = 0;
   const acquisitionProvider = acquisitionProviderFor(env, request, snapshot.policy, providers);
   const observations = batches.flat().sort((a, b) => Number(b.kind === "source_excerpt") - Number(a.kind === "source_excerpt"));
+  const liveSignal = budgetSignal(state, state.budgets.live);
   for (const observation of observations) {
-    if (signal.aborted || stored >= MAX_RETAINED_SOURCES || attempts >= MAX_LIVE_ATTEMPTS) break;
+    if (stored >= MAX_RETAINED_SOURCES[request.mode] || attempts >= MAX_LIVE_ATTEMPTS[request.mode]) break;
+    if (liveSignal.aborted) {
+      if (!signal.aborted) state.gaps.push({ code: "acquisition_budget_reached", message: "Further discovered sources were not acquired so the answer could return in time." });
+      break;
+    }
     let url;
     try { url = publicUrl(observation.url, snapshot.policy.allowed_hosts); }
     catch { continue; }
@@ -194,8 +213,8 @@ async function liveEvidence(state, env, retrieveFn) {
       let original = observation;
       if (!excerpt) {
         state.attempts += 1;
-        const batch = await untilDeadline(() => retrieveFn(acquisitionProvider, { ...intent, source_url: url }, { env, signal, authority: state.authority,
-          invoke: (id, suffix, callback) => state.invoke(id, `acquire-${sequence}-${suffix}`, callback) }), signal);
+        const batch = await untilDeadline(() => retrieveFn(acquisitionProvider, { ...intent, source_url: url }, { env, signal: liveSignal, authority: state.authority,
+          invoke: (id, suffix, callback) => state.invoke(id, `acquire-${sequence}-${suffix}`, callback) }), liveSignal);
         state.successes += 1;
         state.providersUsed.add(acquisitionProvider);
         providerWarnings(state, acquisitionProvider, batch);
@@ -206,6 +225,10 @@ async function liveEvidence(state, env, retrieveFn) {
         stored += 1;
       }
     } catch (error) {
+      if (liveSignal.aborted && !signal.aborted) {
+        state.gaps.push({ code: "acquisition_budget_reached", message: "Further discovered sources were not acquired so the answer could return in time." });
+        break;
+      }
       failed(state, safeCode(error), "A discovered source could not be acquired and retained.");
     }
   }
@@ -256,7 +279,8 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   if (!env.KNOWLEDGE_SNAPSHOTS || !env.KNOWLEDGE_INDEX) fail("storage_unavailable", "Configure the Knowledge snapshot and index bindings.", 503);
   const state = { authority, corpus: options.corpus || new KnowledgeCorpus(env), request, snapshot, signal,
     started, candidates: [], discoveries: [], gaps: [], usage: [], paths: new Set(),
-    providersUsed: new Set(), sourcesToIndex: new Map(), attempts: 0, successes: 0, failed: false };
+    providersUsed: new Set(), sourcesToIndex: new Map(), providerContext: [], attempts: 0, successes: 0, failed: false,
+    budgets: { provider: options.providerBudgetMs ?? PROVIDER_BUDGET_MS, live: options.liveBudgetMs ?? LIVE_BUDGET_MS } };
   const requestId = crypto.randomUUID();
   state.invoke = async (provider, suffix, callback) => {
     checkAbort(signal);
@@ -296,11 +320,16 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   if (latest.policy.revision !== snapshot.policy.revision || !latest.policy.enabled) {
     fail("policy_changed", "Knowledge policy changed during retrieval. Submit a new query using the current policy.", 409);
   }
-  const packed = packEvidence(state.candidates, request);
+  // Verified excerpts keep most of the budget; provider context gets up to 40% of it,
+  // or all of it when no source excerpt was found.
+  const providerContext = packProviderContext(state.providerContext,
+    Math.floor(request.token_budget * (state.candidates.length ? 0.4 : 1)));
+  const packed = packEvidence(state.candidates, { ...request, token_budget: request.token_budget - providerContext.token_count });
   if (!packed.excerpts.length) state.gaps.push({ code: request.version ? "version_not_verified" : "insufficient_evidence",
     message: request.version ? `No retained source verifies the requested version ${request.version}. Related versions are separated.`
       : "No matching source excerpts were available." });
-  const bundle = { ...packed, status: !packed.excerpts.length ? "insufficient_evidence" : state.gaps.length ? "partial" : "ok",
+  const bundle = { ...packed, token_count: packed.token_count + providerContext.token_count, provider_context: providerContext.items,
+    status: !packed.excerpts.length ? (providerContext.items.length ? "partial" : "insufficient_evidence") : state.gaps.length ? "partial" : "ok",
     query: request.query, requested_version: request.version || null, discoveries: state.discoveries,
     gaps: state.gaps, providers_used: [...state.providersUsed], evidence_providers: [...new Set(state.candidates.map(item => item.provider))],
     path: state.paths.size > 1 ? "mixed" : [...state.paths][0] || "live", elapsed_ms: Math.round(performance.now() - state.started),
@@ -327,7 +356,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
 
 export async function retrieveKnowledge(env, authority, principal, request, options = {}) {
   const started = performance.now();
-  const timeout = AbortSignal.timeout(24000);
+  const timeout = AbortSignal.timeout(RETRIEVAL_DEADLINE_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
   const bounded = { call: (operation, payload) => untilDeadline(() => authority.call(operation, payload), signal) };
   // The deadline includes catalogue, cache, snapshots and scheduling, not only HTTP.

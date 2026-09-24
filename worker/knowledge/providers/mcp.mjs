@@ -1,5 +1,6 @@
 import { invalidResponse, jsonPost, ProviderError, requestJSON } from "./transport.mjs";
 import { queryText, sourceLinks } from "./source-policy.mjs";
+import { anyPublicHost } from "../contracts.mjs";
 
 function toolText(provider, response) {
   if (response?.jsonrpc !== "2.0" || response.id !== 1 || response.error || response.result?.isError) {
@@ -13,8 +14,8 @@ function toolText(provider, response) {
   return texts.join("\n\n");
 }
 
-async function callTool(provider, endpoint, name, args, context) {
-  const response = await requestJSON(provider, "context", endpoint, jsonPost({
+export async function callTool(provider, endpoint, name, args, context, operation = "context") {
+  const response = await requestJSON(provider, operation, endpoint, jsonPost({
     jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args },
   }, { Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26" }), context);
   return toolText(provider, response);
@@ -31,7 +32,7 @@ function derived(provider, text, url, intent) {
 export async function retrieveMintlify(intent, context) {
   const args = { query: queryText(intent, "mintlify"), tokenBudget: 3000 };
   if (typeof intent.product === "string" && intent.product.trim()) args.product = intent.product.slice(0, 200);
-  if (intent.allowed_hosts?.length) args.includeDomains = intent.allowed_hosts;
+  if (intent.allowed_hosts?.length && !anyPublicHost(intent.allowed_hosts)) args.includeDomains = intent.allowed_hosts;
   const text = await callTool("mintlify", "https://index.mintlify.com/mcp", "context", args, context);
   return derived("mintlify", text, "https://index.mintlify.com", intent);
 }

@@ -50,7 +50,9 @@ export async function reserve(tx, policy, input, now) {
   const records = [...(await tx.list({ prefix: "reservation:" })).values()];
   if (records.length >= 5000) fail("ledger_full", "Reservation history needs maintenance before new work can be admitted.", 503);
   const used = usageFor(records, input.provider, now);
-  const units = input.provider === "alexandria" ? integer(input.credits, 0, 100000, "reserved credits") : allocation.units_per_call;
+  // Native provider calls reserve their own bound (for example a crawl's page limit).
+  const units = input.provider === "alexandria" ? integer(input.credits, 0, 100000, "reserved credits")
+    : input.units === undefined ? allocation.units_per_call : integer(input.units, 1, 100000, "reserved units");
   if (used.total + units > allocation.limit || (input.background && (
     used.background + units > allocation.background_limit || used.total + units > allocation.limit - allocation.interactive_reserve))) {
     fail("allowance_exhausted", "This operation exceeds the configured provider or background allowance.", 429);
