@@ -66,8 +66,9 @@ async function indexedEvidence(state) {
       checkAbort(state.signal);
       const artifact = await authority.call("artifact.for_key", { key: row.index_key });
       if (!eligibleArtifact(artifact, snapshot, Date.now()) || artifact.status !== "published") continue;
+      // Each version has its own source record, so older revisions of this source are obsolete.
       const source = snapshot.sources.find(item => item.id === artifact.source_id);
-      if (source.current_artifact !== artifact.id && (!request.version || artifact.version?.version !== request.version)) continue;
+      if (source.current_artifact !== artifact.id) continue;
       const text = await untilDeadline(() => corpus.getSnapshot(artifact), state.signal);
       const excerpt = text && validateChunk(artifact, text, row.text);
       if (!excerpt) { state.gaps.push({ code: "invalid_source_span", message: "An index candidate could not be matched to its retained source." }); continue; }
@@ -163,8 +164,7 @@ async function revalidateCandidates(state, snapshot) {
     if (!eligibleArtifact(artifact, snapshot, Date.now())) continue;
     if (state.request.freshness === "fresh" && !originIsFresh(artifact)) continue;
     const source = snapshot.sources.find(item => item.id === artifact.source_id);
-    if (artifact.status === "published" && source.current_artifact !== artifact.id
-      && (!state.request.version || artifact.version?.version !== state.request.version)) continue;
+    if (artifact.status === "published" && source.current_artifact !== artifact.id) continue;
     result.push(candidate);
   }
   return result;

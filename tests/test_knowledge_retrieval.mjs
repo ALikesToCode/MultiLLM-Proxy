@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { retrieve } from "../worker/knowledge/providers/index.mjs";
+import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { fixture, principal, request } from "./knowledge_fixture.mjs";
 
 const run = (f, query = request(), extra = {}) => retrieveKnowledge(f.env, f.authority, principal, query,
@@ -26,6 +27,22 @@ test("indexed citations match retained bytes and cache saves subsequent provider
   await retrieveKnowledge(f.env, f.authority, { ...principal, id: "different-reader" }, query,
     { corpus: f.corpus, cache: f.cache, retrieve: f.retrieve });
   assert.equal(f.counts.searches, 2, "cache entries are principal-scoped");
+});
+
+test("versioned queries cite only the current revision of a refreshed source", async () => {
+  const f = await fixture();
+  const stale = await f.published();
+  const revised = "# Request size limits\n\nFlask 3.1.3 documents the revised request limit.";
+  const current = await createArtifact({ ...f.source, origin_checked: true }, revised, "firecrawl");
+  f.snapshots.set(current.id, revised);
+  await f.authority.call("artifact.save", { artifact: current });
+  const job = await f.authority.call("job.enqueue", { source_id: f.source.id });
+  await f.authority.call("job.publish", { id: job.id, artifact_id: current.id, item_id: "fixture-item-2", index_key: current.index_key });
+  f.rows.push({ text: revised, index_key: current.index_key, score: 0.5 });
+  const result = await run(f, request({ version: "3.1.3" }));
+  assert.deepEqual(result.excerpts.map(item => item.artifact_id), [current.id]);
+  assert.ok(![...result.excerpts, ...result.related_evidence].some(item => item.artifact_id === stale.id),
+    "the higher-ranked stale revision is not evidence");
 });
 
 test("cache reads fail closed when policy or sources are revoked during lookup", async () => {
