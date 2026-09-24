@@ -55,9 +55,9 @@ Shared styles live in `static/css/`:
 | File | Owns |
 | --- | --- |
 | `shell.css` | Tokens, base elements, brand, application and public headers, page header, local navigation, footer |
-| `controls.css` | Buttons (primary, secondary, quiet, danger, small, busy), links, form fields and checks |
-| `components.css` | Panels, cards, meta lists, status pills and tones, tags, callouts, state banners, empty and loading states, dialogs, toasts |
-| `content.css` | Tables with scroll affordance, code blocks, copy buttons, tabs, numbered steps |
+| `controls.css` | Buttons (primary, secondary, quiet, danger, small, busy), links, form fields, label notes and checks |
+| `components.css` | Panels, cards, meta lists, status pills and tones, tags, callouts, state banners, disclosures, empty and loading states, dialogs, toasts |
+| `content.css` | Tables with scroll affordance, code blocks, copy buttons, tabs, numbered steps, endpoint strips |
 
 Page stylesheets add layout only and must not redefine these components.
 Canonical values live in [`static/design-tokens.json`](../static/design-tokens.json)

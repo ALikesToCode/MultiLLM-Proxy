@@ -3,44 +3,79 @@
 {% block title %}Setup guide · MultiLLM Proxy{% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/documentation.css', v='9') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/documentation.css', v='10') }}">
 {% endblock %}
 
+{% macro provider_card(provider) %}
+<article class="card provider-card" id="provider-{{ provider.id }}">
+    <header class="card__header">
+        <div>
+            <p class="provider-card__id">{{ provider.id }}</p>
+            <h4 class="card__title">{{ provider.name }}</h4>
+        </div>
+        <span class="status-pill {{ 'tone-positive' if provider.configured else 'tone-neutral' }}">{{ 'Key configured' if provider.configured else 'No key' }}</span>
+    </header>
+    <p class="card__meta">{{ provider.description }}</p>
+    <div class="tag-list" aria-label="{{ provider.name }} proxy capabilities">
+        {% if provider.unified_chat %}<span class="tag">Unified chat</span>{% endif %}
+        {% if provider.unified_responses %}<span class="tag">Responses</span>{% endif %}
+        {% if provider.unified_images %}<span class="tag">Unified images</span>{% endif %}
+        {% if provider.native_images and not provider.unified_images %}<span class="tag">Native images</span>{% endif %}
+        {% if not provider.unified_chat %}<span class="tag">Native only</span>{% endif %}
+    </div>
+    <dl class="meta-list">
+        <div><dt>Models in proxy</dt><dd>{{ provider.model_count }}{% if provider.live_model_count %} · {{ provider.live_model_count }} live{% endif %}</dd></div>
+        <div><dt>Model catalog</dt><dd>{% if provider.catalog_path %}<code>{{ provider.catalog_path }}</code>{% else %}No standard catalog{% endif %}</dd></div>
+        <div><dt>Server credential</dt><dd class="credential-list">{% for env_name in provider.credential_env %}<code>{{ env_name }}</code>{% endfor %}</dd></div>
+    </dl>
+    {% if provider.native_endpoints %}
+    <details class="disclosure">
+        <summary>{{ provider.native_endpoints | length }} native route{{ '' if provider.native_endpoints | length == 1 else 's' }}</summary>
+        <ul class="endpoint-list">
+            {% for endpoint in provider.native_endpoints %}
+            <li><span>{{ endpoint.method }}</span><code>{{ endpoint.path }}</code><small>{{ endpoint.kind }}</small></li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% endif %}
+</article>
+{% endmacro %}
+
 {% block content %}
-<p><a class="button button--quiet" href="{{ url_for('knowledge_agent_setup') }}">Connect your agent to MultiLLM Knowledge</a></p>
-<div id="proxy-documentation">
+{% set summary = documentation.summary %}
+{% set configured_providers = documentation.providers | selectattr('configured') | list %}
+{% set keyless_providers = documentation.providers | rejectattr('configured') | list %}
+<div id="proxy-documentation" class="docs">
     <script id="proxy-documentation-state" type="application/json">
         {{ documentation | tojson }}
     </script>
 
-    <section class="docs-hero" aria-labelledby="docs-title">
-        <div class="docs-hero__copy">
-            <p class="eyebrow">Live setup guide</p>
-            <h1 id="docs-title">One proxy. Explicit contracts.</h1>
-            <p>
-                Configure provider credentials once, give clients one MultiLLM key, and
-                choose unified chat, explicit image generation, automatic chat failover,
-                or a provider-native route per request.
-            </p>
-            <div class="docs-base-url">
-                <span>Current proxy base URL</span>
-                <code>{{ documentation.base_url }}</code>
-                <button class="button button--secondary" type="button" data-copy-value="{{ documentation.base_url }}">
-                    Copy URL
-                </button>
-            </div>
+    <header class="page-header">
+        <div class="page-header__text">
+            <p class="eyebrow">Setup guide · live from this deployment</p>
+            <h1 class="page-header__title" id="docs-title">One proxy. Explicit contracts.</h1>
+            <p class="page-header__lede">Store provider credentials once on the server, give each client one MultiLLM key, then choose unified chat, explicit image generation, automatic chat failover or a provider-native route per request.</p>
         </div>
-        <dl class="docs-summary" aria-label="Live documentation summary">
-            <div><dt>Providers</dt><dd>{{ documentation.summary.configured_provider_count }}/{{ documentation.summary.provider_count }}</dd><span>configured</span></div>
-            <div><dt>Models</dt><dd>{{ documentation.summary.model_count }}</dd><span>{{ documentation.summary.live_model_count }} live</span></div>
-            <div><dt>Auto routes</dt><dd>{{ documentation.summary.auto_route_count }}</dd><span>chat only</span></div>
-            <div><dt>Image routes</dt><dd>{{ documentation.summary.unified_image_provider_count }}</dd><span>unified providers</span></div>
-        </dl>
-    </section>
+        <div class="page-header__aside">
+            <a class="button button--secondary" href="{{ url_for('knowledge_agent_setup') }}">Connect an agent to Knowledge</a>
+            <a class="button button--quiet" href="{{ url_for('proxy_documentation') }}?format=json">Live JSON</a>
+        </div>
+    </header>
 
-    <nav class="docs-jump-nav" aria-label="Guide sections">
+    <dl class="endpoint-strip on-dark docs-summary" aria-label="Deployment summary">
+        <div class="endpoint-strip__main">
+            <dt>Proxy base URL</dt>
+            <dd><code id="docs-base-url">{{ documentation.base_url }}</code><button class="copy-button" type="button" data-copy-target="docs-base-url" aria-label="Copy the proxy base URL">Copy</button></dd>
+        </div>
+        <div><dt>Provider keys</dt><dd>{{ summary.configured_provider_count }} of {{ summary.provider_count }}</dd></div>
+        <div><dt>Models</dt><dd>{{ summary.model_count }} · {{ summary.live_model_count }} live</dd></div>
+        <div><dt>Auto routes</dt><dd>{{ summary.auto_route_count }} · chat only</dd></div>
+        <div><dt>Image providers</dt><dd>{{ summary.unified_image_provider_count }} unified</dd></div>
+    </dl>
+
+    <nav class="local-nav" aria-label="Guide sections" data-local-nav>
         <a href="#quick-start">Quick start</a>
-        <a href="#agent-setup">Agent setup</a>
+        <a href="#agent-setup">Agent prompt</a>
         <a href="#janitor-ai">Janitor AI</a>
         <a href="#route-contracts">Route contracts</a>
         <a href="#provider-setup">Provider setup</a>
@@ -48,118 +83,114 @@
         <a href="#model-directory">Model directory</a>
     </nav>
 
-    <section class="docs-section" id="quick-start" aria-labelledby="quick-start-title">
-        <header class="docs-section__header">
+    <section class="panel" id="quick-start" aria-labelledby="quick-start-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Start here</p>
                 <h2 id="quick-start-title">Four steps from keys to a response</h2>
+                <p>The same steps work locally, in the container and behind the Cloudflare Worker.</p>
             </div>
-            <a class="text-link" href="{{ url_for('proxy_documentation') }}?format=json">View live JSON</a>
         </header>
-        <ol class="setup-flow">
-            <li>
-                <span>01</span>
-                <div><strong>Store provider keys on the server</strong><p>Use <code>.env.local</code> for local runs or Wrangler secrets for Cloudflare. Never put upstream keys in a browser or client app.</p></div>
-            </li>
-            <li>
-                <span>02</span>
-                <div><strong>Issue one MultiLLM client key</strong><p>Clients authenticate with an admin or user API key. MultiLLM selects the matching server-side provider credential.</p></div>
-            </li>
-            <li>
-                <span>03</span>
-                <div><strong>Discover exact model IDs</strong><p>Call <code>/v1/models</code>. Administrators can refresh provider catalogs from Operations before choosing a model.</p></div>
-            </li>
-            <li>
-                <span>04</span>
-                <div><strong>Choose the contract</strong><p>Use <code>provider:model</code> for explicit chat or images, <code>auto:name</code> for safe chat failover, or a provider prefix for native fidelity.</p></div>
-            </li>
-        </ol>
-
-        <article class="command-card">
-            <div class="command-card__header">
-                <div><strong>Discover models</strong><span>OpenAI-compatible catalog plus cached live provider IDs</span></div>
-                <button class="button button--quiet" type="button" data-copy-value="{{ documentation.examples.models }}">Copy</button>
+        <div class="panel__body docs-stack">
+            <ol class="steps docs-steps">
+                <li><strong>Store provider keys on the server</strong><p>Use <code>.env.local</code> for local runs or Wrangler secrets for Cloudflare. Never put upstream keys in a browser or client app.</p></li>
+                <li><strong>Issue one MultiLLM client key</strong><p>Clients authenticate with an admin or user API key. MultiLLM selects the matching server-side provider credential.</p></li>
+                <li><strong>Discover exact model IDs</strong><p>Call <code>/v1/models</code>. Administrators can refresh provider catalogs from Operations before choosing a model.</p></li>
+                <li><strong>Choose the contract</strong><p>Use <code>provider:model</code> for explicit chat or images, <code>auto:name</code> for chat failover, or a provider prefix for native fidelity.</p></li>
+            </ol>
+            <div class="code-block">
+                <div class="code-block__header">
+                    <span class="code-block__title">Discover models<small>OpenAI-compatible catalog plus cached live provider IDs</small></span>
+                    <button class="copy-button" type="button" data-copy-value="{{ documentation.examples.models }}" aria-label="Copy the model discovery command">Copy</button>
+                </div>
+                <pre><code>{{ documentation.examples.models }}</code></pre>
             </div>
-            <pre><code>{{ documentation.examples.models }}</code></pre>
-        </article>
+        </div>
     </section>
 
-    <section class="docs-section" id="agent-setup" aria-labelledby="agent-setup-title">
-        <header class="docs-section__header">
+    <section class="panel" id="agent-setup" aria-labelledby="agent-setup-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Coding agents</p>
                 <h2 id="agent-setup-title">Connect your application with one prompt</h2>
-                <p>Copy these instructions into your coding agent. They use this deployment's URL and a credential placeholder.</p>
+                <p>Paste these instructions into your coding agent. They use this deployment's URL and a credential placeholder, never a real key.</p>
             </div>
-            <button class="button button--primary" type="button" data-copy-value="{{ documentation.agent_setup_prompt }}">Copy agent prompt</button>
+            <button class="button button--primary" type="button" data-copy-value="{{ documentation.agent_setup_prompt }}" data-copy-message="Agent prompt copied.">Copy agent prompt</button>
         </header>
-        <details class="command-card">
-            <summary>Read the agent setup prompt</summary>
-            <pre><code>{{ documentation.agent_setup_prompt }}</code></pre>
-        </details>
+        <div class="panel__body">
+            <details class="disclosure">
+                <summary>Read the agent setup prompt</summary>
+                <div class="code-block code-block--wrap">
+                    <pre><code>{{ documentation.agent_setup_prompt }}</code></pre>
+                </div>
+            </details>
+        </div>
     </section>
 
-    <section class="docs-section" id="janitor-ai" aria-labelledby="janitor-ai-title">
-        <header class="docs-section__header">
+    {% set janitor = documentation.client_integrations.janitor_ai %}
+    <section class="panel" id="janitor-ai" aria-labelledby="janitor-ai-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Roleplay client</p>
                 <h2 id="janitor-ai-title">Janitor AI configuration</h2>
-                <p>Use the Worker-native compatibility endpoint for durable roleplay memory, complete system-prompt continuity, and automatic Kimi/GLM provider selection.</p>
+                <p>Use the Worker-native compatibility endpoint for durable roleplay memory, complete system-prompt continuity and automatic Kimi/GLM provider selection.</p>
             </div>
+            <span class="panel-tag">Roleplay client</span>
         </header>
-
-        {% set janitor = documentation.client_integrations.janitor_ai %}
-        <div class="secret-guide">
-            <div>
-                <strong>Custom proxy fields</strong>
-                <pre><code>Name=MultiLLM Roleplay
+        <div class="panel__body docs-stack">
+            <div class="docs-pair">
+                <div class="code-block">
+                    <div class="code-block__header">
+                        <span class="code-block__title">Custom proxy fields</span>
+                        <button class="copy-button" type="button" data-copy-value="{{ janitor.proxy_url }}" aria-label="Copy the Janitor AI proxy URL">Copy URL</button>
+                    </div>
+                    <pre><code>Name=MultiLLM Roleplay
 Proxy URL={{ janitor.proxy_url }}
 API key=&lt;value of {{ janitor.api_key_env }}&gt;
 Model={{ janitor.model }}</code></pre>
-            </div>
-            <div>
-                <strong>Janitor switches</strong>
-                <pre><code>Add /chat/completions=Disabled
+                </div>
+                <div class="code-block">
+                    <div class="code-block__header"><span class="code-block__title">Janitor switches</span></div>
+                    <pre><code>Add /chat/completions=Disabled
 Custom prompt=None
 Protocol=OpenAI-compatible
 Transport=HTTPS</code></pre>
+                </div>
             </div>
-        </div>
-        <p class="docs-fine-print">The proxy URL is already the complete Chat Completions endpoint. Save it, hard-refresh Janitor AI, then select <code>MultiLLM Roleplay</code>. Use the Worker-facing <code>{{ janitor.api_key_env }}</code>, never a NanoGPT, NavyAI, or other upstream provider key.</p>
-        <p class="docs-fine-print">Model choices: <code>roleplay:auto</code> uses adaptive routing, <code>roleplay:glm</code> starts on GLM-5.3-Flash with the measured 20% full-model latency guard, and <code>roleplay:5.3-flash</code>, <code>roleplay:5.3</code>, <code>roleplay:5.2</code>, or <code>roleplay:uncensored</code> pin the requested variant.</p>
+            <div class="docs-notes">
+                <p>The proxy URL is already the complete Chat Completions endpoint. Save it, hard-refresh Janitor AI, then select <code>MultiLLM Roleplay</code>. Use the Worker-facing <code>{{ janitor.api_key_env }}</code>, never a NanoGPT, NavyAI or other upstream provider key.</p>
+                <p>Model choices: <code>roleplay:auto</code> uses adaptive routing, <code>roleplay:glm</code> starts on GLM-5.3-Flash with the measured 20% full-model latency guard, and <code>roleplay:5.3-flash</code>, <code>roleplay:5.3</code>, <code>roleplay:5.2</code> or <code>roleplay:uncensored</code> pin the requested variant.</p>
+            </div>
 
-        <aside class="docs-callout">
-            <strong>Try GLM-5.3-Flash directly through OpenCode Go.</strong>
-            <pre><code>Name=MultiLLM OpenCode GLM-5.3-Flash
+            <div class="callout">
+                <strong>Try GLM-5.3-Flash directly through OpenCode Go.</strong>
+                <div class="code-block">
+                    <pre><code>Name=MultiLLM OpenCode GLM-5.3-Flash
 Proxy URL={{ janitor.opencode_proxy_url }}
 API key=&lt;value of {{ janitor.opencode_api_key_env }}&gt;
 Model={{ janitor.opencode_model }}
 Add /chat/completions=Disabled</code></pre>
-            <p>This direct route uses your OpenCode Go subscription and normalizes duplicate reasoning into one provider/model-labelled <code>&lt;think&gt;</code> block. It does not use roleplay Durable Object memory or cross-provider failover, so Janitor must send the conversation history on every request.</p>
-        </aside>
-
-        <aside class="docs-callout docs-callout--warning">
-            <strong>A Janitor <code>connect-src</code> CSP error is controlled by Janitor AI.</strong>
-            <p>If the browser console says it blocked <code>{{ janitor.proxy_url }}</code>, MultiLLM never received the request. CORS headers on this Worker cannot override another site's Content Security Policy. Janitor must allowlist this Worker origin, or the request must come from a client that permits custom origins.</p>
-        </aside>
-        <aside class="docs-callout">
-            <strong>Direct NavyAI is the browser-compatible fallback when Janitor allows <code>api.navy</code>.</strong>
-            <p>Use <code>{{ janitor.direct_navy_url }}</code>, your NavyAI subscription key, and an exact model from NavyAI's catalog. That bypasses MultiLLM, so automatic cross-provider failover and Worker roleplay memory are not available.</p>
-        </aside>
+                </div>
+                <p>This direct route uses your OpenCode Go subscription and normalizes duplicate reasoning into one provider/model-labelled <code>&lt;think&gt;</code> block. It does not use roleplay Durable Object memory or cross-provider failover, so Janitor must send the conversation history on every request.</p>
+            </div>
+            <div class="callout callout--warning">
+                <strong>A Janitor <code>connect-src</code> CSP error is controlled by Janitor AI.</strong>
+                <p>If the browser console says it blocked <code>{{ janitor.proxy_url }}</code>, MultiLLM never received the request. CORS headers on this Worker cannot override another site's Content Security Policy. Janitor must allowlist this Worker origin, or the request must come from a client that permits custom origins.</p>
+            </div>
+            <div class="callout callout--neutral">
+                <strong>Direct NavyAI is the browser-compatible fallback when Janitor allows <code>api.navy</code>.</strong>
+                <p>Use <code>{{ janitor.direct_navy_url }}</code>, your NavyAI subscription key and an exact model from NavyAI's catalog. That bypasses MultiLLM, so automatic cross-provider failover and Worker roleplay memory are not available.</p>
+            </div>
+        </div>
     </section>
 
-    <section class="docs-section" id="route-contracts" aria-labelledby="route-contracts-title">
-        <header class="docs-section__header">
+    <section class="panel" id="route-contracts" aria-labelledby="route-contracts-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Request contracts</p>
                 <h2 id="route-contracts-title">Pick the route that matches the work</h2>
-                <p>Every client uses the proxy key. Provider credentials remain inside the Worker or container.</p>
+                <p>Every client uses the proxy key. Provider credentials stay inside the Worker or container.</p>
             </div>
         </header>
-
-        <div class="contract-table-shell">
-            <table class="contract-table">
-                <thead><tr><th scope="col">Use case</th><th scope="col">Endpoint</th><th scope="col">Model value</th><th scope="col">Routing behavior</th></tr></thead>
+        <div class="data-table-shell" tabindex="0" role="region" aria-labelledby="route-contracts-title">
+            <table class="data-table contract-table">
+                <thead><tr><th scope="col">Use case</th><th scope="col">Endpoint</th><th scope="col">Model value</th><th scope="col">Routing behaviour</th></tr></thead>
                 <tbody>
                     <tr><th scope="row">Unified chat</th><td><code>POST /v1/chat/completions</code></td><td><code>provider:model</code></td><td>One explicit provider; OpenAI-compatible request and stream.</td></tr>
                     <tr><th scope="row">Automatic chat</th><td><code>POST /v1/chat/completions</code></td><td><code>auto:name</code></td><td>Ordered provider candidates; only definite pre-generation rejections advance.</td></tr>
@@ -169,173 +200,173 @@ Add /chat/completions=Disabled</code></pre>
                 </tbody>
             </table>
         </div>
-
-        <div class="example-grid">
-            <article class="command-card">
-                <div class="command-card__header"><div><strong>Unified streaming chat</strong><span>Explicit provider selection</span></div><button class="button button--quiet" type="button" data-copy-value="{{ documentation.examples.chat }}">Copy</button></div>
-                <pre><code>{{ documentation.examples.chat }}</code></pre>
-            </article>
-            <article class="command-card">
-                <div class="command-card__header"><div><strong>Automatic chat failover</strong><span>Saved dashboard priority</span></div><button class="button button--quiet" type="button" data-copy-value="{{ documentation.examples.auto_chat }}">Copy</button></div>
-                <pre><code>{{ documentation.examples.auto_chat }}</code></pre>
-            </article>
-            <article class="command-card">
-                <div class="command-card__header"><div><strong>Unified image generation</strong><span>Explicit provider and image model</span></div><button class="button button--quiet" type="button" data-copy-value="{{ documentation.examples.image }}">Copy</button></div>
-                <pre><code>{{ documentation.examples.image }}</code></pre>
-            </article>
-            <article class="command-card">
-                <div class="command-card__header"><div><strong>Provider-native request</strong><span>Preserve the upstream contract</span></div><button class="button button--quiet" type="button" data-copy-value="{{ documentation.examples.native }}">Copy</button></div>
-                <pre><code>{{ documentation.examples.native }}</code></pre>
-            </article>
+        <div class="panel__body docs-stack">
+            <div class="docs-pair">
+                {% for title, detail, key in [
+                    ('Unified streaming chat', 'Explicit provider selection', 'chat'),
+                    ('Automatic chat failover', 'Saved dashboard priority', 'auto_chat'),
+                    ('Unified image generation', 'Explicit provider and image model', 'image'),
+                    ('Provider-native request', 'Preserve the upstream contract', 'native')
+                ] %}
+                <div class="code-block">
+                    <div class="code-block__header">
+                        <span class="code-block__title">{{ title }}<small>{{ detail }}</small></span>
+                        <button class="copy-button" type="button" data-copy-value="{{ documentation.examples[key] }}" aria-label="Copy the {{ title | lower }} example">Copy</button>
+                    </div>
+                    <pre><code>{{ documentation.examples[key] }}</code></pre>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="docs-pair">
+                <div class="callout callout--warning">
+                    <strong>Images deliberately do not use <code>auto:</code> failover.</strong>
+                    <p>A timeout or server error may happen after a paid generation starts. Retrying another image provider could duplicate cost and output, so image requests stay explicit and single-attempt.</p>
+                </div>
+                <div class="callout">
+                    <strong>Handle both image result shapes.</strong>
+                    <p>Depending on the selected provider and model, inspect <code>data[0].b64_json</code> or <code>data[0].url</code>. MultiLLM does not rewrite successful image payloads.</p>
+                </div>
+            </div>
         </div>
-
-        <aside class="docs-callout docs-callout--warning">
-            <strong>Images deliberately do not use <code>auto:</code> failover.</strong>
-            <p>A timeout or server error may happen after a paid generation starts. Retrying another image provider could duplicate cost and output, so image requests remain explicit and single-attempt.</p>
-        </aside>
-        <aside class="docs-callout">
-            <strong>Handle both image result shapes.</strong>
-            <p>Depending on the selected provider and model, inspect <code>data[0].b64_json</code> or <code>data[0].url</code>. MultiLLM does not rewrite successful image payloads.</p>
-        </aside>
     </section>
 
-    <section class="docs-section" id="provider-setup" aria-labelledby="provider-setup-title">
-        <header class="docs-section__header">
+    <section class="panel" id="provider-setup" aria-labelledby="provider-setup-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Provider setup</p>
-                <h2 id="provider-setup-title">Credentials, capabilities, and native paths</h2>
-                <p>Configuration status is read from this runtime. Only environment-variable names are shown; key values never enter the page.</p>
+                <h2 id="provider-setup-title">Credentials, capabilities and native paths</h2>
+                <p>Read from this runtime. Only environment-variable names appear here; key values never enter the page.</p>
             </div>
             <a class="button button--secondary" href="{{ url_for('status_page') }}#auto-route-catalog-title">Refresh live models</a>
         </header>
-
-        <div class="secret-guide">
-            <div>
-                <strong>Local or container environment</strong>
-                <pre><code>{{ documentation.proxy_credential_env }}=your-client-facing-key
+        <div class="panel__body docs-stack">
+            <div class="docs-pair">
+                <div class="code-block">
+                    <div class="code-block__header">
+                        <span class="code-block__title">Local or container environment</span>
+                        <button class="copy-button" type="button" data-copy-target="docs-env-example" aria-label="Copy the environment template">Copy</button>
+                    </div>
+                    <pre id="docs-env-example"><code>{{ documentation.proxy_credential_env }}=your-client-facing-key
 OPENCODE_GO_API_KEY=your-provider-key
 NANOGPT_API_KEY=your-first-provider-key
 NANOGPT_API_KEY_1=your-second-provider-key
 NANOGPT_PREFERRED_KEY_INDEX=1</code></pre>
-            </div>
-            <div>
-                <strong>Cloudflare secrets</strong>
-                <pre><code>npx wrangler secret put {{ documentation.proxy_credential_env }}
+                </div>
+                <div class="code-block">
+                    <div class="code-block__header">
+                        <span class="code-block__title">Cloudflare secrets</span>
+                        <button class="copy-button" type="button" data-copy-target="docs-wrangler-example" aria-label="Copy the Wrangler commands">Copy</button>
+                    </div>
+                    <pre id="docs-wrangler-example"><code>npx wrangler secret put {{ documentation.proxy_credential_env }}
 npx wrangler secret put FLASK_SECRET_KEY
 npx wrangler secret put JWT_SECRET
 npx wrangler secret put OPENCODE_GO_API_KEY
 npx wrangler secret put NANOGPT_API_KEY
 npx wrangler secret put NANOGPT_API_KEY_1
 npx wrangler deploy --containers-rollout immediate</code></pre>
+                </div>
             </div>
-        </div>
-        <p class="docs-fine-print">Restart local/container services after environment changes. Editing a repository <code>.env</code> file does not rotate secrets in an already deployed Worker.</p>
-        <aside class="docs-callout">
-            <strong>NanoGPT text billing mode: <code>{{ documentation.nanogpt.billing_mode }}</code>.</strong>
-            <p>{% if documentation.nanogpt.subscription_only %}Unified NanoGPT chat, Responses compatibility, key checks, and model discovery use the subscription endpoint. MultiLLM removes <code>caching: true</code> and caller provider/billing overrides because NanoGPT treats those as PAYG selection; no PAYG override is added automatically. Provider-native media routes retain NanoGPT's standard media contract and remain protected by the account's own disabled-PAYG setting.{% else %}NanoGPT text requests use the standard endpoint and may use caller-selected provider or cache routing according to NanoGPT's account settings.{% endif %}</p>
-        </aside>
+            <div class="docs-notes">
+                <p>Restart local and container services after environment changes. Editing a repository <code>.env</code> file does not rotate secrets in an already deployed Worker.</p>
+            </div>
+            <div class="callout">
+                <strong>NanoGPT text billing mode: <code>{{ documentation.nanogpt.billing_mode }}</code>.</strong>
+                <p>{% if documentation.nanogpt.subscription_only %}Unified NanoGPT chat, Responses compatibility, key checks and model discovery use the subscription endpoint. MultiLLM removes <code>caching: true</code> and caller provider/billing overrides because NanoGPT treats those as PAYG selection; no PAYG override is added automatically. Provider-native media routes keep NanoGPT's standard media contract and remain protected by the account's own disabled-PAYG setting.{% else %}NanoGPT text requests use the standard endpoint and may use caller-selected provider or cache routing according to NanoGPT's account settings.{% endif %}</p>
+            </div>
 
-        <div class="provider-grid">
-            {% for provider in documentation.providers %}
-            <article class="provider-card" id="provider-{{ provider.id }}">
-                <header>
-                    <div><p>{{ provider.id }}</p><h3>{{ provider.name }}</h3></div>
-                    <span class="status-pill {{ 'status-pill--ready' if provider.configured else 'status-pill--missing' }}">{{ 'Configured' if provider.configured else 'Key missing' }}</span>
+            <div class="docs-subsection">
+                <header class="docs-subsection__header">
+                    <h3>Providers with a server key <span class="panel-tag">{{ configured_providers | length }}</span></h3>
+                    <p>A configured key is not a connectivity check. Operations shows whether recent requests to each provider succeeded.</p>
                 </header>
-                <p class="provider-card__description">{{ provider.description }}</p>
-                <div class="capability-list" aria-label="{{ provider.name }} proxy capabilities">
-                    {% if provider.unified_chat %}<span>Unified chat</span>{% endif %}
-                    {% if provider.unified_responses %}<span>Responses</span>{% endif %}
-                    {% if provider.unified_images %}<span>Unified images</span>{% endif %}
-                    {% if provider.native_images and not provider.unified_images %}<span>Native images</span>{% endif %}
-                    {% if not provider.unified_chat %}<span>Native only</span>{% endif %}
+                {% if configured_providers %}
+                <div class="card-grid provider-grid">
+                    {% for provider in configured_providers %}{{ provider_card(provider) }}{% endfor %}
                 </div>
-                <dl class="provider-card__facts">
-                    <div><dt>Models in proxy</dt><dd>{{ provider.model_count }}{% if provider.live_model_count %} · {{ provider.live_model_count }} live{% endif %}</dd></div>
-                    <div><dt>Model catalog</dt><dd>{% if provider.catalog_path %}<code>{{ provider.catalog_path }}</code>{% else %}No standard catalog{% endif %}</dd></div>
-                </dl>
-                <div class="credential-list">
-                    <strong>Server credential</strong>
-                    {% for env_name in provider.credential_env %}<code>{{ env_name }}</code>{% endfor %}
-                </div>
-                {% if provider.native_endpoints %}
-                <details>
-                    <summary>{{ provider.native_endpoints | length }} native route{{ '' if provider.native_endpoints | length == 1 else 's' }}</summary>
-                    <ul class="endpoint-list">
-                        {% for endpoint in provider.native_endpoints %}
-                        <li><span>{{ endpoint.method }}</span><code>{{ endpoint.path }}</code><small>{{ endpoint.kind }}</small></li>
-                        {% endfor %}
-                    </ul>
-                </details>
+                {% else %}
+                <div class="empty-state empty-state--bordered"><strong>No provider keys are configured.</strong><p>Add a provider credential to the server environment, then restart the service.</p></div>
                 {% endif %}
-            </article>
-            {% endfor %}
+            </div>
+
+            {% if keyless_providers %}
+            <details class="disclosure docs-subsection">
+                <summary>Supported providers without a key ({{ keyless_providers | length }})</summary>
+                <p class="docs-subsection__hint">Add the listed server credential and restart the service to enable a provider.</p>
+                <div class="card-grid provider-grid">
+                    {% for provider in keyless_providers %}{{ provider_card(provider) }}{% endfor %}
+                </div>
+            </details>
+            {% endif %}
         </div>
     </section>
 
-    <section class="docs-section" id="automatic-routes" aria-labelledby="automatic-routes-title">
-        <header class="docs-section__header">
+    <section class="panel" id="automatic-routes" aria-labelledby="automatic-routes-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Combined providers</p>
                 <h2 id="automatic-routes-title">Current automatic chat priorities</h2>
-                <p>These are the saved routes in this running proxy, not hard-coded examples.</p>
+                <p>The routes saved in this running proxy, not hard-coded examples.</p>
             </div>
             <a class="button button--secondary" href="{{ url_for('status_page') }}#auto-route-panel">Edit priorities</a>
         </header>
-        {% if documentation.auto_routes %}
-        <div class="auto-route-grid">
-            {% for route in documentation.auto_routes %}
-            <article class="auto-route-card">
-                <header><code>{{ route.id }}</code><span>{{ route.candidates | length }} candidates</span></header>
-                <ol>
-                    {% for candidate in route.candidates %}
-                    <li><span>{{ candidate.priority }}</span><code>{{ candidate.id }}</code><small>{{ 'configured' if candidate.configured else 'key missing' }}</small></li>
-                    {% endfor %}
-                </ol>
-            </article>
-            {% endfor %}
+        <div class="panel__body docs-stack">
+            {% if documentation.auto_routes %}
+            <div class="card-grid auto-route-grid">
+                {% for route in documentation.auto_routes %}
+                <article class="card auto-route-card">
+                    <header class="card__header"><h3 class="card__title"><code>{{ route.id }}</code></h3><span class="panel-tag">{{ route.candidates | length }} candidate{{ '' if route.candidates | length == 1 else 's' }}</span></header>
+                    <ol>
+                        {% for candidate in route.candidates %}
+                        <li><span>{{ candidate.priority }}</span><code>{{ candidate.id }}</code><small class="{{ 'tone-positive-text' if candidate.configured else '' }}">{{ 'key configured' if candidate.configured else 'no key' }}</small></li>
+                        {% endfor %}
+                    </ol>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state empty-state--bordered"><strong>No automatic routes are saved.</strong><p>Create one in Operations, then return here for the live priority list.</p></div>
+            {% endif %}
+            <div class="docs-notes">
+                <p>Failover advances only after <code>401</code>, <code>402</code>, <code>403</code>, <code>404</code>, <code>429</code>, or a local open/half-open circuit response. Ambiguous timeouts and generic upstream <code>5xx</code> responses are not replayed. GLM-5.2 defaults to maximum reasoning; semantic <code>max</code> maps to each provider's supported ceiling, while an explicit lower effort is preserved.</p>
+                <p>Long GLM-5.2 contexts use safe adaptive preprocessing by default. Configure <code>GLM_AUTO_OPTIMIZE</code>, <code>GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS</code> (default <code>8000</code>) and <code>GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS</code> (default <code>8</code>). The bounded process-local analysis cache uses SHA-256 keys plus prompt-span offsets only; it never stores conversation text or generated replies. Configure its lifetime with <code>CONTEXT_ANALYSIS_CACHE_TTL_SECONDS</code> (default <code>300</code>) and size with <code>CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES</code> (default <code>2048</code>).</p>
+                <p>Provider prompt caching activates above <code>PROMPT_CACHE_MIN_TOKENS</code> (default <code>1024</code>) when <code>PROMPT_CACHE_ENABLED=true</code>. MultiLLM sends only a provider-supported cache hint or preserves an unchanged schema for automatic-prefix providers. It never stores or replays generated responses, and raw provider routes stay caller-controlled.</p>
+            </div>
         </div>
-        {% else %}
-        <div class="docs-empty"><strong>No automatic routes are saved.</strong><p>Create one in Operations, then return here for the live priority list.</p></div>
-        {% endif %}
-        <p class="docs-fine-print">Failover advances only after <code>401</code>, <code>402</code>, <code>403</code>, <code>404</code>, <code>429</code>, or a local open/half-open circuit response. Ambiguous timeouts and generic upstream <code>5xx</code> responses are not replayed. GLM-5.2 defaults to maximum reasoning; semantic <code>max</code> maps to each provider's supported ceiling, while an explicit lower effort is preserved.</p>
-        <p class="docs-fine-print">Long GLM-5.2 contexts use safe adaptive preprocessing by default. Configure <code>GLM_AUTO_OPTIMIZE</code>, <code>GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS</code> (default <code>8000</code>), and <code>GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS</code> (default <code>8</code>). The bounded process-local analysis cache uses SHA-256 keys plus prompt-span offsets only; it never stores conversation text or generated replies. Configure its lifetime with <code>CONTEXT_ANALYSIS_CACHE_TTL_SECONDS</code> (default <code>300</code>) and size with <code>CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES</code> (default <code>2048</code>).</p>
-        <p class="docs-fine-print">Provider prompt caching activates above <code>PROMPT_CACHE_MIN_TOKENS</code> (default <code>1024</code>) when <code>PROMPT_CACHE_ENABLED=true</code>. MultiLLM sends only a provider-supported cache hint or preserves an unchanged schema for automatic-prefix providers. It never stores or replays generated responses, and raw provider routes stay caller-controlled.</p>
     </section>
 
-    <section class="docs-section" id="model-directory" aria-labelledby="model-directory-title">
-        <header class="docs-section__header">
+    <section class="panel" id="model-directory" aria-labelledby="model-directory-title">
+        <header class="panel__header">
             <div>
-                <p class="eyebrow">Runtime catalog</p>
                 <h2 id="model-directory-title">All models known to this proxy</h2>
-                <p>Built-in IDs, the last successful provider catalogs, saved route references, and virtual <code>auto:</code> models are combined without exposing credentials. Live context and output limits stay attached to each provider entry because gateways may expose different limits for the same model name. Navy entries also retain endpoint, modalities, plan, multiplier, and upstream owner details.</p>
+                <p>Built-in IDs, the last successful provider catalogs, saved route references and virtual <code>auto:</code> models, without credentials. Context and output limits stay attached to each provider entry because gateways may report different limits for the same model name.</p>
             </div>
-            <span class="generated-at">Generated <time datetime="{{ documentation.generated_at }}">{{ documentation.generated_at }}</time></span>
+            <span class="panel-tag">Generated&nbsp;<time datetime="{{ documentation.generated_at }}">{{ documentation.generated_at[:16] | replace('T', ' ') }} UTC</time></span>
         </header>
-
-        <div class="model-toolbar">
-            <label><span>Search models</span><input id="model-search" class="field" type="search" placeholder="glm, image, provider/model…" autocomplete="off"></label>
-            <label><span>Provider</span><select id="model-provider" class="field-select"><option value="">All providers</option></select></label>
-            <label><span>Capability</span><select id="model-capability" class="field-select"><option value="">All capabilities</option><option value="chat">Chat</option><option value="images">Images</option></select></label>
-            <label><span>Source</span><select id="model-source" class="field-select"><option value="">All sources</option><option value="built-in">Built-in</option><option value="live">Live provider</option><option value="route">Route reference</option><option value="auto-route">Automatic route</option></select></label>
+        <div class="panel__body docs-stack">
+            <div class="form-grid model-toolbar">
+                <label class="form-field">Search models<input id="model-search" type="search" placeholder="glm, image, provider/model…" autocomplete="off" spellcheck="false"></label>
+                <label class="form-field">Provider<select id="model-provider"><option value="">All providers</option></select></label>
+                <label class="form-field">Capability<select id="model-capability"><option value="">All capabilities</option><option value="chat">Chat</option><option value="images">Images</option></select></label>
+                <label class="form-field">Source<select id="model-source"><option value="">All sources</option><option value="built-in">Built-in</option><option value="live">Live provider</option><option value="route">Route reference</option><option value="auto-route">Automatic route</option></select></label>
+            </div>
+            <p id="model-result-summary" class="status-note" role="status" aria-live="polite">Loading model catalog…</p>
         </div>
-        <p id="model-result-summary" class="model-result-summary" role="status" aria-live="polite">Loading model catalog…</p>
-        <div class="model-table-shell">
-            <table class="model-table">
+        <div class="data-table-shell" tabindex="0" role="region" aria-labelledby="model-directory-title">
+            <table class="data-table model-table">
                 <thead><tr><th scope="col">Model ID</th><th scope="col">Provider</th><th scope="col">Capabilities</th><th scope="col">Provider details</th><th scope="col">Limits</th><th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Copy</span></th></tr></thead>
                 <tbody id="model-table-body"></tbody>
             </table>
         </div>
-        <div id="model-empty" class="docs-empty" hidden><strong>No matching models.</strong><p>Change the filters or refresh live provider catalogs from Operations.</p></div>
-        <div class="model-pagination" aria-label="Model catalog pages">
-            <button id="model-previous" class="button button--secondary" type="button">Previous</button>
-            <span id="model-page-label">Page 1</span>
-            <button id="model-next" class="button button--secondary" type="button">Next</button>
+        <div id="model-empty" class="empty-state" hidden><strong>No matching models.</strong><p>Change the filters or refresh live provider catalogs from Operations.</p></div>
+        <div class="panel__body table-paging" aria-label="Model catalog pages">
+            <span id="model-page-label" class="status-note">Page 1</span>
+            <div class="button-row">
+                <button id="model-previous" class="button button--secondary button--sm" type="button">Previous</button>
+                <button id="model-next" class="button button--secondary button--sm" type="button">Next</button>
+            </div>
         </div>
     </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/documentation.js', v='10') }}"></script>
+<script src="{{ url_for('static', filename='js/documentation.js', v='11') }}"></script>
 {% endblock %}

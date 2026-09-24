@@ -382,6 +382,47 @@
     background: var(--rose-700);
 }
 
+/* Disclosure: a quiet expandable section for secondary detail. */
+.disclosure > summary {
+    display: flex;
+    width: fit-content;
+    min-height: 2.25rem;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--text-strong);
+    font-size: var(--text-sm);
+    font-weight: 650;
+    list-style: none;
+    cursor: pointer;
+}
+
+.disclosure > summary::-webkit-details-marker {
+    display: none;
+}
+
+.disclosure > summary::before {
+    width: 0.45rem;
+    height: 0.45rem;
+    flex: 0 0 auto;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform var(--motion) var(--ease);
+    content: "";
+}
+
+.disclosure > summary:hover {
+    color: var(--accent-strong);
+}
+
+.disclosure[open] > summary {
+    margin-bottom: 0.75rem;
+}
+
+.disclosure[open] > summary::before {
+    transform: rotate(45deg);
+}
+
 .empty-state {
     display: grid;
     padding: 2rem 1.25rem;
