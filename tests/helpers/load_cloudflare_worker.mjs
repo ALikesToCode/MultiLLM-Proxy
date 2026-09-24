@@ -733,6 +733,10 @@ export async function loadWorkerModule() {
       `from "${new URL("../../worker/api-paths.mjs", import.meta.url)}";`,
     )
     .replace(
+      'from "./worker/fallback-page.mjs";',
+      `from "${new URL("../../worker/fallback-page.mjs", import.meta.url)}";`,
+    )
+    .replace(
       /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,
       "class Container {}\nclass ContainerProxy {}\nconst getContainer = (binding, name) => binding.getByName(name);\nconst switchPort = (request) => request;",
     )
