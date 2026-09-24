@@ -29,6 +29,48 @@ test("indexed citations match retained bytes and cache saves subsequent provider
   assert.equal(f.counts.searches, 2, "cache entries are principal-scoped");
 });
 
+test("indexed chunks of one document share a catalogue lookup and snapshot read", async () => {
+  const f = await fixture();
+  const artifact = await f.published();
+  for (let index = 0; index < 4; index += 1) f.rows.push({ ...f.rows[0], score: 0.8 - index / 10 });
+  const calls = { lookups: 0, snapshots: 0 };
+  const authority = { call: async (operation, payload) => {
+    if (operation === "artifact.for_key") calls.lookups += 1;
+    return f.authority.call(operation, payload);
+  } };
+  f.corpus.getSnapshot = async (item) => {
+    calls.snapshots += 1;
+    return f.snapshots.get(item.id) ?? null;
+  };
+  const result = await retrieveKnowledge(f.env, authority, principal, request({ version: "3.1.3" }),
+    { corpus: f.corpus, cache: f.cache, retrieve: f.retrieve });
+  assert.equal(result.status, "ok");
+  assert.equal(result.excerpts[0].artifact_id, artifact.id);
+  assert.deepEqual([calls.lookups, calls.snapshots], [1, 1]);
+});
+
+test("indexed rows resolve concurrently and keep evidence from rows before a failure", async () => {
+  const f = await fixture();
+  const first = await f.published();
+  f.rows.push({ text: f.text, index_key: "missing-key", score: 0.4 });
+  let inflight = 0;
+  let overlapped = false;
+  const authority = { call: async (operation, payload) => {
+    if (operation !== "artifact.for_key") return f.authority.call(operation, payload);
+    inflight += 1;
+    overlapped ||= inflight > 1;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    inflight -= 1;
+    if (payload.key === "missing-key") throw Object.assign(new Error("catalogue"), { code: "storage_unavailable" });
+    return f.authority.call(operation, payload);
+  } };
+  const result = await retrieveKnowledge(f.env, authority, principal, request({ version: "3.1.3", mode: "economy" }),
+    { corpus: f.corpus, cache: f.cache, retrieve: f.retrieve });
+  assert.equal(overlapped, true);
+  assert.ok(result.excerpts.some(item => item.artifact_id === first.id));
+  assert.ok(result.gaps.some(gap => gap.code === "storage_unavailable"));
+});
+
 test("versioned queries cite only the current revision of a refreshed source", async () => {
   const f = await fixture();
   const stale = await f.published();

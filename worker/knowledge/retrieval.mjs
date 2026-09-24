@@ -65,6 +65,18 @@ function providerWarnings(state, provider, batch) {
   }
 }
 
+// Reads each distinct key once, concurrently, and settles results in input order.
+// Callers walk them in order and stop at the first rejection, keeping the outcome
+// of a sequential loop without one catalogue or snapshot round trip per row.
+function settledInOrder(items, keyOf, read) {
+  const reads = new Map();
+  return Promise.allSettled(items.map(item => {
+    const key = keyOf(item);
+    if (!reads.has(key)) reads.set(key, read(item));
+    return reads.get(key);
+  }));
+}
+
 async function indexedEvidence(state) {
   const { authority, corpus, request, snapshot, invoke } = state;
   if (!snapshot.sources.some(source => source.enabled && source.current_artifact) || !snapshot.policy.providers.ai_search.enabled) return;
@@ -73,14 +85,20 @@ async function indexedEvidence(state) {
     const rows = await invoke("ai_search", "query", () => corpus.search(request));
     state.successes += 1;
     state.paths.add("index");
-    for (const row of rows) {
-      checkAbort(state.signal);
+    checkAbort(state.signal);
+    const resolved = await settledInOrder(rows, row => row.index_key, async row => {
       const artifact = await authority.call("artifact.for_key", { key: row.index_key });
-      if (!eligibleArtifact(artifact, snapshot, Date.now()) || artifact.status !== "published") continue;
+      if (!eligibleArtifact(artifact, snapshot, Date.now()) || artifact.status !== "published") return null;
       // Each version has its own source record, so older revisions of this source are obsolete.
       const source = snapshot.sources.find(item => item.id === artifact.source_id);
-      if (source.current_artifact !== artifact.id) continue;
-      const text = await untilDeadline(() => corpus.getSnapshot(artifact), state.signal);
+      if (source.current_artifact !== artifact.id) return null;
+      return { artifact, text: await untilDeadline(() => corpus.getSnapshot(artifact), state.signal) };
+    });
+    for (const [index, row] of rows.entries()) {
+      checkAbort(state.signal);
+      if (resolved[index].status === "rejected") throw resolved[index].reason;
+      if (!resolved[index].value) continue;
+      const { artifact, text } = resolved[index].value;
       const excerpt = text && validateChunk(artifact, text, row.text);
       if (!excerpt) { state.gaps.push({ code: "invalid_source_span", message: "An index candidate could not be matched to its retained source." }); continue; }
       if (request.freshness === "fresh" && !originIsFresh(artifact)) continue;
@@ -176,8 +194,11 @@ async function liveEvidence(state, env, retrieveFn) {
 
 async function revalidateCandidates(state, snapshot) {
   const result = [];
-  for (const candidate of state.candidates) {
-    const artifact = await state.authority.call("artifact.get", { id: candidate.artifact_id });
+  const artifacts = await settledInOrder(state.candidates, candidate => candidate.artifact_id,
+    candidate => state.authority.call("artifact.get", { id: candidate.artifact_id }));
+  for (const [index, candidate] of state.candidates.entries()) {
+    if (artifacts[index].status === "rejected") throw artifacts[index].reason;
+    const artifact = artifacts[index].value;
     if (!eligibleArtifact(artifact, snapshot, Date.now())) continue;
     if (state.request.freshness === "fresh" && !originIsFresh(artifact)) continue;
     const source = snapshot.sources.find(item => item.id === artifact.source_id);
