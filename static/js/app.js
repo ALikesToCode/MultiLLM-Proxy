@@ -189,7 +189,8 @@ function initializeLocalNavigation() {
             if (entry.isIntersecting) visible.add(entry.target);
             else visible.delete(entry.target);
         });
-        const current = [...links.keys()].find((section) => visible.has(section));
+        // When two sections share the band, the later one is the one being scrolled into.
+        const current = [...links.keys()].filter((section) => visible.has(section)).pop();
         links.forEach((link, section) => {
             if (section === current) link.setAttribute('aria-current', 'true');
             else link.removeAttribute('aria-current');
