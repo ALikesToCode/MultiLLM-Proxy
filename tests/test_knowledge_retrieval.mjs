@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { retrieve } from "../worker/knowledge/providers/index.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";
@@ -470,7 +471,8 @@ test("a provider that misses its budget becomes a gap instead of failing the ans
   await f.storage.put("policy", f.policy);
   f.retrieve = async (provider, intent, { invoke, signal }) => invoke(provider, "lookup", async () => {
     if (provider === "mintlify") {
-      await new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("slow"), { code: "provider_timeout" })), { once: true }));
+      // Model pending I/O: AbortSignal.timeout alone does not keep Node 22 alive.
+      await delay(1000, undefined, { signal });
     }
     return { observations: [{ kind: "source_excerpt", provider, url: f.source.url, text: f.text, freshness: "live" }], warnings: [] };
   });
