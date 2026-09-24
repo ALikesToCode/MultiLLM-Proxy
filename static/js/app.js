@@ -183,6 +183,7 @@ function initializeLocalNavigation() {
         if (section) links.set(section, link);
     });
     const visible = new Set();
+    let active = null;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
             if (entry.isIntersecting) visible.add(entry.target);
@@ -193,6 +194,13 @@ function initializeLocalNavigation() {
             if (section === current) link.setAttribute('aria-current', 'true');
             else link.removeAttribute('aria-current');
         });
+        // On narrow screens the nav scrolls sideways; keep the current section's link in view.
+        const link = links.get(current);
+        if (link && link !== active && nav.scrollWidth > nav.clientWidth) {
+            const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            nav.scrollTo({ left: link.offsetLeft - (nav.clientWidth - link.offsetWidth) / 2, behavior: smooth ? 'smooth' : 'auto' });
+        }
+        active = link || active;
     }, { rootMargin: '-20% 0px -60% 0px' });
     links.forEach((_link, section) => observer.observe(section));
 }
