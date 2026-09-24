@@ -538,7 +538,7 @@
     }
 
     .panel__toolbar,
-    .panel__toolbar > * {
+    .panel__toolbar > :not(.sr-only) {
         width: 100%;
     }
 
