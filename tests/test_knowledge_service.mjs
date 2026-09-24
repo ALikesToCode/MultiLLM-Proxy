@@ -4,6 +4,7 @@ import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { dispatchKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
+import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { fixture, manager, principal } from "./knowledge_fixture.mjs";
@@ -118,6 +119,42 @@ test("terminal jobs make room for new work and expire after thirty days", async 
   now += 31 * 24 * 3600000;
   await authority.call("maintenance");
   assert.deepEqual([...(await f.storage.list({ prefix: "job:" })).keys()], [`job:${job.id}`], "active work is never pruned");
+});
+
+test("read-query discoveries use their own pool and never refresh on a schedule", async () => {
+  const f = await fixture();
+  const discover = i => f.authority.call("source.discover", { url: `https://react.dev/learn/${i}`, product: "react", provider: "exa" });
+  const discovered = [];
+  for (let i = 0; i < 200; i++) discovered.push(await discover(i));
+  const retained = await createArtifact({ ...discovered[0], origin_checked: true }, f.text, "exa");
+  await f.authority.call("artifact.save", { artifact: retained });
+  assert.ok((await f.authority.call("sources.due")).every(source => source.identity_confirmed));
+  const newest = await discover(200);
+  let ids = new Set((await f.authority.call("snapshot")).sources.map(source => source.id));
+  assert.ok(ids.has(newest.id) && ids.has(discovered[0].id), "a discovery with a retained revision is kept");
+  assert.ok(!ids.has(discovered[1].id), "the oldest idle discovery made room");
+  for (let i = 0; i < 199; i++) await f.authority.call("source.create", { url: `https://react.dev/reference/${i}`, product: "react" });
+  await assert.rejects(f.authority.call("source.create", { url: "https://react.dev/blog", product: "react" }), { code: "source_limit" });
+  ids = new Set((await f.authority.call("snapshot")).sources.map(source => source.id));
+  assert.equal(ids.size, 400, "200 registered and 200 discovered sources");
+});
+
+test("registering a discovered source promotes it with the operator settings", async () => {
+  const f = await fixture();
+  const url = "https://flask.palletsprojects.com/en/3.1.3/config/";
+  const found = await f.authority.call("source.discover", { url, product: "flask", version: "3.1.3", provider: "exa", title: "Discovered" });
+  assert.equal(found.identity_confirmed, false);
+  const registered = await f.authority.call("source.create", { url, product: "flask", version: "3.1.3", provider: "firecrawl",
+    pinned: true, refresh_hours: 48, title: "Configuration" });
+  assert.equal(registered.id, found.id);
+  assert.equal(registered.identity_confirmed, true);
+  assert.deepEqual([registered.provider, registered.pinned, registered.refresh_hours, registered.title], ["firecrawl", true, 48, "Configuration"]);
+  assert.equal(registered.revision, found.revision + 1);
+  await assert.rejects(f.authority.call("source.update", { id: found.id, expected_revision: found.revision, enabled: false }),
+    { code: "source_conflict" });
+  assert.deepEqual(await f.authority.call("source.create", { url, product: "flask", version: "3.1.3" }), registered,
+    "registering a confirmed source again changes nothing");
+  assert.ok((await f.authority.call("sources.due")).some(source => source.id === registered.id));
 });
 
 test("live acquisitions can be indexed without paying to acquire the source again", async () => {

@@ -9,6 +9,8 @@ const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unk
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const STATES = new Set([...ACTIVE, ...TERMINAL]);
 const JOB_LIMIT = 1000;
+const REGISTERED_SOURCE_LIMIT = 200;
+const DISCOVERED_SOURCE_LIMIT = 200;
 const JOB_RETENTION_MS = 30 * 24 * 3600000;
 const policyOf = async tx => withProviderDefaults(await tx.get("policy") ?? defaultPolicy());
 const generationOf = async tx => await tx.get("generation") ?? 0;
@@ -36,15 +38,38 @@ async function jobFor(tx, id) {
   return job;
 }
 
+// Read queries discover sources into their own pool, so they cannot fill the registered
+// quota. Evict the oldest discovery that retains no revision, has no active job and was
+// not disabled by an operator.
+async function evictDiscovery(tx, sources) {
+  const jobs = await values(tx, "job:");
+  const busy = new Set([...(await values(tx, "artifact:")).map(artifact => artifact.source_id),
+    ...jobs.filter(job => ACTIVE.has(job.status)).map(job => job.source_id)]);
+  const [evicted] = sources.filter(source => !source.identity_confirmed && source.enabled && !busy.has(source.id))
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (!evicted) fail("discovery_limit", "Retained discoveries fill their catalogue. Register the sources you need or wait for retention to expire.", 409);
+  await tx.delete(`source:${evicted.id}`);
+  for (const job of jobs) if (job.source_id === evicted.id) await tx.delete(`job:${job.id}`);
+}
+
 async function createSource(tx, input, now, discovered = false) {
   const policy = await policyOf(tx);
   const parsed = parseSource(input, policy);
   const id = await digest(`${parsed.url}\0${parsed.product}\0${parsed.version}`);
   const existing = await tx.get(`source:${id}`);
-  if (existing) return existing;
-  if ((await tx.list({ prefix: "source:" })).size >= 200) fail("source_limit", "The corpus supports at most 200 sources.", 409);
-  const source = { ...parsed, id, identity_confirmed: !discovered, revision: 1, fence: 0, current_artifact: null,
-    created_at: new Date(now).toISOString(), last_checked_at: null };
+  if (existing && (discovered || existing.identity_confirmed)) return existing;
+  const sources = await values(tx, "source:");
+  if (discovered) {
+    if (sources.filter(source => !source.identity_confirmed).length >= DISCOVERED_SOURCE_LIMIT) await evictDiscovery(tx, sources);
+  } else if (sources.filter(source => source.identity_confirmed).length >= REGISTERED_SOURCE_LIMIT) {
+    fail("source_limit", "The corpus supports at most 200 registered sources.", 409);
+  }
+  // Registering a discovered source promotes it: operator settings apply, and the new
+  // revision rejects edits made against the discovered record.
+  const source = existing
+    ? { ...existing, ...parsed, title: parsed.title || existing.title, identity_confirmed: true, revision: existing.revision + 1 }
+    : { ...parsed, id, identity_confirmed: !discovered, revision: 1, fence: 0, current_artifact: null,
+      created_at: new Date(now).toISOString(), last_checked_at: null };
   await tx.put(`source:${id}`, source);
   await bump(tx);
   return source;
@@ -112,7 +137,8 @@ async function enqueue(tx, input, now) {
 async function dueSources(tx, now) {
   const policy = await policyOf(tx);
   if (!policy.enabled) return [];
-  const eligible = (await values(tx, "source:")).filter(source => source.enabled
+  // Only registered sources refresh on a schedule; discoveries need an operator to register them.
+  const eligible = (await values(tx, "source:")).filter(source => source.enabled && source.identity_confirmed
     && [source.provider, "ai_search"].every(id => policy.providers[id].enabled
       && policy.providers[id].background_limit >= policy.providers[id].units_per_call)
     && (!source.last_refreshed_at || now - Date.parse(source.last_refreshed_at) >= source.refresh_hours * 3600000))
