@@ -271,7 +271,7 @@ def test_private_transport_uses_one_fixed_submission(monkeypatch):
 
 @pytest.mark.parametrize("response", [
     FakeResponse({"version": True, "result": {}}), FakeResponse({"version": 1, "result": "wrong"}),
-    FakeResponse({"version": 1, "result": {}}, 302), FakeResponse(b"x" * (1048576 + 1)),
+    FakeResponse({"version": 1, "result": {}}, 302), FakeResponse(b"x" * (knowledge_client.MAX_RESPONSE_BYTES + 1)),
     FakeResponse({"version": 1, "result": {}}, headers={"Content-Type": "text/html"}),
     FakeResponse({"version": 1, "result": {}}, headers={"Content-Type": "application/json", "Content-Length": "NaN"}),
     FakeResponse(b'{"version":1,"version":1,"result":{}}'),
@@ -279,6 +279,18 @@ def test_private_transport_uses_one_fixed_submission(monkeypatch):
 def test_invalid_private_responses_fail_closed(response):
     with pytest.raises(knowledge_client.KnowledgeError):
         knowledge_client._decode(response, threading.Event(), time.monotonic() + 1)
+
+
+def test_worst_case_reencoded_upstream_payload_fits_the_private_envelope():
+    count = (knowledge_client.UPSTREAM_JSON_BYTES - 2) // 5
+    upstream = "[" + ",".join(["1e20"] * count) + "]"
+    assert len(upstream) <= knowledge_client.UPSTREAM_JSON_BYTES
+    # The Worker's JSON.stringify writes 1e20 as 21 digits; mirror that re-encoding.
+    receipt = {"status": "ok", "cost": {"credits": 15, "state": "confirmed"}, "data": [10 ** 20] * count}
+    envelope = json.dumps({"version": 1, "result": receipt}, separators=(",", ":")).encode()
+    assert len(envelope) > 4 * knowledge_client.UPSTREAM_JSON_BYTES
+    result = knowledge_client._decode(FakeResponse(envelope), threading.Event(), time.monotonic() + 5)
+    assert len(result["data"]) == count
 
 
 def test_transport_preserves_structured_failure_and_unknown_timeout(monkeypatch):

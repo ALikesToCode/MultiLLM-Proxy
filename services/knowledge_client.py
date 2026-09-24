@@ -12,7 +12,12 @@ from requests.adapters import HTTPAdapter
 
 ENDPOINT = "http://knowledge.internal/v1/dispatch"
 MAX_REQUEST_BYTES = 65536
-MAX_RESPONSE_BYTES = 1048576
+# Provider and Alexandria transports accept at most 1 MiB of upstream JSON. The Worker
+# re-encodes it inside {version, result} with receipt fields: strings never grow, but a
+# number such as 1e20 becomes 21 digits (at most 5.25x). Rejecting that envelope here
+# would lose a result that has already been charged.
+UPSTREAM_JSON_BYTES = 1048576
+MAX_RESPONSE_BYTES = 6 * UPSTREAM_JSON_BYTES
 DEADLINE_SECONDS = 35
 _SLOTS = threading.BoundedSemaphore(8)
 _OPERATIONS = frozenset({
