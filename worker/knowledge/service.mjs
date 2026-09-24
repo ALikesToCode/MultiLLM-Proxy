@@ -3,7 +3,6 @@ import { getAuthority } from "./authority-client.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus } from "./providers/index.mjs";
 import { retrieveKnowledge } from "./retrieval.mjs";
-import { metered } from "./operations.mjs";
 import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs";
 import { dispatchAlexandria } from "./alexandria/service.mjs";
 import { configuredKeys } from "./providers/keys.mjs";
@@ -118,20 +117,16 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
   fail("unknown_operation", "Unknown Knowledge operation.", 404);
 }
 
-export async function maintainKnowledge(env) {
-  const authority = getAuthority(env);
+export async function maintainKnowledge(env, { authority = getAuthority(env), corpus = new KnowledgeCorpus(env) } = {}) {
   await authority.call("maintenance");
-  const snapshot = await authority.call("snapshot");
-  if (!snapshot.policy.enabled) return;
-  const corpus = new KnowledgeCorpus(env);
+  // Retention cleanup does not depend on Knowledge or any allowance being enabled.
+  // Deletes are idempotent: a failed cleanup stays unreadable and a later run retries it.
   for (const artifact of await authority.call("artifacts.expired")) {
     try {
-      await metered(authority, { provider: "ai_search", operation_id: `expire:${artifact.id}:${Date.parse(artifact.expires_at)}`, background: true }, async () => {
-        const claimed = await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
-        await corpus.removeArtifact(claimed);
-        await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
-      });
-    } catch { /* Expired artifacts remain unreadable; an uncertain cleanup is not replayed. */ }
+      const claimed = await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
+      await corpus.removeArtifact(claimed);
+      await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
+    } catch { /* The claimed revision stays unreadable until a later run removes it. */ }
   }
   for (const source of await authority.call("sources.due")) {
     await scheduleSource(env, authority, source.id).catch(() => {});

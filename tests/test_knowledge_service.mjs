@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
-import { dispatchKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
+import { dispatchKnowledge, maintainKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
@@ -155,6 +155,35 @@ test("registering a discovered source promotes it with the operator settings", a
   assert.deepEqual(await f.authority.call("source.create", { url, product: "flask", version: "3.1.3" }), registered,
     "registering a confirmed source again changes nothing");
   assert.ok((await f.authority.call("sources.due")).some(source => source.id === registered.id));
+});
+
+test("retention cleanup runs while Knowledge is disabled and rotates past failing revisions", async () => {
+  const f = await fixture();
+  let now = Date.parse("2026-09-23T00:00:00Z");
+  const authority = new KnowledgeAuthority(f.storage, () => now);
+  const artifacts = [];
+  for (let i = 0; i < 12; i++) {
+    const artifact = await createArtifact({ ...f.source, origin_checked: true }, `${f.text} ${i}`, "firecrawl", now);
+    await authority.call("artifact.save", { artifact });
+    artifacts.push(artifact);
+  }
+  const ids = artifacts.map(artifact => artifact.id).sort();
+  Object.assign(f.policy, { enabled: false });
+  f.policy.providers.ai_search.enabled = false;
+  await f.storage.put("policy", f.policy);
+  now += 169 * 3600000;
+  const failing = new Set(ids.slice(0, 10));
+  const removed = [];
+  const corpus = { async removeArtifact(artifact) {
+    if (failing.has(artifact.id)) throw new Error("index outage");
+    removed.push(artifact.id);
+  } };
+  await maintainKnowledge(f.env, { authority, corpus });
+  assert.deepEqual(removed, []);
+  await maintainKnowledge(f.env, { authority, corpus });
+  assert.deepEqual(removed, ids.slice(10), "later revisions are reached despite repeated failures");
+  for (const id of ids.slice(10)) assert.equal(await authority.call("artifact.get", { id }), null);
+  assert.equal((await authority.call("artifact.get", { id: ids[0] })).status, "expiring");
 });
 
 test("live acquisitions can be indexed without paying to acquire the source again", async () => {

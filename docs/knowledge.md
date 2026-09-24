@@ -183,10 +183,11 @@ cleanup of up to ten expired revisions. Sources discovered by read queries never
 refresh on a schedule; registering the same URL, product and version promotes the
 discovery with the operator's settings. Reads reject expired sources immediately.
 Retention applies to newly acquired/refreshed revisions; changes do not rewrite
-old expiry timestamps. Cleanup requires an enabled storage/background allowance.
-An uncertain cleanup remains fenced and requires operator investigation; do not
-assume physical deletion completed. Review private R2 lifecycle settings and AI
-Search retained items as part of production operations.
+old expiry timestamps. Cleanup runs even while Knowledge or an allowance is disabled.
+Its deletes are idempotent: a revision whose cleanup fails stays unreadable and a
+later run retries it, rotating through expired revisions so one failure cannot starve
+the rest. Review private R2 lifecycle settings and AI Search retained items as part of
+production operations.
 
 Allowances are gateway operation units over a rolling 24-hour window, not provider
 balances or dollar spend. Confirmed work ages out of admission; pending and

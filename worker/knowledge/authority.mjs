@@ -151,6 +151,18 @@ async function dueSources(tx, now) {
   return selected;
 }
 
+// Rotate through expired revisions so a batch that keeps failing cannot starve later ones.
+async function expiredBatch(tx, now) {
+  const expired = (await values(tx, "artifact:")).filter(item => Date.parse(item.expires_at) <= now)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const cursor = await tx.get("expiry_cursor") ?? "";
+  const next = expired.findIndex(item => item.id > cursor);
+  const offset = next < 0 ? 0 : next;
+  const batch = [...expired.slice(offset), ...expired.slice(0, offset)].slice(0, 10);
+  if (batch.length) await tx.put("expiry_cursor", batch.at(-1).id);
+  return batch;
+}
+
 async function updateJob(tx, input, now) {
   fields(input, ["id", "status", "reason", "artifact_id", "item_id", "index_key"], ["id"]);
   const job = await jobFor(tx, input.id);
@@ -275,7 +287,7 @@ export class KnowledgeAuthority {
         await pruneJobs(tx, await values(tx, "job:"), now);
         return { complete: true };
       }
-      if (operation === "artifacts.expired") return (await values(tx, "artifact:")).filter(item => Date.parse(item.expires_at) <= now).slice(0, 10);
+      if (operation === "artifacts.expired") return expiredBatch(tx, now);
       if (operation === "artifact.expiration_claim") {
         const artifact = await tx.get(`artifact:${input.id}`);
         if (!artifact || artifact.expires_at !== input.expires_at || Date.parse(artifact.expires_at) > now) {
