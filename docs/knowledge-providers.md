@@ -72,7 +72,10 @@ for ordinary retrieval. Fresh queries and forced background refresh set
 `maxAge: 0` to require a new acquisition.
 No crawl, browser action, AI extraction, or multi-page PDF parsing is requested.
 The adapter checks `success`, page status, MIME type, original `metadata.sourceURL`,
-and final `metadata.url`; a redirect outside approved hosts is not published.
+and final `metadata.url`; a redirect outside approved hosts is not published. A
+redirect that only adds or drops a trailing slash keeps the requested URL. Any other
+redirect keeps its final URL, reports `firecrawl_source_redirected`, and is not retained
+under the requested source, whose URL may carry version evidence.
 The [v2 schema](https://github.com/firecrawl/firecrawl-docs/blob/main/api-reference/v2-openapi.json)
 documents the original and final URL fields and parser behavior.
 

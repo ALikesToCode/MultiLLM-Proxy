@@ -120,6 +120,18 @@ test("the Firecrawl adapter carries a forced live acquisition through ingestion"
   assert.ok(artifact.checked_at);
 });
 
+test("a trailing-slash redirect still ingests the registered Firecrawl source", async () => {
+  const f = await fixture();
+  f.deps.retrieve = (provider, intent, context) => retrieve(provider, intent, {
+    ...context, env: { FIRECRAWL_API_KEY: "synthetic-test-key" },
+    fetchImpl: async () => Response.json({ success: true, data: { markdown: f.text,
+      metadata: { sourceURL: f.source.url, url: f.source.url.replace(/\/$/, ""), statusCode: 200 } } }),
+  });
+  const result = await f.run();
+  assert.equal(result.status, "completed");
+  assert.equal((await f.authority.call("job.get", { id: f.job.id })).artifact.canonical_url, f.source.url);
+});
+
 test("indexing continues with the next Firecrawl key after a definitive credit rejection", async () => {
   const f = await fixture();
   const keys = [];

@@ -1,6 +1,13 @@
 import { invalidResponse, jsonPost, requestJSON } from "./transport.mjs";
 import { liveAcquisition, observation, requireSourceURL, sourceOperation } from "./source-policy.mjs";
 
+// A redirect that only adds or drops a trailing slash reaches the same page.
+function samePage(requested, final) {
+  const [a, b] = [new URL(requested), new URL(final)];
+  const path = url => url.pathname.replace(/\/+$/, "") || "/";
+  return a.origin === b.origin && a.search === b.search && path(a) === path(b);
+}
+
 export async function retrieveFirecrawl(intent, context) {
   if (!intent.source_url) return { observations: [], warnings: ["firecrawl_requires_source_url"] };
   const source = requireSourceURL(intent.source_url, intent.allowed_hosts, "firecrawl");
@@ -26,5 +33,10 @@ export async function retrieveFirecrawl(intent, context) {
   }, intent.allowed_hosts);
   if (!item) return { observations: [], warnings: ["firecrawl_redirect_outside_source_policy"] };
   if (item.kind === "source_excerpt" && live) item.freshness = "live";
-  return { observations: [item], warnings: data.markdown.length > 100000 ? ["firecrawl_content_truncated"] : [] };
+  const warnings = data.markdown.length > 100000 ? ["firecrawl_content_truncated"] : [];
+  // Keep the requested identity for the same page. A different page keeps its final URL, so
+  // it is not retained under the requested source, whose URL may carry version evidence.
+  if (samePage(source, item.url)) item.url = source;
+  else warnings.push("firecrawl_source_redirected");
+  return { observations: [item], warnings };
 }

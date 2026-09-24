@@ -176,6 +176,19 @@ test("Firecrawl rejects redirects outside policy and unsupported binary response
   assert.deepEqual((await retrieve("firecrawl", { ...INTENT, source_url: SOURCE }, fixture([binary]))).warnings, ["firecrawl_unsupported_source_format"]);
 });
 
+test("Firecrawl keeps the requested source for a same-page redirect only", async () => {
+  const slash = firecrawlDoc();
+  slash.data.metadata.url = `${SOURCE}/`;
+  const moved = firecrawlDoc();
+  moved.data.metadata.url = "https://docs.example.com/stable/limits";
+  const same = await retrieve("firecrawl", { ...INTENT, source_url: SOURCE }, fixture([slash]));
+  assert.equal(same.observations[0].url, SOURCE);
+  assert.deepEqual(same.warnings, []);
+  const other = await retrieve("firecrawl", { ...INTENT, source_url: SOURCE }, fixture([moved]));
+  assert.equal(other.observations[0].url, "https://docs.example.com/stable/limits");
+  assert.deepEqual(other.warnings, ["firecrawl_source_redirected"]);
+});
+
 test("Firecrawl rejects an error page or mismatched original source even on HTTP 200", async () => {
   for (const response of [
     { success: false, error: SECRET },
