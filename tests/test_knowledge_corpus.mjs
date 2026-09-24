@@ -295,3 +295,22 @@ test("expiry cleanup only removes the named immutable artifact and is repeatable
   await assert.rejects(f.corpus.removeArtifact(revision), { code: "invalid_artifact_removal" });
   assert.equal(removed.length, 3);
 });
+
+test("expiry cleanup removes an index item accepted before publication", async () => {
+  const f = fixture();
+  const id = "b".repeat(64);
+  const revision = { ...artifact(), id, snapshot_key: `snapshots/${id}.txt`, index_key: `revisions/${id}.txt` };
+  const removed = [];
+  f.item = { id: "item-pending", key: revision.index_key, status: "error" };
+  f.index.items.delete = async itemId => {
+    removed.push(itemId);
+    f.index.items.list = async () => ({ result: [] });
+  };
+  f.bucket.delete = async key => { removed.push(key); f.objects.delete(key); };
+  await f.corpus.putSnapshot(revision, text);
+  await f.corpus.removeArtifact(revision);
+  assert.deepEqual(removed, ["item-pending", revision.snapshot_key]);
+  // Without an index binding an unpublished revision can still leave storage.
+  await new KnowledgeCorpus({ KNOWLEDGE_SNAPSHOTS: f.bucket }).removeArtifact(revision);
+  assert.deepEqual(removed.slice(2), [revision.snapshot_key]);
+});

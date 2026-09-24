@@ -271,10 +271,12 @@ export class KnowledgeCorpus {
       || artifact.snapshot_key !== `snapshots/${artifact.id}.txt`
       || artifact.index_key !== `revisions/${artifact.id}.txt`
       || artifact.item_id && !/^[A-Za-z0-9_-]{1,128}$/.test(artifact.item_id)) throw invalid("invalid_artifact_removal");
-    if (artifact.item_id) {
+    // An upload can be accepted before publication records its item on the artifact, so
+    // reconcile by the immutable index key whether or not this revision was published.
+    if (artifact.item_id || this.index?.items) {
       const item = await this.reconcileRevision(artifact);
-      if (item && item.id !== artifact.item_id) throw invalid("invalid_artifact_removal");
-      if (item) await this.requireIndex().items.delete(artifact.item_id);
+      if (item && artifact.item_id && item.id !== artifact.item_id) throw invalid("invalid_artifact_removal");
+      if (item) await this.requireIndex().items.delete(item.id);
     }
     await this.requireBucket().delete(artifact.snapshot_key);
   }
