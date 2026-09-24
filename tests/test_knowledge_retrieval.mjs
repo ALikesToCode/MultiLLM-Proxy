@@ -45,6 +45,35 @@ test("versioned queries cite only the current revision of a refreshed source", a
     "the higher-ranked stale revision is not evidence");
 });
 
+test("artifact admission applies the current retention policy", async () => {
+  const f = await fixture();
+  const artifact = await createArtifact({ ...f.source, origin_checked: true }, f.text, "firecrawl");
+  f.policy.providers.firecrawl.retention_allowed = false;
+  await f.storage.put("policy", f.policy);
+  await assert.rejects(f.authority.call("artifact.save", { artifact }), { code: "provider_disabled" });
+  f.policy.providers.firecrawl.retention_allowed = true;
+  f.policy.allowed_hosts = ["react.dev"];
+  await f.storage.put("policy", f.policy);
+  await assert.rejects(f.authority.call("artifact.save", { artifact }), { code: "source_not_allowed" });
+});
+
+test("revoking a host during a live snapshot write removes only bytes that write created", async () => {
+  for (const created of [true, false]) {
+    const f = await fixture();
+    const discarded = [];
+    f.corpus.putSnapshot = async (artifact, value) => {
+      f.snapshots.set(artifact.id, value);
+      const { revision, ...policy } = f.policy;
+      await f.authority.call("policy.update", { ...policy, expected_revision: revision, allowed_hosts: ["react.dev"] });
+      return { key: artifact.snapshot_key, created };
+    };
+    f.corpus.discardSnapshot = async artifact => { discarded.push(artifact.id); f.snapshots.delete(artifact.id); };
+    await assert.rejects(run(f), { code: "policy_changed" });
+    assert.equal(discarded.length, created ? 1 : 0);
+    assert.equal(f.snapshots.size, created ? 0 : 1);
+  }
+});
+
 test("cache reads fail closed when policy or sources are revoked during lookup", async () => {
   for (const revokePolicy of [false, true]) {
     const f = await fixture();

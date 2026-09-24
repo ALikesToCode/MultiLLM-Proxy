@@ -2,7 +2,7 @@ import { fail, KnowledgeError, publicUrl } from "./contracts.mjs";
 import { createArtifact, evidenceMatch, normalizeSourceText, packEvidence, selectPassage, validateChunk } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
-import { metered } from "./operations.mjs";
+import { confirmSnapshot, metered } from "./operations.mjs";
 import { cacheKey, readCache, writeCache } from "./cache.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
@@ -104,9 +104,9 @@ async function storeObservation(state, observation, sequence) {
   // Record the immutable manifest before R2 so interrupted writes remain discoverable
   // for retention cleanup. An unreadable snapshot can never become an excerpt.
   await authority.call("artifact.save", { artifact: candidate });
-  await state.invoke("ai_search", `snapshot-${sequence}`, () => corpus.putSnapshot(candidate, text));
+  const written = await state.invoke("ai_search", `snapshot-${sequence}`, () => corpus.putSnapshot(candidate, text));
   checkAbort(state.signal);
-  const artifact = await authority.call("artifact.save", { artifact: candidate });
+  const artifact = await confirmSnapshot(authority, corpus, candidate, written);
   const excerpt = validateChunk(artifact, text, selectPassage(text, request.query));
   if (excerpt && (request.freshness !== "fresh" || originIsFresh(artifact))) {
     state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: 0.75 });

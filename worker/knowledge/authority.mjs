@@ -181,6 +181,8 @@ async function saveArtifact(tx, artifact) {
   const source = await sourceFor(tx, artifact.source_id);
   if (artifact.canonical_url !== source.url || artifact.product !== source.product || artifact.requested_version !== source.version
     || !source.enabled) fail("invalid_artifact", "The artifact does not match an enabled source.");
+  // Admission and the post-write confirmation both apply the current retention policy.
+  retainedByPolicy(artifact, await policyOf(tx));
   if (!Number.isFinite(Date.parse(artifact.expires_at)) || !Number.isFinite(Date.parse(artifact.fetched_at))) fail("invalid_artifact", "Invalid artifact timestamps.");
   const existing = await tx.get(`artifact:${artifact.id}`);
   if (existing) {

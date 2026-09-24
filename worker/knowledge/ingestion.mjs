@@ -1,6 +1,7 @@
 import { publicUrl } from "./contracts.mjs";
 import { createArtifact, normalizeSourceText } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
+import { confirmSnapshot } from "./operations.mjs";
 
 const NO_RETRY = { retries: { limit: 0, delay: "1 second" }, timeout: "2 minutes" };
 const READ_RETRY = { retries: { limit: 2, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" };
@@ -69,9 +70,10 @@ async function persistSnapshot(context, artifact, text) {
   if (previous && previous.content_hash !== artifact.content_hash) throw ingestionError("artifact_conflict");
   await context.authority.call("artifact.save", { artifact });
   await update(context, { status: "acquiring", artifact_id: artifact.id, index_key: artifact.index_key });
+  let written;
   try {
     if (!previous || await context.corpus.getSnapshot(previous) !== text) {
-      await context.metered(context.authority, {
+      written = await context.metered(context.authority, {
         provider: "ai_search", operation_id: `${context.jobId}:snapshot`, background: true, job_id: context.jobId,
       }, () => context.corpus.putSnapshot(previous ?? artifact, text));
     }
@@ -79,6 +81,7 @@ async function persistSnapshot(context, artifact, text) {
     if (REFUSED_ERRORS.has(safeCode(error))) throw error;
     throw ingestionError("snapshot_outcome_unknown");
   }
+  await confirmSnapshot(context.authority, context.corpus, artifact, written);
   await update(context, { status: "snapshot", artifact_id: artifact.id, index_key: artifact.index_key });
   return { artifact_id: artifact.id, checked_at: artifact.checked_at };
 }

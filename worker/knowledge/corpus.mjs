@@ -30,6 +30,14 @@ function validateArtifact(artifact) {
     || artifact.byte_length > MAX_SNAPSHOT_BYTES) throw invalid();
 }
 
+function assertRemovable(artifact) {
+  validateArtifact(artifact);
+  if (!/^[a-f0-9]{64}$/.test(artifact.id ?? "")
+    || artifact.snapshot_key !== `snapshots/${artifact.id}.txt`
+    || artifact.index_key !== `revisions/${artifact.id}.txt`
+    || artifact.item_id && !/^[A-Za-z0-9_-]{1,128}$/.test(artifact.item_id)) throw invalid("invalid_artifact_removal");
+}
+
 async function hash(bytes) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, "0")).join("");
@@ -148,7 +156,13 @@ export class KnowledgeCorpus {
       customMetadata: { content_hash: artifact.content_hash },
     });
     if (result === null && await this.getSnapshot(artifact) !== text) throw invalid("snapshot_conflict");
-    return artifact.snapshot_key;
+    return { key: artifact.snapshot_key, created: result !== null };
+  }
+
+  /** Remove bytes a write created for a revision that lost retention permission meanwhile. */
+  async discardSnapshot(artifact) {
+    assertRemovable(artifact);
+    await this.requireBucket().delete(artifact.snapshot_key);
   }
 
   async getSnapshot(artifact) {
@@ -266,11 +280,7 @@ export class KnowledgeCorpus {
   }
 
   async removeArtifact(artifact) {
-    validateArtifact(artifact);
-    if (!/^[a-f0-9]{64}$/.test(artifact.id ?? "")
-      || artifact.snapshot_key !== `snapshots/${artifact.id}.txt`
-      || artifact.index_key !== `revisions/${artifact.id}.txt`
-      || artifact.item_id && !/^[A-Za-z0-9_-]{1,128}$/.test(artifact.item_id)) throw invalid("invalid_artifact_removal");
+    assertRemovable(artifact);
     // An upload can be accepted before publication records its item on the artifact, so
     // reconcile by the immutable index key whether or not this revision was published.
     if (artifact.item_id || this.index?.items) {

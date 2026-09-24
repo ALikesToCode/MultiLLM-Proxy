@@ -162,6 +162,26 @@ test("an exhausted key pool fails the job so a later refresh can acquire again",
   assert.equal((await f.run(workflow(), next.id)).status, "completed");
 });
 
+test("revoking retention during the snapshot write fails the job and discards its bytes", async () => {
+  const f = await fixture();
+  const discarded = [];
+  f.corpus.putSnapshot = async (artifact, content) => {
+    f.counts.write += 1;
+    f.snapshots.set(artifact.id, content);
+    const policy = await f.storage.get("policy");
+    policy.providers.firecrawl.retention_allowed = false;
+    await f.storage.put("policy", policy);
+    return { key: artifact.snapshot_key, created: true };
+  };
+  f.corpus.discardSnapshot = async artifact => { discarded.push(artifact.id); f.snapshots.delete(artifact.id); };
+  const result = await f.run();
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason, "provider_disabled");
+  assert.equal(discarded.length, 1);
+  assert.equal(f.snapshots.size, 0);
+  assert.equal(f.counts.upload, 0);
+});
+
 test("derived answers and source URL substitution cannot become snapshots", async () => {
   for (const observation of [
     { kind: "derived_context", text: "An answer", url: "https://flask.palletsprojects.com/en/3.1.3/limits/" },

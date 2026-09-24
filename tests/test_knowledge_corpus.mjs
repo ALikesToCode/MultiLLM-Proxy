@@ -314,3 +314,17 @@ test("expiry cleanup removes an index item accepted before publication", async (
   await new KnowledgeCorpus({ KNOWLEDGE_SNAPSHOTS: f.bucket }).removeArtifact(revision);
   assert.deepEqual(removed.slice(2), [revision.snapshot_key]);
 });
+
+test("snapshot writes report creation and discards only the named immutable object", async () => {
+  const f = fixture();
+  const id = "c".repeat(64);
+  const revision = { ...artifact(), id, snapshot_key: `snapshots/${id}.txt`, index_key: `revisions/${id}.txt` };
+  assert.deepEqual(await f.corpus.putSnapshot(revision, text), { key: revision.snapshot_key, created: true });
+  assert.deepEqual(await f.corpus.putSnapshot(revision, text), { key: revision.snapshot_key, created: false });
+  const deleted = [];
+  f.bucket.delete = async key => { deleted.push(key); f.objects.delete(key); };
+  await assert.rejects(f.corpus.discardSnapshot({ ...revision, snapshot_key: "pre-existing-user-data" }), { code: "invalid_artifact_removal" });
+  await f.corpus.discardSnapshot(revision);
+  assert.deepEqual(deleted, [revision.snapshot_key]);
+  assert.equal(await f.corpus.getSnapshot(revision), null);
+});
