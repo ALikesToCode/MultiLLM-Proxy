@@ -591,6 +591,15 @@ samp {
 }
 
 @media (max-width: 40rem) {
+    /* The public header wraps to two rows here; let it scroll away and pin the section nav. */
+    .site-header {
+        position: relative;
+    }
+
+    .site-header ~ .app-main .local-nav {
+        top: 0;
+    }
+
     .site-header__inner {
         flex-wrap: wrap;
         row-gap: 0;

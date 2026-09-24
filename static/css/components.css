@@ -274,10 +274,9 @@
 /* Callouts and page state. `.alert` is the warning callout used by server-rendered notices. */
 .callout,
 .alert {
-    display: grid;
+    display: block;
     margin: 0;
     padding: 0.85rem 1rem;
-    gap: 0.25rem;
     border: 1px solid var(--border);
     border-left: 4px solid var(--accent-fill);
     border-radius: var(--radius-sm);
@@ -293,7 +292,11 @@
 }
 
 .callout p {
-    margin: 0;
+    margin: 0.25rem 0 0;
+}
+
+.callout > p:first-child {
+    margin-top: 0;
 }
 
 .callout--warning,
