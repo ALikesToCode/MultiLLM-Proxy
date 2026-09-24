@@ -148,6 +148,8 @@ def main(argv=None) -> None:
     application = app_module.app
     application.config["IMAGE_RELAY_CATALOG_AUTO_REFRESH"] = False
     # Reviewers edit templates while the preview runs; production keeps Jinja's cache.
+    # The config key matters: app.run(debug=False) otherwise resets auto_reload.
+    application.config["TEMPLATES_AUTO_RELOAD"] = True
     application.jinja_env.auto_reload = True
     preview_fixtures.install(application, knowledge_mode=args.knowledge, badge=not args.no_badge)
     assert_synthetic_credentials()
