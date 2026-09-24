@@ -195,9 +195,16 @@ Background jobs persist references and reuse retained live acquisitions. They
 publish only after AI Search reports completion and its chunks match the source.
 An upload acknowledgement alone is not readiness. After bounded polling,
 `pending_index`/`unknown` remain visible; refreshing the source resumes
-reconciliation using the same job and operation receipts. Ambiguous acquisition
-or upload is never automatically paid for again. Cancellation stops future
-steps; accepted upstream work and its charge may still complete.
+reconciliation using the same job and operation receipts. The hourly scheduler
+also re-polls up to five such jobs that have been idle for ten minutes, including
+discovered sources, so their uploads publish without a manual refresh. Ambiguous
+acquisition or upload is never automatically paid for again. Cancellation stops
+future steps; accepted upstream work and its charge may still complete.
+
+Every result reports `index_diagnostics`: index hits returned, hits admitted as
+evidence, and skipped hits by reason (`unpublished`, `superseded`, `ineligible`,
+`unknown_revision`, `span_mismatch`, `not_fresh`). A query answered from the live
+path despite many hits usually means those revisions are still awaiting publication.
 
 The hourly scheduler rotates up to five eligible due registered sources and attempts
 cleanup of up to ten expired revisions. Sources discovered by read queries never

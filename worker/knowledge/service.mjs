@@ -131,4 +131,7 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
   for (const source of await authority.call("sources.due")) {
     await scheduleSource(env, authority, source.id).catch(() => {});
   }
+  for (const job of await authority.call("jobs.reconcilable")) {
+    await scheduleSource(env, authority, job.source_id, undefined, job.artifact_id ?? undefined).catch(() => {});
+  }
 }

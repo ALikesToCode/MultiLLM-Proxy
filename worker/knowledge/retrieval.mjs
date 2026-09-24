@@ -92,22 +92,32 @@ async function indexedEvidence(state) {
     state.successes += 1;
     state.paths.add("index");
     checkAbort(state.signal);
+    const diagnostics = { hits: rows.length, admitted: 0, skipped: {} };
+    state.indexDiagnostics = diagnostics;
+    const skip = reason => { diagnostics.skipped[reason] = (diagnostics.skipped[reason] ?? 0) + 1; };
     const resolved = await settledInOrder(rows, row => row.index_key, async row => {
       const artifact = await authority.call("artifact.for_key", { key: row.index_key });
-      if (!eligibleArtifact(artifact, snapshot, Date.now()) || artifact.status !== "published") return null;
+      if (!artifact) return { skipped: "unknown_revision" };
+      if (!eligibleArtifact(artifact, snapshot, Date.now())) return { skipped: "ineligible" };
+      if (artifact.status !== "published") return { skipped: "unpublished" };
       // Each version has its own source record, so older revisions of this source are obsolete.
       const source = snapshot.sources.find(item => item.id === artifact.source_id);
-      if (source.current_artifact !== artifact.id) return null;
+      if (source.current_artifact !== artifact.id) return { skipped: "superseded" };
       return { artifact, text: await untilDeadline(() => corpus.getSnapshot(artifact), state.signal) };
     });
     for (const [index, row] of rows.entries()) {
       checkAbort(state.signal);
       if (resolved[index].status === "rejected") throw resolved[index].reason;
-      if (!resolved[index].value) continue;
-      const { artifact, text } = resolved[index].value;
+      const { artifact, text, skipped } = resolved[index].value;
+      if (skipped) { skip(skipped); continue; }
       const excerpt = text && validateChunk(artifact, text, row.text);
-      if (!excerpt) { failed(state, "invalid_source_span", "An index candidate could not be matched to its retained source."); continue; }
-      if (request.freshness === "fresh" && !originIsFresh(artifact)) continue;
+      if (!excerpt) {
+        skip("span_mismatch");
+        failed(state, "invalid_source_span", "An index candidate could not be matched to its retained source.");
+        continue;
+      }
+      if (request.freshness === "fresh" && !originIsFresh(artifact)) { skip("not_fresh"); continue; }
+      diagnostics.admitted += 1;
       state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: row.score });
     }
   } catch (error) {
@@ -294,6 +304,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     query: request.query, requested_version: request.version || null, discoveries: state.discoveries,
     gaps: state.gaps, providers_used: [...state.providersUsed], evidence_providers: [...new Set(state.candidates.map(item => item.provider))],
     path: state.paths.size > 1 ? "mixed" : [...state.paths][0] || "live", elapsed_ms: Math.round(performance.now() - state.started),
+    index_diagnostics: state.indexDiagnostics ?? null,
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {

@@ -89,6 +89,36 @@ test("unconfirmed Workflow creation reuses its durable job and cancellation surv
   assert.equal(attempted.length, 2);
 });
 
+test("maintenance re-polls stuck index jobs in bounded rotation without new uploads", async () => {
+  const f = await fixture();
+  let now = Date.parse("2026-09-24T00:00:00Z");
+  const authority = new KnowledgeAuthority(f.storage, () => now);
+  const jobs = [];
+  for (let i = 0; i < 7; i++) {
+    const source = await authority.call("source.discover", { url: `https://flask.palletsprojects.com/en/3.1.3/page-${i}/`, product: "flask", provider: "exa" });
+    const artifact = await authority.call("artifact.save", { artifact: await createArtifact({ ...source, origin_checked: true }, `${f.text} ${i}`, "exa", now) });
+    const job = await authority.call("job.enqueue", { source_id: source.id, artifact_id: artifact.id });
+    jobs.push((await authority.call("job.update", { id: job.id, status: i % 2 ? "unknown" : "pending_index" })).job ?? job);
+  }
+  const stuck = new Set(jobs.map(job => job.id));
+  const restarted = [];
+  f.env.KNOWLEDGE_INGESTION = {
+    async createBatch() { return []; },
+    async get(id) { return { status: async () => ({ status: "complete" }), restart: async () => { if (stuck.has(id)) restarted.push(id); } }; },
+  };
+  const corpus = { async removeArtifact() {} };
+  await maintainKnowledge(f.env, { authority, corpus });
+  assert.deepEqual(restarted, [], "recently updated jobs are still being verified by their Workflow");
+  now += 11 * 60000;
+  await maintainKnowledge(f.env, { authority, corpus });
+  await maintainKnowledge(f.env, { authority, corpus });
+  const ids = jobs.map(job => job.id).sort();
+  assert.equal(restarted.length, 10);
+  assert.deepEqual([...new Set(restarted)].sort(), ids, "every stuck job is reached across runs");
+  const reserved = [...(await f.storage.list({ prefix: "reservation:" })).values()];
+  assert.ok(reserved.every(item => !stuck.has(item.job_id)), "reconciliation spends no allowance");
+});
+
 test("maintenance rotates eligible due sources so failed scheduling cannot starve later work", async () => {
   const f = await fixture();
   f.policy.providers.firecrawl.enabled = false;

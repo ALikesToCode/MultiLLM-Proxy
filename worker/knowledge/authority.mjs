@@ -7,6 +7,7 @@ import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const RECONCILE_AFTER_MS = 10 * 60000;
 const STATES = new Set([...ACTIVE, ...TERMINAL]);
 const JOB_LIMIT = 1000;
 const REGISTERED_SOURCE_LIMIT = 200;
@@ -151,6 +152,21 @@ async function dueSources(tx, now) {
   return selected;
 }
 
+// Uploads that outlived the Workflow's verification polls stay pending until reconciled.
+// Discoveries are never refreshed on a schedule, so maintenance re-polls these jobs in a
+// bounded rotation; reconciliation reuses the job and never submits the upload again.
+async function reconcilableJobs(tx, now) {
+  const jobs = (await values(tx, "job:")).filter(job => ["pending_index", "unknown"].includes(job.status)
+    && (now - Date.parse(job.updated_at) >= RECONCILE_AFTER_MS || !Number.isFinite(Date.parse(job.updated_at))))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const cursor = await tx.get("reconcile_cursor") ?? "";
+  const next = jobs.findIndex(job => job.id > cursor);
+  const offset = next < 0 ? 0 : next;
+  const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 5);
+  if (selected.length) await tx.put("reconcile_cursor", selected.at(-1).id);
+  return selected.map(job => ({ id: job.id, source_id: job.source_id, artifact_id: job.artifact_id }));
+}
+
 // Rotate through expired revisions so a batch that keeps failing cannot starve later ones.
 async function expiredBatch(tx, now) {
   const expired = (await values(tx, "artifact:")).filter(item => Date.parse(item.expires_at) <= now)
@@ -263,6 +279,7 @@ export class KnowledgeAuthority {
       if (operation === "source.discover") return createSource(tx, input, now, true);
       if (operation === "source.update") return updateSource(tx, input);
       if (operation === "sources.due") return dueSources(tx, now);
+      if (operation === "jobs.reconcilable") return reconcilableJobs(tx, now);
       if (operation === "job.enqueue") return enqueue(tx, input, now);
       if (operation === "job.get") {
         const job = await jobFor(tx, input.id);
