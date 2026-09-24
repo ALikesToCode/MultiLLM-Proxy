@@ -178,8 +178,10 @@ reconciliation using the same job and operation receipts. Ambiguous acquisition
 or upload is never automatically paid for again. Cancellation stops future
 steps; accepted upstream work and its charge may still complete.
 
-The hourly scheduler rotates up to five eligible due sources and attempts cleanup
-of up to ten expired revisions. Reads reject expired sources immediately.
+The hourly scheduler rotates up to five eligible due registered sources and attempts
+cleanup of up to ten expired revisions. Sources discovered by read queries never
+refresh on a schedule; registering the same URL, product and version promotes the
+discovery with the operator's settings. Reads reject expired sources immediately.
 Retention applies to newly acquired/refreshed revisions; changes do not rewrite
 old expiry timestamps. Cleanup requires an enabled storage/background allowance.
 An uncertain cleanup remains fenced and requires operator investigation; do not
@@ -191,10 +193,13 @@ balances or dollar spend. Confirmed work ages out of admission; pending and
 unknown work remains charged until reviewed. Readiness/status reads, catalogue
 storage, Workflow control, index polling, R2 reads and runtime overhead are not
 individual provider reservations. Include those costs in platform limits. Current
-bounds are 200 sources, 1,000 retained manifests, 1,000 jobs and 5,000 ledger records;
-capacity errors fail closed. Only confirmed ledger rows older than 30 days are
-automatically pruned. Source retention permission and billing hard stops are
-operator acknowledgements, not account checks performed by this application.
+bounds are 200 registered sources, 200 discovered sources, 1,000 retained manifests,
+1,000 jobs and 5,000 ledger records; capacity errors fail closed. A full discovery pool
+evicts its oldest discovery that retains no revision and has no active job. Completed,
+failed and cancelled jobs are pruned after 30 days, or oldest first when a new job needs
+room. Only confirmed ledger rows older than 30 days are automatically pruned. Source
+retention permission and billing hard stops are operator acknowledgements, not account
+checks performed by this application.
 
 ## Verification before activation
 
