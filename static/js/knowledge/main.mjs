@@ -11,7 +11,10 @@ async function loadStatus({ replacePolicy = false } = {}) {
   if (statusInFlight) return;
   statusInFlight = true;
   const banner = element("knowledge-status");
-  element("knowledge-refresh").disabled = true;
+  const refresh = element("knowledge-refresh");
+  refresh.disabled = true;
+  refresh.setAttribute("aria-busy", "true");
+  banner.dataset.state = "loading";
   banner.textContent = "Checking service configuration and stored receipts…";
   try {
     const result = await api("status");
@@ -27,14 +30,15 @@ async function loadStatus({ replacePolicy = false } = {}) {
     if (!policyDirty || replacePolicy) { renderPolicy(result.policy); policyDirty = false; }
     for (const button of document.querySelectorAll("[data-needs-service]")) button.disabled = !serviceConnected || button.dataset.busy === "true";
   } catch (error) {
-    banner.textContent = error.message;
+    banner.textContent = `Knowledge status could not be loaded: ${error.message}`;
     banner.dataset.state = "error";
     if (!serviceConnected) {
       for (const id of ["knowledge-readiness", "knowledge-providers", "knowledge-source-list", "knowledge-jobs", "knowledge-usage"]) element(id).textContent = "Status unavailable. Refresh to try again.";
     }
   } finally {
     statusInFlight = false;
-    element("knowledge-refresh").disabled = false;
+    refresh.disabled = false;
+    refresh.removeAttribute("aria-busy");
   }
 }
 
@@ -43,12 +47,15 @@ function formAction(id, statusId, callback) {
     event.preventDefault();
     const form = event.currentTarget;
     const submit = form.querySelector('button[type="submit"]');
+    const note = element(statusId);
     submit.dataset.busy = "true";
     submit.disabled = true;
-    element(statusId).textContent = "Working…";
+    submit.setAttribute("aria-busy", "true");
+    delete note.dataset.tone;
+    note.textContent = "Working…";
     try { await callback(form); }
-    catch (error) { element(statusId).textContent = error.message; }
-    finally { submit.dataset.busy = "false"; submit.disabled = !serviceConnected; }
+    catch (error) { note.dataset.tone = "error"; note.textContent = error.message; }
+    finally { submit.dataset.busy = "false"; submit.disabled = !serviceConnected; submit.removeAttribute("aria-busy"); }
   });
 }
 

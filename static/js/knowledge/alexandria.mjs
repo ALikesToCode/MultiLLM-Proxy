@@ -1,5 +1,5 @@
 import { api } from "./api.mjs";
-import { element, node } from "./render.mjs";
+import { card, element, node } from "./render.mjs";
 
 export function costText(result) {
   const cost = result.cost;
@@ -13,14 +13,16 @@ export function renderTools(tools) {
   const list = element("alexandria-tools");
   list.replaceChildren();
   for (const tool of tools) {
-    const card = node("article", undefined, "knowledge-card");
-    card.append(node("h3", tool.name), node("code", `${tool.provider}/${tool.capability}`),
-      node("p", tool.whenToUse || tool.description), node("p", `${tool.creditsCost} credits per ${tool.perRecord ? "record" : "call"}`));
-    const button = node("button", "Inspect contract · free", "button");
+    const result = card(tool.name);
+    const actions = node("div", undefined, "card__actions");
+    result.append(node("code", `${tool.provider}/${tool.capability}`, "card__code"),
+      node("p", tool.whenToUse || tool.description, "card__meta"),
+      node("p", `${tool.creditsCost} credits per ${tool.perRecord ? "record" : "call"}`, "alexandria-price-tag"));
+    const button = node("button", "Inspect contract · free", "button button--secondary button--sm");
     button.type = "button"; button.dataset.quoteId = tool.quote_id;
-    card.append(button); list.append(card);
+    actions.append(button); result.append(actions); list.append(result);
   }
-  if (!tools.length) list.append(node("p", "No capabilities matched. Try a more specific data request."));
+  if (!tools.length) list.append(node("p", "No capabilities matched. Try a more specific data request.", "empty-state empty-state--bordered"));
 }
 
 export function executionPayload(form, tool) {

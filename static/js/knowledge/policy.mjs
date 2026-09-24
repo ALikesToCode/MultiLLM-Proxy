@@ -4,7 +4,7 @@ const PROVIDERS = ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_s
 const LABELS = { context7: "Context7", firecrawl: "Firecrawl", exa: "Exa", mintlify: "Mintlify Index", deepwiki: "DeepWiki", ai_search: "AI Search", alexandria: "Alexandria · Firecrawl credits" };
 
 function input(label, name, value, checkbox = false) {
-  const wrapper = node("label", undefined, checkbox ? "knowledge-check" : undefined);
+  const wrapper = node("label", undefined, checkbox ? "check-field" : "form-field");
   const field = node("input");
   field.name = name; field.type = checkbox ? "checkbox" : "number";
   if (checkbox) field.checked = Boolean(value);
@@ -28,9 +28,9 @@ export function renderPolicy(policy) {
   cards.replaceChildren();
   for (const id of PROVIDERS) {
     const allocation = policy.providers[id] || {};
-    const card = node("div", undefined, "knowledge-card knowledge-provider-policy");
-    card.append(node("h3", LABELS[id]), input("Enable provider", `${id}.enabled`, allocation.enabled, true));
-    if (id === "alexandria") card.append(node("p", "Free discovery works while disabled. Each retrieval reserves credits and records the actual charge; variable per-record totals can exceed the reservation."));
+    const card = node("div", undefined, "card knowledge-provider-policy");
+    card.append(node("h3", LABELS[id], "card__title"), input("Enable provider", `${id}.enabled`, allocation.enabled, true));
+    if (id === "alexandria") card.append(node("p", "Free discovery works while disabled. Each retrieval reserves credits and records the actual charge; variable per-record totals can exceed the reservation.", "card__meta"));
     for (const [name, label] of [["limit", "Total units / rolling 24h"], ["background_limit", "Background cap"],
       ["interactive_reserve", "Reserve for interactive queries"], ["units_per_call", "Conservative units per operation"]]) {
       const field = input(id === "alexandria" && name === "limit" ? "Credits / rolling 24h" : label, `${id}.${name}`, allocation[name]);
