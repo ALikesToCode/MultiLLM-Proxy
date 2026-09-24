@@ -16,8 +16,20 @@ function safeError(error) {
   return { code: "alexandria_unavailable", message: "Alexandria could not complete the request. No automatic retry was started." };
 }
 
-function transport(env, options) {
+function requireCredentials(env) {
   if (!configuredKeys("alexandria", env).length) fail("provider_not_configured", "Configure FIRECRAWL_API_KEY or its numbered keys on the private Knowledge Worker.", 503);
+}
+
+async function priorReceipt(authority, identity) {
+  try { return await authority.call("alexandria.receipt", identity); }
+  catch (error) {
+    if (error?.code === "receipt_missing") return null;
+    throw error;
+  }
+}
+
+function transport(env, options) {
+  requireCredentials(env);
   // Callers admit paid requests durably before invoking this fixed transport.
   // Search restricted to Alexandria and find-tools are free catalogue operations.
   return (path, body, requestId = crypto.randomUUID()) => requestJSON("alexandria", path,
@@ -48,7 +60,7 @@ function unexpectedCharge(credits) {
   } };
 }
 
-async function execute(authority, identity, payload, send) {
+async function execute(authority, identity, payload, connect) {
   const fingerprint = await digest(JSON.stringify({ quote_id: payload.quote_id, options: payload.options,
     reserve_credits: payload.reserve_credits, accept_variable_cost: payload.accept_variable_cost ?? false },
   (_key, value) => isRecord(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value));
@@ -58,6 +70,7 @@ async function execute(authority, identity, payload, send) {
   let receipt, data;
   try {
     const { tool } = begun;
+    const send = connect();
     const response = await send("scrape", { alexandria: { provider: tool.provider, capability: tool.capability, options: payload.options }, timeout: 10000 }, identity.receipt_id);
     const result = scrapeResult(response, tool.provider, tool.capability);
     const error = result.item.error ? { code: "capability_failed", message: "The provider reported a capability failure. See the confirmed cost and receipt before making another request." } : null;
@@ -77,8 +90,13 @@ export async function dispatchAlexandria(env, authority, principal, operation, b
   const identity = { principal_id: principal.id };
   if (payload.request_id) identity.receipt_id = `alexandria:${await digest(`${principal.id}\0${payload.request_id}`)}`;
   if (operation === "alexandria.receipt") return { ...publicReceipt(await authority.call("alexandria.receipt", identity)), call_cost: FREE_COST };
-  const send = transport(env, { ...options, authority });
-  if (operation === "alexandria.execute") return execute(authority, identity, payload, send);
+  const connect = () => transport(env, { ...options, authority });
+  if (operation === "alexandria.execute") {
+    // A durable replay needs no provider credentials; a new request is refused before admission.
+    if (!configuredKeys("alexandria", env).length && !await priorReceipt(authority, identity)) requireCredentials(env);
+    return execute(authority, identity, payload, connect);
+  }
+  const send = connect();
   try {
     return operation === "alexandria.search" ? await discover(authority, identity, payload, send)
       : await inspect(authority, identity, payload, send);

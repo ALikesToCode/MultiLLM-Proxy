@@ -152,6 +152,21 @@ test("replays remain readable after discovery expires without another network re
   assert.equal(f.calls.length, 2);
 });
 
+test("replays need no provider key while new executions are refused before admission", async () => {
+  const f = await setup();
+  const payload = await requestFor(f);
+  await f.run("execute", payload);
+  delete f.env.FIRECRAWL_API_KEY;
+  const replay = await f.run("execute", payload);
+  assert.equal(replay.replay, true);
+  assert.deepEqual(replay.cost, { credits: 15, state: "confirmed" });
+  assert.equal(f.calls.length, 2);
+  const fresh = { ...payload, request_id: crypto.randomUUID() };
+  await assert.rejects(f.run("execute", fresh), { code: "provider_not_configured" });
+  await assert.rejects(f.run("receipt", { request_id: fresh.request_id }), { code: "receipt_missing" });
+  assert.equal((await usage(f)).confirmed, 15);
+});
+
 test("unknown, stale, cross-principal and arbitrary capabilities cannot execute", async () => {
   const f = await setup();
   const payload = await requestFor(f);
