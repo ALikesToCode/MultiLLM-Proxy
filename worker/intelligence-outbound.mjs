@@ -1,5 +1,6 @@
 import { handleIntelligenceStoreRequest } from "./intelligence-d1.mjs";
 import { handleIntelligenceAuthRequest } from "./intelligence-auth-d1.mjs";
+import { handleControlUsersRequest } from "./control-users-d1.mjs";
 
 /** Domain operations reachable only through the container's private outbound handler. */
 export function handleIntelligenceOutbound(request, env) {
@@ -13,5 +14,6 @@ export function handleIntelligenceOutbound(request, env) {
   }
   if (url.pathname === "/v1/store") return handleIntelligenceStoreRequest(request, env);
   if (url.pathname === "/v1/auth") return handleIntelligenceAuthRequest(request, env);
+  if (url.pathname === "/v1/users") return handleControlUsersRequest(request, env);
   return Response.json({ error: { code: "not_found", message: "Storage operation not found." } }, { status: 404 });
 }

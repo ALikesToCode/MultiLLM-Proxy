@@ -121,6 +121,17 @@ function shouldPassThroughKey(key) {
   return DIRECT_ENV_KEYS.includes(key) || DYNAMIC_ENV_PATTERNS.some((pattern) => pattern.test(key));
 }
 
+/**
+ * Dashboard accounts use D1 when the Worker has its binding and no external
+ * PostgreSQL control plane is configured; AUTH_STORAGE_BACKEND overrides this.
+ * The edge uses the same rule, so both always read the same account store.
+ */
+export function authStorageBackend(source = {}) {
+  const configured = typeof source.AUTH_STORAGE_BACKEND === "string" ? source.AUTH_STORAGE_BACKEND.trim() : "";
+  if (configured) return configured;
+  return source.INTELLIGENCE_DB && !String(source.CONTROL_PLANE_DATABASE_URL ?? "").trim() ? "d1" : "sql";
+}
+
 export function collectContainerEnv(source = {}) {
   const envVars = {
     AUTH_DB_PATH: source.AUTH_DB_PATH ?? "/tmp/auth.sqlite3",
@@ -132,6 +143,7 @@ export function collectContainerEnv(source = {}) {
     MULTILLM_TRUST_PROXY_HEADERS: "true",
     INTELLIGENCE_REQUIRE_DURABLE_STORAGE: "true",
     ...(source.INTELLIGENCE_DB ? { INTELLIGENCE_STORAGE_BACKEND: "d1" } : {}),
+    AUTH_STORAGE_BACKEND: authStorageBackend(source),
     ...(source.KNOWLEDGE_SERVICE ? { KNOWLEDGE_SERVICE_ENABLED: "true" } : {}),
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",

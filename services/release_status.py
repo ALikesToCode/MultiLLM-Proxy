@@ -7,15 +7,24 @@ from pathlib import Path
 import requests
 
 
+def _storage():
+    if os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip():
+        return "postgresql", None
+    if os.environ.get("AUTH_STORAGE_BACKEND", "").strip().lower() == "d1":
+        return "sqlite+d1-accounts", ("Accounts are durable in D1. Other Container-local SQLite state "
+                                      "(rate limits, model overrides) may be lost on replacement.")
+    return "sqlite", "Container-local SQLite may be lost on replacement. Configure durable storage before rollout."
+
+
 def container_release():
     path = Path(__file__).resolve().parent.parent / ".container-build-id"
     try:
         value = path.read_text().strip()
     except OSError:
         value = ""
+    storage, warning = _storage()
     return {"build_id": value if re.fullmatch(r"[a-f0-9]{64}", value) else None,
-            "compatibility": 1, "storage": "postgresql" if os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip() else "sqlite",
-            "durability_warning": None if os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip() else "Container-local SQLite may be lost on replacement. Configure durable storage before rollout."}
+            "compatibility": 1, "storage": storage, "durability_warning": warning}
 
 
 def deployment_status(worker):

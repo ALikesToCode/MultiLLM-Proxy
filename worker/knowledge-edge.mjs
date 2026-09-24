@@ -1,12 +1,15 @@
 /**
  * Knowledge MCP and REST at the edge for credentials the Worker can verify itself:
- * the bootstrap ADMIN_API_KEY and durable D1 integration keys. Those requests go
- * straight to the private Knowledge service, so agents never wait for the Container
- * to wake. Any other credential is left to the Container before the body is read.
+ * the bootstrap ADMIN_API_KEY, durable D1 integration keys and, when accounts live in
+ * D1, dashboard keys. Those requests go straight to the private Knowledge service, so
+ * agents never wait for the Container to wake. Any other credential is left to the
+ * Container before the body is read.
  */
 import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import catalogue from "./knowledge-mcp-catalogue.json" with { type: "json" };
+import { authStorageBackend } from "./container-env.mjs";
+import { activeUsersByPrefix, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
@@ -20,6 +23,7 @@ const ERROR_CODE = /^[a-z][a-z0-9_]{0,79}$/;
 const MAX_REQUEST_BYTES = 65536;
 const DEADLINE_MS = 35000;
 const MAX_VERIFIED = 256;
+const MAX_KEY_LENGTH = 1024;
 const TOOLS = new Map(catalogue.tools.map(entry => [entry.definition.name, entry]));
 const ALEXANDRIA_OPERATIONS = ["search", "inspect", "execute", "receipt"];
 // Werkzeug scrypt:32768:8:1 needs 32 MiB, above Node's default ceiling.
@@ -92,9 +96,32 @@ async function matchesHash(key, keyHash) {
   return true;
 }
 
+// Mirrors the Container: administrators hold both Knowledge scopes.
+function accountScopes(user) {
+  const scopes = user.scopes.split(",").map(scope => scope.trim()).filter(Boolean);
+  return user.is_admin === 1 || scopes.includes("admin") ? [...KNOWLEDGE_SCOPES]
+    : scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope));
+}
+
+// Dashboard accounts in D1 use the Container's key prefix and Werkzeug hashes.
+async function accountPrincipal(env, key) {
+  if (key.length > MAX_KEY_LENGTH) return { denied: true };
+  let users;
+  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, `mllm_${key.slice(0, 8)}`); }
+  catch { return null; }
+  let unverifiable = false;
+  for (const user of users) {
+    if (!validUser(user)) return null;
+    if (!HASH_PATTERN.test(user.api_key_hash)) { unverifiable = true; continue; }
+    if (await matchesHash(key, user.api_key_hash)) return { principal: { id: user.username, scopes: accountScopes(user) } };
+  }
+  // A hash format the edge cannot check is left to the Container.
+  return unverifiable ? null : { denied: true };
+}
+
 /**
- * Returns {principal}, {denied: true} for a durable key that is definitively invalid,
- * or null when the Container must decide (other key types, storage or data faults).
+ * Returns {principal}, {denied: true} for a key that is definitively invalid, or null
+ * when the Container must decide (unverifiable key types, storage or data faults).
  */
 async function resolvePrincipal(request, env) {
   const key = requestKey(request.headers);
@@ -103,7 +130,8 @@ async function resolvePrincipal(request, env) {
     const id = adminUsername(env);
     return id ? { principal: { id, scopes: [...KNOWLEDGE_SCOPES] } } : null;
   }
-  if (!key.startsWith(KEY_NAMESPACE) || !env.INTELLIGENCE_DB) return null;
+  if (!env.INTELLIGENCE_DB) return null;
+  if (!key.startsWith(KEY_NAMESPACE)) return authStorageBackend(env) === "d1" ? accountPrincipal(env, key) : null;
   if (!KEY_PATTERN.test(key)) return { denied: true };
   const prefix = key.slice(0, KEY_NAMESPACE.length + 16);
   let record;

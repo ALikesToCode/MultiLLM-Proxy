@@ -17,6 +17,7 @@ from services.intelligence_policy import DEFAULT_POLICY, validate_policy
 _ENDPOINTS = {
     "store": "http://intelligence.internal/v1/store",
     "auth": "http://intelligence.internal/v1/auth",
+    "users": "http://intelligence.internal/v1/users",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)

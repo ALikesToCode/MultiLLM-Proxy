@@ -37,6 +37,7 @@ from services.auth_primitives import (
     serialize_scopes,
 )
 from services.nanogpt_key_pool import configured_nanogpt_keys
+from services import user_store
 from services.sqlite_store import connect, storage_path
 from services.intelligence_auth import (
     KEY_NAMESPACE, reject_local_integration_management, verify_integration_key,
@@ -44,6 +45,9 @@ from services.intelligence_auth import (
 from services.user_provisioning import create_user as provision_user
 
 logger = logging.getLogger(__name__)
+
+
+USAGE_WRITE_INTERVAL_SECONDS = 60
 
 
 def _utcnow() -> datetime:
@@ -80,6 +84,9 @@ class AuthService:
 
     @classmethod
     def _ensure_storage(cls) -> None:
+        if user_store.using_d1():
+            # The Worker's D1 migrations own the control_users schema.
+            return
         with cls._storage_lock:
             with closing(cls._connect()) as connection:
                 cls._ensure_users_schema(connection)
@@ -253,18 +260,21 @@ class AuthService:
 
     @classmethod
     def _reload_user_cache(cls) -> None:
-        with cls._storage_lock:
-            with closing(cls._connect()) as connection:
-                rows = connection.execute(
-                    """
-                    SELECT
-                        username, api_key_hash, api_key_prefix, scopes, is_admin,
-                        created_at, last_login, last_used_at, last_used_ip,
-                        created_by, rotated_at, revoked_at
-                    FROM users
-                    ORDER BY username
-                    """
-                ).fetchall()
+        if user_store.using_d1():
+            rows = user_store.list_users()
+        else:
+            with cls._storage_lock:
+                with closing(cls._connect()) as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT
+                            username, api_key_hash, api_key_prefix, scopes, is_admin,
+                            created_at, last_login, last_used_at, last_used_ip,
+                            created_by, rotated_at, revoked_at
+                        FROM users
+                        ORDER BY username
+                        """
+                    ).fetchall()
         cls._users = {
             row["username"]: cls._row_to_user(row)
             for row in rows
@@ -273,20 +283,23 @@ class AuthService:
 
     @classmethod
     def _load_user_by_username(cls, username: str) -> Optional[Dict[str, Any]]:
-        with cls._storage_lock:
-            with closing(cls._connect()) as connection:
-                cls._ensure_users_schema(connection)
-                row = connection.execute(
-                    """
-                    SELECT
-                        username, api_key_hash, api_key_prefix, scopes, is_admin,
-                        created_at, last_login, last_used_at, last_used_ip,
-                        created_by, rotated_at, revoked_at
-                    FROM users
-                    WHERE username = ?
-                    """,
-                    (username,),
-                ).fetchone()
+        if user_store.using_d1():
+            row = user_store.get_user(username)
+        else:
+            with cls._storage_lock:
+                with closing(cls._connect()) as connection:
+                    cls._ensure_users_schema(connection)
+                    row = connection.execute(
+                        """
+                        SELECT
+                            username, api_key_hash, api_key_prefix, scopes, is_admin,
+                            created_at, last_login, last_used_at, last_used_ip,
+                            created_by, rotated_at, revoked_at
+                        FROM users
+                        WHERE username = ?
+                        """,
+                        (username,),
+                    ).fetchone()
         if not row:
             cls._users.pop(username, None)
             cls._rebuild_api_key_prefix_index()
@@ -299,21 +312,24 @@ class AuthService:
 
     @classmethod
     def _load_users_by_api_key_prefix(cls, api_key_prefix: str) -> List[tuple[str, Dict[str, Any]]]:
-        with cls._storage_lock:
-            with closing(cls._connect()) as connection:
-                cls._ensure_users_schema(connection)
-                rows = connection.execute(
-                    """
-                    SELECT
-                        username, api_key_hash, api_key_prefix, scopes, is_admin,
-                        created_at, last_login, last_used_at, last_used_ip,
-                        created_by, rotated_at, revoked_at
-                    FROM users
-                    WHERE api_key_prefix = ? AND revoked_at IS NULL
-                    ORDER BY username
-                    """,
-                    (api_key_prefix,),
-                ).fetchall()
+        if user_store.using_d1():
+            rows = user_store.users_by_prefix(api_key_prefix)
+        else:
+            with cls._storage_lock:
+                with closing(cls._connect()) as connection:
+                    cls._ensure_users_schema(connection)
+                    rows = connection.execute(
+                        """
+                        SELECT
+                            username, api_key_hash, api_key_prefix, scopes, is_admin,
+                            created_at, last_login, last_used_at, last_used_ip,
+                            created_by, rotated_at, revoked_at
+                        FROM users
+                        WHERE api_key_prefix = ? AND revoked_at IS NULL
+                        ORDER BY username
+                        """,
+                        (api_key_prefix,),
+                    ).fetchall()
 
         users = [(row["username"], cls._row_to_user(row)) for row in rows]
         for username, user in users:
@@ -347,6 +363,23 @@ class AuthService:
         rotated_at: Optional[datetime] = None,
         revoked_at: Optional[datetime] = None,
     ) -> None:
+        if user_store.using_d1():
+            user_store.upsert_user({
+                "username": username,
+                "api_key_hash": api_key_hash,
+                "api_key_prefix": api_key_prefix,
+                "scopes": serialize_scopes(scopes),
+                "is_admin": int(is_admin),
+                "created_at": serialize_datetime(created_at),
+                "last_login": serialize_datetime(last_login),
+                "last_used_at": serialize_datetime(last_used_at),
+                "last_used_ip": last_used_ip,
+                "created_by": created_by,
+                "rotated_at": serialize_datetime(rotated_at),
+                "revoked_at": serialize_datetime(revoked_at),
+            })
+            cls._reload_user_cache()
+            return
         with cls._storage_lock:
             with closing(cls._connect()) as connection:
                 cls._ensure_users_schema(connection)
@@ -421,10 +454,13 @@ class AuthService:
 
     @classmethod
     def _delete_user_record(cls, username: str) -> None:
-        with cls._storage_lock:
-            with closing(cls._connect()) as connection:
-                connection.execute("DELETE FROM users WHERE username = ?", (username,))
-                connection.commit()
+        if user_store.using_d1():
+            user_store.delete_user(username)
+        else:
+            with cls._storage_lock:
+                with closing(cls._connect()) as connection:
+                    connection.execute("DELETE FROM users WHERE username = ?", (username,))
+                    connection.commit()
         cls._reload_user_cache()
 
     @classmethod
@@ -542,8 +578,15 @@ class AuthService:
         """Initialize the auth service and load persisted users."""
         cls._jwt_secret = os.environ.get("JWT_SECRET")
         cls._ensure_storage()
-        cls._reload_user_cache()
-        cls._ensure_default_admin_user()
+        try:
+            cls._reload_user_cache()
+            cls._ensure_default_admin_user()
+        except APIError:
+            if not user_store.using_d1():
+                raise
+            # Serve without a boot-time copy; reads go to D1 per request, and the
+            # environment-managed admin is written on its first authenticated use.
+            logger.warning("Account storage was unavailable at startup")
         cls._load_provider_api_keys()
 
     @classmethod
@@ -780,6 +823,21 @@ class AuthService:
         if not user:
             return
         last_used_at = _utcnow()
+        if user_store.using_d1():
+            previous = user.get("last_used_at")
+            # Usage metadata is advisory: skip a remote write per request, and never
+            # fail an authenticated request because it could not be recorded.
+            if (previous and user.get("last_used_ip") == remote_addr
+                    and last_used_at - previous < timedelta(seconds=USAGE_WRITE_INTERVAL_SECONDS)):
+                return
+            try:
+                user_store.touch_user(username, serialize_datetime(last_used_at), remote_addr)
+            except APIError:
+                logger.warning("Could not record API key usage", extra={"username": username})
+                return
+            user["last_used_at"] = last_used_at
+            user["last_used_ip"] = remote_addr
+            return
         with cls._storage_lock:
             with closing(cls._connect()) as connection:
                 try:
@@ -822,6 +880,10 @@ class AuthService:
             and hmac.compare_digest(api_key, admin_api_key)
         ):
             user = cls._load_user_by_username(default_username)
+            if user is None and user_store.using_d1():
+                # Startup could not reach D1; write the environment-managed admin now.
+                cls._ensure_default_admin_user()
+                user = cls._load_user_by_username(default_username)
             if (
                 user
                 and user.get("is_admin")
