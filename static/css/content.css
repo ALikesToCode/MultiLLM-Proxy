@@ -80,9 +80,19 @@
     white-space: nowrap;
 }
 
-.numeric {
+.numeric,
+.data-table .numeric {
     font-variant-numeric: tabular-nums;
     text-align: right;
+}
+
+.table-paging {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    border-top: 1px solid var(--border-subtle);
 }
 
 /* Code */

@@ -97,7 +97,8 @@
                     return false;
                 }
                 return !query || model.id.toLowerCase().includes(query);
-            });
+            // Usable models first; the sort is stable, so catalog order holds within each group.
+            }).sort((left, right) => Number(Boolean(right.configured)) - Number(Boolean(left.configured)));
 
             elements.list.replaceChildren();
             const visibleModels = filteredModels.slice(0, MAX_VISIBLE_MODELS);

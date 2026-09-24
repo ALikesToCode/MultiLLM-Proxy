@@ -60,6 +60,7 @@ class ControlPlaneUiTest(unittest.TestCase):
             "static/js/auto-route-catalog.js",
             "static/js/auto-routes.js",
             "static/js/dashboard.js",
+            "static/js/request-explorer.js",
             "static/js/documentation.js",
             "static/js/openrouter.js",
             "static/js/users.js",
@@ -89,13 +90,14 @@ class ControlPlaneUiTest(unittest.TestCase):
             "/static/css/content.css?v=1",
             "/static/css/public.css?v=1",
             "/static/js/app.js?v=2",
-            "/static/css/auto-routes.css?v=7",
+            "/static/css/auto-routes.css?v=8",
             "/static/css/documentation.css?v=9",
-            "/static/css/operations.css",
+            "/static/css/operations.css?v=2",
             "/static/css/surfaces.css",
-            "/static/js/auto-route-catalog.js?v=8",
+            "/static/js/auto-route-catalog.js?v=9",
             "/static/js/auto-routes.js?v=7",
-            "/static/js/dashboard.js",
+            "/static/js/dashboard.js?v=2",
+            "/static/js/request-explorer.js?v=1",
             "/static/js/documentation.js?v=10",
             "/static/js/openrouter.js",
             "/static/js/users.js",
@@ -160,7 +162,7 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertIn("NANOGPT_PREFERRED_KEY_INDEX=1", operations)
         self.assertIn("js/auto-route-catalog.js", operations)
         self.assertIn("js/auto-routes.js", operations)
-        self.assertIn("filename='js/auto-route-catalog.js', v='8'", operations)
+        self.assertIn("filename='js/auto-route-catalog.js', v='9'", operations)
         self.assertIn("filename='js/auto-routes.js', v='7'", operations)
         self.assertIn("X-CSRFToken", editor)
         self.assertIn("refreshCatalog", editor)
