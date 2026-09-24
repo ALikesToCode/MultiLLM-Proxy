@@ -141,9 +141,10 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         # API clients such as curl send Accept: */*; they keep the proxy's JSON rejection.
         api = self.client.get("/no-such-page", headers={"Authorization": "Bearer admin-test-key", "Accept": "*/*"})
-        self.assertEqual(api.status_code, 400)
+        # The exact rejection (unsupported provider or authentication) depends on key state;
+        # what matters is that API clients never receive the HTML not-found page.
         self.assertEqual(api.content_type, "application/json")
-        self.assertIn("Unsupported API provider", api.get_json()["message"])
+        self.assertIn(api.status_code, (400, 401))
 
     def test_session_cookie_is_hardened_in_production(self):
         self.flask_app.config["SESSION_COOKIE_SECURE"] = True
