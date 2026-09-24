@@ -1,6 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@config "../../tailwind.config.js";
+
+@layer base {
+    /* Keep existing border-only controls on the v3 neutral border color. */
+    *,
+    ::before,
+    ::after,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentColor);
+    }
+}
 
 @layer utilities {
     .hidden {

@@ -58,9 +58,39 @@ jobs:
         run: npm ci
       - name: Node audit
         run: npm audit --audit-level=high
+      - name: Frontend build contracts
+        run: node --test tests/test_frontend_build.mjs
       - name: Worker tests
         run: npm run test:worker
       - name: Free pool Worker contracts
         run: node --test tests/test_free_routes_worker.mjs
       - name: Client header contracts
         run: node --test tests/test_client_headers_worker.mjs
+
+  cloudflare-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install deployment package manager
+        run: npm install --global "$(node -p "require('./package.json').packageManager")"
+      - name: Install deployment dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend assets
+        run: pnpm run build
+      - name: Check committed frontend assets
+        run: git diff --exit-code -- static/css/style.css
+      - name: Frontend build contracts
+        run: node --test tests/test_frontend_build.mjs
+      - name: Validate Knowledge Worker bundle
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm exec wrangler deploy --config wrangler.knowledge.jsonc --dry-run --outdir /tmp/knowledge-worker
+      - name: Validate main Worker bundle
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm exec wrangler deploy --dry-run --containers-rollout=none --outdir /tmp/main-worker

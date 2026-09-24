@@ -1,3 +1,11 @@
-allowBuilds:
-  esbuild: set this to true or false
-  workerd: set this to true or false
+packages:
+  - '.'
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - esbuild
+  - workerd
+overrides:
+  sharp: 0.35.4
+minimumReleaseAgeExclude:
+  - miniflare@5.20260921.1-alpha
+  - wrangler@4.138.0
