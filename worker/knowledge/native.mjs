@@ -7,7 +7,7 @@ import TOOLS from "./native-tools.json" with { type: "json" };
 import { fail, hostAllowed, isRecord, publicHost } from "./contracts.mjs";
 import { metered } from "./operations.mjs";
 import { callTool } from "./providers/mcp.mjs";
-import { jsonPost, requestJSON } from "./providers/transport.mjs";
+import { jsonPost, ProviderError, requestJSON } from "./providers/transport.mjs";
 import { providerStatus } from "./providers/index.mjs";
 
 export const NATIVE_TOOLS = TOOLS;
@@ -131,12 +131,19 @@ export async function dispatchNative(env, authority, principal, operation, paylo
       : metered(authority, { provider, operation_id: `native:${requestId}:${suffix}`, background: false, units: reserved }, callback),
   };
   let result;
-  if (MCP_TOOLS[tool]) {
-    const [endpoint, name] = MCP_TOOLS[tool];
-    result = { text: await callTool(spec.provider, endpoint, name, payload, context, tool) };
-  } else {
-    const [url, request] = REQUESTS[tool](payload);
-    result = await requestJSON(spec.provider, tool, url, request, context);
+  try {
+    if (MCP_TOOLS[tool]) {
+      const [endpoint, name] = MCP_TOOLS[tool];
+      result = { text: await callTool(spec.provider, endpoint, name, payload, context, tool) };
+    } else {
+      const [url, request] = REQUESTS[tool](payload);
+      result = await requestJSON(spec.provider, tool, url, request, context);
+    }
+  } catch (error) {
+    // Report the provider's own failure (timeout, rate limit, exhausted keys) so the
+    // caller can decide whether to retry; its message never contains upstream text.
+    if (error instanceof ProviderError) fail(error.code, error.message, error.status >= 400 && error.status < 600 ? error.status : 502);
+    throw error;
   }
   return { provider: spec.provider, tool, result, usage: { provider: spec.provider, units: reserved },
     verification: "provider_generated_unverified" };

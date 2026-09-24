@@ -137,3 +137,17 @@ test("disabled providers and scopes are enforced through the Knowledge dispatche
     { authority: f.authority }), { code: "insufficient_scope" });
   assert.equal(calls.length, 0);
 });
+
+test("provider failures reach the caller with their own code and status", async () => {
+  const { f } = await setup();
+  const failing = status => async () => new Response("{}", { status, headers: { "content-type": "application/json" } });
+  for (const [status, code] of [[429, "provider_rate_limited"], [500, "provider_request_failed"], [401, "provider_access_denied"]]) {
+    await assert.rejects(dispatchNative(f.env, f.authority, principal, "native.exa_search", { query: "x" }, { fetchImpl: failing(status) }),
+      error => error.code === code && error.status === status && !String(error.message).includes("{}"));
+  }
+  const hung = async (url, options) => new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted"))));
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 20);
+  await assert.rejects(dispatchNative(f.env, f.authority, principal, "native.deepwiki_structure", { repoName: "a/b" },
+    { fetchImpl: hung, signal: controller.signal }), { code: "provider_timeout", status: 504 });
+});
