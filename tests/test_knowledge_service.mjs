@@ -186,6 +186,22 @@ test("retention cleanup runs while Knowledge is disabled and rotates past failin
   assert.equal((await authority.call("artifact.get", { id: ids[0] })).status, "expiring");
 });
 
+test("expiring a revision retires jobs that still wait on it", async () => {
+  const f = await fixture();
+  let now = Date.parse("2026-09-23T00:00:00Z");
+  const authority = new KnowledgeAuthority(f.storage, () => now);
+  const created = await createArtifact({ ...f.source, origin_checked: true }, f.text, "firecrawl", now);
+  const artifact = await authority.call("artifact.save", { artifact: created });
+  const job = await authority.call("job.enqueue", { source_id: f.source.id, artifact_id: artifact.id });
+  await authority.call("job.update", { id: job.id, status: "pending_index" });
+  now += 169 * 3600000;
+  await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
+  await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
+  const retired = (await authority.call("job.get", { id: job.id })).job;
+  assert.deepEqual([retired.status, retired.reason], ["cancelled", "artifact_expired"]);
+  assert.notEqual((await authority.call("job.enqueue", { source_id: f.source.id })).id, job.id, "a refresh starts a new job");
+});
+
 test("live acquisitions can be indexed without paying to acquire the source again", async () => {
   const f = await fixture();
   const artifact = await f.published();

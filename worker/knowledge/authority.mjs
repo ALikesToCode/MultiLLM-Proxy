@@ -308,6 +308,12 @@ export class KnowledgeAuthority {
           || Date.parse(artifact.expires_at) > now) fail("artifact_not_expired", "The artifact is not eligible for expiration.", 409);
         const source = await sourceFor(tx, artifact.source_id);
         if (source.current_artifact === artifact.id) await tx.put(`source:${source.id}`, { ...source, current_artifact: null });
+        // A job still waiting on this revision can never finish; retire it so refreshes start a new one.
+        for (const job of await values(tx, "job:")) {
+          if (job.artifact_id === artifact.id && ACTIVE.has(job.status)) {
+            await tx.put(`job:${job.id}`, { ...job, status: "cancelled", reason: "artifact_expired", updated_at: new Date(now).toISOString() });
+          }
+        }
         await tx.delete(`artifact:${artifact.id}`);
         await tx.delete(`index:${artifact.index_key}`);
         await tx.delete(`submission:${artifact.id}`);
