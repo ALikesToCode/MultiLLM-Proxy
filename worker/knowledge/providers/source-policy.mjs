@@ -1,21 +1,14 @@
+import { publicHost } from "../contracts.mjs";
 import { ProviderError } from "./transport.mjs";
 
-const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home", ".test", ".invalid", ".onion"];
 const SENSITIVE_QUERY = /^(?:api[-_]?key|key|token|access[-_]?token|auth|authorization|password|secret|signature|sig)$/i;
-
-function publicHostname(host) {
-  return host.length <= 253 && host.split(".").every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part))
-    && host.includes(".") && !/^[\d.]+$/.test(host)
-    && !PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix))
-    && host !== "localhost" && !host.endsWith(".example");
-}
 
 export function sourceURL(value, allowedHosts = []) {
   if (!Array.isArray(allowedHosts) || typeof value !== "string" || value.length > 2048 || /[\x00-\x20\x7f\\]/.test(value)) return null;
   try {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
-    if (!publicHostname(url.hostname)) return null;
+    if (!publicHost(url.hostname)) return null;
     if (!allowedHosts.some((host) => typeof host === "string" && host.toLowerCase() === url.hostname)) return null;
     if ([...url.searchParams.keys()].some((name) => SENSITIVE_QUERY.test(name))) return null;
     url.hash = "";

@@ -7,7 +7,8 @@ import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";
 import { createArtifact, normalizeSourceText, packEvidence, validateChunk, versionEvidence } from "../worker/knowledge/evidence.mjs";
-import { parseQuery, publicUrl } from "../worker/knowledge/contracts.mjs";
+import { parseQuery, publicHost, publicUrl } from "../worker/knowledge/contracts.mjs";
+import { sourceURL } from "../worker/knowledge/providers/source-policy.mjs";
 
 const bundled = await build({ stdin: { resolveDir: process.cwd(), sourcefile: "knowledge-fixture.mjs", contents: `
   import { DurableObject } from 'cloudflare:workers';
@@ -175,6 +176,16 @@ test("source policy rejects credentials, private origins and significant invalid
   assert.equal(publicUrl("https://react.dev/page?version=3#section", ["react.dev"]), "https://react.dev/page?version=3");
   for (const payload of [{ query: "test", version: "3" }, { query: "test", token_budget: true }, { query: "test", repository: "../private/repo" }, { query: "test", extra: "field" }]) {
     assert.throws(() => parseQuery(payload));
+  }
+});
+
+test("policy hosts and provider targets share one public host rule", () => {
+  for (const host of ["react.dev", "docs.example.com", "docs.example", "docs.test", "docs.invalid", "printer.local",
+    "a.localhost", "10.0.0.1", "docs.c0m", `${"a".repeat(64)}.com`]) {
+    assert.equal(publicHost(host), sourceURL(`https://${host}/`, [host]) !== null, host);
+  }
+  for (const host of ["docs.example", "docs.test", "docs.invalid"]) {
+    assert.throws(() => validatePolicy({ ...enabledPolicy(), allowed_hosts: ["react.dev", host] }), { code: "invalid_policy" });
   }
 });
 

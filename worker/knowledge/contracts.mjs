@@ -37,10 +37,13 @@ export function string(value, maximum, name, { optional = false } = {}) {
   return value.trim();
 }
 
+// One rule for policy validation and the provider layer, so an approved host is always fetchable.
+const RESERVED_HOST = /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid|example|onion)$/;
+
 export function publicHost(value) {
   return typeof value === "string" && value.length <= 253
-    && /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}$/.test(value)
-    && !/(?:^|\.)(?:localhost|local|internal|lan|home|onion)$/.test(value);
+    && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(value)
+    && !RESERVED_HOST.test(value);
 }
 
 export function publicUrl(value, allowedHosts) {
