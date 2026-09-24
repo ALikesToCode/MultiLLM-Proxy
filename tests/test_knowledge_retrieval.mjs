@@ -57,6 +57,16 @@ test("artifact admission applies the current retention policy", async () => {
   await assert.rejects(f.authority.call("artifact.save", { artifact }), { code: "source_not_allowed" });
 });
 
+test("saving clamps expiry to the current retention duration", async () => {
+  const f = await fixture();
+  const artifact = await createArtifact({ ...f.source, origin_checked: true }, f.text, "firecrawl");
+  f.policy.retention_hours = 1;
+  await f.storage.put("policy", f.policy);
+  const saved = await f.authority.call("artifact.save", { artifact });
+  assert.equal(Date.parse(saved.expires_at), Date.parse(artifact.fetched_at) + 3600000);
+  assert.equal((await f.authority.call("artifact.save", { artifact })).expires_at, saved.expires_at, "a refresh cannot extend it either");
+});
+
 test("revoking a host during a live snapshot write removes only bytes that write created", async () => {
   for (const created of [true, false]) {
     const f = await fixture();

@@ -194,8 +194,12 @@ async function saveArtifact(tx, artifact) {
   if (artifact.canonical_url !== source.url || artifact.product !== source.product || artifact.requested_version !== source.version
     || !source.enabled) fail("invalid_artifact", "The artifact does not match an enabled source.");
   // Admission and the post-write confirmation both apply the current retention policy.
-  retainedByPolicy(artifact, await policyOf(tx));
+  const policy = await policyOf(tx);
+  retainedByPolicy(artifact, policy);
   if (!Number.isFinite(Date.parse(artifact.expires_at)) || !Number.isFinite(Date.parse(artifact.fetched_at))) fail("invalid_artifact", "Invalid artifact timestamps.");
+  // Retention counts from acquisition under the current duration, even if it was lowered in flight.
+  const retainUntil = Date.parse(artifact.fetched_at) + policy.retention_hours * 3600000;
+  if (Date.parse(artifact.expires_at) > retainUntil) artifact = { ...artifact, expires_at: new Date(retainUntil).toISOString() };
   const existing = await tx.get(`artifact:${artifact.id}`);
   if (existing) {
     if (existing.status === "expiring") fail("artifact_expiring", "This revision is being removed under its retention policy.", 409);
