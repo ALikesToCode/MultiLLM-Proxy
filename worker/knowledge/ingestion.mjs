@@ -8,9 +8,12 @@ const MAX_POLLS = 6;
 const TERMINAL = new Set(["completed", "cancelled", "failed"]);
 const UNKNOWN_ERRORS = new Set(["acquisition_outcome_unknown", "snapshot_outcome_unknown",
   "operation_already_submitted", "operation_outcome_unknown"]);
+// Definitive refusals charge nothing, so the job can fail and a later refresh can try again.
+// provider_keys_exhausted is raised only after every configured key refused before dispatch.
 const REFUSED_ERRORS = new Set(["provider_disabled", "allowance_exhausted", "ledger_full", "invalid_reservation",
-  "provider_not_configured", "invalid_source_policy", "source_not_allowed", "primary_source_unavailable",
-  "invalid_source", "source_too_large", "invalid_snapshot", "artifact_conflict", "artifact_expiring"]);
+  "provider_not_configured", "provider_keys_exhausted", "invalid_source_policy", "source_not_allowed",
+  "primary_source_unavailable", "invalid_source", "source_too_large", "invalid_snapshot", "artifact_conflict",
+  "artifact_expiring"]);
 
 function ingestionError(code) {
   return Object.assign(new Error("The knowledge ingestion job could not complete."), { code });

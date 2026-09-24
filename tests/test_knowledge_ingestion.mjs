@@ -145,6 +145,23 @@ test("indexing continues with the next Firecrawl key after a definitive credit r
   assert.equal((await f.authority.call("job.get", { id: f.job.id })).source.current_artifact, result.artifact_id);
 });
 
+test("an exhausted key pool fails the job so a later refresh can acquire again", async () => {
+  const f = await fixture();
+  const available = f.deps.retrieve;
+  f.deps.retrieve = (provider, intent, context) => retrieve(provider, intent, {
+    ...context, env: { FIRECRAWL_API_KEY: "synthetic-empty", FIRECRAWL_API_KEY_1: "synthetic-next" },
+    fetchImpl: async () => Response.json({ success: false, error: "Insufficient credits" }, { status: 402 }),
+  });
+  const result = await f.run();
+  assert.equal(result.status, "failed");
+  assert.equal(result.reason, "provider_keys_exhausted");
+  assert.equal((await f.authority.call("snapshot")).usage.find(row => row.provider === "firecrawl").total, 0);
+  const next = await f.authority.call("job.enqueue", { source_id: f.source.id });
+  assert.notEqual(next.id, f.job.id, "a refused job no longer blocks refreshes");
+  f.deps.retrieve = available;
+  assert.equal((await f.run(workflow(), next.id)).status, "completed");
+});
+
 test("derived answers and source URL substitution cannot become snapshots", async () => {
   for (const observation of [
     { kind: "derived_context", text: "An answer", url: "https://flask.palletsprojects.com/en/3.1.3/limits/" },
