@@ -87,6 +87,7 @@
         const formData = new FormData(form);
         const submit = form.querySelector('button[type="submit"]');
         submit.disabled = true;
+        submit.setAttribute('aria-busy', 'true');
         try {
             const payload = await fetchJson('/users', {
                 method: 'POST',
@@ -105,6 +106,7 @@
             window.MultiLLM?.showToast(error.message, 'error');
         } finally {
             submit.disabled = false;
+            submit.removeAttribute('aria-busy');
         }
     });
 
@@ -123,6 +125,7 @@
                 return;
             }
             rotateButton.disabled = true;
+            rotateButton.setAttribute('aria-busy', 'true');
             try {
                 const payload = await fetchJson(`/users/${encodeURIComponent(username)}/rotate-key`, {
                     method: 'POST'
@@ -132,6 +135,7 @@
                 window.MultiLLM?.showToast(error.message, 'error');
             } finally {
                 rotateButton.disabled = false;
+                rotateButton.removeAttribute('aria-busy');
             }
             return;
         }
@@ -140,12 +144,14 @@
             return;
         }
         deleteButton.disabled = true;
+        deleteButton.setAttribute('aria-busy', 'true');
         try {
             await fetchJson(`/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
             window.location.reload();
         } catch (error) {
             window.MultiLLM?.showToast(error.message, 'error');
             deleteButton.disabled = false;
+            deleteButton.removeAttribute('aria-busy');
         }
     });
 

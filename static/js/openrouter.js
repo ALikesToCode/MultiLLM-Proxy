@@ -213,7 +213,7 @@
             return;
         }
         creditsDisplay.textContent = message;
-        creditsDisplay.style.color = tone === 'error' ? 'var(--rose-700)' : 'var(--ink-950)';
+        creditsDisplay.dataset.tone = tone;
     }
 
     function renderCredits(data) {
@@ -228,17 +228,14 @@
             : Math.max(limit - used, 0);
         const percentage = limit > 0 ? Math.min(Math.round((used / limit) * 100), 100) : 0;
 
-        setCreditsDisplay(
-            hasLimit || limit > 0
-                ? `$${available.toFixed(2)}`
-                : 'Credits Available: Unlimited',
-            'ok'
-        );
-        document.getElementById('usage-bar').style.width = `${percentage}%`;
-        document.getElementById('usage-percentage').textContent = `${percentage}%`;
-        document.getElementById('usage-details').textContent = limit > 0
+        // A null key limit means OpenRouter enforces no per-key cap; account credits still apply.
+        const bounded = hasLimit || limit > 0;
+        setCreditsDisplay(bounded ? `$${available.toFixed(2)} left` : 'No key limit', 'ok');
+        document.getElementById('usage-bar').style.width = `${bounded ? percentage : 0}%`;
+        document.getElementById('usage-percentage').textContent = bounded ? `${percentage}% used` : '—';
+        document.getElementById('usage-details').textContent = bounded
             ? `$${used.toFixed(2)} used of $${limit.toFixed(2)} reported limit.`
-            : 'No OpenRouter credit usage has been reported for this key.';
+            : `$${used.toFixed(2)} used. This key has no spending limit of its own; account credits still apply.`;
     }
 
     async function updateOpenRouterCredits() {
@@ -265,6 +262,7 @@
         button.addEventListener('click', () => {
             document.querySelectorAll('.model-button').forEach((candidate) => {
                 candidate.classList.toggle('is-selected', candidate === button);
+                candidate.setAttribute('aria-pressed', String(candidate === button));
             });
             modelInput.value = button.dataset.model;
             selectedModelDisplay.textContent = `Selected model: ${button.dataset.model}`;
@@ -276,7 +274,9 @@
             ? `Selected model: ${modelInput.value.trim()}`
             : 'Enter a model ID';
         document.querySelectorAll('.model-button').forEach((button) => {
-            button.classList.toggle('is-selected', button.dataset.model === modelInput.value.trim());
+            const selected = button.dataset.model === modelInput.value.trim();
+            button.classList.toggle('is-selected', selected);
+            button.setAttribute('aria-pressed', String(selected));
         });
     });
 

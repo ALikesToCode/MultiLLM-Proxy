@@ -93,14 +93,14 @@ class ControlPlaneUiTest(unittest.TestCase):
             "/static/css/auto-routes.css?v=8",
             "/static/css/documentation.css?v=9",
             "/static/css/operations.css?v=2",
-            "/static/css/surfaces.css",
+            "/static/css/surfaces.css?v=2",
             "/static/js/auto-route-catalog.js?v=9",
             "/static/js/auto-routes.js?v=7",
             "/static/js/dashboard.js?v=2",
             "/static/js/request-explorer.js?v=1",
             "/static/js/documentation.js?v=10",
-            "/static/js/openrouter.js",
-            "/static/js/users.js",
+            "/static/js/openrouter.js?v=2",
+            "/static/js/users.js?v=2",
         ):
             self.assertIn(asset, worker)
         self.assertNotIn("/static/css/openrouter.css", worker)

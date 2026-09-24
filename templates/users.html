@@ -3,68 +3,63 @@
 {% block title %}Access · MultiLLM Proxy{% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css', v='2') }}">
 {% endblock %}
 
 {% block content %}
+{% set scope_labels = {'chat': 'Chat', 'models': 'Model discovery', 'knowledge:read': 'Read Knowledge', 'knowledge:manage': 'Manage Knowledge', 'admin': 'Administrator', 'metrics': 'Request metrics', 'users': 'Account management'} %}
+{# Short form keeps the zone: UTC for +00:00 or Z, otherwise the stored offset. #}
+{% macro timestamp(value, fallback) %}{% if value %}{% set zone = ' UTC' if value.endswith('+00:00') or value.endswith('Z') else (' ' ~ value[-6:] if value | length > 6 and value[-6] in '+-' else '') %}<time datetime="{{ value }}" title="{{ value }}">{{ value[:16] | replace('T', ' ') }}{{ zone }}</time>{% else %}{{ fallback }}{% endif %}{% endmacro %}
 <div id="access-console">
-    <section class="surface-intro">
-        <div>
+    <header class="page-header">
+        <div class="page-header__text">
             <p class="eyebrow">Identity and keys</p>
-            <h1>Access control</h1>
-            <p>
-                Create operators, rotate exposed keys, and keep administrative scope visible.
-                New keys appear once and are never rendered again after this page closes.
-            </p>
+            <h1 class="page-header__title">Access</h1>
+            <p class="page-header__lede">Issue scoped proxy keys, rotate exposed ones and keep administrative access visible. A new key is shown once and never displayed again.</p>
         </div>
-        <div class="surface-stat" aria-label="{{ users | length }} accounts">
-            <strong>{{ users | length }}</strong>
-            <span>persisted accounts</span>
-        </div>
-    </section>
+        <p class="page-header__aside account-count" aria-live="polite"><strong>{{ users | length }}</strong> {{ 'account' if users | length == 1 else 'accounts' }}</p>
+    </header>
 
-    <div class="surface-grid">
+    {% if not current_user.is_admin %}
+    <p class="callout callout--neutral access-note">You can review accounts. Only administrators can create accounts, rotate keys or delete accounts.</p>
+    {% endif %}
+
+    <div class="{{ 'surface-grid' if current_user.is_admin else '' }}">
         {% if current_user.is_admin %}
         <section class="panel" aria-labelledby="create-user-heading">
             <header class="panel__header">
                 <div>
                     <h2 id="create-user-heading">Create account</h2>
-                    <p>Issue a scoped proxy key to a new operator.</p>
+                    <p>Issue a proxy key for a person or service.</p>
                 </div>
-                <span class="panel-tag">Admin</span>
             </header>
             <div class="panel__body">
                 <form id="create-user-form" class="form-stack">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <label>
-                        <span class="field-label">Username</span>
-                        <input
-                            class="field"
-                            id="username"
-                            name="username"
-                            type="text"
-                            minlength="2"
-                            maxlength="64"
-                            autocomplete="off"
-                            required
-                        >
-                        <span class="field-hint">Use a stable operator or service identity.</span>
+                    <label class="form-field" for="username">
+                        Username
+                        <input id="username" name="username" type="text" minlength="2" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required aria-describedby="username-hint">
                     </label>
+                    <span class="field-hint" id="username-hint">Use a stable operator or service name, such as <code>docs-agent</code>.</span>
 
                     <label class="switch-field">
                         <input id="is_admin" name="is_admin" type="checkbox">
                         <span>
                             <strong>Administrator</strong>
-                            <small>Can manage accounts and inspect request-level telemetry.</small>
+                            <small>Full access, including accounts, request telemetry and Knowledge administration.</small>
                         </span>
                     </label>
 
-                    <fieldset id="account-scopes">
-                        <legend class="field-label">API permissions</legend>
-                        <p class="field-hint">Choose only Knowledge permissions for a key that cannot call chat routes.</p>
-                        {% for scope, label in [('chat', 'Chat'), ('models', 'Model discovery'), ('knowledge:read', 'Read Knowledge'), ('knowledge:manage', 'Manage Knowledge')] %}
-                        <label class="switch-field"><input type="checkbox" name="scopes" value="{{ scope }}" {% if scope in ['chat', 'models'] %}checked{% endif %}><span>{{ label }}</span></label>
+                    <fieldset id="account-scopes" class="scope-fieldset">
+                        <legend class="field-label">Permissions</legend>
+                        <p class="field-hint">Choose only Knowledge permissions for a key that must not call chat routes.</p>
+                        {% for scope, label, hint in [
+                            ('chat', 'Chat', 'Unified and provider chat routes'),
+                            ('models', 'Model discovery', 'List models through /v1/models'),
+                            ('knowledge:read', 'Read Knowledge', 'Evidence, artifacts and Alexandria'),
+                            ('knowledge:manage', 'Manage Knowledge', 'Sources, jobs and allowances')
+                        ] %}
+                        <label class="switch-field"><input type="checkbox" name="scopes" value="{{ scope }}" {% if scope in ['chat', 'models'] %}checked{% endif %}><span><strong>{{ label }}</strong><small>{{ hint }}</small></span></label>
                         {% endfor %}
                     </fieldset>
 
@@ -78,11 +73,13 @@
             <header class="panel__header">
                 <div>
                     <h2 id="account-list-heading">Accounts</h2>
-                    <p>Keys show prefixes only. Rotation immediately invalidates the prior key.</p>
+                    <p>Only key prefixes are shown. Rotating a key invalidates the previous one immediately.</p>
                 </div>
                 <div class="panel__toolbar">
-                    <input id="search-users" class="field toolbar-field" type="search" placeholder="Search username…" aria-label="Search accounts">
-                    <select id="filter-users" class="field-select toolbar-field" aria-label="Filter accounts by role">
+                    <label class="sr-only" for="search-users">Search accounts</label>
+                    <input id="search-users" class="field" type="search" placeholder="Search username…">
+                    <label class="sr-only" for="filter-users">Filter accounts by role</label>
+                    <select id="filter-users" class="field-select">
                         <option value="all">All roles</option>
                         <option value="admin">Administrators</option>
                         <option value="regular">Operators</option>
@@ -90,50 +87,45 @@
                 </div>
             </header>
 
-            <div class="data-table-shell">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Account</th>
-                            <th scope="col">Role</th>
-                            <th scope="col">Key prefix</th>
-                            <th scope="col">Created</th>
-                            <th scope="col">Last login</th>
-                            {% if current_user.is_admin %}<th scope="col">Actions</th>{% endif %}
+            <div class="table-scroll account-table-shell">
+                <table class="data-table account-table" role="table">
+                    <caption class="sr-only">Accounts with role, permissions, key prefix and activity</caption>
+                    <thead role="rowgroup">
+                        <tr role="row">
+                            <th scope="col" role="columnheader">Account</th>
+                            <th scope="col" role="columnheader">Permissions</th>
+                            <th scope="col" role="columnheader">Key prefix</th>
+                            <th scope="col" role="columnheader">Activity</th>
+                            {% if current_user.is_admin %}<th scope="col" role="columnheader"><span class="sr-only">Actions</span></th>{% endif %}
                         </tr>
                     </thead>
-                    <tbody id="users-table-body">
+                    <tbody id="users-table-body" role="rowgroup">
                         {% for user in users %}
-                        <tr data-user-row data-username="{{ user.username }}" data-role="{{ 'admin' if user.is_admin else 'regular' }}">
-                            <td>
+                        <tr role="row" data-user-row data-username="{{ user.username }}" data-role="{{ 'admin' if user.is_admin else 'regular' }}">
+                            <th scope="row" role="rowheader" data-label="Account">
                                 <span class="avatar-cell">
-                                    <span class="avatar-cell__mark" aria-hidden="true">{{ user.username[0].upper() }}</span>
-                                    <strong>{{ user.username }}</strong>
+                                    <span class="avatar-cell__mark" aria-hidden="true">{{ user.username[0] | upper }}</span>
+                                    <span>
+                                        <strong>{{ user.username }}</strong>
+                                        <span class="status-pill {{ 'tone-warning' if user.is_admin else 'tone-neutral' }}">{{ 'administrator' if user.is_admin else 'operator' }}</span>
+                                        {% if user.username == current_user.username %}<span class="status-pill tone-info">you</span>{% endif %}
+                                    </span>
                                 </span>
+                            </th>
+                            <td role="cell" data-label="Permissions">
+                                <span class="tag-list">{% for scope in user.scopes %}<span class="tag">{{ scope_labels.get(scope, scope) }}</span>{% else %}<span class="cell-secondary">None</span>{% endfor %}</span>
                             </td>
-                            <td>
-                                <span class="status-pill {{ 'tone-warning' if user.is_admin else 'tone-neutral' }}">
-                                    {{ 'Admin' if user.is_admin else 'Operator' }}
-                                </span>
-                                <small>{{ user.scopes | join(', ') }}</small>
+                            <td role="cell" data-label="Key prefix"><code>{{ user.api_key_prefix }}</code></td>
+                            <td role="cell" data-label="Activity" class="activity-cell">
+                                <span>Created {{ timestamp(user.created_at, 'unknown') }}</span>
+                                <span class="cell-secondary">Last sign-in {{ timestamp(user.last_login, 'never') }}</span>
                             </td>
-                            <td><code>{{ user.api_key_prefix }}</code></td>
-                            <td>{{ user.created_at or 'Unknown' }}</td>
-                            <td>{{ user.last_login or 'Never' }}</td>
                             {% if current_user.is_admin %}
-                            <td>
+                            <td role="cell" data-label="Actions">
                                 <div class="table-actions">
-                                    <button
-                                        class="button button--quiet"
-                                        type="button"
-                                        data-rotate-user="{{ user.username }}"
-                                    >Rotate key</button>
-                                    <button
-                                        class="button button--danger"
-                                        type="button"
-                                        data-delete-user="{{ user.username }}"
-                                        {% if user.username == current_user.username %}disabled title="You cannot delete your active account"{% endif %}
-                                    >Delete</button>
+                                    <button class="button button--secondary button--sm" type="button" data-rotate-user="{{ user.username }}" aria-label="Rotate key for {{ user.username }}">Rotate key</button>
+                                    <button class="button button--danger button--sm" type="button" data-delete-user="{{ user.username }}" aria-label="Delete {{ user.username }}"
+                                        {% if user.username == current_user.username %}disabled title="You cannot delete your own signed-in account"{% endif %}>Delete</button>
                                 </div>
                             </td>
                             {% endif %}
@@ -145,18 +137,18 @@
 
             <div id="users-empty" class="empty-state" {% if users %}hidden{% endif %}>
                 <strong>No matching accounts</strong>
-                <p>Change the filters or create the first account.</p>
+                <p>Change the search or role filter{% if current_user.is_admin %}, or create an account{% endif %}.</p>
             </div>
         </section>
     </div>
 
-    <dialog id="secret-dialog" class="secret-dialog" aria-labelledby="secret-dialog-title">
-        <div class="secret-dialog__body">
+    <dialog id="secret-dialog" class="dialog" aria-labelledby="secret-dialog-title" aria-describedby="secret-dialog-description">
+        <div class="dialog__body">
             <p class="eyebrow">One-time secret</p>
             <h2 id="secret-dialog-title">Save this API key now</h2>
-            <p>The complete key will not be shown again. Store it in your secret manager before closing.</p>
+            <p id="secret-dialog-description">It will not be shown again. Store it in your secret manager before closing this dialog.</p>
             <code id="secret-value" class="secret-value"></code>
-            <div class="secret-dialog__actions">
+            <div class="dialog__actions">
                 <button id="copy-secret" class="button button--secondary" type="button">Copy key</button>
                 <button id="close-secret" class="button button--primary" type="button">I saved it</button>
             </div>
@@ -166,5 +158,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/users.js') }}"></script>
+<script src="{{ url_for('static', filename='js/users.js', v='2') }}"></script>
 {% endblock %}

@@ -234,7 +234,9 @@ class OpenRouterDashboardSecurityTest(unittest.TestCase):
 
         self.assertIn("creditsPayload.usage ?? creditsPayload.used", script)
         self.assertIn("creditsPayload.limit_remaining", script)
-        self.assertIn("Credits Available: Unlimited", script)
+        # A null key limit is not unlimited credit; the lab must not claim it is.
+        self.assertIn("No key limit", script)
+        self.assertNotIn("Unlimited", script)
 
     def test_openrouter_template_does_not_render_provider_key(self):
         template = Path("templates/openrouter.html").read_text(encoding="utf-8")
