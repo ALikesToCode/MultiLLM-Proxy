@@ -212,6 +212,11 @@ legend {
     padding: 0;
 }
 
+.form-stack {
+    display: grid;
+    gap: 1rem;
+}
+
 .form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
@@ -235,6 +240,13 @@ legend {
     color: var(--text);
     font-size: var(--text-sm);
     font-weight: 600;
+}
+
+/* An optional qualifier inside a field label, e.g. "optional" or "hours". */
+.label-note {
+    margin-top: -0.25rem;
+    color: var(--text-muted);
+    font-weight: 400;
 }
 
 .field-label {

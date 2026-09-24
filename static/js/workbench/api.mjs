@@ -1,5 +1,9 @@
 export const element = (id) => document.getElementById(id);
-export function status(message) { element("workbench-status").textContent = message; }
+export function status(message, state = "info") {
+  const banner = element("workbench-status");
+  banner.textContent = message;
+  banner.dataset.state = state;
+}
 
 export async function api(path, body, options = {}) {
   const headers = new Headers(options.headers);
@@ -22,7 +26,7 @@ export function action(id, callback) {
   element(id).addEventListener("click", async () => {
     const button = element(id);
     button.disabled = true;
-    try { await callback(); } catch (error) { status(error.message); }
+    try { await callback(); } catch (error) { status(error.message, "error"); }
     finally { button.disabled = false; }
   });
 }

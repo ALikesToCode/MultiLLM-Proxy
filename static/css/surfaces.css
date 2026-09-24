@@ -7,11 +7,6 @@
     gap: 1.25rem;
 }
 
-.form-stack {
-    display: grid;
-    gap: 1rem;
-}
-
 .form-stack .field-hint {
     margin-top: -0.6rem;
 }
