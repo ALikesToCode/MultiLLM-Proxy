@@ -11,13 +11,12 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 
 ## Connect to the gateway
 
-1. Get a proxy key with `knowledge:read`. Add `knowledge:manage` only for source
-   or policy administration. On Cloudflare, use a durable D1 integration key from
+1. In the dashboard's **Access** page, create a proxy key with `knowledge:read`,
+   or provision a durable integration key with
    `scripts/intelligence_operator.mjs provision --scopes knowledge:read`
-   ([details](knowledge.md#client-routes)): dashboard **Access** keys stop working
-   when the Container restarts unless an external control-plane database is
-   configured. Keep the key in the client's private credential environment or
-   secret store.
+   ([details](knowledge.md#client-routes)). Add `knowledge:manage` only for source
+   or policy administration. Keep the key in the client's private credential
+   environment or secret store.
 2. Add a remote HTTP MCP connection to `https://<gateway-origin>/mcp`, sending the
    proxy key as `Authorization: Bearer ...`. Use an environment reference supported
    by the client; do not copy the value into a committed configuration file.

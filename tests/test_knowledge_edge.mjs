@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { generateIntegrationCredential } from "../scripts/intelligence_operator.mjs";
+import { generateIntegrationCredential, hashIntegrationKey } from "../scripts/intelligence_operator.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "../worker/knowledge-edge.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
@@ -11,10 +11,19 @@ const ADMIN_KEY = "synthetic-edge-admin-key";
 const catalogue = JSON.parse(await readFile(new URL("../worker/knowledge-mcp-catalogue.json", import.meta.url), "utf8"));
 const [reader, manager, chatOnly] = await Promise.all([1, 2, 3].map(() => generateIntegrationCredential()));
 
-function database(records, calls = { lookups: 0 }) {
+function database(records, calls = { lookups: 0 }, accounts = []) {
   return {
     calls,
-    prepare() {
+    accounts,
+    prepare(sql) {
+      if (sql.includes("control_users")) {
+        return { bind(prefix) {
+          return { async all() {
+            calls.accounts = (calls.accounts ?? 0) + 1;
+            return { results: accounts.filter(row => row.api_key_prefix === prefix && row.revoked_at === null) };
+          } };
+        } };
+      }
       return { bind(prefix) {
         return { async first() {
           calls.lookups += 1;
@@ -125,7 +134,10 @@ test("rotation, revocation and unknown durable keys are rejected on every reques
 
 test("keys the edge cannot verify, storage faults and malformed records use the Container", async () => {
   const { env, records } = environment();
-  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest("legacy-dashboard-key-0000000000000", "ping"), env), null);
+  const sqlAccounts = { ...env, AUTH_STORAGE_BACKEND: "sql" };
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest("legacy-dashboard-key-0000000000000", "ping"), sqlAccounts), null);
+  assert.equal((await handleKnowledgeEdgeRequest(mcpRequest("unknown-dashboard-key-000000000000", "ping"), env)).status, 401,
+    "with accounts in D1 the edge rejects unknown keys itself");
   assert.equal(await handleKnowledgeEdgeRequest(new Request(`${ORIGIN}/mcp`, { method: "POST" }), env), null);
   assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(reader.key, "ping"), { ...env, KNOWLEDGE_SERVICE: undefined }), null);
   assert.equal(await handleKnowledgeEdgeRequest(new Request(`${ORIGIN}/v1/knowledge/unknown`, {
@@ -204,7 +216,35 @@ test("the Worker answers verified Knowledge keys without waking the Container", 
   const verified = await worker.fetch(mcpRequest(reader.key, "ping"), env);
   assert.equal(verified.status, 200);
   assert.equal(forwarded.length, 0);
-  const legacy = await worker.fetch(mcpRequest("legacy-dashboard-key-0000000000000", "ping"), env);
+  const unknown = await worker.fetch(mcpRequest("unknown-dashboard-key-000000000000", "ping"), env);
+  assert.equal(unknown.status, 401);
+  assert.equal(forwarded.length, 0, "D1 accounts let the edge reject unknown keys without the Container");
+  const legacy = await worker.fetch(mcpRequest("legacy-dashboard-key-0000000000000", "ping"), { ...env, AUTH_STORAGE_BACKEND: "sql" });
   assert.equal(legacy.status, 401);
   assert.deepEqual(forwarded.map(body => JSON.parse(body).method), ["ping"]);
+});
+
+test("dashboard accounts stored in D1 are verified at the edge with their Knowledge scopes", async () => {
+  const account = async (username, scopes, changes = {}) => {
+    const key = "Dash" + username.padEnd(28, "k").slice(0, 28);
+    return { key, row: { username, api_key_hash: await hashIntegrationKey(key, "saltsaltsalt1234"), api_key_prefix: `mllm_${key.slice(0, 8)}`,
+      scopes, is_admin: 0, created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
+      created_by: "admin", rotated_at: null, revoked_at: null, ...changes } };
+  };
+  const reader = await account("reader", "knowledge:read");
+  const chat = await account("chatter", "chat,models");
+  const admin = await account("owner", "admin,chat,metrics,models,users", { is_admin: 1 });
+  const revoked = await account("revoked", "knowledge:read", { revoked_at: "2026-09-24T01:00:00+00:00" });
+  const legacy = await account("legacy", "knowledge:read", { api_key_hash: "pbkdf2:sha256:600000$salt$" + "b".repeat(64) });
+  const { env, dispatched } = environment();
+  env.INTELLIGENCE_DB = database(new Map(), { lookups: 0 }, [reader.row, chat.row, admin.row, revoked.row, legacy.row]);
+  const tools = (await (await call(env, mcpRequest(reader.key, "tools/list"))).json()).result.tools;
+  assert.equal(tools.length, catalogue.tools.filter(entry => entry.scope === "knowledge:read").length);
+  await call(env, mcpRequest(admin.key, "tools/call", { name: "knowledge_status" }));
+  assert.deepEqual(dispatched.at(-1).principal, { id: "owner", scopes: ["knowledge:read", "knowledge:manage"] });
+  assert.equal((await call(env, mcpRequest(chat.key, "ping"))).status, 403);
+  for (const key of [revoked.key, reader.key.slice(0, -1) + "x"]) assert.equal((await call(env, mcpRequest(key, "ping"))).status, 401);
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(legacy.key, "ping"), env), null, "unverifiable hashes use the Container");
+  const external = { ...env, CONTROL_PLANE_DATABASE_URL: "postgresql://control" };
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(reader.key, "ping"), external), null, "PostgreSQL accounts stay in the Container");
 });

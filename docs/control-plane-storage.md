@@ -10,6 +10,28 @@ closed: it never silently switches to an empty local database.
 Container disk is ephemeral. PostgreSQL must be external to the Container;
 changing this setting does not provision a database or migrate existing records.
 Deploying without migrating existing authentication records can lock users out.
+
+## Dashboard accounts in D1
+
+On Cloudflare, dashboard accounts (usernames, scopes, key hashes and usage
+metadata) live in the `control_users` table of the `INTELLIGENCE_DB` D1 database,
+so Access keys survive Container sleep and redeploys. The Worker selects this with
+`AUTH_STORAGE_BACKEND=d1` whenever the D1 binding exists and
+`CONTROL_PLANE_DATABASE_URL` is not configured; set `AUTH_STORAGE_BACKEND=sql` to
+keep accounts in SQLite or PostgreSQL. The Container reaches the table only through
+the private `intelligence.internal/v1/users` operations (list, get, by prefix,
+upsert, delete, touch), never with SQL. The edge reads the same table to verify
+Knowledge requests, and the environment-managed `ADMIN_API_KEY` account is written
+at startup or on its first use.
+
+Apply `intelligence-migrations/0003_control_users.sql` before deploying code that
+selects D1 (`npx wrangler d1 migrations apply multillm-intelligence --remote`);
+without it every account lookup fails closed with 503. An unavailable D1 never
+falls back to local SQLite. Last-used times are advisory and written at most once a
+minute per key and address. Existing SQLite accounts are not migrated; on Cloudflare
+they were already lost with the Container disk. Rate limits, model overrides and
+other control-plane tables still use SQLite, and encrypted control-plane backups
+do not include D1 accounts: recover them through Cloudflare's D1 tooling.
 Model override reads bypass the process-local cache in PostgreSQL mode so another
 replica's changes are visible. Short control-plane transactions use a database-wide
 advisory lock, matching SQLite's single-writer semantics for quota reservations.

@@ -245,4 +245,4 @@ Wrangler will:
 
 - The deployment is pinned to a single named container instance (`primary`) to avoid auth/session drift from the app's in-memory state.
 - `wrangler.jsonc` sets `max_instances=1` for the same reason.
-- Container disk is ephemeral. The default SQLite paths use `/tmp`, so created users, model-disable overrides, and rate-limit rows are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential and move state to D1/Durable Object storage or another external database before relying on dashboard-created users in production.
+- Container disk is ephemeral. Dashboard accounts are stored in D1 ([details](control-plane-storage.md#dashboard-accounts-in-d1)), but model-disable overrides and rate-limit rows use SQLite under `/tmp` and are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential.

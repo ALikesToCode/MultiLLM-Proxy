@@ -123,11 +123,12 @@ Create an account/key in **Access** with `knowledge:read`. Give automation
 `knowledge:manage` only when it must change sources or policy. Existing chat keys
 keep their previous permissions. Administrator accounts retain both abilities.
 
-On Cloudflare, **Access** keys live in the Container's SQLite store unless
-`CONTROL_PLANE_DATABASE_URL` is configured. That disk is reset whenever the
-Container sleeps (after 15 idle minutes) or is redeployed, so those keys then fail
-with `Invalid API key`. Give agents a durable D1 integration key instead; it
-survives restarts and is verified at the edge:
+On Cloudflare, **Access** accounts and key hashes live in D1 (see
+[control-plane persistence](control-plane-storage.md#dashboard-accounts-in-d1)),
+so they survive Container restarts and the edge verifies them without waking the
+Container. Keys created before that change lived on the Container's reset disk;
+create them again once. Service integrations can instead use a durable D1
+integration key, which the dashboard cannot modify:
 
 ```sh
 node scripts/intelligence_operator.mjs provision --account-id <account> --database-id <database_id> \

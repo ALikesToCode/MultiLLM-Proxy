@@ -41,7 +41,7 @@
     <header class="panel__header"><div><h2 id="start-title">Before you start</h2><p>You need a scoped proxy key from this deployment. Keys are never shown on this page.</p></div></header>
     <div class="panel__body">
       <ol class="steps agent-steps">
-        <li><strong>Get a scoped proxy key</strong><p>An administrator provisions a durable key with <code>knowledge:read</code>. Add <code>knowledge:manage</code> only if the agent should administer sources and allowances. Access-page keys survive Container restarts only with an external control-plane database.</p></li>
+        <li><strong>Get a scoped proxy key</strong><p>An administrator creates it in Access with <code>knowledge:read</code>. Add <code>knowledge:manage</code> only if the agent should administer sources and allowances.</p></li>
         <li><strong>Store it privately</strong><p>Put it in your shell profile or secret manager, not in a prompt, repository or chat.</p>
           <div class="code-block">
             <div class="code-block__header"><span class="code-block__title">Shell environment</span><button class="copy-button" type="button" data-copy-target="agent-env-example">Copy</button></div>
