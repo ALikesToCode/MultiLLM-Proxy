@@ -1,6 +1,7 @@
 """Public, credential-free discovery and setup material for Knowledge clients."""
 
 import json
+import shlex
 from pathlib import Path
 
 from flask import Response, jsonify, render_template, request, url_for
@@ -12,6 +13,14 @@ PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_skill", "knowledge_agent_prompt", "knowledge_agent_config",
 })
 _SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-knowledge" / "SKILL.md"
+_RESOURCES = [
+    ("/llms.txt", "Discovery index for agents: setup links, access model and providers."),
+    ("/llm.txt", "Alias of llms.txt for clients that request the singular name."),
+    ("/llms-full.txt", "Complete operating instructions; the same text as the skill."),
+    ("/agent-onboarding/SKILL.md", "Installable skill for Codex and Claude Code."),
+    ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
+    ("/agent-onboarding/config.json", "Endpoint, protocol versions, scopes and tool catalogue."),
+]
 _PROVIDERS = [
     ("Context7", "Version-aware library documentation discovery"),
     ("Exa", "Source discovery and original source acquisition"),
@@ -62,6 +71,24 @@ Report connection, scope, indexing or provider limitations instead of claiming r
 """
 
 
+def _client_setup(origin):
+    """Configuration and one-line commands that reference the key without containing it."""
+    endpoint = origin + "/mcp"
+    claude_server = {"type": "http", "url": endpoint,
+                     "headers": {"Authorization": "Bearer ${MULTILLM_KNOWLEDGE_API_KEY}"}}
+    return {
+        "codex_config": ("[mcp_servers.multillm-knowledge]\n"
+                         f"url = {json.dumps(endpoint)}\n"
+                         'bearer_token_env_var = "MULTILLM_KNOWLEDGE_API_KEY"'),
+        "codex_command": (f"codex mcp add multillm-knowledge --url {shlex.quote(endpoint)} "
+                          "--bearer-token-env-var MULTILLM_KNOWLEDGE_API_KEY"),
+        "claude_config": json.dumps({"mcpServers": {"multillm-knowledge": claude_server}}, indent=2),
+        # Single quotes keep ${...} unexpanded so Claude Code resolves it from the environment.
+        "claude_command": ("claude mcp add-json multillm-knowledge "
+                           f"{shlex.quote(json.dumps(claude_server, separators=(',', ':')))} --scope project"),
+    }
+
+
 def _skill():
     content = _SKILL_PATH.read_text(encoding="utf-8")
     connection = f"\nGateway origin: `{_origin()}`. MCP endpoint: `{_origin()}/mcp`.\n"
@@ -79,16 +106,9 @@ def register_knowledge_onboarding_routes(app):
     @app.get("/agent-onboarding")
     def knowledge_agent_setup():
         origin = _origin()
-        codex = ("[mcp_servers.multillm-knowledge]\n"
-                 f"url = {json.dumps(origin + '/mcp')}\n"
-                 'bearer_token_env_var = "MULTILLM_KNOWLEDGE_API_KEY"')
-        claude = json.dumps({"mcpServers": {"multillm-knowledge": {
-            "type": "http", "url": origin + "/mcp",
-            "headers": {"Authorization": "Bearer ${MULTILLM_KNOWLEDGE_API_KEY}"},
-        }}}, indent=2)
         response = Response(render_template("knowledge_agents.html", origin=origin,
-            setup_prompt=_setup_prompt(), codex_config=codex, claude_config=claude,
-            providers=_PROVIDERS, tools=_tools()))
+            setup_prompt=_setup_prompt(), providers=_PROVIDERS, tools=_tools(),
+            resources=_RESOURCES, **_client_setup(origin)))
         response.headers["Cache-Control"] = "no-store"
         return response
 

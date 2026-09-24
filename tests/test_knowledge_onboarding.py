@@ -1,6 +1,7 @@
 """Public setup must stay discoverable without opening account or management data."""
 
 import json
+import shlex
 import tomllib
 from html import unescape
 from pathlib import Path
@@ -76,3 +77,27 @@ def test_public_allowlist_does_not_open_private_routes(client):
         assert client.get(path, headers={"Accept": "application/json"}).status_code == 401
     assert client.get("/agent-onboarding/private.json").status_code != 200
     assert client.get("/agent-onboarding/../../.env").status_code != 200
+
+
+def test_one_line_client_commands_keep_the_credential_as_a_reference(client):
+    html = client.get("/agent-onboarding", base_url="https://gateway.example").get_data(as_text=True)
+    def command(identifier):
+        return shlex.split(unescape(html.split(f'<pre id="{identifier}">', 1)[1].split("</pre>", 1)[0]))
+    assert command("codex-mcp-command") == [
+        "codex", "mcp", "add", "multillm-knowledge", "--url", "https://gateway.example/mcp",
+        "--bearer-token-env-var", "MULTILLM_KNOWLEDGE_API_KEY",
+    ]
+    claude = command("claude-mcp-command")
+    assert claude[:4] == ["claude", "mcp", "add-json", "multillm-knowledge"]
+    assert claude[5:] == ["--scope", "project"]
+    server = json.loads(claude[4])
+    assert server == {"type": "http", "url": "https://gateway.example/mcp",
+                      "headers": {"Authorization": "Bearer ${MULTILLM_KNOWLEDGE_API_KEY}"}}
+
+
+def test_setup_page_links_every_machine_readable_resource(client):
+    html = client.get("/agent-onboarding", base_url="https://gateway.example").get_data(as_text=True)
+    for path in ("/llms.txt", "/llm.txt", "/llms-full.txt", "/agent-onboarding/SKILL.md",
+                 "/agent-onboarding/prompt.txt", "/agent-onboarding/config.json"):
+        assert f'href="https://gateway.example{path}"' in html
+        assert client.get(path, base_url="https://gateway.example").status_code == 200

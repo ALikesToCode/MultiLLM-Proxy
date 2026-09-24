@@ -1,53 +1,195 @@
 {% extends "base.html" %}
 {% block title %}Connect your agent · MultiLLM Knowledge{% endblock %}
-{% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/knowledge.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/knowledge-agents.css') }}">
-{% endblock %}
+{% block description %}Connect Codex or Claude Code to MultiLLM Knowledge over MCP: copyable setup prompt, client configuration, installable skill and machine-readable resources.{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/knowledge-agents.css', v='2') }}">{% endblock %}
 {% block content %}
-<div class="knowledge-console knowledge-agent-setup">
-  <header class="knowledge-heading">
-    <div><p class="eyebrow">One knowledge connection</p><h1>Give your agent MultiLLM Knowledge</h1><p>Documentation, repository evidence, indexing, and structured data through one MCP connection.</p></div>
-    <a class="button button--quiet" href="{{ url_for('knowledge_page') }}">Open Knowledge</a>
+{% set endpoint = origin ~ '/mcp' %}
+{% set read_tools = tools | selectattr('scope', 'equalto', 'knowledge:read') | list %}
+<div class="agent-setup">
+  <header class="page-header agent-setup__header">
+    <div class="page-header__text">
+      <p class="eyebrow">Agent setup</p>
+      <h1 class="page-header__title">Connect Codex or Claude to MultiLLM Knowledge</h1>
+      <p class="page-header__lede">One MCP connection gives your coding agent cited documentation, repository evidence, indexed sources and Alexandria structured data. Provider keys stay on this server; your agent uses one scoped proxy key.</p>
+    </div>
+    <div class="page-header__aside">
+      <button class="button button--primary" type="button" data-copy-target="agent-setup-prompt" data-copy-message="Setup prompt copied. Paste it into your agent.">Copy setup prompt</button>
+      <a class="button button--secondary" href="{{ url_for('knowledge_agent_skill', download='1') }}">Download skill</a>
+    </div>
   </header>
-  <nav class="knowledge-sections" aria-label="Agent setup sections"><a href="#setup-prompt">Setup prompt</a><a href="#client-config">Connect MCP</a><a href="#knowledge-tools">Tools</a><a href="#provider-coverage">Providers</a></nav>
 
-  <section id="setup-prompt" class="panel" aria-labelledby="prompt-title">
-    <header class="panel__header"><div><h2 id="prompt-title">Paste this into Codex or Claude</h2><p>Your agent can read the skill and configure MultiLLM as its default knowledge service.</p></div><span class="panel-tag">Start here</span></header>
+  <dl class="endpoint-strip on-dark">
+    <div class="endpoint-strip__main">
+      <dt>MCP endpoint</dt>
+      <dd><code id="agent-mcp-endpoint">{{ endpoint }}</code><button class="copy-button" type="button" data-copy-target="agent-mcp-endpoint" aria-label="Copy MCP endpoint">Copy</button></dd>
+    </div>
+    <div><dt>Transport</dt><dd>Streamable HTTP</dd></div>
+    <div><dt>Credential</dt><dd><code>MULTILLM_KNOWLEDGE_API_KEY</code></dd></div>
+  </dl>
+
+  <nav class="local-nav" aria-label="Agent setup sections" data-local-nav>
+    <a href="#before-you-start">Before you start</a>
+    <a href="#fast-path">Fast path</a>
+    <a href="#client-setup">Codex and Claude</a>
+    <a href="#verify">Verify</a>
+    <a href="#resources">Resources</a>
+    <a href="#knowledge-tools">Tools</a>
+    <a href="#provider-coverage">Providers</a>
+  </nav>
+
+  <section id="before-you-start" class="panel" aria-labelledby="start-title">
+    <header class="panel__header"><div><h2 id="start-title">Before you start</h2><p>You need a scoped proxy key from this deployment. Keys are never shown on this page.</p></div></header>
     <div class="panel__body">
-      <label for="agent-setup-prompt">Setup prompt</label>
-      <textarea id="agent-setup-prompt" class="agent-prompt" rows="10" readonly spellcheck="false">{{ setup_prompt }}</textarea>
-      <div class="knowledge-actions"><button class="button button--primary" type="button" data-copy-target="agent-setup-prompt">Copy setup prompt</button><a class="button button--quiet" href="{{ url_for('knowledge_agent_skill', download='1') }}">Download skill</a><a class="text-link" href="{{ url_for('knowledge_llms') }}">llms.txt</a><a class="text-link" href="{{ url_for('knowledge_llms_full') }}">Full instructions</a></div>
-      <p id="agent-copy-status" role="status" aria-live="polite"></p>
-      <p class="knowledge-note">The prompt contains no key. Set <code>MULTILLM_KNOWLEDGE_API_KEY</code> in your client's private environment using a scoped proxy key from Access.</p>
+      <ol class="steps agent-steps">
+        <li><strong>Get a scoped proxy key</strong><p>An administrator creates it in Access with <code>knowledge:read</code>. Add <code>knowledge:manage</code> only if the agent should administer sources and allowances.</p></li>
+        <li><strong>Store it privately</strong><p>Put it in your shell profile or secret manager, not in a prompt, repository or chat.</p>
+          <div class="code-block">
+            <div class="code-block__header"><span class="code-block__title">Shell environment</span><button class="copy-button" type="button" data-copy-target="agent-env-example">Copy</button></div>
+            <pre id="agent-env-example">export MULTILLM_KNOWLEDGE_API_KEY="your-scoped-proxy-key"</pre>
+          </div>
+        </li>
+        <li><strong>Connect your client</strong><p>Let your agent configure itself with the setup prompt, or follow the Codex or Claude Code steps below.</p></li>
+      </ol>
     </div>
   </section>
 
-  <section id="client-config" class="panel" aria-labelledby="client-title">
-    <header class="panel__header"><div><h2 id="client-title">Connect your client</h2><p>Use <code>knowledge:read</code> for research. Add <code>knowledge:manage</code> when the agent should administer sources and indexing.</p></div></header>
+  <section id="fast-path" class="panel" aria-labelledby="prompt-title">
+    <header class="panel__header">
+      <div><h2 id="prompt-title">Fast path: paste one prompt</h2><p>Your agent reads the skill, installs it, connects the MCP server and verifies a small request, preserving your existing configuration.</p></div>
+      <span class="panel-tag">Codex or Claude</span>
+    </header>
     <div class="panel__body">
-      <p>MCP endpoint: <code>{{ origin }}/mcp</code></p>
-      <div class="knowledge-grid">
-        <div><h3>Codex</h3><p>Add this server entry to your existing Codex configuration.</p><pre id="codex-mcp-config">{{ codex_config }}</pre><button class="button button--quiet" type="button" data-copy-target="codex-mcp-config">Copy Codex config</button><p>Skill location: <code>~/.codex/skills/multillm-knowledge/SKILL.md</code><br>Invoke: <code>$multillm-knowledge</code></p></div>
-        <div><h3>Claude Code</h3><p>Merge this server into your existing MCP configuration.</p><pre id="claude-mcp-config">{{ claude_config }}</pre><button class="button button--quiet" type="button" data-copy-target="claude-mcp-config">Copy Claude config</button><p>Skill location: <code>~/.claude/skills/multillm-knowledge/SKILL.md</code><br>Invoke: <code>/multillm-knowledge</code></p></div>
+      <label class="field-label" for="agent-setup-prompt">Setup prompt</label>
+      <textarea id="agent-setup-prompt" class="agent-prompt" rows="9" readonly spellcheck="false">{{ setup_prompt }}</textarea>
+      <div class="button-row agent-prompt-actions">
+        <button class="button button--primary" type="button" data-copy-target="agent-setup-prompt" data-copy-message="Setup prompt copied. Paste it into your agent.">Copy setup prompt</button>
+        <a class="button button--secondary" href="{{ url_for('knowledge_agent_prompt') }}">Open as text</a>
       </div>
-      <p>Restart the client after configuration, initialize MCP, and list available tools. Keep the key out of prompts and committed files. <a href="{{ url_for('knowledge_agent_config') }}">View machine-readable setup</a>.</p>
+      <p class="callout">The prompt contains no key. It tells the agent to read <code>MULTILLM_KNOWLEDGE_API_KEY</code> from your private environment and never to ask for the secret in chat.</p>
     </div>
   </section>
 
-  <section id="knowledge-tools" class="panel" aria-labelledby="tools-title">
-    <header class="panel__header"><div><h2 id="tools-title">Research and manage knowledge</h2><p>The server exposes the tools allowed by your key. A key with both scopes can use all thirteen.</p></div></header>
-    <div class="panel__body agent-table-wrap"><table class="agent-table"><caption>MCP tools and required permissions</caption><thead><tr><th scope="col">Tool</th><th scope="col">Permission</th></tr></thead><tbody>{% for tool in tools %}<tr><td><code>{{ tool.name }}</code></td><td><code>{{ tool.scope }}</code></td></tr>{% endfor %}</tbody></table>
-    <p>Register a source, refresh it, verify publication, then query the retained evidence. Refreshes can spend allowances. Alexandria follows discover → inspect → authorized retrieval → actual cost receipt.</p></div>
+  <section id="client-setup" class="panel" aria-labelledby="client-title">
+    <header class="panel__header"><div><h2 id="client-title">Configure your client</h2><p>Each path references the environment variable, so the configuration itself contains no secret.</p></div></header>
+    <div class="panel__body" data-tabs>
+      <div class="tabs__list" role="tablist" aria-label="Client">
+        <button class="tabs__tab" id="tab-codex" type="button" role="tab" aria-selected="true" aria-controls="panel-codex">Codex</button>
+        <button class="tabs__tab" id="tab-claude" type="button" role="tab" aria-selected="false" aria-controls="panel-claude">Claude Code</button>
+      </div>
+
+      <div class="tabs__panel client-panel" id="panel-codex" role="tabpanel" aria-labelledby="tab-codex" tabindex="0">
+        <h3 class="client-panel__title">Codex</h3>
+        <div class="client-options">
+          <div class="client-option">
+            <h4>Option A · one command</h4>
+            <div class="code-block code-block--wrap">
+              <div class="code-block__header"><span class="code-block__title">Terminal</span><button class="copy-button" type="button" data-copy-target="codex-mcp-command">Copy</button></div>
+              <pre id="codex-mcp-command">{{ codex_command }}</pre>
+            </div>
+          </div>
+          <div class="client-option">
+            <h4>Option B · edit configuration</h4>
+            <div class="code-block">
+              <div class="code-block__header"><span class="code-block__title"><code>~/.codex/config.toml</code><small>Add beside your existing servers</small></span><button class="copy-button" type="button" data-copy-target="codex-mcp-config">Copy</button></div>
+              <pre id="codex-mcp-config">{{ codex_config }}</pre>
+            </div>
+          </div>
+        </div>
+        <h4>Install the skill</h4>
+        <div class="code-block code-block--wrap">
+          <div class="code-block__header"><span class="code-block__title">Terminal<small>Replaces an existing copy at this path; compare it first</small></span><button class="copy-button" type="button" data-copy-target="codex-skill-command">Copy</button></div>
+          <pre id="codex-skill-command">curl --create-dirs -fsSL {{ origin }}/agent-onboarding/SKILL.md -o ~/.codex/skills/multillm-knowledge/SKILL.md</pre>
+        </div>
+        <p class="field-hint">Restart Codex so it reads the key from its environment, confirm with <code>codex mcp get multillm-knowledge</code>, then invoke the skill with <code>$multillm-knowledge</code>.</p>
+      </div>
+
+      <div class="tabs__panel client-panel" id="panel-claude" role="tabpanel" aria-labelledby="tab-claude" tabindex="0">
+        <h3 class="client-panel__title">Claude Code</h3>
+        <div class="client-options">
+          <div class="client-option">
+            <h4>Option A · one command</h4>
+            <div class="code-block code-block--wrap">
+              <div class="code-block__header"><span class="code-block__title">Terminal, in your project</span><button class="copy-button" type="button" data-copy-target="claude-mcp-command">Copy</button></div>
+              <pre id="claude-mcp-command">{{ claude_command }}</pre>
+            </div>
+          </div>
+          <div class="client-option">
+            <h4>Option B · edit configuration</h4>
+            <div class="code-block">
+              <div class="code-block__header"><span class="code-block__title"><code>.mcp.json</code> in your project root<small>Merge into existing servers</small></span><button class="copy-button" type="button" data-copy-target="claude-mcp-config">Copy</button></div>
+              <pre id="claude-mcp-config">{{ claude_config }}</pre>
+            </div>
+          </div>
+        </div>
+        <h4>Install the skill</h4>
+        <div class="code-block code-block--wrap">
+          <div class="code-block__header"><span class="code-block__title">Terminal<small>Replaces an existing copy at this path; compare it first</small></span><button class="copy-button" type="button" data-copy-target="claude-skill-command">Copy</button></div>
+          <pre id="claude-skill-command">curl --create-dirs -fsSL {{ origin }}/agent-onboarding/SKILL.md -o ~/.claude/skills/multillm-knowledge/SKILL.md</pre>
+        </div>
+        <p class="field-hint">Claude Code expands <code>${MULTILLM_KNOWLEDGE_API_KEY}</code> from your environment, so the project file is safe to share. Approve the project server when asked, check it with <code>claude mcp get multillm-knowledge</code>, then invoke <code>/multillm-knowledge</code>.</p>
+      </div>
+    </div>
   </section>
 
-  <section id="provider-coverage" class="panel" aria-labelledby="providers-title">
-    <header class="panel__header"><div><h2 id="providers-title">Services behind your gateway</h2><p>MultiLLM selects configured, eligible providers within your policy. Provider credentials stay on the server.</p></div></header>
-    <div class="panel__body knowledge-provider-grid">{% for name, detail in providers %}<div class="knowledge-card"><h3>{{ name }}</h3><p>{{ detail }}</p></div>{% endfor %}</div>
+  <section id="verify" class="panel" aria-labelledby="verify-title">
+    <header class="panel__header"><div><h2 id="verify-title">Verify the connection</h2><p>Configuration alone does not prove access. Confirm it with a small real request.</p></div></header>
+    <div class="panel__body verify-grid">
+      <ol class="steps">
+        <li><strong>List the tools</strong><p>A key with both scopes sees all {{ tools | length }} tools; a <code>knowledge:read</code> key sees {{ read_tools | length }}.</p></li>
+        <li><strong>Ask a small evidence question</strong><p>For example, the request-size limit of a dependency in your project. Expect cited excerpts, a version basis and any coverage gaps.</p></li>
+        <li><strong>Read the limitations</strong><p>Missing providers, disabled allowances or unindexed sources are reported, not hidden.</p></li>
+      </ol>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Troubleshooting, scrollable">
+        <table class="data-table">
+          <caption>If something fails</caption>
+          <thead><tr><th scope="col">Symptom</th><th scope="col">Likely cause</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">401 authentication required</th><td>The client did not send the key; export the variable and restart the client.</td></tr>
+            <tr><th scope="row">Tools missing or scope error</th><td>The key lacks <code>knowledge:read</code> or <code>knowledge:manage</code>. Provider keys cannot authenticate here.</td></tr>
+            <tr><th scope="row"><code>setup_needed</code></th><td>This deployment has not connected its private Knowledge service yet.</td></tr>
+            <tr><th scope="row">Insufficient evidence</th><td>No retained or live source covers the question or version; the response lists the gaps.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </section>
-  <p class="knowledge-note">Public documentation is supported. Private portals, local uploads, and Firecrawl's native Developer and Research index APIs are outside this gateway's current adapters. Connection settings do not prove live provider access; check Knowledge status and a real retrieval.</p>
+
+  <section id="resources" class="panel" aria-labelledby="resources-title">
+    <header class="panel__header"><div><h2 id="resources-title">Machine-readable resources</h2><p>Public, credential-free files for agents and tooling. They contain no account data, source inventory or configuration status.</p></div></header>
+    <ul class="resource-list">
+      {% for path, description in resources %}
+      <li>
+        <div>
+          <a href="{{ origin }}{{ path }}"><code>{{ path }}</code></a>
+          <p>{{ description }}</p>
+        </div>
+        <button class="copy-button" type="button" data-copy-value="{{ origin }}{{ path }}" aria-label="Copy the {{ path }} URL">Copy URL</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <div class="agent-setup__grid">
+    <section id="knowledge-tools" class="panel" aria-labelledby="tools-title">
+      <header class="panel__header"><div><h2 id="tools-title">Tools and permissions</h2><p>The server lists only the tools your key's scopes allow.</p></div></header>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="MCP tools, scrollable">
+        <table class="data-table agent-table">
+          <caption class="sr-only">MCP tools and required permissions</caption>
+          <thead><tr><th scope="col">Tool</th><th scope="col">Permission</th></tr></thead>
+          <tbody>{% for tool in tools %}<tr><td><code>{{ tool.name }}</code></td><td><span class="status-pill {{ 'tone-info' if tool.scope == 'knowledge:read' else 'tone-warning' }}">{{ tool.scope }}</span></td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+      <p class="panel__body agent-table-note">Register a source, refresh it, verify publication, then query the retained evidence; refreshes can spend allowances. Alexandria follows discover → inspect → authorized retrieval → cost receipt.</p>
+    </section>
+
+    <section id="provider-coverage" class="panel" aria-labelledby="providers-title">
+      <header class="panel__header"><div><h2 id="providers-title">Services behind the gateway</h2><p>Availability depends on this deployment's credentials and allowance policy; this list is not a status report.</p></div></header>
+      <ul class="provider-list">
+        {% for name, detail in providers %}<li><strong>{{ name }}</strong><span>{{ detail }}</span></li>{% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <p class="callout callout--neutral agent-scope-note">Public documentation is supported. Private portals, local uploads and Firecrawl's native Developer and Research index APIs are outside this gateway's current adapters. Connection settings do not prove live provider access; check Knowledge status and a real retrieval.</p>
 </div>
 {% endblock %}
-{% block scripts %}<script type="module" src="{{ url_for('static', filename='js/knowledge/onboarding.mjs') }}"></script>{% endblock %}
