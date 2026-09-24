@@ -411,6 +411,12 @@
     font-size: var(--text-sm);
 }
 
+/* Empty live regions stay rendered so later messages are announced. */
+.status-note:empty {
+    min-height: 0;
+    margin: 0;
+}
+
 .status-note[data-tone="error"] { color: var(--rose-700); }
 .status-note[data-tone="success"] { color: var(--emerald-700); }
 

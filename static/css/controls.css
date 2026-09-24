@@ -139,7 +139,7 @@
 }
 
 /* Forms: native controls inside the main frame share one treatment. */
-:where(.app-main, dialog) :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="color"]), select, textarea),
+:is(.app-main, dialog) :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"], [type="submit"], [type="button"], [type="file"], [type="color"]), select, textarea),
 .field,
 .field-select,
 .field-textarea {
@@ -151,18 +151,19 @@
     background: var(--surface);
     color: var(--text-strong);
     font-size: var(--text-base);
+    font-weight: 400;
     line-height: 1.4;
     transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
 }
 
-:where(.app-main, dialog) :where(textarea),
+:is(.app-main, dialog) :where(textarea),
 .field-textarea {
     min-height: 6rem;
     line-height: 1.55;
     resize: vertical;
 }
 
-:where(.app-main, dialog) :where(input, select, textarea):focus-visible,
+:is(.app-main, dialog) :where(input, select, textarea):focus-visible,
 .field:focus-visible,
 .field-select:focus-visible,
 .field-textarea:focus-visible {
@@ -171,18 +172,18 @@
     outline-offset: 0;
 }
 
-:where(.app-main, dialog) :where(input, select, textarea):disabled,
-:where(.app-main, dialog) :where(input, textarea)[readonly] {
+:is(.app-main, dialog) :where(input, select, textarea):disabled,
+:is(.app-main, dialog) :where(input, textarea)[readonly] {
     background: var(--surface-muted);
     color: var(--text-muted);
 }
 
-:where(.app-main, dialog) :where(input, select, textarea)[aria-invalid="true"],
-:where(.app-main, dialog) :where(input, select, textarea):user-invalid {
+:is(.app-main, dialog) :where(input, select, textarea)[aria-invalid="true"],
+:is(.app-main, dialog) :where(input, select, textarea):user-invalid {
     border-color: var(--rose-700);
 }
 
-:where(.app-main, dialog) ::placeholder {
+:is(.app-main, dialog) ::placeholder {
     color: var(--text-subtle);
     opacity: 1;
 }
@@ -214,7 +215,7 @@ legend {
 .form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-    align-items: start;
+    align-items: end;
     gap: 1rem;
 }
 
@@ -226,7 +227,7 @@ legend {
     grid-column: 1 / -1;
 }
 
-.form-grid > label,
+.form-grid > label:not(.check-field),
 .form-field {
     display: grid;
     min-width: 0;

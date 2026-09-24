@@ -500,7 +500,11 @@ samp {
     border-radius: var(--radius-md);
     background: var(--surface);
     box-shadow: var(--shadow-sm);
-    scrollbar-width: thin;
+    scrollbar-width: none;
+}
+
+.local-nav::-webkit-scrollbar {
+    display: none;
 }
 
 .local-nav a {
