@@ -57,6 +57,13 @@ def test_replacement_rotation_and_revocation(durable, tmp_path):
         assert rpc.call_count == 5
 
 
+def test_knowledge_scopes_are_durable_integration_scopes(durable, tmp_path):
+    record, _ = durable
+    record["scopes"] = ["knowledge:read", "knowledge:manage"]
+    with patch.object(AuthService, "_storage_path", tmp_path / "fresh.sqlite3"):
+        assert AuthService.verify_api_key(KEY)["scopes"] == ["knowledge:read", "knowledge:manage"]
+
+
 @pytest.mark.parametrize(
     "change",
     [

@@ -76,7 +76,8 @@ reservation IDs cannot authorize more work.
 
 Integration keys use the reserved `mllm_intelligence_` namespace and a 32–128
 character URL-safe suffix. Their principals use IDs such as `integration:omni`.
-Allowed scopes are `chat`, `models`, `audio` and `embeddings`; none grants admin.
+Allowed scopes are `chat`, `models`, `audio`, `embeddings`, `knowledge:read` and
+`knowledge:manage`; none grants admin.
 
 Provisioning is an explicit operator operation through the private auth domain,
 not an environment seed. Its version-one operation fields are:
@@ -98,10 +99,14 @@ Resolve a lost management response by inspecting durable state before proceeding
 Every reserved-key authentication reads D1. Revocation is not hidden behind a
 process cache, and storage failure never enables a local-user fallback. Existing
 administrator and ordinary user authentication retains its current behavior.
+The edge Worker authenticates these keys for Knowledge MCP and REST requests
+itself. It still reads the current D1 row on every request and memoizes only the
+scrypt comparison against that row's hash, so rotation and revocation apply at once.
 The dashboard's local user-management commands cannot modify these principals.
 
-Integration access is restricted to model discovery and the intelligence chat and
-media endpoints. Unified chat must select `auto:intelligence` or include a `routing`
+Integration access is restricted to model discovery, the intelligence chat and
+media endpoints, and the Knowledge routes (`/mcp` and `/v1/knowledge/*`), which
+require `knowledge:read` or `knowledge:manage`. Unified chat must select `auto:intelligence` or include a `routing`
 field so it enters the intelligence dispatcher. Legacy provider passthrough,
 optimizer, image generation and administrative routes are denied, even when their
 ordinary scope name matches. This keeps every integration inference inside the

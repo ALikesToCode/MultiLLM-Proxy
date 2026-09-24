@@ -18,6 +18,9 @@ In a MultiLLM-Proxy checkout, read `docs/knowledge-agents.md` for setup,
 `docs/knowledge.md` for operations, and `docs/knowledge-alexandria.md` for receipts.
 Outside the checkout, use the contracts below and discover the connected MCP tools.
 Keep provider keys in the private Knowledge Worker. Clients use proxy keys.
+If a key that worked now gets `Invalid API key`, do not retry. Report it: the
+operator should issue a durable `knowledge:read` integration key, because dashboard
+keys can be lost when the Container restarts.
 
 ## Choose the workflow
 

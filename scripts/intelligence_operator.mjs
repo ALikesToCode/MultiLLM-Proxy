@@ -63,6 +63,8 @@ Operations:
   provision   Create a new integration principal and key:
               --principal integration:<name> --scopes chat,models,audio,embeddings
               --credential-file <new path>
+              Knowledge clients use --scopes knowledge:read (add knowledge:manage
+              only for administration). These keys survive Container restarts.
 
 seed and provision are dry runs unless --apply is given. Dry runs validate with the
 Worker domain handlers, make no remote call and create no file.

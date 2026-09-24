@@ -2,6 +2,7 @@ import { Container, ContainerProxy, getContainer } from "@cloudflare/containers"
 import { collectContainerEnv } from "./worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
+import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
@@ -1829,6 +1830,17 @@ export default {
 
     if (apiPath && !readyPath) {
       request = new Request(request, { headers: withClientDefaults(request.headers, env) });
+    }
+
+    if (isKnowledgeEdgePath(requestUrl.pathname)) {
+      // Verified knowledge keys skip the Container; others continue below unread.
+      const response = await handleKnowledgeEdgeRequest(request, env).catch((error) => {
+        logStructuredError("knowledge_edge_failed", error);
+        return null;
+      });
+      if (response) {
+        return applyCorsHeaders(request, response, env);
+      }
     }
 
     if (roleplayPath) {

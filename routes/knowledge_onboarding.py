@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import Response, jsonify, render_template, request, url_for
 
-from routes import knowledge_alexandria, knowledge_management
+from routes import knowledge_alexandria, knowledge_management, knowledge_mcp
 
 PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_setup", "knowledge_llms", "knowledge_llms_full",
@@ -160,7 +160,7 @@ report actual receipt costs and keep the same request ID after uncertain outcome
     @app.get("/agent-onboarding/config.json")
     def knowledge_agent_config():
         return jsonify({"name": "multillm-knowledge", "transport": "streamable-http",
-            "url": _origin() + "/mcp", "protocol_versions": ["2025-06-18", "2025-03-26"],
+            "url": _origin() + "/mcp", "protocol_versions": list(knowledge_mcp.PROTOCOL_VERSIONS),
             "accept": "application/json, text/event-stream",
             "authentication": {"type": "bearer", "env": "MULTILLM_KNOWLEDGE_API_KEY"},
             "skill_url": url_for("knowledge_agent_skill", _external=True),

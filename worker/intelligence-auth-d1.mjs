@@ -1,4 +1,6 @@
-const scopesAllowed = new Set(["chat", "models", "audio", "embeddings"]);
+export const INTEGRATION_SCOPES = Object.freeze(["chat", "models", "audio", "embeddings",
+  "knowledge:read", "knowledge:manage"]);
+const scopesAllowed = new Set(INTEGRATION_SCOPES);
 const idPattern = /^integration:[a-z][a-z0-9_-]{0,63}$/;
 const prefixPattern = /^mllm_intelligence_[A-Za-z0-9_-]{16}$/;
 const hashPattern = /^scrypt:32768:8:1\$[A-Za-z0-9]{8,32}\$[a-f0-9]{128}$/;
@@ -30,6 +32,19 @@ async function boundedBody(request) {
   return new TextDecoder("utf-8", {fatal:true}).decode(bytes);
 }
 
+/** The current credential row for a key prefix, shared by the container RPC and the edge. */
+export async function lookupIntegrationPrincipal(db, keyPrefix) {
+  const row = await db.prepare(`SELECT p.id, p.scopes, p.version, p.created_at, p.revoked_at,
+    c.key_prefix, c.key_hash FROM intelligence_credentials c
+    JOIN intelligence_principals p ON p.id=c.principal_id AND p.version=c.version
+    WHERE c.key_prefix=?`).bind(keyPrefix).first();
+  return row ? {
+    id: row.id, scopes: JSON.parse(row.scopes), credentialVersion: row.version,
+    createdAt: row.created_at, revokedAt: row.revoked_at,
+    keyPrefix: row.key_prefix, keyHash: row.key_hash
+  } : null;
+}
+
 export async function handleIntelligenceAuthRequest(request, env) {
   const url = new URL(request.url);
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal"
@@ -54,22 +69,14 @@ export async function handleIntelligenceAuthRequest(request, env) {
     if (body.operation === "lookup") {
       if (!fields(body, ["version", "operation", "keyPrefix"]) || !validPrefix(body.keyPrefix))
         return reply({error: "invalid_request"}, 400);
-      const row = await db.prepare(`SELECT p.id, p.scopes, p.version, p.created_at, p.revoked_at,
-        c.key_prefix, c.key_hash FROM intelligence_credentials c
-        JOIN intelligence_principals p ON p.id=c.principal_id AND p.version=c.version
-        WHERE c.key_prefix=?`).bind(body.keyPrefix).first();
-      return reply({version: 1, principal: row ? {
-        id: row.id, scopes: JSON.parse(row.scopes), credentialVersion: row.version,
-        createdAt: row.created_at, revokedAt: row.revoked_at,
-        keyPrefix: row.key_prefix, keyHash: row.key_hash
-      } : null});
+      return reply({version: 1, principal: await lookupIntegrationPrincipal(db, body.keyPrefix)});
     }
     if (typeof body.principalId !== "string" || !idPattern.test(body.principalId)) return reply({error: "invalid_request"}, 400);
     const now = new Date().toISOString();
     if (body.operation === "provision") {
       if (!fields(body, ["version", "operation", "principalId", "keyPrefix", "keyHash", "scopes"])
         || !validCredential(body) || !Array.isArray(body.scopes) || !body.scopes.length
-        || body.scopes.length > 4 || new Set(body.scopes).size !== body.scopes.length
+        || body.scopes.length > INTEGRATION_SCOPES.length || new Set(body.scopes).size !== body.scopes.length
         || body.scopes.some(scope => !scopesAllowed.has(scope)))
         return reply({error: "invalid_request"}, 400);
       await db.batch([

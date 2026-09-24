@@ -1,0 +1,830 @@
+{
+  "protocolVersions": [
+    "2025-06-18",
+    "2025-03-26"
+  ],
+  "serverInfo": {
+    "name": "multillm-knowledge",
+    "version": "1.0.0"
+  },
+  "instructions": "Use knowledge_context or knowledge_search for source evidence, including the actual product and dependency version when known. Read excerpts, original citations, related versions and coverage gaps before answering; insufficient evidence is not a verified answer. For Alexandria, first use knowledge_alexandria_search, then knowledge_alexandria_inspect on a returned quote. These catalogue calls cost zero credits. Execute only a discovered quote with authorized spending, contract-valid options and a unique request_id. Report each call's actual cost and cost state; reserve_credits is not an upstream price cap. After interruption use knowledge_alexandria_receipt or replay the identical payload with the same request_id; never purchase again under a new ID to resolve an unknown outcome. Use knowledge_status and the available source, job and policy tools for administration. Management tools require knowledge:manage; retrieval tools require knowledge:read. Registering a source does not fetch it; refresh and verify publication before querying. Read /llms.txt and /agent-onboarding/SKILL.md on this server for complete setup.",
+  "tools": [
+    {
+      "operation": "context",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_context",
+        "description": "Retrieve cited technical excerpts with explicit version evidence and gaps.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[\\w.-]+/[\\w.-]+$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "economy",
+                "smart",
+                "deep"
+              ],
+              "default": "smart"
+            },
+            "token_budget": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 16000,
+              "default": 6000
+            },
+            "freshness": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "fresh"
+              ],
+              "default": "normal"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "search",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_search",
+        "description": "Search technical sources and inspect normalized retrieval diagnostics.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[\\w.-]+/[\\w.-]+$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "economy",
+                "smart",
+                "deep"
+              ],
+              "default": "smart"
+            },
+            "token_budget": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 16000,
+              "default": 6000
+            },
+            "freshness": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "fresh"
+              ],
+              "default": "normal"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "alexandria.search",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_alexandria_search",
+        "description": "Discover Alexandria capabilities for free. Only returned quote ids can be inspected or executed.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "alexandria.inspect",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_alexandria_inspect",
+        "description": "Inspect a discovered capability's inputs and response contract for free.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quote_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "quote_id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "alexandria.execute",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_alexandria_execute",
+        "description": "Spend Firecrawl credits to execute a recently discovered quote. Choose options from its contract; reserve_credits counts against the allowance but is not an upstream price cap. Per-record pricing requires accept_variable_cost=true. Reuse request_id for the same request; never retry with a new id after an unknown outcome. Report the returned cost to the user.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quote_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "options": {
+              "type": "object"
+            },
+            "reserve_credits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "accept_variable_cost": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "quote_id",
+            "request_id",
+            "options",
+            "reserve_credits"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "alexandria.receipt",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_alexandria_receipt",
+        "description": "Read a previous request's credit receipt without executing the provider again. No charge.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "request_id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      }
+    },
+    {
+      "operation": "artifact",
+      "scope": "knowledge:read",
+      "definition": {
+        "name": "knowledge_artifact",
+        "description": "Read a retained source snapshot and immutable citation manifest. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "status",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_status",
+        "description": "Inspect source, job, allowance and configuration status. Requires knowledge:manage; configuration is not a connectivity test.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {},
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "sources.create",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_source_register",
+        "description": "Register an approved public documentation URL without fetching it. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "firecrawl",
+                "exa"
+              ],
+              "default": "firecrawl"
+            },
+            "refresh_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "url",
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "sources.update",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_source_update",
+        "description": "Enable, disable, pin or change a source refresh interval using its current revision. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740990
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "pinned": {
+              "type": "boolean"
+            },
+            "refresh_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            }
+          },
+          "required": [
+            "id",
+            "expected_revision"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "sources.refresh",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_source_refresh",
+        "description": "Start or reconcile the source's durable indexing job. Can spend provider and platform allowances. Reuse the existing source after uncertainty. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "jobs.cancel",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_job_cancel",
+        "description": "Fence future job work. Accepted upstream work and charges may still complete. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "policy.update",
+      "scope": "knowledge:manage",
+      "definition": {
+        "name": "knowledge_policy_update",
+        "description": "Save the complete allowance and retention policy with its current revision. Requires knowledge:manage. Obtain operator confirmation of billing controls and retention rights; never invent acknowledgements or raise limits to retry unknown work.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740990
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "cache_ttl_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600
+            },
+            "retention_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            },
+            "allowed_hosts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "providers": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "context7",
+                "firecrawl",
+                "exa",
+                "mintlify",
+                "deepwiki",
+                "ai_search",
+                "alexandria"
+              ],
+              "properties": {
+                "context7": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "firecrawl": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "exa": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "mintlify": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "deepwiki": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "ai_search": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "alexandria": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "expected_revision",
+            "enabled",
+            "cache_ttl_seconds",
+            "retention_hours",
+            "allowed_hosts",
+            "providers"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    }
+  ]
+}

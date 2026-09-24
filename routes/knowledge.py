@@ -9,39 +9,14 @@ from flask import Response, g, jsonify, render_template, request
 from route_helpers import api_authenticate_only, login_required
 from routes import knowledge_alexandria as alexandria
 from routes import knowledge_management as management
+from routes import knowledge_mcp as mcp
 from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
 from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch
 
-PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26")
-_MCP_INSTRUCTIONS = (
-    "Use knowledge_context or knowledge_search for source evidence, including the actual "
-    "product and dependency version when known. Read excerpts, original citations, related "
-    "versions and coverage gaps before answering; insufficient evidence is not a verified answer. "
-    "For Alexandria, first use knowledge_alexandria_search, then knowledge_alexandria_inspect "
-    "on a returned quote. These catalogue calls cost zero credits. Execute only a discovered "
-    "quote with authorized spending, contract-valid options and a unique request_id. "
-    "Report each call's actual cost and cost state; reserve_credits is not an upstream price cap. "
-    "After interruption use knowledge_alexandria_receipt or replay the identical payload with "
-    "the same request_id; never purchase again under a new ID to resolve an unknown outcome. "
-    "Use knowledge_status and the available source, job and policy tools for administration. "
-    "Management tools require knowledge:manage; retrieval tools require knowledge:read. "
-    "Registering a source does not fetch it; refresh and verify publication before querying. "
-    "Read /llms.txt and /agent-onboarding/SKILL.md on this server for complete setup."
-)
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
-_QUERY_SCHEMA = {
-    "type": "object", "required": ["query"], "additionalProperties": False,
-    "properties": {
-        "query": {"type": "string", "minLength": 1, "maxLength": 500},
-        "product": {"type": "string", "maxLength": 100},
-        "version": {"type": "string", "maxLength": 80},
-        "repository": {"type": "string", "maxLength": 200, "pattern": r"^[\w.-]+/[\w.-]+$"},
-        "mode": {"type": "string", "enum": ["economy", "smart", "deep"], "default": "smart"},
-        "token_budget": {"type": "integer", "minimum": 256, "maximum": 16000, "default": 6000},
-        "freshness": {"type": "string", "enum": ["normal", "fresh"], "default": "normal"},
-    },
-}
+_CATALOGUE = mcp.catalogue()
+_TOOLS = {entry["definition"]["name"]: entry for entry in _CATALOGUE["tools"]}
 
 
 def _error(code, message, status=400):
@@ -79,7 +54,7 @@ def _body():
 
 
 def _query(payload):
-    allowed = _QUERY_SCHEMA["properties"]
+    allowed = mcp.QUERY_SCHEMA["properties"]
     if any(key not in allowed for key in payload):
         raise KnowledgeError("invalid_request", "The query contains unsupported fields.", 400)
     query = payload.get("query")
@@ -137,28 +112,26 @@ def _valid_origin():
 
 
 def _mcp_initialize(identifier, params):
+    # Clients differ in optional initialize fields; only the offered version is required.
     if (not isinstance(params.get("protocolVersion"), str)
-            or not isinstance(params.get("capabilities"), dict)
-            or not isinstance(params.get("clientInfo"), dict)
-            or not isinstance(params["clientInfo"].get("name"), str)
-            or not isinstance(params["clientInfo"].get("version"), str)):
-        return _rpc_error(identifier, -32602, "Initialize requires protocolVersion, capabilities and clientInfo.")
-    version = params["protocolVersion"] if params["protocolVersion"] in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
+            or not isinstance(params.get("capabilities", {}), dict)
+            or not isinstance(params.get("clientInfo", {}), dict)):
+        return _rpc_error(identifier, -32602, "Initialize requires a protocolVersion string.")
+    versions = mcp.PROTOCOL_VERSIONS
+    version = params["protocolVersion"] if params["protocolVersion"] in versions else versions[0]
     return _rpc_result(identifier, {"protocolVersion": version,
                        "capabilities": {"tools": {}},
-                       "serverInfo": {"name": "multillm-knowledge", "version": "1.0.0"},
-                       "instructions": _MCP_INSTRUCTIONS})
+                       "serverInfo": mcp.SERVER_INFO,
+                       "instructions": mcp.INSTRUCTIONS})
 
 
 def _mcp_tool(identifier, params, protocol):
     tool_name = params.get("name")
-    operations = {"knowledge_context": "context", "knowledge_search": "search",
-                  **{"knowledge_" + name.replace(".", "_"): name for name in alexandria.OPERATIONS},
-                  **management.OPERATIONS}
-    operation = operations.get(tool_name) if isinstance(tool_name, str) else None
-    if operation is None:
+    entry = _TOOLS.get(tool_name) if isinstance(tool_name, str) else None
+    if entry is None:
         return _rpc_error(identifier, -32602, "Unknown Knowledge tool.")
-    if not management.permits(g.authenticated_user, management.required_scope(tool_name)):
+    operation = entry["operation"]
+    if not management.permits(g.authenticated_user, entry["scope"]):
         return _rpc_result(identifier, {"isError": True, "content": [{"type": "text", "text": json.dumps({
             "error": {"code": "insufficient_scope", "message": "The key is not authorized for this Knowledge tool."},
         })}]})
@@ -188,11 +161,11 @@ def _mcp():
         return _error("invalid_origin", "MCP requests must use the gateway origin.", 403)
     if request.method != "POST":
         return Response(status=405, headers={"Allow": "POST"})
-    accepted = request.accept_mimetypes
-    if not accepted["application/json"] or not accepted["text/event-stream"]:
-        return _rpc_error(None, -32600, "Accept must include application/json and text/event-stream.", 406)
+    # Responses are always JSON, so a client that omits text/event-stream still works.
+    if request.headers.get("Accept") and not request.accept_mimetypes["application/json"]:
+        return _rpc_error(None, -32600, "Accept must include application/json.", 406)
     protocol = request.headers.get("MCP-Protocol-Version")
-    if protocol is not None and protocol not in PROTOCOL_VERSIONS:
+    if protocol is not None and protocol not in mcp.PROTOCOL_VERSIONS:
         return _rpc_error(None, -32600, "Unsupported MCP protocol version.", 400)
     try:
         body = _body()
@@ -214,16 +187,8 @@ def _mcp():
     if method == "ping":
         return _rpc_result(identifier, {})
     if method == "tools/list":
-        tools = [{
-            "name": f"knowledge_{operation}",
-            "description": description, "inputSchema": _QUERY_SCHEMA,
-            "annotations": {"readOnlyHint": True, "openWorldHint": True},
-        } for operation, description in (
-            ("context", "Retrieve cited technical excerpts with explicit version evidence and gaps."),
-            ("search", "Search technical sources and inspect normalized retrieval diagnostics."),
-        )] + alexandria.TOOLS + management.TOOLS
-        return _rpc_result(identifier, {"tools": [tool for tool in tools
-            if management.permits(g.authenticated_user, management.required_scope(tool["name"]))]})
+        return _rpc_result(identifier, {"tools": [entry["definition"] for entry in _CATALOGUE["tools"]
+            if management.permits(g.authenticated_user, entry["scope"])]})
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     return _mcp_tool(identifier, params, protocol)

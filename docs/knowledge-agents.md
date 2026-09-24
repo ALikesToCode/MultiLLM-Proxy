@@ -11,17 +11,21 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 
 ## Connect to the gateway
 
-1. In the dashboard's **Access** page, create a proxy key with `knowledge:read`.
-   Add `knowledge:manage` only for source or policy administration. Keep the key
-   in the client's private credential environment or secret store.
+1. Get a proxy key with `knowledge:read`. Add `knowledge:manage` only for source
+   or policy administration. On Cloudflare, use a durable D1 integration key from
+   `scripts/intelligence_operator.mjs provision --scopes knowledge:read`
+   ([details](knowledge.md#client-routes)): dashboard **Access** keys stop working
+   when the Container restarts unless an external control-plane database is
+   configured. Keep the key in the client's private credential environment or
+   secret store.
 2. Add a remote HTTP MCP connection to `https://<gateway-origin>/mcp`, sending the
    proxy key as `Authorization: Bearer ...`. Use an environment reference supported
    by the client; do not copy the value into a committed configuration file.
 3. Initialize MCP and list tools. The server negotiates `2025-06-18` or
    `2025-03-26` and returns operating instructions. Send
-   `Accept: application/json, text/event-stream` and use the negotiated
-   `MCP-Protocol-Version` thereafter. This server returns JSON without a persistent
-   session or GET event stream.
+   `Accept: application/json, text/event-stream` (JSON-only clients also work) and
+   use the negotiated `MCP-Protocol-Version` thereafter. This server returns JSON
+   without a persistent session or GET event stream.
 4. Confirm the tools permitted by the key are discoverable. A key with both scopes
    sees all thirteen tools below. Ask a small evidence question
    before using results in a larger task. Scope errors require a correctly scoped

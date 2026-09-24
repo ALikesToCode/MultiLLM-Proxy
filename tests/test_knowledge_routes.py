@@ -125,6 +125,13 @@ def mcp(client, key, method, params=None, **headers):
                        headers=bearer(key, Accept="application/json, text/event-stream", **headers))
 
 
+def test_edge_catalogue_matches_the_container_contract():
+    from routes import knowledge_mcp
+
+    assert knowledge_mcp.CATALOGUE_PATH.read_text(encoding="utf-8") == knowledge_mcp.catalogue_json(), (
+        "Run python scripts/build_knowledge_mcp_catalogue.py")
+
+
 def test_mcp_initialize_and_discovery(app, keys):
     client = app.test_client()
     response = mcp(client, keys["reader"], "initialize", {"protocolVersion": "2099-01-01", "capabilities": {}, "clientInfo": {"name": "fixture", "version": "1"}})
@@ -200,7 +207,12 @@ def test_mcp_origin_protocol_media_and_notifications(app, keys):
     assert mcp(client, keys["reader"], "ping", Origin="https://evil.example").status_code == 403
     assert mcp(client, keys["reader"], "ping", Origin="http://localhost").status_code == 200
     assert mcp(client, keys["reader"], "ping", **{"MCP-Protocol-Version": "unknown"}).status_code == 400
-    assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=bearer(keys["reader"], Accept="application/json")).status_code == 406
+    for accept, status in (("application/json", 200), ("*/*", 200), ("text/event-stream", 406)):
+        response = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=bearer(keys["reader"], Accept=accept))
+        assert response.status_code == status, accept
+    assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}, headers=bearer(keys["reader"])).status_code == 200
+    assert mcp(client, keys["reader"], "initialize", {"protocolVersion": "2025-03-26"}).json["result"]["protocolVersion"] == "2025-03-26"
+    assert mcp(client, keys["reader"], "initialize", {"capabilities": {}}).json["error"]["code"] == -32602
     response = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=bearer(keys["reader"], Accept="application/json, text/event-stream"))
     assert response.status_code == 202 and not response.data
     for method in (client.get, client.delete):

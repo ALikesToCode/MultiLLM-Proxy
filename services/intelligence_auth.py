@@ -8,7 +8,9 @@ from error_handlers import APIError
 
 KEY_NAMESPACE = "mllm_intelligence_"
 PRINCIPAL_NAMESPACE = "integration:"
-SCOPES = frozenset({"chat", "models", "audio", "embeddings"})
+SCOPES = frozenset({
+    "chat", "models", "audio", "embeddings", "knowledge:read", "knowledge:manage",
+})
 KEY_PATTERN = re.compile(r"mllm_intelligence_[A-Za-z0-9_-]{32,128}\Z")
 ID_PATTERN = re.compile(r"integration:[a-z][a-z0-9_-]{0,63}\Z")
 HASH_PATTERN = re.compile(r"scrypt:32768:8:1\$[A-Za-z0-9]{8,32}\$[a-f0-9]{128}\Z")
@@ -63,7 +65,7 @@ def verify_integration_key(api_key):
             or not ID_PATTERN.fullmatch(principal["id"])
             or not isinstance(scopes, list)
             or not scopes
-            or len(scopes) > 4
+            or len(scopes) > len(SCOPES)
             or any(
                 not isinstance(scope, str) or scope not in SCOPES for scope in scopes
             )

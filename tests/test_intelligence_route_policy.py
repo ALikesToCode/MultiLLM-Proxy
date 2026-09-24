@@ -144,6 +144,10 @@ class IntegrationRouteTests(IntelligenceApiTestCase):
         ("/v1/audio/speech", "POST"),
         ("/v1/audio/transcriptions", "POST"),
         ("/v1/embeddings", "POST"),
+        ("/mcp", "POST"),
+        ("/v1/knowledge/context", "POST"),
+        ("/v1/knowledge/artifacts/art-1", "GET"),
+        ("/v1/knowledge/sources/src-1/refresh", "POST"),
     ],
 )
 def test_exact_reviewed_routes_are_allowed(path, method):
@@ -159,6 +163,9 @@ def test_exact_reviewed_routes_are_allowed(path, method):
         ("/admin/models", "GET"),
         ("/openai/v1/models", "GET"),
         ("/v1/audio/speech", "GET"),
+        ("/mcpx", "POST"),
+        ("/admin/knowledge/status", "GET"),
+        ("/v1/knowledge", "POST"),
     ],
 )
 def test_other_routes_and_methods_fail_closed(path, method):

@@ -97,9 +97,12 @@ See Cloudflare's [binding compatibility reference](https://developers.cloudflare
 
 3. Deploy the main Worker using the existing
    [Container deployment procedure](cloudflare-containers.md). Keep the existing
-   persisted user/key storage and session secrets configured. The public path is
-   Flask authentication → fixed Container egress → private Knowledge Worker.
-   The only internal destination is `http://knowledge.internal/v1/dispatch`.
+   persisted user/key storage and session secrets configured. Keys the Worker can
+   verify itself (the bootstrap `ADMIN_API_KEY` and durable D1 integration keys)
+   are served at the edge: Worker → private Knowledge Worker, without waking the
+   Container. Other keys take Flask authentication → fixed Container egress →
+   private Knowledge Worker. Both paths use only
+   `http://knowledge.internal/v1/dispatch`.
 
 4. Open `/knowledge`. Confirm all four resource bindings appear configured.
    Review approved public hosts, retention, and provider billing controls. Set
@@ -119,6 +122,20 @@ See Cloudflare's [binding compatibility reference](https://developers.cloudflare
 Create an account/key in **Access** with `knowledge:read`. Give automation
 `knowledge:manage` only when it must change sources or policy. Existing chat keys
 keep their previous permissions. Administrator accounts retain both abilities.
+
+On Cloudflare, **Access** keys live in the Container's SQLite store unless
+`CONTROL_PLANE_DATABASE_URL` is configured. That disk is reset whenever the
+Container sleeps (after 15 idle minutes) or is redeployed, so those keys then fail
+with `Invalid API key`. Give agents a durable D1 integration key instead; it
+survives restarts and is verified at the edge:
+
+```sh
+node scripts/intelligence_operator.mjs provision --account-id <account> --database-id <database_id> \
+  --principal integration:agents --scopes knowledge:read --credential-file /private/knowledge.key --apply
+```
+
+See [integration credentials](intelligence-d1.md#integration-credentials) for the
+dry run, conflicts and uncertain outcomes.
 
 | Method and route | Scope | Result |
 | --- | --- | --- |
@@ -151,10 +168,14 @@ The MCP endpoint is `/mcp`, using streamable HTTP with a privately configured
 bearer key. It exposes seven read tools (context, search, artifacts and the four
 [Alexandria tools](knowledge-alexandria.md#discover-inspect-execute)) and six
 [management tools](knowledge-agents.md#connect-to-the-gateway), filtered by scope. Send
-`Accept: application/json, text/event-stream`, initialize normally, and include
-the negotiated `MCP-Protocol-Version` on later requests. Supported versions are
-`2025-06-18` and `2025-03-26`. Responses are JSON; no persistent session or GET
-event stream is required. Cross-origin browser MCP requests are refused.
+`Accept: application/json, text/event-stream` (clients that accept only JSON also
+work), initialize with at least `protocolVersion`, and include the negotiated
+`MCP-Protocol-Version` on later requests. Supported versions are `2025-06-18` and
+`2025-03-26`. Responses are JSON; no persistent session or GET event stream is
+required. Cross-origin browser MCP requests are refused. The edge Worker and Flask
+serve the same catalogue: `routes/knowledge_mcp.py` is the source and
+`python scripts/build_knowledge_mcp_catalogue.py` regenerates
+`worker/knowledge-mcp-catalogue.json` (a test fails when they differ).
 
 ## Evidence, freshness and recovery
 

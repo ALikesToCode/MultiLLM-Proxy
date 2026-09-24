@@ -12,6 +12,9 @@ def authorize_integration_route(user):
         for value in (identity, username)
     ):
         return
+    if request.path == "/mcp" or request.path.startswith("/v1/knowledge/"):
+        # Knowledge routes enforce knowledge:read/knowledge:manage themselves.
+        return
     route = (request.method, request.path)
     allowed = route in {
         ("GET", "/v1/models"),
