@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { handleIntelligenceStoreRequest } from "../worker/intelligence-d1.mjs";
 
 const source = await readFile(new URL("../worker/intelligence-d1.mjs", import.meta.url), "utf8");
@@ -28,14 +28,14 @@ const request = (operation, fields = {}) => new Request(URL_STORE, requestOption
 
 async function fixture(t, initialPolicy = policy()) {
   const directory = await mkdtemp(join(tmpdir(), "multillm-intelligence-d1-"));
-  const create = () => new Miniflare({
-    cf: false, d1Persist: directory,
+  const create = () => new Miniflare(convertV4MiniflareOptions({
+    cf: false, resourcePersistencePath: directory,
     workers: ["replica-a", "replica-b"].map((name) => ({
       name, modules: true, compatibilityDate: "2026-07-28",
       script: `${source}\nexport default { fetch: handleIntelligenceStoreRequest };`,
       d1Databases: { INTELLIGENCE_DB: "shared-intelligence-ledger" },
     })),
-  });
+  }));
   let mf = create();
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });
   let db = await mf.getD1Database("INTELLIGENCE_DB", "replica-a");

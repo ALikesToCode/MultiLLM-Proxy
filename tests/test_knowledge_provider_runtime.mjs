@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 async function runtime(t, outboundService) {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
@@ -17,8 +17,8 @@ async function runtime(t, outboundService) {
       } catch (error) { return Response.json({ code: error.code }, { status: 502 }); }
     }};
   ` }, bundle: true, write: false, format: "esm", platform: "neutral" });
-  const mf = new Miniflare({ cf: false, modules: true, script: bundle.outputFiles[0].text,
-    compatibilityDate: "2026-07-28", outboundService });
+  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, script: bundle.outputFiles[0].text,
+    compatibilityDate: "2026-07-28", outboundService }));
   t.after(() => mf.dispose());
   return mf;
 }

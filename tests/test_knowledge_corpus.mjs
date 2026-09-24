@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { KnowledgeCorpus } from "../worker/knowledge/corpus.mjs";
 
 const text = "# Flask 3.1\n\nRequest limits support café and 東京.\n";
@@ -83,10 +83,10 @@ test("snapshots are immutable, hash checked and readable across corpus instances
 });
 
 test("the real local R2 binding honors immutable snapshot preconditions", async t => {
-  const runtime = new Miniflare({
+  const runtime = new Miniflare(convertV4MiniflareOptions({
     cf: false, modules: true, script: "export default { fetch() { return new Response('ok'); } };",
     r2Buckets: { KNOWLEDGE_SNAPSHOTS: "knowledge-snapshot-test" },
-  });
+  }));
   t.after(() => runtime.dispose());
   const bucket = await runtime.getR2Bucket("KNOWLEDGE_SNAPSHOTS");
   const corpus = new KnowledgeCorpus({ KNOWLEDGE_SNAPSHOTS: bucket });

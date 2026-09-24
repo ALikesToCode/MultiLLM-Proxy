@@ -1,13 +1,13 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {Miniflare} from "miniflare";
+import {convertV4MiniflareOptions,Miniflare} from "miniflare";
 import {handleIntelligenceAuthRequest} from "../worker/intelligence-auth-d1.mjs";
 
 const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);
 const prefix = "mllm_intelligence_" + "a".repeat(16);
 test("D1 credentials survive new callers, rotate atomically and retain revocation tombstones", async () => {
-  const mf = new Miniflare({modules:true, script:"export default {fetch(){return new Response('ok')}}", d1Databases:["INTELLIGENCE_DB"]});
+  const mf = new Miniflare(convertV4MiniflareOptions({modules:true, script:"export default {fetch(){return new Response('ok')}}", d1Databases:["INTELLIGENCE_DB"]}));
   try {
     const db = await mf.getD1Database("INTELLIGENCE_DB");
     const migration = await readFile(new URL("../intelligence-migrations/0002_integration_principals.sql", import.meta.url),"utf8");

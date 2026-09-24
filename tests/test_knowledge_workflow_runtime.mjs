@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { build } from "esbuild";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 test("native Workflow accepts ingestion step contracts and publishes once", async t => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
@@ -31,7 +31,7 @@ test("native Workflow accepts ingestion step contracts and publishes once", asyn
     }
   ` }, bundle: true, write: false, format: "esm", platform: "neutral", external: ["cloudflare:workers"] });
   let acquisitions = 0;
-  const mf = new Miniflare({ cf: false, modules: true, script: bundle.outputFiles[0].text,
+  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, script: bundle.outputFiles[0].text,
     compatibilityDate: "2026-07-28", bindings: { FIRECRAWL_API_KEY: "synthetic-key" },
     durableObjects: { KNOWLEDGE_AUTHORITY: { className: "KnowledgeCatalogue", useSQLite: true } },
     workflows: { KNOWLEDGE_INGESTION: { name: "test-ingestion", className: "TestIngestion" } },
@@ -42,7 +42,7 @@ test("native Workflow accepts ingestion step contracts and publishes once", asyn
       return Response.json({ success: true, data: { markdown: "# Python 3.11\n\nRunner manages an event loop.",
         metadata: { sourceURL: url, statusCode: 200 } } });
     },
-  });
+  }));
   t.after(() => mf.dispose());
   async function dispatch(operation, payload = {}) {
     const response = await mf.dispatchFetch("http://knowledge.internal/v1/dispatch", {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { build } from "esbuild";
-import { Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";
 import { createArtifact, normalizeSourceText, packEvidence, validateChunk, versionEvidence } from "../worker/knowledge/evidence.mjs";
 import { parseQuery, publicUrl } from "../worker/knowledge/contracts.mjs";
@@ -33,9 +33,9 @@ function enabledPolicy(limit = 10) {
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "knowledge-authority-"));
-  const create = () => new Miniflare({ cf: false, modules: true, compatibilityDate: "2026-07-28",
-    script: bundled.outputFiles[0].text, durableObjectsPersist: directory,
-    durableObjects: { CATALOGUE: { className: "Catalogue", useSQLite: true } } });
+  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28",
+    script: bundled.outputFiles[0].text, resourcePersistencePath: directory,
+    durableObjects: { CATALOGUE: { className: "Catalogue", useSQLite: true } } }));
   let mf = create();
   let now = Date.parse("2026-09-23T00:00:00Z");
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });
