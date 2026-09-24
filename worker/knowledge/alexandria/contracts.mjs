@@ -55,10 +55,44 @@ export function scrapeResult(response, provider, capability) {
     scrape_id: typeof response.scrape_id === "string" ? response.scrape_id.slice(0, 128) : null };
 }
 
+// Returns null for a contract type the gateway cannot check, so the call fails closed.
+function matchesType(type, value) {
+  const element = /^(\w+)\[\]$/.exec(type)?.[1];
+  if (element) return Array.isArray(value) && value.every(item => matchesType(element, item));
+  switch (type.toLowerCase()) {
+    case "string": return typeof value === "string";
+    case "number": return typeof value === "number" && Number.isFinite(value);
+    case "integer": return Number.isSafeInteger(value);
+    case "boolean": return typeof value === "boolean";
+    case "array": return Array.isArray(value);
+    case "object": return isRecord(value);
+    default: return null;
+  }
+}
+
+function checkValue(option, value) {
+  const matched = matchesType(option.type, value);
+  if (matched === null) fail("invalid_options", `Option ${option.name} has a type this gateway cannot validate: ${option.type}.`);
+  if (!matched) fail("invalid_options", `Option ${option.name} must be ${option.type}.`);
+  if (Array.isArray(option.enum) && !option.enum.includes(value)) fail("invalid_options", `Option ${option.name} must be one of the discovered values.`);
+  const [measure, low, high] = typeof value === "number" ? [value, "minimum", "maximum"]
+    : typeof value === "string" ? [value.length, "minLength", "maxLength"]
+      : Array.isArray(value) ? [value.length, "minItems", "maxItems"] : [null];
+  if (measure === null) return;
+  if (typeof option[low] === "number" && measure < option[low]) fail("invalid_options", `Option ${option.name} is below its discovered ${low}.`);
+  if (typeof option[high] === "number" && measure > option[high]) fail("invalid_options", `Option ${option.name} exceeds its discovered ${high}.`);
+}
+
+// Values are checked against the discovered contract before any reservation, because
+// reserve_credits does not cap what the provider charges.
 export function validateOptions(tool, options) {
   const allowed = new Set(tool.options.map(option => option.name));
   if (Object.keys(options).some(key => !allowed.has(key))) fail("invalid_options", "Use only option names returned by discovery.");
   for (const option of tool.options) {
-    if (option.required && !Object.hasOwn(options, option.name)) fail("invalid_options", `Missing required option: ${option.name}.`);
+    if (!Object.hasOwn(options, option.name)) {
+      if (option.required) fail("invalid_options", `Missing required option: ${option.name}.`);
+      continue;
+    }
+    checkValue(option, options[option.name]);
   }
 }

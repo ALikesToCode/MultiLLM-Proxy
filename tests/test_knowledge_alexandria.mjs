@@ -192,6 +192,22 @@ test("policy, input contracts and reservations reject before provider dispatch",
   assert.equal(f.calls.length, 1);
 });
 
+test("option values must match the discovered contract before any reservation", async () => {
+  const bounded = { ...tool, options: [{ name: "semantic_search", type: "string", required: true, maxLength: 40 },
+    { name: "limit", type: "integer", minimum: 1, maximum: 25 }, { name: "sort", type: "string", enum: ["new", "top"] },
+    { name: "window", type: "duration" }] };
+  const f = await setup({ tools: [bounded] });
+  const payload = await requestFor(f);
+  for (const options of [{ semantic_search: 7 }, { semantic_search: "x".repeat(41) }, { semantic_search: "AI", limit: 26 },
+    { semantic_search: "AI", limit: 2.5 }, { semantic_search: "AI", sort: "old" }, { semantic_search: "AI", window: "1d" }]) {
+    await assert.rejects(f.run("execute", { ...payload, options, request_id: crypto.randomUUID() }), { code: "invalid_options" });
+  }
+  assert.equal((await usage(f)).total, 0);
+  assert.equal(f.calls.length, 1, "only the free discovery call was sent");
+  const result = await f.run("execute", { ...payload, options: { semantic_search: "AI agents", limit: 25, sort: "top" } });
+  assert.deepEqual(result.cost, { credits: 15, state: "confirmed" });
+});
+
 test("concurrent paid calls respect the credit allowance and request identity", async () => {
   const f = await setup({ limit: 20 });
   const payload = await requestFor(f);

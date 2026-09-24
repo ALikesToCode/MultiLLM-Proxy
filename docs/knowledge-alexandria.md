@@ -62,8 +62,10 @@ Execute accepts:
 The example reservation is illustrative: use the selected capability's actual
 published price. Quotes last ten minutes and belong to the authenticated principal.
 Execution rejects invented provider/capability fields, undiscovered or expired
-quotes, unsupported option names, and missing required options. Firecrawl validates
-provider-specific option types, ranges and relationships. Each execution sends one
+quotes, unsupported option names, and missing required options. Before reserving
+credits it also checks each value against the discovered type, `enum` and
+`minimum`/`maximum` (or length and item) bounds, and refuses option types it cannot
+validate. Firecrawl still validates relationships between options. Each execution sends one
 capability to `/v2/scrape`; provider data is returned as `data` without being indexed
 or retained in the corpus. Discovery contracts retain any published attribution
 requirements, which clients must preserve when using the records.
