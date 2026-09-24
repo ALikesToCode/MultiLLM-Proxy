@@ -18,7 +18,8 @@ export async function readCache(cache, key, now = Date.now()) {
 }
 
 export async function writeCache(cache, key, bundle, ttl, now = Date.now()) {
-  if (!cache || ttl < 1 || bundle.status !== "ok" || !bundle.excerpts.length) return;
+  // Partial bundles reach here only with stable provider coverage notes, never failures.
+  if (!cache || ttl < 1 || !["ok", "partial"].includes(bundle.status) || !bundle.excerpts.length) return;
   const expiry = Math.min(now + ttl * 1000, ...bundle.excerpts.map(item => Date.parse(item.expires_at)));
   if (!Number.isFinite(expiry) || expiry <= now) return;
   try {

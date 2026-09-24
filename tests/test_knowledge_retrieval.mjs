@@ -138,6 +138,55 @@ test("a failed indexing schedule is not cached as a complete answer", async () =
   assert.equal(scheduled.length, 1, "the next request retries indexing");
 });
 
+test("stable provider coverage notes are cached but provider failures are not", async () => {
+  const f = await fixture();
+  const retrieve = f.retrieve;
+  f.retrieve = async (...args) => ({ ...await retrieve(...args), warnings: ["derived_context_requires_source_verification"] });
+  const query = request({ version: "3.1.3" });
+  const first = await run(f, query);
+  assert.equal(first.status, "partial");
+  const providers = f.counts.providers;
+  const cached = await run(f, query);
+  assert.equal(cached.path, "cache");
+  assert.deepEqual(cached.gaps.map(gap => gap.code), ["derived_context_requires_source_verification"]);
+  assert.equal(f.counts.providers, providers);
+
+  const g = await fixture();
+  let calls = 0;
+  g.retrieve = async (provider, intent, context) => {
+    calls += 1;
+    if (calls === 1) throw Object.assign(new Error("upstream"), { code: "upstream_unavailable" });
+    return retrieve.call(null, provider, intent, context);
+  };
+  g.env.CONTEXT7_API_KEY = "synthetic-test-key";
+  g.policy.providers.context7 = { ...g.policy.providers.exa };
+  await g.storage.put("policy", g.policy);
+  const smart = request({ version: "3.1.3", mode: "smart" });
+  const failed = await run(g, smart);
+  assert.ok(failed.gaps.some(gap => gap.code === "upstream_unavailable"));
+  assert.notEqual((await run(g, smart)).path, "cache", "a failed provider is retried");
+});
+
+test("unchanged sources reuse retained snapshots and skip re-indexing a published revision", async () => {
+  const f = await fixture();
+  const query = request({ version: "3.1.3", freshness: "fresh" });
+  const scheduled = [];
+  const schedule = async (...args) => { scheduled.push(args); };
+  const first = await run(f, query, { schedule });
+  assert.equal(f.counts.writes, 1);
+  assert.equal(first.usage.filter(item => item.operation_id.includes("snapshot")).length, 1);
+  assert.equal(scheduled.length, 1);
+  const [sourceId, , artifactId] = scheduled[0];
+  const artifact = await f.authority.call("artifact.get", { id: artifactId });
+  const job = await f.authority.call("job.enqueue", { source_id: sourceId, artifact_id: artifactId });
+  await f.authority.call("job.publish", { id: job.id, artifact_id: artifactId, item_id: "fixture-item", index_key: artifact.index_key });
+  const second = await run(f, query, { schedule });
+  assert.equal(second.excerpts[0].artifact_id, artifactId);
+  assert.equal(f.counts.writes, 1, "the retained snapshot is not written again");
+  assert.equal(second.usage.filter(item => item.operation_id.includes("snapshot")).length, 0);
+  assert.equal(scheduled.length, 1, "a published revision is not submitted for indexing again");
+});
+
 test("cache reads fail closed when policy or sources are revoked during lookup", async () => {
   for (const revokePolicy of [false, true]) {
     const f = await fixture();

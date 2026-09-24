@@ -57,6 +57,12 @@ function originIsFresh(artifact) {
   return Number.isFinite(checked) && Date.now() - checked <= 3600000;
 }
 
+// A failure makes the bundle retryable: it is reported as a gap and never cached.
+function failed(state, code, message) {
+  state.failed = true;
+  state.gaps.push({ code, message });
+}
+
 function providerWarnings(state, provider, batch) {
   for (const code of batch.warnings ?? []) {
     if (typeof code === "string" && /^[a-z0-9_]{1,80}$/.test(code)) {
@@ -100,12 +106,12 @@ async function indexedEvidence(state) {
       if (!resolved[index].value) continue;
       const { artifact, text } = resolved[index].value;
       const excerpt = text && validateChunk(artifact, text, row.text);
-      if (!excerpt) { state.gaps.push({ code: "invalid_source_span", message: "An index candidate could not be matched to its retained source." }); continue; }
+      if (!excerpt) { failed(state, "invalid_source_span", "An index candidate could not be matched to its retained source."); continue; }
       if (request.freshness === "fresh" && !originIsFresh(artifact)) continue;
       state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: row.score });
     }
   } catch (error) {
-    state.gaps.push({ code: safeCode(error), message: "Indexed retrieval could not complete." });
+    failed(state, safeCode(error), "Indexed retrieval could not complete.");
   }
 }
 
@@ -122,7 +128,11 @@ async function storeObservation(state, observation, sequence) {
   // Record the immutable manifest before R2 so interrupted writes remain discoverable
   // for retention cleanup. An unreadable snapshot can never become an excerpt.
   await authority.call("artifact.save", { artifact: candidate });
-  const written = await state.invoke("ai_search", `snapshot-${sequence}`, () => corpus.putSnapshot(candidate, text));
+  // Snapshots are content-addressed. Reuse retained bytes rather than spending an
+  // allowance unit on a write that would change nothing.
+  const retained = await untilDeadline(() => corpus.getSnapshot(candidate), state.signal).catch(() => null);
+  const written = retained === text ? { key: candidate.snapshot_key, created: false }
+    : await state.invoke("ai_search", `snapshot-${sequence}`, () => corpus.putSnapshot(candidate, text));
   checkAbort(state.signal);
   const artifact = await confirmSnapshot(authority, corpus, candidate, written);
   const excerpt = validateChunk(artifact, text, selectPassage(text, request.query));
@@ -132,7 +142,7 @@ async function storeObservation(state, observation, sequence) {
     state.gaps.push({ code: "freshness_unverified", message: "The acquired source did not establish a recent origin check." });
   }
   state.paths.add("live");
-  state.sourcesToIndex.set(source.id, artifact.id);
+  if (source.current_artifact !== artifact.id) state.sourcesToIndex.set(source.id, artifact.id);
   return true;
 }
 
@@ -150,7 +160,7 @@ async function liveEvidence(state, env, retrieveFn) {
       providerWarnings(state, provider, batch);
       return batch.observations.slice(0, 5);
     } catch (error) {
-      state.gaps.push({ code: safeCode(error), message: `${provider} could not supply evidence.` });
+      failed(state, safeCode(error), `${provider} could not supply evidence.`);
       return [];
     }
   }));
@@ -186,7 +196,7 @@ async function liveEvidence(state, env, retrieveFn) {
         stored += 1;
       }
     } catch (error) {
-      state.gaps.push({ code: safeCode(error), message: "A discovered source could not be acquired and retained." });
+      failed(state, safeCode(error), "A discovered source could not be acquired and retained.");
     }
   }
   if (!providers.length) state.gaps.push({ code: "no_eligible_provider", message: "Configure a provider and its allowance to retrieve missing evidence." });
@@ -236,7 +246,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   if (!env.KNOWLEDGE_SNAPSHOTS || !env.KNOWLEDGE_INDEX) fail("storage_unavailable", "Configure the Knowledge snapshot and index bindings.", 503);
   const state = { authority, corpus: options.corpus || new KnowledgeCorpus(env), request, snapshot, signal,
     started, candidates: [], discoveries: [], gaps: [], usage: [], paths: new Set(),
-    providersUsed: new Set(), sourcesToIndex: new Map(), attempts: 0, successes: 0 };
+    providersUsed: new Set(), sourcesToIndex: new Map(), attempts: 0, successes: 0, failed: false };
   const requestId = crypto.randomUUID();
   state.invoke = async (provider, suffix, callback) => {
     checkAbort(signal);
@@ -287,15 +297,17 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {
-    for (const [sourceId, artifactId] of state.sourcesToIndex) await untilDeadline(() => options.schedule(sourceId, signal, artifactId), signal).catch(() => {
-      bundle.gaps.push({ code: "indexing_not_scheduled", message: "Live evidence is retained; indexing could not be scheduled." });
-      if (bundle.status === "ok") bundle.status = "partial";
-    });
+    await Promise.all([...state.sourcesToIndex].map(([sourceId, artifactId]) =>
+      untilDeadline(() => options.schedule(sourceId, signal, artifactId), signal).catch(() => {
+        failed(state, "indexing_not_scheduled", "Live evidence is retained; indexing could not be scheduled.");
+      })));
+    if (bundle.status === "ok" && state.gaps.length) bundle.status = "partial";
   }
-  // Cache only the finished bundle: a failed schedule leaves it partial, which is not
-  // cached, so the next request retries. Publication/policy races never create cache
-  // entries for an obsolete generation.
-  if (latest.generation === snapshot.generation) {
+  // Cache only a finished bundle without failures: a failed provider, read or schedule
+  // is not cached, so the next request retries. Provider coverage notes are stable for
+  // the same query and corpus, so they do not prevent caching. Publication/policy races
+  // never create cache entries for an obsolete generation.
+  if (latest.generation === snapshot.generation && !state.failed) {
     await untilDeadline(() => writeCache(cache, key, bundle, snapshot.policy.cache_ttl_seconds), signal);
   }
   checkAbort(signal);
