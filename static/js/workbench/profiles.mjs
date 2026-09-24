@@ -21,8 +21,8 @@ export function initProfiles() {
     event.preventDefault();
     const submit = form.querySelector('button[type="submit"]');
     submit.disabled = true;
-    try { await api("profiles", read()); await refresh(); status("Profile saved. Existing profiles were preserved."); }
-    catch (error) { status(error.message); }
+    try { await api("profiles", read()); await refresh(); status("Profile saved. Existing profiles were preserved.", "ready"); }
+    catch (error) { status(error.message, "error"); }
     finally { submit.disabled = false; }
   });
   action("preview-profile", async () => {

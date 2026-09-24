@@ -14,7 +14,7 @@
     const previousButton = document.getElementById('model-previous');
     const nextButton = document.getElementById('model-next');
     const pageLabel = document.getElementById('model-page-label');
-    const pageSize = 50;
+    const pageSize = 25;
     let currentPage = 1;
     let models = [];
 
@@ -147,10 +147,11 @@
     function capabilitiesCell(model) {
         const cell = document.createElement('td');
         const wrapper = document.createElement('div');
-        wrapper.className = 'table-tags';
+        wrapper.className = 'tag-list';
         const labels = capabilityLabels(model);
         for (const label of labels.length ? labels : ['provider native']) {
             const tag = document.createElement('span');
+            tag.className = 'tag';
             tag.textContent = label;
             wrapper.appendChild(tag);
         }
@@ -208,7 +209,7 @@
         const cell = document.createElement('td');
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'model-copy-button';
+        button.className = 'copy-button';
         button.setAttribute('data-copy-value', model.id);
         button.setAttribute('aria-label', `Copy ${model.id}`);
         button.textContent = 'Copy';
@@ -233,7 +234,7 @@
                     ? 'disabled'
                     : model.configured
                         ? model.status
-                        : `${model.status} · key missing`,
+                        : `${model.status} · no key`,
             ),
             copyCell(model),
         );

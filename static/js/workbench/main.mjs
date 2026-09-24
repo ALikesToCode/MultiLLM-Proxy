@@ -25,4 +25,4 @@ async function loadCatalog() {
 }
 const results = await Promise.allSettled([refreshProfiles(), loadCatalog()]);
 const failed = results.filter((result) => result.status === "rejected");
-status(failed.length ? failed.map((result) => result.reason.message).join(" · ") : "Workbench ready. No generation starts until you confirm it.");
+status(failed.length ? failed.map((result) => result.reason.message).join(" · ") : "Workbench ready. No generation starts until you confirm it.", failed.length ? "error" : "ready");

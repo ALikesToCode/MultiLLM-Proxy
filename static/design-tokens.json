@@ -4,30 +4,49 @@
     "ink": {
       "950": { "$value": "#07131f", "$type": "color" },
       "900": { "$value": "#0d1d2d", "$type": "color" },
+      "800": { "$value": "#173047", "$type": "color" },
       "700": { "$value": "#29475f", "$type": "color" },
-      "500": { "$value": "#657c8e", "$type": "color" },
+      "600": { "$value": "#476277", "$type": "color", "$description": "Muted text; 5.9:1 on ink-50" },
+      "500": { "$value": "#5a7082", "$type": "color", "$description": "Subtle text; 4.8:1 on ink-50" },
+      "400": { "$value": "#8a9cab", "$type": "color", "$description": "Decorative only; never body text" },
+      "300": { "$value": "#aebdc8", "$type": "color" },
       "200": { "$value": "#ccd7df", "$type": "color" },
+      "150": { "$value": "#dae3e9", "$type": "color" },
       "100": { "$value": "#e6edf1", "$type": "color" },
       "50": { "$value": "#f3f7f9", "$type": "color" }
     },
     "paper": { "$value": "#fbfcfc", "$type": "color" },
     "cyan": {
-      "700": { "$value": "#087d8d", "$type": "color" },
-      "600": { "$value": "#0891a4", "$type": "color" },
-      "100": { "$value": "#d8f1f3", "$type": "color" }
+      "800": { "$value": "#0a5f6b", "$type": "color", "$description": "Text on cyan-100; 6.2:1" },
+      "700": { "$value": "#0a6b78", "$type": "color", "$description": "Accent text and links; 5.8:1 on ink-50" },
+      "600": { "$value": "#0891a4", "$type": "color", "$description": "Fills, bars and focus rings" },
+      "400": { "$value": "#42d1c5", "$type": "color", "$description": "Accent on dark surfaces" },
+      "100": { "$value": "#d8f1f3", "$type": "color" },
+      "50": { "$value": "#effafa", "$type": "color" }
     },
     "positive": {
       "700": { "$value": "#0f7658", "$type": "color" },
       "100": { "$value": "#dff4e9", "$type": "color" }
     },
     "warning": {
-      "700": { "$value": "#a45c07", "$type": "color" },
+      "700": { "$value": "#8f5006", "$type": "color", "$description": "5.6:1 on warning-100" },
       "100": { "$value": "#fff0cf", "$type": "color" }
     },
     "danger": {
       "700": { "$value": "#b43f50", "$type": "color" },
       "100": { "$value": "#fee8eb", "$type": "color" }
     }
+  },
+  "font": {
+    "sans": { "$value": ["Inter", "ui-sans-serif", "system-ui", "sans-serif"], "$type": "fontFamily" },
+    "mono": { "$value": ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"], "$type": "fontFamily" }
+  },
+  "fontSize": {
+    "xs": { "$value": "0.75rem", "$type": "dimension", "$description": "Smallest readable text" },
+    "sm": { "$value": "0.8125rem", "$type": "dimension" },
+    "base": { "$value": "0.875rem", "$type": "dimension", "$description": "Interface text" },
+    "md": { "$value": "0.9375rem", "$type": "dimension", "$description": "Reading text" },
+    "lg": { "$value": "1.0625rem", "$type": "dimension", "$description": "Panel titles" }
   },
   "space": {
     "1": { "$value": "0.25rem", "$type": "dimension" },
@@ -41,28 +60,20 @@
   },
   "radius": {
     "small": { "$value": "0.45rem", "$type": "dimension" },
-    "medium": { "$value": "0.8rem", "$type": "dimension" },
-    "large": { "$value": "1.1rem", "$type": "dimension" }
+    "medium": { "$value": "0.75rem", "$type": "dimension" },
+    "large": { "$value": "1rem", "$type": "dimension" }
   },
   "shadow": {
     "small": {
-      "$value": {
-        "color": "#07131f0f",
-        "offsetX": "0",
-        "offsetY": "1px",
-        "blur": "2px",
-        "spread": "0"
-      },
+      "$value": { "color": "#07131f0f", "offsetX": "0", "offsetY": "1px", "blur": "2px", "spread": "0" },
       "$type": "shadow"
     },
     "medium": {
-      "$value": {
-        "color": "#07131f17",
-        "offsetX": "0",
-        "offsetY": "16px",
-        "blur": "45px",
-        "spread": "0"
-      },
+      "$value": { "color": "#07131f17", "offsetX": "0", "offsetY": "12px", "blur": "32px", "spread": "0" },
+      "$type": "shadow"
+    },
+    "large": {
+      "$value": { "color": "#07131f38", "offsetX": "0", "offsetY": "28px", "blur": "70px", "spread": "0" },
       "$type": "shadow"
     }
   },

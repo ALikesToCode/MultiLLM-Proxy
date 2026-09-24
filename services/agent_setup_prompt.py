@@ -35,6 +35,17 @@ Credential environment variable: MULTILLM_API_KEY
    only within my task's authorized scope. Report the selected endpoint and
    model, checks performed, and any failures without exposing credentials.
 
-Knowledge retrieval and MCP integration are planned and are not available
-through this setup prompt. Do not configure a guessed MCP or knowledge endpoint.
+For explicit technical evidence retrieval, use POST {base_url}/v1/knowledge/context
+or POST {base_url}/v1/knowledge/search with a key granted knowledge:read in Access.
+Send query, optional product/version/repository, mode (economy, smart or deep),
+token_budget, and freshness (normal or fresh). Inspect citations, observed version
+evidence and coverage gaps; requested versions are not proof of compatibility.
+Remote MCP uses stateless Streamable HTTP at {base_url}/mcp with the same scoped
+Bearer key. Its tools are knowledge_context and knowledge_search. Never put the
+key in a URL. A Knowledge-only key does not grant chat or model-discovery access.
+Operators configure sources, providers and allowances at {base_url}/knowledge.
+Retrieval remains disabled until the private service, required Cloudflare resources,
+provider credentials and finite allowances are configured. A setup_needed or
+upstream failure is not an empty successful search. Disable automatic retries
+of potentially billed retrieval and indexing operations.
 """

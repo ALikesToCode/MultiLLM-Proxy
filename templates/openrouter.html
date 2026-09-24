@@ -3,42 +3,58 @@
 {% block title %}OpenRouter lab · MultiLLM Proxy{% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css', v='2') }}">
 {% endblock %}
 
 {% block content %}
 {% set proxy_root = request.url_root.rstrip('/') %}
-<div id="openrouter-lab" data-admin="{{ 'true' if user and user.is_admin else 'false' }}">
-    <section class="surface-intro">
-        <div>
-            <p class="eyebrow">Provider workbench</p>
-            <h1>OpenRouter lab</h1>
-            <p>
-                Exercise one model at a time through the server-side dashboard proxy.
-                Credentials never enter browser JavaScript, and streamed output renders as plain text.
-            </p>
+{% set is_admin = user and user.is_admin %}
+<div id="openrouter-lab" data-admin="{{ 'true' if is_admin else 'false' }}">
+    <header class="page-header">
+        <div class="page-header__text">
+            <p class="eyebrow">Provider lab</p>
+            <h1 class="page-header__title">OpenRouter lab</h1>
+            <p class="page-header__lede">Send one message to one model through the server-side dashboard proxy. The provider key never reaches this browser, and model output is shown as plain text.</p>
         </div>
-        <div class="surface-stat">
+        <div class="page-header__aside credit-summary" aria-live="polite">
+            <span class="credit-summary__label">Key balance reported by OpenRouter</span>
             <strong id="credits-display">Loading…</strong>
-            <span>reported key balance</span>
         </div>
-    </section>
+    </header>
 
-    {% if not user or not user.is_admin %}
-    <div class="alert" role="alert">
-        <strong>Administrator access required.</strong>
-        <span>The workbench and credit lookup are disabled for this account.</span>
-    </div>
+    {% if not is_admin %}
+    <p class="callout callout--warning access-note" role="alert"><strong>Administrator access required.</strong> Running requests and reading the key balance are limited to administrators; the endpoints below still work with your own proxy key.</p>
     {% endif %}
 
     <div class="lab-grid">
         <aside class="lab-workspace">
+            <section class="panel" aria-labelledby="model-heading">
+                <header class="panel__header">
+                    <div>
+                        <h2 id="model-heading">Model</h2>
+                        <p>Use any model ID your OpenRouter key can access. The shortcuts are examples.</p>
+                    </div>
+                </header>
+                <div class="panel__body form-stack">
+                    <label class="form-field" for="model-input">
+                        OpenRouter model ID
+                        <input id="model-input" type="text" value="openai/gpt-4.1-mini" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="selected-model-display">
+                    </label>
+                    <div class="model-picker" role="group" aria-label="Example models">
+                        <button type="button" class="model-button is-selected" aria-pressed="true" data-model="openai/gpt-4.1-mini">GPT-4.1 mini</button>
+                        <button type="button" class="model-button" aria-pressed="false" data-model="anthropic/claude-sonnet-4">Claude Sonnet 4</button>
+                        <button type="button" class="model-button" aria-pressed="false" data-model="google/gemini-2.5-flash">Gemini 2.5 Flash</button>
+                        <button type="button" class="model-button" aria-pressed="false" data-model="deepseek/deepseek-r1">DeepSeek R1</button>
+                    </div>
+                    <span id="selected-model-display" class="field-hint">Selected model: openai/gpt-4.1-mini</span>
+                </div>
+            </section>
+
             <section class="panel" aria-labelledby="endpoint-heading">
                 <header class="panel__header">
                     <div>
                         <h2 id="endpoint-heading">Proxy endpoints</h2>
-                        <p>Use your MultiLLM key from server-side clients.</p>
+                        <p>For server-side clients using a MultiLLM key.</p>
                     </div>
                     <span class="panel-tag">OpenAI compatible</span>
                 </header>
@@ -54,31 +70,9 @@
                             <strong>{{ name }}</strong>
                             <code>{{ proxy_root }}{{ path }}</code>
                         </span>
-                        <button class="copy-button" type="button" data-copy-value="{{ proxy_root }}{{ path }}">Copy</button>
+                        <button class="copy-button" type="button" data-copy-value="{{ proxy_root }}{{ path }}" aria-label="Copy the {{ name | lower }} endpoint">Copy</button>
                     </div>
                     {% endfor %}
-                </div>
-            </section>
-
-            <section class="panel" aria-labelledby="model-heading">
-                <header class="panel__header">
-                    <div>
-                        <h2 id="model-heading">Model target</h2>
-                        <p>Examples are editable. Use any ID currently available to your OpenRouter key.</p>
-                    </div>
-                </header>
-                <div class="panel__body form-stack">
-                    <label>
-                        <span class="field-label">OpenRouter model ID</span>
-                        <input id="model-input" class="field" type="text" value="openai/gpt-4.1-mini" autocomplete="off">
-                    </label>
-                    <div class="model-picker" aria-label="Example models">
-                        <button type="button" class="model-button is-selected" data-model="openai/gpt-4.1-mini">GPT-4.1 mini</button>
-                        <button type="button" class="model-button" data-model="anthropic/claude-sonnet-4">Claude Sonnet 4</button>
-                        <button type="button" class="model-button" data-model="google/gemini-2.5-flash">Gemini 2.5 Flash</button>
-                        <button type="button" class="model-button" data-model="deepseek/deepseek-r1">DeepSeek R1</button>
-                    </div>
-                    <span id="selected-model-display" class="field-hint">Selected model: openai/gpt-4.1-mini</span>
                 </div>
             </section>
         </aside>
@@ -87,28 +81,27 @@
             <article class="panel" aria-labelledby="prompt-heading">
                 <header class="panel__header">
                     <div>
-                        <h2 id="prompt-heading">Request composer</h2>
-                        <p>One user message, optional SSE streaming, no hidden prompt rewriting.</p>
+                        <h2 id="prompt-heading">Request</h2>
+                        <p>One user message, optional streaming, no hidden prompt rewriting. Each run is a real, potentially billed provider call.</p>
                     </div>
-                    <span class="panel-tag">Session BFF</span>
                 </header>
                 <div class="panel__body lab-controls">
-                    <label>
-                        <span class="field-label">Prompt</span>
-                        <textarea id="prompt-input" class="field-textarea" rows="6" placeholder="Ask the selected model…" maxlength="16000"></textarea>
+                    <label class="form-field" for="prompt-input">
+                        Prompt
+                        <textarea id="prompt-input" rows="6" placeholder="Ask the selected model…" maxlength="16000"></textarea>
                     </label>
                     <div class="lab-control-row">
                         <label class="switch-field">
                             <input id="streaming-toggle" type="checkbox" checked>
                             <span>
                                 <strong>Stream response</strong>
-                                <small>Render SSE deltas as they arrive.</small>
+                                <small>Show text as it arrives.</small>
                             </span>
                         </label>
-                        <button id="test-button" class="button button--primary" type="button" {% if not user or not user.is_admin %}disabled{% endif %}>
-                            Run request
-                        </button>
-                        <button id="stop-button" class="button button--quiet" type="button" disabled>Stop</button>
+                        <div class="button-row">
+                            <button id="stop-button" class="button button--secondary" type="button" disabled>Stop</button>
+                            <button id="test-button" class="button button--primary" type="button" {% if not is_admin %}disabled{% endif %}>Run request</button>
+                        </div>
                     </div>
                 </div>
             </article>
@@ -117,19 +110,19 @@
                 <header class="panel__header">
                     <div>
                         <h2 id="response-heading">Response</h2>
-                        <p id="tokens-info">Token usage appears after the provider reports it.</p>
+                        <p id="tokens-info">Token usage appears when the provider reports it.</p>
                     </div>
                     <div class="response-toolbar">
-                        <span id="response-status" class="response-status hidden">
+                        <span id="response-status" class="response-status hidden" role="status">
                             <span class="loading-spinner" aria-hidden="true"></span>
-                            Generating
+                            Generating…
                         </span>
-                        <button id="copy-response" class="button button--quiet" type="button">Copy output</button>
+                        <button id="copy-response" class="button button--secondary button--sm" type="button">Copy output</button>
                     </div>
                 </header>
                 <div class="panel__body">
-                    <div id="response-area" class="response-area" tabindex="0">
-                        <div class="response-placeholder">Model output will appear here.</div>
+                    <div id="response-area" class="response-area" tabindex="0" role="region" aria-label="Model output">
+                        <div class="response-placeholder">Model output appears here.</div>
                     </div>
                 </div>
             </article>
@@ -137,17 +130,14 @@
             <article class="panel" aria-labelledby="usage-heading">
                 <header class="panel__header">
                     <div>
-                        <h2 id="usage-heading">OpenRouter usage</h2>
-                        <p>Provider-reported key usage; independent from configured MultiLLM estimates.</p>
+                        <h2 id="usage-heading">Key usage</h2>
+                        <p>Reported by OpenRouter for this key; separate from MultiLLM's configured cost estimates.</p>
                     </div>
-                    <span id="usage-percentage" class="panel-tag">0%</span>
+                    <span id="usage-percentage" class="panel-tag">—</span>
                 </header>
                 <div class="panel__body">
-                    <div class="usage-meter" aria-hidden="true"><span id="usage-bar" style="width: 0%"></span></div>
-                    <div class="usage-copy">
-                        <span id="usage-details">Loading credit usage details…</span>
-                        <span>OpenRouter</span>
-                    </div>
+                    <div class="usage-meter" aria-hidden="true"><span id="usage-bar"></span></div>
+                    <p class="usage-copy"><span id="usage-details">Loading key usage…</span></p>
                 </div>
             </article>
         </section>
@@ -156,5 +146,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/openrouter.js') }}"></script>
+<script src="{{ url_for('static', filename='js/openrouter.js', v='2') }}"></script>
 {% endblock %}

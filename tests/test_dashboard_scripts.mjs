@@ -270,7 +270,7 @@ function serviceWorkerFixture(fetch, { failWrite = false } = {}) {
     },
     caches: {
       open: async () => cache,
-      keys: async () => ['multillm-proxy-v11', 'multillm-proxy-v12', 'other-app-v1'],
+      keys: async () => ['multillm-proxy-v12', 'multillm-proxy-v13', 'other-app-v1'],
       delete: async (name) => deleted.push(name),
     },
   });
@@ -309,7 +309,7 @@ test('service worker refreshes stable asset URLs and preserves unrelated caches'
   assert.equal(options.cache, 'no-cache');
   assert.equal(await fixture.entries.get('https://proxy.test/static/js/app.js').clone().text(), 'new script');
   await fixture.activate();
-  assert.deepEqual(fixture.deleted, ['multillm-proxy-v11']);
+  assert.deepEqual(fixture.deleted, ['multillm-proxy-v12']);
 });
 
 test('service worker retains known-good assets on failures and does not cache private responses', async () => {

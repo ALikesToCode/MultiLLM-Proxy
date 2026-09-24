@@ -87,7 +87,7 @@ export function initLab() {
       view.title.textContent += ` · ${candidate.provider} / ${candidate.model}`;
       view.note.textContent = `${result.status} · first visible ${result.ttft_ms === null ? "unknown" : (result.ttft_ms / 1000).toFixed(2) + "s"} · total ${(result.duration_ms / 1000).toFixed(2)}s · output TPS ${result.tps === null ? "unknown" : result.tps.toFixed(1)}`;
     }
-    element("lab-export").disabled = false; status("Ratings and content-free measurements saved.");
+    element("lab-export").disabled = false; status("Ratings and content-free measurements saved.", "ready");
   });
   action("lab-export", () => { if (report) download("comparison-report.json", report); });
   action("lab-history", async () => { element("lab-history-result").textContent = JSON.stringify(await api("lab/reports"), null, 2); });

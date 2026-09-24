@@ -719,6 +719,7 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)
@@ -730,6 +731,10 @@ export async function loadWorkerModule() {
     .replace(
       'from "./worker/api-paths.mjs";',
       `from "${new URL("../../worker/api-paths.mjs", import.meta.url)}";`,
+    )
+    .replace(
+      'from "./worker/fallback-page.mjs";',
+      `from "${new URL("../../worker/fallback-page.mjs", import.meta.url)}";`,
     )
     .replace(
       /import\s+\{[^}]+\}\s+from\s+"@cloudflare\/containers";/,

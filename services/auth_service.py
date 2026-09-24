@@ -41,6 +41,7 @@ from services.sqlite_store import connect, storage_path
 from services.intelligence_auth import (
     KEY_NAMESPACE, reject_local_integration_management, verify_integration_key,
 )
+from services.user_provisioning import create_user as provision_user
 
 logger = logging.getLogger(__name__)
 
@@ -900,38 +901,9 @@ class AuthService:
         return len(cls._users)
 
     @classmethod
-    def create_user(cls, username: str, is_admin: bool = False) -> Dict[str, Any]:
+    def create_user(cls, username: str, is_admin: bool = False, scopes=None) -> Dict[str, Any]:
         """Create a new user and persist it."""
-        cls._require_admin()
-        username = require_valid_username(username)
-        reject_local_integration_management(username)
-        if username in cls._users:
-            raise APIError("User already exists", status_code=409)
-
-        api_key = cls._generate_api_key()
-        created_at = _utcnow()
-        scopes = default_scopes(is_admin)
-        current_user = cls.get_current_user() or {}
-        cls._persist_user_with_api_key(
-            username=username,
-            api_key=api_key,
-            is_admin=is_admin,
-            created_at=created_at,
-            last_login=None,
-            scopes=scopes,
-            created_by=current_user.get("username"),
-        )
-
-        return {
-            "id": username,
-            "username": username,
-            "api_key": api_key,
-            "api_key_prefix": build_api_key_prefix(api_key),
-            "scopes": list(scopes),
-            "is_admin": is_admin,
-            "created_at": serialize_datetime(created_at),
-            "last_login": None,
-        }
+        return provision_user(cls, username, is_admin, scopes)
 
     @classmethod
     def delete_user(cls, username: str) -> None:

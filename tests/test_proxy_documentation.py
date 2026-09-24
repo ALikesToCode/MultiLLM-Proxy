@@ -9,7 +9,11 @@ from tests.unified_api_test_case import UnifiedApiTestCase
 
 class ProxyDocumentationTest(UnifiedApiTestCase):
     def _authenticate(self):
-        with self.client.session_transaction() as session:
+        self._authenticate_client(self.client)
+
+    @staticmethod
+    def _authenticate_client(client, base_url="http://localhost"):
+        with client.session_transaction(base_url=base_url) as session:
             session["authenticated"] = True
             session["user"] = {
                 "username": "admin",
@@ -85,7 +89,10 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertIn("http://localhost/v1/models", payload["agent_setup_prompt"])
-        self.assertIn("not available", payload["agent_setup_prompt"])
+        self.assertIn("http://localhost/v1/knowledge/context", payload["agent_setup_prompt"])
+        self.assertIn("http://localhost/mcp", payload["agent_setup_prompt"])
+        self.assertIn("knowledge:read", payload["agent_setup_prompt"])
+        self.assertIn("disabled until", payload["agent_setup_prompt"])
         self.assertNotIn("opencode-provider-key", payload["agent_setup_prompt"])
         providers = {provider["id"]: provider for provider in payload["providers"]}
         models = {model["id"]: model for model in payload["models"]}
@@ -139,21 +146,10 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
             follow_redirects=False,
         )
         self.assertEqual(login_redirect.status_code, 302)
-        self.assertIn(
-            "next=https://multillm-proxy.cserules.workers.dev/docs",
-            login_redirect.headers["Location"],
-        )
+        # Sign-in returns to a local path; the public origin is checked below.
+        self.assertTrue(login_redirect.headers["Location"].endswith("/login?next=/docs"))
 
-        with client.session_transaction(
-            base_url="http://container.internal:8080",
-        ) as session:
-            session["authenticated"] = True
-            session["user"] = {
-                "username": "admin",
-                "is_admin": True,
-                "api_key_prefix": "mllm_admin-te",
-                "scopes": ["admin"],
-            }
+        self._authenticate_client(client, "http://container.internal:8080")
 
         response = client.get(
             "/docs.json",
@@ -183,11 +179,19 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertIn(
-            "next=http://container.internal:8080/docs",
-            response.headers["Location"],
-        )
+        self.assertTrue(response.headers["Location"].endswith("/login?next=/docs"))
         self.assertNotIn("spoofed.example", response.headers["Location"])
+
+        self._authenticate_client(client, "http://container.internal:8080")
+        payload = client.get(
+            "/docs.json",
+            base_url="http://container.internal:8080",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "spoofed.example",
+            },
+        ).get_json()
+        self.assertEqual(payload["base_url"], "http://container.internal:8080")
 
     def test_worker_origin_header_wins_after_container_header_normalization(self):
         os.environ["MULTILLM_TRUST_PROXY_HEADERS"] = "true"
@@ -195,8 +199,10 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         trusted_app.config["WTF_CSRF_ENABLED"] = False
         client = trusted_app.test_client()
 
+        self._authenticate_client(client, "http://container.internal:8080")
+
         response = client.get(
-            "/docs",
+            "/docs.json",
             base_url="http://container.internal:8080",
             headers={
                 "X-Forwarded-Proto": "http",
@@ -205,13 +211,12 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
                     "https://multillm-proxy.cserules.workers.dev"
                 ),
             },
-            follow_redirects=False,
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(
-            "next=https://multillm-proxy.cserules.workers.dev/docs",
-            response.headers["Location"],
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["base_url"],
+            "https://multillm-proxy.cserules.workers.dev",
         )
 
 

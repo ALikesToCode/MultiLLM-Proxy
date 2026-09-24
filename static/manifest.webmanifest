@@ -30,16 +30,16 @@
       "description": "Open provider health, traffic, and route telemetry."
     },
     {
-      "name": "OpenRouter",
+      "name": "OpenRouter lab",
       "short_name": "OpenRouter",
-      "url": "/openrouter",
-      "description": "Open the OpenRouter dashboard."
+      "url": "/openrouter-lab",
+      "description": "Test OpenRouter models through the server-side dashboard proxy."
     },
     {
-      "name": "Users",
-      "short_name": "Users",
+      "name": "Access",
+      "short_name": "Access",
       "url": "/users",
-      "description": "Open user management."
+      "description": "Manage accounts and scoped API keys."
     }
   ]
 }

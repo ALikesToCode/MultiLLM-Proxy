@@ -15,6 +15,11 @@ That makes Cloudflare Containers the safer target for the Python application. `/
 
 ## Prerequisites
 
+The main Worker now binds the private `multillm-knowledge` service. Before its
+first deployment with that binding, provision and deploy the
+[Knowledge Worker](knowledge.md#provision-and-deploy). Knowledge starts disabled;
+provider secrets and allowances are configured separately from chat.
+
 1. The target Cloudflare account must have the Workers Paid plan because Containers are only available there.
 2. Authenticate Wrangler against the student roll-number account:
 

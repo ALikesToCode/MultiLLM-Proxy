@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Knowledge · MultiLLM Proxy{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/knowledge.css', v='2') }}">{% endblock %}
+{% block content %}
+<div id="knowledge-console" class="knowledge-console">
+  <header class="page-header">
+    <div class="page-header__text">
+      <p class="eyebrow">Technical evidence</p>
+      <h1 class="page-header__title">Knowledge</h1>
+      <p class="page-header__lede">Retain public documentation, check which versions it covers, and retrieve cited excerpts. Missing evidence stays visible instead of being filled in.</p>
+    </div>
+    <div class="page-header__aside">
+      <a class="button button--primary" href="{{ url_for('knowledge_agent_setup') }}">Connect Codex or Claude</a>
+      <button id="knowledge-refresh" class="button button--secondary" type="button">Refresh status</button>
+    </div>
+  </header>
+
+  <p id="knowledge-status" class="state-banner" data-state="loading" role="status" aria-live="polite">Loading Knowledge service status…</p>
+
+  <nav class="local-nav" aria-label="Knowledge sections" data-local-nav>
+    <a href="#knowledge-query">Ask a question</a>
+    <a href="#knowledge-alexandria">Alexandria</a>
+    <a href="#knowledge-sources">Sources</a>
+    <a href="#knowledge-activity">Jobs and usage</a>
+    <a href="#knowledge-setup">Setup</a>
+    <a href="#knowledge-policy">Allowances</a>
+  </nav>
+
+  <section id="knowledge-query" class="panel" aria-labelledby="query-title">
+    <header class="panel__header">
+      <div><h2 id="query-title">Find source evidence</h2><p>Requested versions stay separate from observed versions. The result lists coverage gaps; there is no answer-generation step.</p></div>
+      <span class="panel-tag">REST + MCP</span>
+    </header>
+    <div class="panel__body">
+      <form id="knowledge-query-form" class="form-grid">
+        <label class="form-grid__wide">Question<textarea name="query" rows="3" maxlength="500" required placeholder="How does Flask configure request size limits?"></textarea></label>
+        <label>Product<input name="product" maxlength="100" placeholder="flask"></label>
+        <label>Requested version<input name="version" maxlength="80" placeholder="3.1.3"></label>
+        <label>Public repository <span class="label-note">optional</span><input name="repository" maxlength="200" placeholder="pallets/flask"></label>
+        <label>Retrieval mode<select name="mode"><option value="economy">Economy · corpus + one provider</option><option value="smart" selected>Smart · targeted providers</option><option value="deep">Deep · all eligible providers</option></select></label>
+        <label>Evidence budget <span class="label-note">estimated tokens</span><input name="token_budget" type="number" min="256" max="16000" step="1" value="6000" required></label>
+        <label>Freshness<select name="freshness"><option value="normal">Normal</option><option value="fresh">Check current evidence</option></select></label>
+        <div class="form-grid__wide button-row"><button class="button button--primary" type="submit" data-needs-service disabled>Retrieve evidence</button><span class="field-hint">Live retrieval draws on the configured allowances.</span></div>
+      </form>
+      <p id="knowledge-query-status" class="status-note" role="status" aria-live="polite">Submit a question to inspect evidence and coverage gaps.</p>
+      <div id="knowledge-results" class="knowledge-results"></div>
+    </div>
+  </section>
+
+  {% include "knowledge_alexandria.html" %}
+
+  <section id="knowledge-sources" class="panel" aria-labelledby="sources-title">
+    <header class="panel__header"><div><h2 id="sources-title">Sources and version coverage</h2><p>Register one public upstream source at a time. Registering does not fetch it; refresh the source to acquire and index it.</p></div></header>
+    <div class="panel__body">
+      <p id="knowledge-allowed-hosts" class="callout callout--neutral">Approved hosts have not been loaded.</p>
+      <form id="knowledge-source-form" class="form-grid knowledge-source-form">
+        <label class="form-grid__wide">Public source URL<input name="url" type="url" maxlength="2048" placeholder="https://flask.palletsprojects.com/en/stable/" required></label>
+        <label>Product<input name="product" maxlength="100" placeholder="flask" required></label>
+        <label>Target version <span class="label-note">optional</span><input name="version" maxlength="80" placeholder="3.1.3"></label>
+        <label>Acquisition provider<select name="provider"><option value="firecrawl">Firecrawl</option><option value="exa">Exa</option></select></label>
+        <label>Refresh interval <span class="label-note">hours</span><input name="refresh_hours" type="number" min="1" max="720" step="1" value="24" required></label>
+        <label class="check-field form-grid__wide"><input name="pinned" type="checkbox">Pin this dependency version</label>
+        <div class="form-grid__wide button-row"><button class="button button--primary" type="submit" data-needs-service disabled>Save source</button></div>
+      </form>
+      <p id="knowledge-source-status" class="status-note" role="status" aria-live="polite"></p>
+      <div id="knowledge-source-list" class="knowledge-cards"><p class="skeleton-row"><span class="skeleton"></span><span class="sr-only">Loading source coverage…</span></p></div>
+    </div>
+  </section>
+
+  <div id="knowledge-activity" class="knowledge-grid">
+    <section class="panel" aria-labelledby="jobs-title">
+      <header class="panel__header"><div><h2 id="jobs-title">Indexing and refresh jobs</h2><p>Cancelling stops future steps; upstream work that was already accepted may still finish.</p></div></header>
+      <div class="panel__body"><p id="knowledge-job-status" class="status-note" role="status" aria-live="polite"></p><div id="knowledge-jobs" class="knowledge-cards"><p class="skeleton-row"><span class="skeleton"></span><span class="sr-only">Loading jobs…</span></p></div></div>
+    </section>
+    <section class="panel" aria-labelledby="usage-title">
+      <header class="panel__header"><div><h2 id="usage-title">Allowance use</h2><p>Confirmed, pending and unknown outcomes all count against admission. Windows are rolling 24 hours.</p></div></header>
+      <div class="panel__body"><div id="knowledge-usage"><p class="skeleton-row"><span class="skeleton"></span><span class="sr-only">Loading usage…</span></p></div></div>
+    </section>
+  </div>
+
+  <section id="knowledge-setup" class="panel" aria-labelledby="setup-title">
+    <header class="panel__header"><div><h2 id="setup-title">Production connections</h2><p>These checks report configuration only. They do not prove that a live provider call succeeds.</p></div></header>
+    <div class="panel__body">
+      <h3 class="knowledge-subheading">Service bindings</h3>
+      <div id="knowledge-readiness" class="card-grid"><p class="field-hint">Loading setup requirements…</p></div>
+      <h3 class="knowledge-subheading">Providers</h3>
+      <div id="knowledge-providers" class="card-grid"><p class="field-hint">Provider credentials and capabilities have not been checked.</p></div>
+      <details class="knowledge-connection-guide"><summary>Connect a client manually</summary>
+        <div class="knowledge-connection-guide__body">
+          <p>Create a key with <code>knowledge:read</code> in <a href="{{ url_for('manage_users') }}">Access</a> and keep it in the client's private environment. Keys restricted to Knowledge cannot use chat routes.</p>
+          <dl class="meta-list">
+            <div><dt>REST</dt><dd><code>POST {{ request.url_root.rstrip('/') }}/v1/knowledge/context</code></dd></div>
+            <div><dt>MCP (streamable HTTP)</dt><dd><code>{{ request.url_root.rstrip('/') }}/mcp</code></dd></div>
+          </dl>
+          <div class="code-block code-block--wrap">
+            <div class="code-block__header"><span class="code-block__title">Example request body</span><button class="copy-button" type="button" data-copy-target="knowledge-example-body">Copy</button></div>
+            <pre id="knowledge-example-body">{"query":"How are request size limits configured?","product":"flask","version":"3.1.3","mode":"smart","token_budget":6000,"freshness":"normal"}</pre>
+          </div>
+          <p>Production needs the private Knowledge Worker binding, the Durable Object catalogue, R2 snapshots, the ingestion Workflow, AI Search, and credentials for the selected providers. Provider allowances start at zero. Configure secrets in the Worker runtime.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section id="knowledge-policy" class="panel" aria-labelledby="policy-title">
+    <header class="panel__header"><div><h2 id="policy-title">Retrieval and background allowances</h2><p>A zero allowance prevents provider calls. Background work must fit its cap and preserve the interactive reserve.</p></div></header>
+    <div class="panel__body">
+      <p class="callout callout--warning"><span><strong>Operator acknowledgements.</strong> Confirm retention permission and an upstream billing hard stop before enabling a provider. Saving these settings does not verify the provider account.</span></p>
+      <form id="knowledge-policy-form">
+        <fieldset id="knowledge-policy-fields" disabled>
+          <legend class="sr-only">Knowledge allowance policy</legend>
+          <div class="form-grid knowledge-policy-general">
+            <label class="check-field form-grid__wide"><input name="enabled" type="checkbox">Enable Knowledge retrieval</label>
+            <label>Cache lifetime <span class="label-note">seconds</span><input name="cache_ttl_seconds" type="number" min="0" max="3600" step="1" required></label>
+            <label>Snapshot retention <span class="label-note">hours</span><input name="retention_hours" type="number" min="1" max="720" step="1" required></label>
+            <label class="form-grid__wide">Approved public hosts <span class="label-note">one hostname per line</span><textarea name="allowed_hosts" rows="3" placeholder="flask.palletsprojects.com&#10;docs.python.org"></textarea></label>
+          </div>
+          <div id="knowledge-provider-policy" class="card-grid knowledge-provider-policy-grid"></div>
+          <div class="button-row knowledge-policy-actions"><button class="button button--primary" type="submit">Save allowance policy</button><button id="knowledge-policy-reload" class="button button--secondary" type="button">Reload saved policy</button></div>
+        </fieldset>
+      </form>
+      <p id="knowledge-policy-status" class="status-note" role="status" aria-live="polite">Load service status to view the policy.</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ url_for('static', filename='js/knowledge/main.mjs', v='2') }}"></script>{% endblock %}

@@ -1,9 +1,11 @@
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
+import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
+import { buildRootFallbackResponse } from "./worker/fallback-page.mjs";
 import { CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, withClientDefaults, withOpencodeSession } from "./worker/client-headers.mjs";
 import { withOpencodeRequestSession } from "./worker/opencode-session.mjs";
 import { withOpencodeGlmReasoning } from "./worker/opencode/reasoning-request.mjs";
@@ -257,41 +259,6 @@ function buildFallbackHealthResponse() {
     status: "healthy",
     mode: "worker-fallback",
   });
-}
-
-function buildRootFallbackResponse() {
-  return new Response(
-    `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MultiLLM Proxy</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 0; background: #0b1020; color: #e5e7eb; }
-      main { max-width: 48rem; margin: 0 auto; padding: 4rem 1.5rem; }
-      h1 { margin: 0 0 1rem; font-size: 2rem; }
-      p { line-height: 1.6; color: #cbd5e1; }
-      code { background: #111827; padding: 0.15rem 0.35rem; border-radius: 0.35rem; }
-      a { color: #93c5fd; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>MultiLLM Proxy</h1>
-      <p>The dashboard container is currently unavailable.</p>
-      <p>Use <code>/health</code> for Worker liveness and <code>/ready</code> for application readiness.</p>
-    </main>
-  </body>
-</html>`,
-    {
-      status: 503,
-      headers: {
-        "Content-Type": "text/html; charset=UTF-8",
-        "Retry-After": "5",
-      },
-    },
-  );
 }
 
 function buildContainerNotReadyApiResponse() {
@@ -1816,6 +1783,7 @@ export class MultiLLMProxyContainer extends Container {
 
 MultiLLMProxyContainer.outboundByHost = {
   "intelligence.internal": handleIntelligenceOutbound,
+  "knowledge.internal": handleKnowledgeOutbound,
 };
 
 export default {

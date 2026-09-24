@@ -77,7 +77,7 @@ export function initSessions() {
     const data = await api("memory?" + query, { action: "update", revision,
       summary: element("memory-summary").value, pins: element("memory-pins").value.split("\n").map((pin) => pin.trim()).filter(Boolean) });
     if (sessionQuery() === query) displayMemory(data, query);
-    status("Corrections saved. Stale revisions are rejected, never silently overwritten.");
+    status("Corrections saved. Stale revisions are rejected, never silently overwritten.", "ready");
   });
   action("branch-create", async () => {
     const query = checkedRevision();
@@ -117,6 +117,6 @@ export function initSessions() {
       for (const id of ["recovery-inspect", "session-id", "session-scope"]) element(id).disabled = false;
     }
   };
-  for (const mode of ["continue", "regenerate"]) element("recovery-" + mode).addEventListener("click", () => { void recover(mode).catch((error) => status(error.message)); });
+  for (const mode of ["continue", "regenerate"]) element("recovery-" + mode).addEventListener("click", () => { void recover(mode).catch((error) => status(error.message, "error")); });
   element("recovery-stop").addEventListener("click", () => generation?.abort());
 }

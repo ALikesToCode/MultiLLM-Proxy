@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import psutil
-from flask import Response, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Response, abort, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -14,6 +14,8 @@ from error_handlers import APIError, INTERNAL_ERROR_MESSAGE, get_request_id, int
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from routes.csrf_errors import handle_csrf_error
+from routes.knowledge_onboarding import PUBLIC_ENDPOINTS as KNOWLEDGE_PUBLIC_ENDPOINTS
+from routes.public_pages import PUBLIC_ENDPOINTS as PRODUCT_PUBLIC_ENDPOINTS, register_public_routes
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -196,6 +198,7 @@ def register_core_routes(app) -> None:
     )
 
     app.register_error_handler(CSRFError, handle_csrf_error)
+    register_public_routes(app)
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -242,6 +245,10 @@ def register_core_routes(app) -> None:
                 response.headers["Retry-After"] = str(decision.retry_after)
             return response
 
+        if AuthService.is_authenticated():
+            next_page = request.args.get("next")  # nosemgrep
+            return redirect(next_page if is_safe_redirect_target(next_page) else url_for("status_page"))
+
         logger.info("Rendering login template")
         return render_template(
             "login.html",
@@ -286,7 +293,8 @@ def register_core_routes(app) -> None:
                 if not username:
                     raise APIError("Username is required", status_code=400)
 
-                user = AuthService.create_user(username, is_admin)
+                scopes = payload.get("scopes") if payload else request.form.getlist("scopes") or None
+                user = AuthService.create_user(username, is_admin, scopes=scopes)
                 return jsonify(
                     {
                         "status": "success",
@@ -408,7 +416,7 @@ def register_core_routes(app) -> None:
         if request.headers.get("Authorization") or request_api_key():
             return None
 
-        if request.endpoint in [
+        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS or request.endpoint in [
             "login",
             "static_files",
             "favicon",
@@ -428,11 +436,23 @@ def register_core_routes(app) -> None:
                 or "application/json" in request.headers.get("Accept", "")
             ):
                 raise APIError("Authentication required", status_code=401)
-            return redirect(url_for("login", next=request.url))
+            # A local path survives is_safe_redirect_target; request.url would not.
+            query = request.query_string.decode("utf-8", "replace")
+            return redirect(url_for("login", next=f"{request.path}?{query}" if query else request.path))
 
         sanitized_path = request.path.rstrip("/")
         if sanitized_path in [f"/{prov}" for prov in app.config["API_BASE_URLS"]]:
             return app.view_functions["proxy"](sanitized_path.strip("/"))
+
+        # Browser navigation to a path outside every provider namespace would
+        # otherwise fall into the proxy catch-all and return an API error.
+        if (
+            request.endpoint == "proxy"
+            and request.method == "GET"
+            and not is_api_request_path(request.path)
+            and "text/html" in request.headers.get("Accept", "")
+        ):
+            abort(404)
 
         return None
 
@@ -582,7 +602,8 @@ def register_core_routes(app) -> None:
                 request_id=get_request_id(),
             ), 500
 
-    @app.route("/openrouter")
+    # "/openrouter" belongs to the provider proxy namespace, so the lab lives beside it.
+    @app.route("/openrouter-lab")
     @login_required
     def openrouter_dashboard():
         """

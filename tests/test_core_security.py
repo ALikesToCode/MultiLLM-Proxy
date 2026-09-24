@@ -1,9 +1,12 @@
 import importlib
 import os
+import re
 import sys
 import tempfile
 import unittest
+from html import unescape
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from flask import abort, request
 
@@ -97,6 +100,51 @@ class LoginRedirectSecurityTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], "/users")
+
+    def test_sign_in_returns_to_the_originally_requested_page(self):
+        bounced = self.client.get("/users?role=admin", follow_redirects=False)
+        self.assertEqual(bounced.status_code, 302)
+        login_url = urlsplit(bounced.headers["Location"])
+        self.assertEqual(login_url.path, "/login")
+        self.assertEqual(parse_qs(login_url.query)["next"], ["/users?role=admin"])
+
+        form = self.client.get(bounced.headers["Location"]).get_data(as_text=True)
+        action = unescape(re.search(r'<form method="post" action="([^"]+)"', form).group(1))
+        self.assertEqual(parse_qs(urlsplit(action).query)["next"], ["/users?role=admin"])
+
+        signed_in = self.client.post(
+            action,
+            data={"username": "admin", "api_key": "admin-test-key"},
+            follow_redirects=False,
+        )
+        self.assertEqual(signed_in.status_code, 302)
+        self.assertEqual(signed_in.headers["Location"], "/users?role=admin")
+
+    def test_signed_in_visitors_skip_the_sign_in_form(self):
+        self._set_admin_session()
+        for path, destination in (
+            ("/login", "/"),
+            ("/login?next=/docs", "/docs"),
+            ("/login?next=https://evil.example/path", "/"),
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path, follow_redirects=False)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], destination)
+
+    def test_unknown_dashboard_paths_render_not_found_for_signed_in_browsers(self):
+        self._set_admin_session()
+        page = self.client.get("/no-such-page", headers={"Accept": "text/html"})
+        self.assertEqual(page.status_code, 404)
+        self.assertIn("text/html", page.content_type)
+        self.assertIn("/no-such-page", page.get_data(as_text=True))
+
+        # API clients such as curl send Accept: */*; they keep the proxy's JSON rejection.
+        api = self.client.get("/no-such-page", headers={"Authorization": "Bearer admin-test-key", "Accept": "*/*"})
+        # The exact rejection (unsupported provider or authentication) depends on key state;
+        # what matters is that API clients never receive the HTML not-found page.
+        self.assertEqual(api.content_type, "application/json")
+        self.assertIn(api.status_code, (400, 401))
 
     def test_session_cookie_is_hardened_in_production(self):
         self.flask_app.config["SESSION_COOKIE_SECURE"] = True

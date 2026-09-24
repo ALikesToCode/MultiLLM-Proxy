@@ -3,11 +3,14 @@
 {% block title %}Operations · MultiLLM Proxy{% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css', v='7') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css', v='2') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css', v='8') }}">
 {% endblock %}
 
 {% block content %}
+{% set configured = providers.values() | selectattr('is_configured') | list %}
+{% set verified = configured | selectattr('requests_24h') | selectattr('success_rate') | list %}
+{% set cost = analytics.cost %}
 <div
     id="operations-dashboard"
     data-status-snapshot="{{ url_for('status_page') }}"
@@ -26,36 +29,34 @@
         } | tojson }}
     </script>
 
-    <section class="page-intro">
-        <div class="page-intro__copy">
+    <header class="page-header">
+        <div class="page-header__text">
             <p class="eyebrow">Live control plane</p>
-            <h1>Route control, without guesswork.</h1>
-            <p class="page-intro__description">
-                Provider health, circuit pressure, latency, request traces, and configured
-                cost estimates in one operator view. Routing stays explicit and protocol
-                fidelity remains visible.
+            <h1 class="page-header__title">Operations</h1>
+            <p class="page-header__lede">
+                Traffic, provider evidence, circuit state and request traces for this deployment.
+                Figures cover the last 24 hours of this process; prompt and response bodies are never stored.
             </p>
         </div>
-        <div class="page-intro__meta" aria-label="Runtime status">
-            <span class="live-state" id="stream-state">Connecting</span>
-            <span class="meta-line"><span>Last refresh</span><strong id="last-updated">Now</strong></span>
-            <span class="meta-line"><span>Process uptime</span><strong id="uptime">—</strong></span>
-            <span class="meta-line"><span>Request ID</span><strong>response header</strong></span>
-        </div>
-    </section>
+        <dl class="page-header__aside runtime-meta" aria-label="Runtime status">
+            <div><dt class="sr-only">Refresh state</dt><dd><span class="live-state" id="stream-state" data-state="loading">Connecting</span></dd></div>
+            <div><dt>Last refresh</dt><dd id="last-updated">—</dd></div>
+            <div><dt>Process uptime</dt><dd id="uptime">—</dd></div>
+        </dl>
+    </header>
 
     {% if errors %}
-    <aside class="alert" role="alert">
+    <div class="callout callout--warning page-callout" role="alert">
         <strong>Some provider checks failed.</strong>
-        <span>{{ errors | join(" · ") }}</span>
-    </aside>
+        <p>{{ errors | join(" · ") }}</p>
+    </div>
     {% endif %}
 
     <section class="metric-strip" aria-label="24 hour summary">
         <div class="metric">
             <span class="metric__label">Requests · 24h</span>
             <strong class="metric__value" data-metric="total-requests">{{ stats.total_requests }}</strong>
-            <span class="metric__detail">Top route <span data-metric="top-provider">{{ stats.top_provider or "none" }}</span></span>
+            <span class="metric__detail">Most traffic: <span data-metric="top-provider">{{ stats.top_provider or "none yet" }}</span></span>
         </div>
         <div class="metric">
             <span class="metric__label">Success rate</span>
@@ -68,33 +69,32 @@
             <span class="metric__detail">Median <span data-metric="p50-latency">{{ stats.p50_response_time }}</span>ms</span>
         </div>
         <div class="metric">
-            <span class="metric__label">Configured estimate</span>
-            <strong class="metric__value" data-metric="estimated-cost">${{ "%.4f" | format(analytics.cost.effective_cost) }}</strong>
-            <span class="metric__detail"><span data-metric="cost-coverage">{{ analytics.cost.coverage_percent }}%</span> priced</span>
+            <span class="metric__label">Cost estimate</span>
+            <strong class="metric__value" data-metric="estimated-cost">{% if cost.basis == 'unpriced' %}Unpriced{% else %}${{ "%.4f" | format(cost.effective_cost) }}{% endif %}</strong>
+            <span class="metric__detail" data-metric="cost-coverage">{{ cost.coverage_percent }}% of requests priced</span>
         </div>
         <div class="metric">
-            <span class="metric__label">Provider health</span>
-            <strong class="metric__value">
-                <span data-metric="active-providers">{{ analytics.active_providers }}</span>/<span data-metric="configured-providers">{{ analytics.configured_providers }}</span>
-            </strong>
-            <span class="metric__detail"><span data-metric="open-circuits">{{ analytics.circuit_counts.open }}</span> open circuits</span>
+            <span class="metric__label">Providers configured</span>
+            <strong class="metric__value" data-metric="configured-providers">{{ configured | length }}</strong>
+            <span class="metric__detail"><span data-metric="verified-providers">{{ verified | length }}</span> with successful traffic</span>
         </div>
     </section>
 
     <div class="operator-grid">
-        <article class="panel panel--dark span-8">
+        <article class="panel panel--dark span-8 on-dark">
             <header class="panel__header">
                 <div>
-                    <h2>Traffic pressure</h2>
-                    <p>Hourly request volume and failed responses over the last 24 hours.</p>
+                    <h2>Traffic</h2>
+                    <p>Hourly requests and failed responses over the last 24 hours.</p>
                 </div>
-                <div class="legend" aria-label="Chart legend">
-                    <span><i></i>requests</span>
-                    <span><i></i>errors</span>
+                <div class="legend" aria-hidden="true">
+                    <span><i></i>Requests</span>
+                    <span><i></i>Errors</span>
                 </div>
             </header>
             <div class="panel__body">
-                <div id="traffic-chart" class="traffic-chart" role="img" aria-label="24 hour traffic chart"></div>
+                <p id="traffic-summary" class="sr-only" aria-live="polite"></p>
+                <div id="traffic-chart" class="traffic-chart" aria-hidden="true"></div>
             </div>
         </article>
 
@@ -102,7 +102,7 @@
             <header class="panel__header">
                 <div>
                     <h2>Response classes</h2>
-                    <p>Fast separation of client errors from provider faults.</p>
+                    <p>Separates client errors from provider faults.</p>
                 </div>
                 <span class="panel-tag">24h</span>
             </header>
@@ -116,39 +116,48 @@
         <article class="panel span-8">
             <header class="panel__header">
                 <div>
-                    <h2>Provider health matrix</h2>
-                    <p>Configuration, traffic, latency, process-local recovery, and raw passthrough are shown separately.</p>
+                    <h2>Provider health</h2>
+                    <p>A stored credential means configured. Only successful traffic counts as evidence that a route works.</p>
                 </div>
-                <span class="panel-tag"><span data-metric="providers-with-traffic">{{ analytics.providers_with_traffic }}</span>&nbsp;active routes</span>
+                <span class="panel-tag"><span data-metric="providers-with-traffic">{{ analytics.providers_with_traffic }}</span>&nbsp;with traffic</span>
             </header>
-            <div class="data-table-shell">
-                <table class="data-table">
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Provider health, scrollable">
+                <table class="data-table provider-table">
                     <thead>
                         <tr>
                             <th scope="col">Provider</th>
+                            <th scope="col">Evidence</th>
                             <th scope="col">Circuit</th>
-                            <th scope="col">Success</th>
-                            <th scope="col">Requests</th>
-                            <th scope="col">Average</th>
-                            <th scope="col">P95</th>
+                            <th scope="col" class="numeric">Success</th>
+                            <th scope="col" class="numeric">Requests</th>
+                            <th scope="col" class="numeric">P95</th>
                             <th scope="col">Last seen</th>
                         </tr>
                     </thead>
                     <tbody id="provider-health-body"></tbody>
                 </table>
             </div>
+            <div id="provider-health-empty" class="empty-state" hidden>
+                <strong>No provider credentials configured</strong>
+                <p>Add a provider key to the server environment and restart the service. The Setup guide lists every credential name.</p>
+            </div>
+            <details class="panel__body unconfigured-providers" id="unconfigured-providers">
+                <summary>Providers without credentials (<span id="unconfigured-count">0</span>)</summary>
+                <p class="field-hint">These routes exist in this build but have no server-side key. Requests to them fail until a key is configured.</p>
+                <ul id="unconfigured-list" class="tag-list"></ul>
+            </details>
         </article>
 
         <aside class="panel span-4">
             <header class="panel__header">
                 <div>
                     <h2>Route trace</h2>
-                    <p>Newest requests first. No prompt or response bodies are stored.</p>
+                    <p>Newest requests first.</p>
                 </div>
                 <span class="panel-tag" id="trace-count">0 events</span>
             </header>
             <div class="panel__body">
-                <div id="route-trace" class="route-trace"></div>
+                <ol id="route-trace" class="route-trace" aria-label="Recent requests"></ol>
             </div>
         </aside>
     </div>
@@ -159,7 +168,7 @@
             <header class="panel__header">
                 <div>
                     <h2>Automatic model priorities</h2>
-                    <p>Each <code>auto:&lt;name&gt;</code> model tries this explicit order after a definite authentication, model-availability, or rate-limit rejection.</p>
+                    <p>Each <code>auto:&lt;name&gt;</code> model tries this order after a definite authentication, model-availability or rate-limit rejection.</p>
                 </div>
                 <span class="panel-tag">Chat only</span>
             </header>
@@ -168,7 +177,7 @@
                     <label class="field-label" for="auto-route-select">Virtual model</label>
                     <select id="auto-route-select" class="field-select"></select>
                     <button id="new-auto-route" class="button button--secondary" type="button">New virtual model</button>
-                    <p class="field-help">The seeded <code>auto:glm-5.2</code> route starts with NanoGPT, OpenCode, then NavyAI. Saving changes updates SQLite immediately.</p>
+                    <p class="field-help">The seeded <code>auto:glm-5.2</code> route starts with NanoGPT, OpenCode, then NavyAI. Saving updates SQLite immediately.</p>
                 </div>
 
                 <div class="auto-route-editor__main">
@@ -182,12 +191,12 @@
                     <div class="auto-route-candidate-heading">
                         <div>
                             <h3>Provider candidates</h3>
-                            <p>Top row is tried first. Disabled or unconfigured candidates are skipped before transport.</p>
+                            <p>The top row is tried first. Disabled or unconfigured candidates are skipped before transport.</p>
                         </div>
                         <span id="auto-route-count" class="panel-tag">0 candidates</span>
                     </div>
                     <ol id="auto-route-candidates" class="auto-route-candidates"></ol>
-                    <div id="auto-route-empty" class="empty-state auto-route-empty">
+                    <div id="auto-route-empty" class="empty-state empty-state--bordered auto-route-empty">
                         <strong>No candidates yet</strong>
                         <p>Add at least one provider and model before saving.</p>
                     </div>
@@ -213,24 +222,28 @@
                     <div class="auto-route-section-heading">
                         <div>
                             <h3 id="auto-route-setup-title">Configure automatic routing</h3>
-                            <p>Provider secrets stay on the server. The dashboard shows names and status, never key values.</p>
+                            <p>Provider secrets stay on the server. This page shows credential names and status, never key values.</p>
                         </div>
-                        <span class="panel-tag">4 steps</span>
                     </div>
 
-                    <ol class="auto-route-setup-steps">
-                        <li><span>1</span><div><strong>Add provider keys</strong><p>For local or container use, add keys to <code>.env.local</code> or export them in the service environment.</p></div></li>
-                        <li><span>2</span><div><strong>Restart the service</strong><p>Reloading the page is not enough. Restart the running proxy so it reads the new environment.</p></div></li>
-                        <li><span>3</span><div><strong>Refresh live models</strong><p>Use the catalog refresh below. It makes read-only model-list requests only for configured providers.</p></div></li>
-                        <li><span>4</span><div><strong>Save and call the route</strong><p>Order provider candidates, save, then send <code>auto:&lt;name&gt;</code> to <code>/v1/chat/completions</code>.</p></div></li>
+                    <ol class="steps auto-route-setup-steps">
+                        <li><strong>Add provider keys</strong><p>For local or container use, add keys to <code>.env.local</code> or export them in the service environment.</p></li>
+                        <li><strong>Restart the service</strong><p>Reloading the page is not enough; the running proxy reads its environment at start-up.</p></li>
+                        <li><strong>Refresh live models</strong><p>The catalog refresh below makes read-only model-list requests only to configured providers.</p></li>
+                        <li><strong>Save and call the route</strong><p>Order the candidates, save, then send <code>auto:&lt;name&gt;</code> to <code>/v1/chat/completions</code>.</p></li>
                     </ol>
 
-                    <pre class="auto-route-env-example" aria-label="Example provider environment variables"><code>OPENCODE_GO_API_KEY=your-key
+                    <div class="code-block">
+                        <div class="code-block__header">
+                            <span class="code-block__title">Example environment<small>Numbered keys join the provider's failover pool</small></span>
+                        </div>
+                        <pre class="auto-route-env-example" aria-label="Example provider environment variables"><code>OPENCODE_GO_API_KEY=your-key
 NANOGPT_API_KEY=your-first-key
 NANOGPT_API_KEY_1=your-second-key
 NANOGPT_PREFERRED_KEY_INDEX=1
 NAVYAI_API_KEY=your-key</code></pre>
-                    <p class="field-help">For Cloudflare or another hosted runtime, configure deployment secrets there. Editing the repository <code>.env</code> does not update an already deployed service.</p>
+                    </div>
+                    <p class="field-help">For Cloudflare or another hosted runtime, configure deployment secrets there. Editing the repository <code>.env</code> does not update a deployed service.</p>
                 </section>
 
                 <section class="auto-route-provider-setup" aria-labelledby="auto-route-provider-setup-title">
@@ -249,7 +262,7 @@ NAVYAI_API_KEY=your-key</code></pre>
                 <div class="auto-route-section-heading">
                     <div>
                         <h3 id="auto-route-catalog-title">Available provider models</h3>
-                        <p>Built-in IDs, saved-route IDs, and the latest successful live catalog are combined here.</p>
+                        <p>Built-in IDs, saved-route IDs and the latest successful live catalog.</p>
                     </div>
                     <span id="auto-route-catalog-count" class="panel-tag">0 models</span>
                 </div>
@@ -263,8 +276,8 @@ NAVYAI_API_KEY=your-key</code></pre>
                     <button id="refresh-auto-route-catalog" class="button button--secondary" type="button">Refresh live models</button>
                 </div>
                 <p id="auto-route-catalog-status" class="field-help" role="status" aria-live="polite">Loading saved model catalog…</p>
-                <ul id="auto-route-model-catalog" class="auto-route-model-catalog"></ul>
-                <div id="auto-route-catalog-empty" class="empty-state auto-route-empty" hidden>
+                <ul id="auto-route-model-catalog" class="auto-route-model-catalog" tabindex="0" aria-label="Available provider models, scrollable"></ul>
+                <div id="auto-route-catalog-empty" class="empty-state empty-state--bordered auto-route-empty" hidden>
                     <strong>No matching models</strong>
                     <p>Change the filters or configure a provider and refresh its live catalog.</p>
                 </div>
@@ -278,14 +291,17 @@ NAVYAI_API_KEY=your-key</code></pre>
             <header class="panel__header">
                 <div>
                     <h2>Request explorer</h2>
-                    <p>Correlate route, model, response class, circuit state, and cost estimate.</p>
+                    <p>Correlate route, model, response class, circuit state and cost for recent requests.</p>
                 </div>
                 <div class="panel__toolbar">
-                    <input id="request-search" class="field toolbar-field" type="search" placeholder="Request ID, model, user…" aria-label="Filter request log">
-                    <select id="request-provider-filter" class="field-select toolbar-field" aria-label="Filter requests by provider">
+                    <label class="sr-only" for="request-search">Filter request log</label>
+                    <input id="request-search" class="field" type="search" placeholder="Request ID, model, user…">
+                    <label class="sr-only" for="request-provider-filter">Filter requests by provider</label>
+                    <select id="request-provider-filter" class="field-select">
                         <option value="">All providers</option>
                     </select>
-                    <select id="request-status-filter" class="field-select toolbar-field" aria-label="Filter requests by status">
+                    <label class="sr-only" for="request-status-filter">Filter requests by status</label>
+                    <select id="request-status-filter" class="field-select">
                         <option value="">All responses</option>
                         <option value="success">Successful</option>
                         <option value="error">Errors</option>
@@ -293,25 +309,29 @@ NAVYAI_API_KEY=your-key</code></pre>
                     <button id="refresh-requests" class="button button--secondary" type="button">Refresh</button>
                 </div>
             </header>
-            <div class="data-table-shell">
-                <table class="data-table">
+            <div class="table-scroll" tabindex="0" role="region" aria-label="Request log, scrollable">
+                <table class="data-table request-table">
                     <thead>
                         <tr>
                             <th scope="col">Time / request</th>
                             <th scope="col">Route</th>
                             <th scope="col">Model</th>
                             <th scope="col">Status</th>
-                            <th scope="col">Latency</th>
+                            <th scope="col" class="numeric">Latency</th>
                             <th scope="col">Circuit</th>
-                            <th scope="col">Cost</th>
+                            <th scope="col" class="numeric">Cost</th>
                         </tr>
                     </thead>
                     <tbody id="request-log-body"></tbody>
                 </table>
             </div>
-            <div id="request-log-empty" class="empty-state" hidden>
-                <strong>No matching request records</strong>
-                <p>Admin request telemetry appears here after authenticated proxy traffic.</p>
+            <div id="request-log-empty" class="empty-state" role="status">
+                <strong>Loading request records…</strong>
+                <p>Recent authenticated proxy traffic appears here.</p>
+            </div>
+            <div id="request-log-paging" class="panel__body table-paging" hidden>
+                <p id="request-log-summary" class="field-hint" role="status"></p>
+                <button id="request-log-more" class="button button--secondary button--sm" type="button">Show 25 more</button>
             </div>
         </article>
     </div>
@@ -321,85 +341,86 @@ NAVYAI_API_KEY=your-key</code></pre>
             <header class="panel__header">
                 <div>
                     <h2>Endpoint catalog</h2>
-                    <p>Explicit provider routes stay inspectable instead of hiding behind an opaque auto selector.</p>
+                    <p>Provider-native routes stay inspectable instead of hiding behind an automatic selector.</p>
                 </div>
-                <span class="panel-tag">{{ providers | length }} providers</span>
+                <span class="panel-tag">{{ configured | length }} of {{ providers | length }} configured</span>
             </header>
             <div class="panel__body">
-                <div class="endpoint-catalog">
-                    {% for provider_key, details in providers | dictsort %}
-                    <details
-                        class="endpoint-group"
-                        id="{% if provider_key in ['linkapi', 'codex-easy', 'kimi-code'] %}{{ provider_key }}-native-endpoints{% else %}provider-{{ provider_key }}{% endif %}"
-                    >
-                        <summary>
-                            <span>{{ details.name }}</span>
-                            <span class="status-pill {{ 'tone-positive' if details.active else 'tone-neutral' }}">
-                                {{ 'configured' if details.is_configured else 'not configured' }}
+                {% macro endpoint_group(provider_key, details) %}
+                <details class="endpoint-group" id="{% if provider_key in ['linkapi', 'codex-easy', 'kimi-code'] %}{{ provider_key }}-native-endpoints{% else %}provider-{{ provider_key }}{% endif %}">
+                    <summary>
+                        <span>{{ details.name }}</span>
+                        <span class="status-pill {{ 'tone-positive' if details.is_configured else 'tone-neutral' }}">{{ 'configured' if details.is_configured else 'no credential' }}</span>
+                    </summary>
+                    <div class="endpoint-group__body">
+                        {% if provider_key == 'linkapi' %}
+                        <div class="callout"><strong>LinkAPI native fast path</strong><p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>LINKAPI_KEY</code> stays server-side. Use <code>linkapi:&lt;model&gt;</code> through the unified route when Flask controls are required. Image routes include <code>gpt-image-2-c</code> and <code>gemini-2.5-flash-image</code>.</p></div>
+                        {% elif provider_key == 'codex-easy' %}
+                        <div class="callout"><strong>Codex Everywhere OpenAI fast path</strong><p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>CODEX_EASY_API_KEY</code> stays server-side. Use <code>codex-easy:&lt;model&gt;</code> when Flask controls are required. Image routes work only for image-generation key groups.</p></div>
+                        {% elif provider_key == 'kimi-code' %}
+                        <div class="callout"><strong>Kimi Code protected routes</strong><p>Chat streams to <code>https://api.kimi.com/coding/v1</code> while <code>KIMI_CODE_API_KEY</code> stays server-side. Use <code>kimi-code:k3</code> for unified accounting. Generation supports Chat Completions only; send <code>reasoning_effort: max</code> and keep <code>prompt_cache_key</code> stable for stable conversation prefixes.</p></div>
+                        {% endif %}
+                        {% for endpoint in details.endpoints %}
+                        {% set endpoint_value = request.url_root.rstrip('/') ~ '/' ~ provider_key ~ endpoint.url %}
+                        <div class="endpoint-row">
+                            <span>
+                                <code>{{ endpoint_value }}</code>
+                                {% if provider_key == 'linkapi' and endpoint.url == '/v1/messages' %}
+                                <small class="endpoint-auth">x-api-key: YOUR_API_KEY</small>
+                                {% elif provider_key == 'linkapi' and endpoint.url.startswith('/v1beta/') %}
+                                <small class="endpoint-auth">x-goog-api-key: YOUR_API_KEY</small>
+                                {% else %}
+                                <small class="endpoint-auth">Authorization: Bearer YOUR_API_KEY</small>
+                                {% endif %}
                             </span>
-                        </summary>
-                        <div class="endpoint-group__body">
-                            {% if provider_key == 'linkapi' %}
-                            <div class="route-boundary">
-                                <strong>LinkAPI native fast path</strong>
-                                <p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>LINKAPI_KEY</code> stays server-side. Use <code>linkapi:&lt;model&gt;</code> through the unified route when Flask controls are required. Image routes include <code>gpt-image-2-c</code> and <code>gemini-2.5-flash-image</code>.</p>
-                            </div>
-                            {% elif provider_key == 'codex-easy' %}
-                            <div class="route-boundary">
-                                <strong>Codex Everywhere OpenAI fast path</strong>
-                                <p>Use a proxy API key; on Cloudflare, direct routes accept only the deployed Worker's admin key and bypass Flask user, request-size, rate-limit, and metrics controls. <code>CODEX_EASY_API_KEY</code> stays server-side. Use <code>codex-easy:&lt;model&gt;</code> when Flask controls are required. Image routes work only for image-generation key groups.</p>
-                            </div>
-                            {% elif provider_key == 'kimi-code' %}
-                            <div class="route-boundary">
-                                <strong>Kimi Code protected routes</strong>
-                                <p>Chat streams to <code>https://api.kimi.com/coding/v1</code> while <code>KIMI_CODE_API_KEY</code> stays server-side. Use <code>kimi-code:k3</code> for unified accounting. Generation supports Chat Completions only; send <code>reasoning_effort: max</code> and keep <code>prompt_cache_key</code> stable for stable conversation prefixes.</p>
-                            </div>
-                            {% endif %}
-                            {% for endpoint in details.endpoints %}
-                            {% set endpoint_value = request.url_root.rstrip('/') ~ '/' ~ provider_key ~ endpoint.url %}
-                            <div class="endpoint-row">
-                                <span>
-                                    <code>{{ endpoint_value }}</code>
-                                    {% if provider_key == 'linkapi' and endpoint.url == '/v1/messages' %}
-                                    <small class="endpoint-auth">x-api-key: YOUR_API_KEY</small>
-                                    {% elif provider_key == 'linkapi' and endpoint.url.startswith('/v1beta/') %}
-                                    <small class="endpoint-auth">x-goog-api-key: YOUR_API_KEY</small>
-                                    {% else %}
-                                    <small class="endpoint-auth">Authorization: Bearer YOUR_API_KEY</small>
-                                    {% endif %}
-                                </span>
-                                <button class="copy-button" type="button" data-copy-value="{{ endpoint_value }}">Copy</button>
-                            </div>
-                            {% endfor %}
+                            <button class="copy-button" type="button" data-copy-value="{{ endpoint_value }}" aria-label="Copy {{ endpoint_value }}">Copy</button>
                         </div>
-                    </details>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endmacro %}
+                <div class="endpoint-catalog">
+                    {% for provider_key, details in providers | dictsort if details.is_configured %}
+                    {{ endpoint_group(provider_key, details) }}
+                    {% else %}
+                    <p class="field-hint">No provider has a server-side credential yet.</p>
                     {% endfor %}
                 </div>
+                {% set missing = providers | dictsort | rejectattr('1.is_configured') | list %}
+                {% if missing %}
+                <details class="endpoint-catalog-more">
+                    <summary>Routes without credentials ({{ missing | length }})</summary>
+                    <div class="endpoint-catalog">
+                        {% for provider_key, details in missing %}
+                        {{ endpoint_group(provider_key, details) }}
+                        {% endfor %}
+                    </div>
+                </details>
+                {% endif %}
             </div>
         </article>
 
         <aside class="panel span-5">
             <header class="panel__header">
                 <div>
-                    <h2>Configured cost view</h2>
-                    <p>Only operator-supplied model prices are counted.</p>
+                    <h2>Cost estimate</h2>
+                    <p>Only operator-supplied model prices are counted; this is not a provider invoice.</p>
                 </div>
-                <span class="panel-tag">Estimate</span>
+                <span class="panel-tag" id="cost-basis">{{ cost.basis }}</span>
             </header>
             <div class="panel__body">
                 <div class="cost-callout">
                     <span class="metric__label">24h effective estimate</span>
-                    <strong class="cost-callout__value" id="cost-total">$0.0000</strong>
-                    <p>
-                        Reservation-based estimates are not provider invoices. Unpriced requests remain
-                        visible and are never silently treated as free. Output cost is counted only
-                        when the request supplies an output-token limit.
+                    <strong class="cost-callout__value" id="cost-total">{% if cost.basis == 'unpriced' %}Unpriced{% else %}${{ "%.6f" | format(cost.effective_cost) }}{% endif %}</strong>
+                    <p id="cost-explanation">
+                        <span data-metric="unpriced-requests">{{ cost.unpriced_requests }}</span> unpriced requests are counted separately and never treated as free.
+                        Output cost is counted only when a request sets an output-token limit.
                     </p>
                 </div>
-                <div id="cost-list" class="cost-list" style="margin-top: 0.8rem;"></div>
+                <ul id="cost-list" class="cost-list"></ul>
                 <div class="empty-state" id="cost-empty" hidden>
-                    <strong>No model pricing configured</strong>
-                    <p>Set MODEL_PRICING_USD_PER_MILLION to enable estimates without guessing prices.</p>
+                    <strong>No model prices configured</strong>
+                    <p>Set <code>MODEL_PRICING_USD_PER_MILLION</code> to estimate cost without guessing prices.</p>
                 </div>
             </div>
         </aside>
@@ -408,9 +429,10 @@ NAVYAI_API_KEY=your-key</code></pre>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/request-explorer.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js', v='2') }}"></script>
 {% if user and user.is_admin %}
-<script src="{{ url_for('static', filename='js/auto-route-catalog.js', v='8') }}"></script>
+<script src="{{ url_for('static', filename='js/auto-route-catalog.js', v='9') }}"></script>
 <script src="{{ url_for('static', filename='js/auto-routes.js', v='7') }}"></script>
 {% endif %}
 {% endblock %}

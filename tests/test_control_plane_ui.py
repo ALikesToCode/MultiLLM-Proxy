@@ -11,8 +11,8 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_base_shell_uses_local_assets_without_runtime_cdns(self):
         base = self.read("templates/base.html")
 
-        self.assertIn("css/style.css", base)
-        self.assertIn("css/shell.css", base)
+        for stylesheet in ("style.css", "shell.css", "controls.css", "components.css", "content.css"):
+            self.assertIn(f"css/{stylesheet}", base)
         self.assertNotIn("cdn.tailwindcss.com", base)
         self.assertNotIn("cdnjs.cloudflare.com", base)
         self.assertNotIn("unpkg.com", base)
@@ -36,6 +36,10 @@ class ControlPlaneUiTest(unittest.TestCase):
             "docs/design-preview.html",
             "static/design-tokens.json",
             "static/css/shell.css",
+            "static/css/controls.css",
+            "static/css/components.css",
+            "static/css/content.css",
+            "static/css/public.css",
             "static/css/auto-routes.css",
             "static/css/documentation.css",
             "static/css/operations.css",
@@ -46,11 +50,17 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_changed_handwritten_ui_files_stay_below_source_limit(self):
         relative_paths = (
             "static/css/shell.css",
+            "static/css/controls.css",
+            "static/css/components.css",
+            "static/css/content.css",
+            "static/css/public.css",
+            "static/js/app.js",
             "static/css/operations.css",
             "static/css/surfaces.css",
             "static/js/auto-route-catalog.js",
             "static/js/auto-routes.js",
             "static/js/dashboard.js",
+            "static/js/request-explorer.js",
             "static/js/documentation.js",
             "static/js/openrouter.js",
             "static/js/users.js",
@@ -72,19 +82,25 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v12", worker)
+        self.assertIn("multillm-proxy-v13", worker)
         for asset in (
-            "/static/css/shell.css",
-            "/static/css/auto-routes.css?v=7",
-            "/static/css/documentation.css?v=9",
-            "/static/css/operations.css",
-            "/static/css/surfaces.css",
-            "/static/js/auto-route-catalog.js?v=8",
+            "/static/css/shell.css?v=2",
+            "/static/css/controls.css?v=1",
+            "/static/css/components.css?v=1",
+            "/static/css/content.css?v=1",
+            "/static/css/public.css?v=2",
+            "/static/js/app.js?v=2",
+            "/static/css/auto-routes.css?v=8",
+            "/static/css/documentation.css?v=10",
+            "/static/css/operations.css?v=2",
+            "/static/css/surfaces.css?v=2",
+            "/static/js/auto-route-catalog.js?v=9",
             "/static/js/auto-routes.js?v=7",
-            "/static/js/dashboard.js",
-            "/static/js/documentation.js?v=10",
-            "/static/js/openrouter.js",
-            "/static/js/users.js",
+            "/static/js/dashboard.js?v=2",
+            "/static/js/request-explorer.js?v=1",
+            "/static/js/documentation.js?v=11",
+            "/static/js/openrouter.js?v=2",
+            "/static/js/users.js?v=2",
         ):
             self.assertIn(asset, worker)
         self.assertNotIn("/static/css/openrouter.css", worker)
@@ -104,7 +120,7 @@ class ControlPlaneUiTest(unittest.TestCase):
         documentation = self.read("templates/documentation.html")
         script = self.read("static/js/documentation.js")
 
-        self.assertIn("url_for('proxy_documentation')", base)
+        self.assertIn("('proxy_documentation', 'Setup guide'", base)
         self.assertIn('id="proxy-documentation-state"', documentation)
         self.assertIn("/v1/chat/completions", documentation)
         self.assertIn("/v1/images/generations", documentation)
@@ -146,7 +162,7 @@ class ControlPlaneUiTest(unittest.TestCase):
         self.assertIn("NANOGPT_PREFERRED_KEY_INDEX=1", operations)
         self.assertIn("js/auto-route-catalog.js", operations)
         self.assertIn("js/auto-routes.js", operations)
-        self.assertIn("filename='js/auto-route-catalog.js', v='8'", operations)
+        self.assertIn("filename='js/auto-route-catalog.js', v='9'", operations)
         self.assertIn("filename='js/auto-routes.js', v='7'", operations)
         self.assertIn("X-CSRFToken", editor)
         self.assertIn("refreshCatalog", editor)

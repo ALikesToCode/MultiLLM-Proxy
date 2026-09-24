@@ -4,9 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#07131f">
+    <meta name="description" content="{% block description %}MultiLLM Proxy routes LLM requests across providers, serves cited technical knowledge, and connects coding agents through one scoped gateway.{% endblock %}">
     <meta name="application-name" content="MultiLLM Proxy">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MultiLLM Proxy">
     <title>{% block title %}MultiLLM Proxy{% endblock %}</title>
@@ -14,80 +16,125 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/shell.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/shell.css', v='2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/controls.css', v='1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css', v='1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/content.css', v='1') }}">
     {% block styles %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
     <a class="skip-link" href="#main-content">Skip to content</a>
+    {% set current_user_session = session.get('user') if session.get('authenticated') else None %}
 
-    {% if session.get('user') and session.get('authenticated') %}
+    {% macro brand(href, label) -%}
+    <a href="{{ href }}" class="brand-lockup" aria-label="{{ label }}">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="brand-lockup__name">MultiLLM<span>Proxy</span></span>
+    </a>
+    {%- endmacro %}
+
+    {% if current_user_session %}
+    {% set is_admin = current_user_session.get('is_admin') %}
+    {# Each item: endpoint, label, admin only, endpoints that mark it current. #}
+    {% set nav_items = [
+        ('status_page', 'Operations', False, ['status_page']),
+        ('knowledge_page', 'Knowledge', True, ['knowledge_page', 'knowledge_agent_setup']),
+        ('workbench', 'Workbench', True, ['workbench']),
+        ('openrouter_dashboard', 'OpenRouter lab', False, ['openrouter_dashboard']),
+        ('manage_users', 'Access', False, ['manage_users']),
+        ('proxy_documentation', 'Setup guide', False, ['proxy_documentation']),
+    ] %}
     <header class="app-header">
         <div class="app-header__inner">
-            <a href="{{ url_for('status_page') }}" class="brand-lockup" aria-label="MultiLLM Proxy operations">
-                <span class="brand-mark" aria-hidden="true">
-                    <span></span><span></span><span></span>
-                </span>
-                <span>
-                    <strong>MultiLLM</strong>
-                    <small>Route control</small>
-                </span>
-            </a>
+            {{ brand(url_for('status_page'), 'MultiLLM Proxy operations') }}
 
             <nav class="primary-nav" aria-label="Primary">
-                {% if session.get('user').get('is_admin') %}<a href="{{ url_for('workbench') }}" class="primary-nav__link {% if request.endpoint == 'workbench' %}is-active{% endif %}">Workbench</a>{% endif %}
-                <a href="{{ url_for('status_page') }}" class="primary-nav__link {% if request.endpoint == 'status_page' %}is-active{% endif %}">
-                    Operations
-                </a>
-                <a href="{{ url_for('proxy_documentation') }}" class="primary-nav__link {% if request.endpoint == 'proxy_documentation' %}is-active{% endif %}">
-                    Setup guide
-                </a>
-                <a href="{{ url_for('manage_users') }}" class="primary-nav__link {% if request.endpoint == 'manage_users' %}is-active{% endif %}">
-                    Access
-                </a>
-                <a href="{{ url_for('openrouter_dashboard') }}" class="primary-nav__link {% if request.endpoint == 'openrouter_dashboard' %}is-active{% endif %}">
-                    OpenRouter lab
-                </a>
+                {% for endpoint, label, admin_only, current_for in nav_items if is_admin or not admin_only %}
+                <a href="{{ url_for(endpoint) }}" class="primary-nav__link"{% if request.endpoint in current_for %} aria-current="page"{% endif %}>{{ label }}</a>
+                {% endfor %}
             </nav>
 
             <div class="app-header__actions">
-                {% if session.get('user').get('username') %}
+                {% if current_user_session.get('username') %}
                 <span class="operator-identity">
-                    <span class="operator-identity__avatar" aria-hidden="true">
-                        {{ session.get('user').get('username')[0].upper() }}
-                    </span>
+                    <span class="operator-identity__avatar" aria-hidden="true">{{ current_user_session.get('username')[0] | upper }}</span>
                     <span class="operator-identity__text">
-                        <strong>{{ session.get('user').get('username') }}</strong>
-                        <small>Operator</small>
+                        <strong>{{ current_user_session.get('username') }}</strong>
+                        <small>{{ 'Administrator' if is_admin else 'Operator' }}</small>
                     </span>
                 </span>
                 {% endif %}
-                <form action="{{ url_for('logout') }}" method="post">
+                <form class="sign-out-form" action="{{ url_for('logout') }}" method="post">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="button button--quiet">Sign out</button>
+                    <button type="submit" class="button button--secondary button--sm">Sign out</button>
                 </form>
                 <button id="mobile-menu-button" class="mobile-menu-button" type="button" aria-expanded="false" aria-controls="mobile-menu">
-                    <span class="sr-only">Toggle navigation</span>
+                    <span class="sr-only">Menu</span>
                     <span></span><span></span><span></span>
                 </button>
             </div>
         </div>
 
-        <nav class="mobile-nav" id="mobile-menu" aria-label="Mobile" hidden>
-            {% if session.get('user').get('is_admin') %}<a href="{{ url_for('workbench') }}">Workbench</a>{% endif %}
-            <a href="{{ url_for('status_page') }}" class="{% if request.endpoint == 'status_page' %}is-active{% endif %}">Operations</a>
-            <a href="{{ url_for('proxy_documentation') }}" class="{% if request.endpoint == 'proxy_documentation' %}is-active{% endif %}">Setup guide</a>
-            <a href="{{ url_for('manage_users') }}" class="{% if request.endpoint == 'manage_users' %}is-active{% endif %}">Access</a>
-            <a href="{{ url_for('openrouter_dashboard') }}" class="{% if request.endpoint == 'openrouter_dashboard' %}is-active{% endif %}">OpenRouter lab</a>
+        <nav class="mobile-nav" id="mobile-menu" aria-label="Primary" hidden>
+            {% for endpoint, label, admin_only, current_for in nav_items if is_admin or not admin_only %}
+            <a href="{{ url_for(endpoint) }}"{% if request.endpoint in current_for %} aria-current="page"{% endif %}>{{ label }}</a>
+            {% endfor %}
+            <div class="mobile-nav__footer">
+                <span class="operator-identity__text">
+                    <strong>{{ current_user_session.get('username') }}</strong>
+                    <small>{{ 'Administrator' if is_admin else 'Operator' }}</small>
+                </span>
+                <form action="{{ url_for('logout') }}" method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="button button--secondary button--sm">Sign out</button>
+                </form>
+            </div>
         </nav>
+    </header>
+    {% else %}
+    {% set public_links = [
+        ('product_overview', 'Product'),
+        ('knowledge_agent_setup', 'Agent setup'),
+    ] %}
+    <header class="site-header">
+        <div class="site-header__inner">
+            {{ brand(url_for('product_overview'), 'MultiLLM Proxy overview') }}
+            <nav class="site-nav" aria-label="Site">
+                {% for endpoint, label in public_links %}
+                <a class="site-nav__link" href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ label }}</a>
+                {% endfor %}
+                <a class="site-nav__link" href="{{ url_for('knowledge_llms') }}">llms.txt</a>
+            </nav>
+            <div class="site-header__actions">
+                {% if request.endpoint != 'login' %}
+                <a class="button button--primary button--sm" href="{{ url_for('login') }}">Sign in</a>
+                {% endif %}
+            </div>
+        </div>
     </header>
     {% endif %}
 
-    <main id="main-content" class="app-main {% if not session.get('authenticated') %}app-main--guest{% endif %}">
+    <main id="main-content" class="app-main {% block main_class %}{% endblock %}" tabindex="-1">
         {% block content %}{% endblock %}
     </main>
 
+    {% if not current_user_session %}
+    <footer class="site-footer">
+        <div class="site-footer__inner">
+            <span>MultiLLM Proxy · provider credentials stay on the server.</span>
+            <nav aria-label="Footer">
+                <a href="{{ url_for('product_overview') }}">Product</a>
+                <a href="{{ url_for('knowledge_agent_setup') }}">Agent setup</a>
+                <a href="{{ url_for('knowledge_llms') }}">llms.txt</a>
+                <a href="{{ url_for('knowledge_llms_full') }}">llms-full.txt</a>
+                <a href="{{ url_for('login') }}">Sign in</a>
+            </nav>
+        </div>
+    </footer>
+    {% endif %}
+
     <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js', v='2') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
