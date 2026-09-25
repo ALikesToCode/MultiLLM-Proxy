@@ -22,6 +22,10 @@ _ENDPOINTS = {
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
 _DEADLINE_SECONDS = 5
+# Every authenticated request waits on an account lookup, and the first call after
+# the Container or D1 has been idle can take several seconds. Give it room instead
+# of failing a valid key.
+_ENDPOINT_LIMITS = {"users": ((3, 8), 10)}
 _TRANSPORT_SLOTS = threading.BoundedSemaphore(16)
 _RESERVATION_ID = re.compile(r"[0-9a-f]{32}\Z")
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
@@ -110,7 +114,7 @@ def _decode_response(response, stopped, deadline, success_statuses):
     return payload
 
 
-def _submit(url, body, stopped, deadline, results, slots, success_statuses):
+def _submit(url, body, stopped, deadline, results, slots, success_statuses, timeout=_TIMEOUT):
     try:
         with requests.Session() as session:
             session.trust_env = False
@@ -125,7 +129,7 @@ def _submit(url, body, stopped, deadline, results, slots, success_statuses):
                     "Accept": "application/json",
                     "Accept-Encoding": "identity",
                 },
-                timeout=_TIMEOUT,
+                timeout=timeout,
                 allow_redirects=False,
                 stream=True,
             ) as response:
@@ -164,7 +168,8 @@ def request_private_intelligence(payload, *, endpoint="store"):
     if len(body) > _MAX_BYTES or not slots.acquire(blocking=False):
         raise storage_unavailable()
     stopped, results = threading.Event(), queue.Queue(maxsize=1)
-    deadline = time.monotonic() + _DEADLINE_SECONDS
+    timeout, deadline_seconds = _ENDPOINT_LIMITS.get(endpoint, (_TIMEOUT, _DEADLINE_SECONDS))
+    deadline = time.monotonic() + deadline_seconds
     worker = threading.Thread(
         target=_submit,
         args=(
@@ -175,6 +180,7 @@ def request_private_intelligence(payload, *, endpoint="store"):
             results,
             slots,
             (200, 201) if endpoint == "auth" else (200,),
+            timeout,
         ),
         daemon=True,
         name="intelligence-store",

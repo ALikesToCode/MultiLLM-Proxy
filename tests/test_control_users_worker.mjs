@@ -92,3 +92,24 @@ test("accounts use D1 unless an external control plane or explicit backend is co
   assert.equal(collectContainerEnv({ INTELLIGENCE_DB: {} }).AUTH_STORAGE_BACKEND, "d1");
   assert.equal(collectContainerEnv({}).AUTH_STORAGE_BACKEND, "sql");
 });
+
+test("a transient D1 error on an account read is retried once", async () => {
+  const { mf, db, call } = await database();
+  try {
+    await call({ operation: "upsert", user: user("alice") });
+    let failures = 1;
+    const flaky = { prepare: (sql) => {
+      const statement = db.prepare(sql);
+      return { bind: (...values) => {
+        const bound = statement.bind(...values);
+        return { first: async () => { if (failures-- > 0) throw new Error("D1_ERROR: Network connection lost"); return bound.first(); },
+          all: () => bound.all(), run: () => bound.run() };
+      } };
+    } };
+    const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version: 1, operation: "get", username: "alice" }) }), { INTELLIGENCE_DB: flaky });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).user.username, "alice");
+  } finally { await mf.dispose(); }
+});

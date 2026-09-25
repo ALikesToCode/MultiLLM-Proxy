@@ -24,10 +24,16 @@ export function validUser(user) {
     && optionalText(user.last_used_ip, 128) && optionalText(user.created_by, 128);
 }
 
+// Reads are idempotent: retry once so a transient D1 error does not reject a valid key.
+async function read(query) {
+  try { return await query(); }
+  catch { return query(); }
+}
+
 /** Unrevoked accounts for a key prefix, shared by the Container RPC and the edge. */
 export async function activeUsersByPrefix(db, prefix) {
-  const { results } = await db.prepare(`SELECT ${COLUMNS} FROM control_users
-    WHERE api_key_prefix=? AND revoked_at IS NULL ORDER BY username LIMIT ${MAX_PAGE}`).bind(prefix).all();
+  const { results } = await read(() => db.prepare(`SELECT ${COLUMNS} FROM control_users
+    WHERE api_key_prefix=? AND revoked_at IS NULL ORDER BY username LIMIT ${MAX_PAGE}`).bind(prefix).all());
   return results;
 }
 
@@ -75,11 +81,11 @@ export async function handleControlUsersRequest(request, env) {
         const statement = body.after === null
           ? db.prepare(`SELECT ${COLUMNS} FROM control_users ORDER BY username LIMIT ?`).bind(body.limit)
           : db.prepare(`SELECT ${COLUMNS} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit);
-        return reply({ version: 1, users: (await statement.all()).results });
+        return reply({ version: 1, users: (await read(() => statement.all())).results });
       }
       case "get": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
-        const user = await db.prepare(`SELECT ${COLUMNS} FROM control_users WHERE username=?`).bind(body.username).first();
+        const user = await read(() => db.prepare(`SELECT ${COLUMNS} FROM control_users WHERE username=?`).bind(body.username).first());
         return reply({ version: 1, user: user ?? null });
       }
       case "by_prefix": {

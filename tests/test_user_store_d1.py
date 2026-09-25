@@ -54,6 +54,7 @@ def d1(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_API_KEY", "synthetic-d1-admin-key")
     domain = FakeUsersDomain()
     monkeypatch.setattr(user_store, "request_private_intelligence", domain)
+    monkeypatch.setattr(user_store, "READ_RETRY_DELAY_SECONDS", 0)
     restart(monkeypatch)
     yield domain
     assert not (tmp_path / "auth.sqlite3").exists(), "D1 mode never creates a local account database"
@@ -142,3 +143,57 @@ def test_backend_names_are_explicit(monkeypatch):
     monkeypatch.setenv("AUTH_STORAGE_BACKEND", "postgres")
     with pytest.raises(RuntimeError):
         user_store.using_d1()
+
+
+def test_a_transient_read_failure_is_retried_once(d1):
+    key = create("agent", ["chat"])
+    original = FakeUsersDomain.__call__
+    failures = {"by_prefix": 1}
+
+    def flaky(self, payload, *, endpoint):
+        if failures.get(payload["operation"], 0):
+            failures[payload["operation"]] -= 1
+            self.calls.append(payload["operation"])
+            raise PrivateIntelligenceError(503, "storage_unavailable")
+        return original(self, payload, endpoint=endpoint)
+
+    d1.calls.clear()
+    with patch.object(FakeUsersDomain, "__call__", flaky):
+        assert AuthService.verify_api_key(key)["username"] == "agent"
+    assert d1.calls.count("by_prefix") == 2
+
+
+def test_refused_reads_and_all_writes_are_sent_once(d1):
+    create("agent", ["chat"])
+    original = FakeUsersDomain.__call__
+
+    def refuse(self, payload, *, endpoint):
+        self.calls.append(payload["operation"])
+        if payload["operation"] in ("get", "upsert"):
+            raise PrivateIntelligenceError(400 if payload["operation"] == "get" else 503, "invalid_request")
+        return original(self, payload, endpoint=endpoint)
+
+    d1.calls.clear()
+    with patch.object(FakeUsersDomain, "__call__", refuse):
+        with pytest.raises(APIError):
+            user_store.get_user("agent")
+        with pytest.raises(APIError):
+            user_store.upsert_user(d1.rows["agent"])
+    assert d1.calls == ["get", "upsert"]
+
+
+def test_account_lookups_get_a_longer_transport_budget(monkeypatch):
+    from services import intelligence_d1_store as store
+
+    captured = {}
+
+    def fake_submit(url, body, stopped, deadline, results, slots, success_statuses, timeout=store._TIMEOUT):
+        captured[url.rsplit("/", 1)[-1]] = (timeout, round(deadline - store.time.monotonic()))
+        results.put_nowait((True, {"version": 1, "user": None}))
+        slots.release()
+
+    monkeypatch.setattr(store, "_submit", fake_submit)
+    store.request_private_intelligence({"operation": "get", "username": "a"}, endpoint="users")
+    store.request_private_intelligence({"operation": "lookup", "keyPrefix": "x"}, endpoint="auth")
+    assert captured["users"] == ((3, 8), 10)
+    assert captured["auth"] == ((2, 3), 5)

@@ -6,10 +6,14 @@ fixed statements only; no SQL crosses this boundary. Failures never fall back to
 SQLite: an unavailable store is reported as such.
 """
 
+import logging
 import os
+import time
 
 from error_handlers import APIError
-from services.intelligence_d1_store import request_private_intelligence
+from services.intelligence_d1_store import PrivateIntelligenceError, request_private_intelligence
+
+logger = logging.getLogger(__name__)
 
 USER_FIELDS = (
     "username", "api_key_hash", "api_key_prefix", "scopes", "is_admin", "created_at",
@@ -18,6 +22,8 @@ USER_FIELDS = (
 _REQUIRED_TEXT = ("username", "api_key_hash", "api_key_prefix", "scopes", "created_at")
 _OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at")
 PAGE_SIZE = 200
+READ_OPERATIONS = frozenset({"list", "get", "by_prefix"})
+READ_RETRY_DELAY_SECONDS = 0.25
 
 
 def using_d1():
@@ -31,11 +37,31 @@ def unavailable():
     return APIError("Account storage is unavailable", 503, {"error": "account_storage_unavailable"})
 
 
+def _transient(error):
+    # A 4xx means the request itself was refused; retrying cannot change that.
+    return not isinstance(error, PrivateIntelligenceError) or error.status >= 500
+
+
 def _call(operation, **values):
-    try:
-        return request_private_intelligence({"operation": operation, **values}, endpoint="users")
-    except Exception:
-        raise unavailable() from None
+    """One private call; reads are retried once after a transient failure.
+
+    Reads are idempotent, so a single retry absorbs a slow first call after the
+    Container or D1 was idle. Writes are sent once.
+    """
+    attempts = 2 if operation in READ_OPERATIONS else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return request_private_intelligence({"operation": operation, **values}, endpoint="users")
+        except Exception as error:
+            cause = (f"{error.status} {error.code}" if isinstance(error, PrivateIntelligenceError)
+                     else getattr(error, "code", None) or type(error).__name__)
+            retry = attempt < attempts and _transient(error)
+            logger.warning("Account storage %s failed (%s)%s", operation, cause,
+                           "; retrying once" if retry else "")
+            if not retry:
+                raise unavailable() from None
+            time.sleep(READ_RETRY_DELAY_SECONDS)
+    raise unavailable()
 
 
 def _row(value):
