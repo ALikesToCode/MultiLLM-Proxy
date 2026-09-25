@@ -31,6 +31,7 @@ from route_helpers import (
     stream_upstream_response,
 )
 from routes.auto_routes import (
+    dispatch_auto_route,
     dispatch_auto_route_chat_completion,
     register_auto_route_admin_routes,
 )
@@ -208,6 +209,22 @@ def _merge_request_headers(headers: dict, additions: Mapping[str, str]) -> None:
     for name, value in additions.items():
         if name.lower() not in existing:
             headers[name] = value
+
+
+def _validate_direct_image_target(
+    app,
+    auth_service_cls,
+    proxy_service_cls,
+    model_id: str,
+) -> str:
+    provider, _, adapter = _resolve_enabled_model(app, model_id)
+    if not adapter.capabilities().supports_images:
+        raise APIError(
+            f"Image generation is not supported for provider: {provider}",
+            status_code=400,
+        )
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+    return provider
 
 
 def _validate_direct_chat_target(
@@ -547,6 +564,32 @@ def dispatch_unified_image_generation(
     request_args=None,
 ):
     """Dispatch an OpenAI Images request, translating provider-native models."""
+    if AutoRouteService.is_auto_route(payload.get("model")):
+        def validate_candidate(candidate: str) -> None:
+            _validate_direct_image_target(
+                app,
+                auth_service_cls,
+                proxy_service_cls,
+                candidate,
+            )
+
+        def dispatch_candidate(candidate_payload: dict, candidate: str, route_decision: str) -> Response:
+            return dispatch_unified_image_generation(
+                app,
+                auth_service_cls,
+                metrics_service_cls,
+                proxy_service_cls,
+                candidate_payload,
+                request_headers=request_headers,
+                request_args=request_args,
+            )
+
+        return dispatch_auto_route(
+            payload,
+            validate_candidate=validate_candidate,
+            dispatch_candidate=dispatch_candidate,
+        )
+
     start_time = time.time()
     provider = "unknown"
     headers_source = request.headers if request_headers is None else request_headers
@@ -701,8 +744,8 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
             requested_model = payload.get("model")
             if AutoRouteService.is_auto_route(requested_model):
                 raise APIError(
-                    "Auto routes currently support /v1/chat/completions and "
-                    "/optimize/v1/chat/completions only",
+                    "Auto routes currently support /v1/chat/completions, "
+                    "/optimize/v1/chat/completions and /v1/images/generations only",
                     status_code=400,
                 )
             provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)

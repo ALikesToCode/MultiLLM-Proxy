@@ -25,12 +25,13 @@ def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cl
     @csrf.exempt
     @api_auth_required(required_scope="models")
     def list_unified_models():
+        catalog = current_catalog()
         models = [
             unified_model_payload(model)
-            for model in current_catalog()
+            for model in catalog
             if model["status"] != "disabled"
         ]
-        models.extend(openai_auto_route_models())
+        models.extend(openai_auto_route_models(catalog))
         models.extend(free_model_aliases())
         models = [model for model in models if model["id"] != "auto:intelligence"]
         try:

@@ -64,13 +64,18 @@ def _decorate_response(
     return response
 
 
-def dispatch_auto_route_chat_completion(
+def dispatch_auto_route(
     payload: dict,
     *,
     validate_candidate: Callable[[str], None],
     dispatch_candidate: Callable[[dict, str, str], Response],
 ) -> Response:
-    """Run an explicit priority list through injected validation and transport."""
+    """Run an explicit priority list through injected validation and transport.
+
+    Chat and image generation share this policy: only a refusal that proves the
+    candidate generated nothing moves on, so a paid request is never repeated
+    after an uncertain outcome.
+    """
     route = AutoRouteService.get_route(payload.get("model"))
     if route is None:
         raise APIError(
@@ -141,17 +146,33 @@ def dispatch_auto_route_chat_completion(
     )
 
 
-def openai_auto_route_models() -> list[dict]:
-    return [
-        {
+dispatch_auto_route_chat_completion = dispatch_auto_route
+
+
+def _route_capabilities(route: AutoRoute, catalog: list[dict]) -> dict[str, bool]:
+    """A route can do what at least one of its candidates can do."""
+    by_id = {model["id"]: model.get("capabilities") or {} for model in catalog}
+    candidates = [by_id.get(candidate, {}) for candidate in route.candidates]
+    return {
+        name: any(bool(capabilities.get(name)) for capabilities in candidates)
+        for name in ("supports_chat", "supports_images")
+    }
+
+
+def openai_auto_route_models(catalog: list[dict] | None = None) -> list[dict]:
+    models = []
+    for route in AutoRouteService.list_routes():
+        model = {
             "id": route.id,
             "object": "model",
             "created": 0,
             "owned_by": "multillm-auto",
             "status": "available",
         }
-        for route in AutoRouteService.list_routes()
-    ]
+        if catalog is not None:
+            model["capabilities"] = _route_capabilities(route, catalog)
+        models.append(model)
+    return models
 
 
 def _provider_is_configured(auth_service_cls, provider: str) -> bool:

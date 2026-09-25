@@ -18,6 +18,8 @@ DEFAULT_AUTO_ROUTES = {
         "opencode:glm-5.2",
         "navyai:glm-5.2",
     ),
+    # Image route: add more providers that serve gpt-image-2.5 in Operations.
+    "auto:gpt-image-2.5": ("gguu:gpt-image-2.5",),
 }
 LEGACY_DEFAULT_AUTO_ROUTES = {
     "auto:glm-5.2": (
@@ -42,7 +44,7 @@ class AutoRoute:
 
 
 class AutoRouteService:
-    """Persist ordered, explicit provider candidates for virtual chat models."""
+    """Persist ordered, explicit provider candidates for virtual chat and image models."""
 
     @staticmethod
     def _connect() -> sqlite3.Connection:

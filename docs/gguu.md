@@ -67,7 +67,11 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
 ```
 
 The unified endpoint removes the `gguu:` prefix and preserves the remaining
-OpenAI Images request and response fields.
+OpenAI Images request and response fields. The seeded automatic model
+`auto:gpt-image-2.5` routes to `gguu:gpt-image-2.5`; add other providers of that
+model in **Operations** to fail over between them ([automatic routes](auto-routing.md#image-generation)).
+Only `gpt-image-2` receives the automatic `moderation: "low"` default, so send
+`moderation` explicitly for `gpt-image-2.5`.
 
 ## Native endpoints
 

@@ -77,7 +77,8 @@ class ImageRelayCatalogTest(UnifiedApiTestCase):
         )
         for model_id in ("gguu:gpt-image-2.5", "gguu:gpt-image-3.0"):
             self.assertTrue(models[model_id]["capabilities"]["supports_images"])
-            self.assertEqual(models[model_id]["sources"], ["live"])
+            # gpt-image-2.5 is also a candidate of the seeded auto:gpt-image-2.5 route.
+            self.assertIn("live", models[model_id]["sources"])
         self.assertFalse(models["gguu:text-test"]["capabilities"]["supports_images"])
         return models
 

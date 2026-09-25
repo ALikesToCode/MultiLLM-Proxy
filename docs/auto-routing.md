@@ -1,15 +1,15 @@
 # Automatic model priorities
 
-MultiLLM exposes explicit virtual Chat Completions models in the
-`auto:<name>` namespace. Each virtual model stores an ordered list of normal
-`provider:model` candidates. This keeps fallback policy visible and editable
-without changing any direct provider route.
+MultiLLM exposes explicit virtual Chat Completions and image generation models
+in the `auto:<name>` namespace. Each virtual model stores an ordered list of
+normal `provider:model` candidates. This keeps fallback policy visible and
+editable without changing any direct provider route.
 
-The first startup seeds this route:
+Startup seeds these routes:
 
-1. `nanogpt:zai-org/glm-5.2:thinking`
-2. `opencode:glm-5.2`
-3. `navyai:glm-5.2`
+- `auto:glm-5.2`: `nanogpt:zai-org/glm-5.2:thinking`, `opencode:glm-5.2`,
+  `navyai:glm-5.2`
+- `auto:gpt-image-2.5`: `gguu:gpt-image-2.5`
 
 Use `auto:glm-5.2` with the normal unified endpoint:
 
@@ -27,9 +27,45 @@ curl "$PROXY_BASE_URL/v1/chat/completions" \
 `GET /v1/models` includes every saved virtual model with
 `owned_by: multillm-auto`, built-in provider models, and IDs retained from the
 last successful live provider-catalog refresh. Automatic models also work through
-`POST /optimize/v1/chat/completions`. Images and the Responses API still
-require an explicit `provider:model` because their request and stream
-contracts differ across providers.
+`POST /optimize/v1/chat/completions`. The Responses API still requires an
+explicit `provider:model` because its request and stream contracts differ
+across providers.
+
+## Image generation
+
+`POST /v1/images/generations` accepts an `auto:<name>` model. Candidates are
+tried in order; a candidate is skipped before any request when its provider
+cannot generate images, has no configured credential, or the model is disabled
+in Operations. Each candidate receives the same OpenAI Images body with its own
+`provider:model` translated as a direct request would be.
+
+```bash
+curl "$PROXY_BASE_URL/v1/images/generations" \
+  -H "Authorization: Bearer $MULTILLM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto:gpt-image-2.5",
+    "prompt": "A glass observatory at sunrise",
+    "size": "2048x2048",
+    "quality": "high",
+    "moderation": "low",
+    "response_format": "url",
+    "n": 1
+  }'
+```
+
+Image generation is paid, so failover follows the chat rule strictly: the next
+candidate is tried only after `401`, `402`, `403`, `404` or `429`, or while the
+provider's circuit is open. Those responses mean the candidate generated
+nothing. A `5xx`, timeout or transport failure is returned as-is and never
+repeated on another provider. Responses carry `X-MultiLLM-Auto-Route`,
+`X-MultiLLM-Auto-Selected-Model`, `X-MultiLLM-Auto-Selected-Priority` and
+`X-MultiLLM-Auto-Attempts`. Image edits still use a provider's native
+`/<provider>/v1/images/edits` path.
+
+`GET /v1/models` reports each automatic model's `capabilities` as
+`supports_chat` and `supports_images`, true when at least one candidate can
+serve that endpoint.
 
 Live entries retain safe provider metadata rather than reducing every model to
 an ID and token limits. NavyAI entries, for example, expose endpoint,
@@ -131,7 +167,7 @@ Sign in as an administrator and open **Operations**. The **Automatic model
 priorities** panel can:
 
 - reorder candidates with Up and Down controls;
-- add any provider/model ID supported by the unified Chat route;
+- add any provider/model ID supported by the unified Chat or Images route;
 - remove a candidate from the pending order;
 - create additional virtual models such as `auto:kimi-k3`; and
 - show whether each provider currently has a configured server credential.

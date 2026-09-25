@@ -170,14 +170,14 @@
                     <h2>Automatic model priorities</h2>
                     <p>Each <code>auto:&lt;name&gt;</code> model tries this order after a definite authentication, model-availability or rate-limit rejection.</p>
                 </div>
-                <span class="panel-tag">Chat only</span>
+                <span class="panel-tag">Chat and images</span>
             </header>
             <div class="panel__body auto-route-editor">
                 <div class="auto-route-editor__sidebar">
                     <label class="field-label" for="auto-route-select">Virtual model</label>
                     <select id="auto-route-select" class="field-select"></select>
                     <button id="new-auto-route" class="button button--secondary" type="button">New virtual model</button>
-                    <p class="field-help">The seeded <code>auto:glm-5.2</code> route starts with NanoGPT, OpenCode, then NavyAI. Saving updates SQLite immediately.</p>
+                    <p class="field-help">The seeded <code>auto:glm-5.2</code> route starts with NanoGPT, OpenCode, then NavyAI; <code>auto:gpt-image-2.5</code> uses GGUU for image generation. Saving updates SQLite immediately.</p>
                 </div>
 
                 <div class="auto-route-editor__main">
