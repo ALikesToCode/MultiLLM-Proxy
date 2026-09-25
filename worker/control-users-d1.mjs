@@ -2,11 +2,14 @@
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
+import { logFailure } from "./log.mjs";
+
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at"]);
 const COLUMNS = USER_FIELDS.join(", ");
 const MAX_BODY_BYTES = 8192;
 const MAX_PAGE = 200;
+const OPERATIONS = new Set(["list", "get", "by_prefix", "upsert", "delete", "touch"]);
 const CONTROL = /[\x00-\x1f\x7f]/;
 const text = (value, maximum) => typeof value === "string" && value.length > 0 && value.length <= maximum && !CONTROL.test(value);
 const optionalText = (value, maximum) => value === null || text(value, maximum);
@@ -24,10 +27,31 @@ export function validUser(user) {
     && optionalText(user.last_used_ip, 128) && optionalText(user.created_by, 128);
 }
 
+/**
+ * Usernames the Worker's own configuration lets hold administration: ADMIN_USERNAME and
+ * the comma-separated ADMIN_USERNAMES. The Container writes accounts, but it cannot grant
+ * a durable admin account that the Worker and the edge would then honor.
+ */
+export function adminUsernames(env) {
+  const names = [env.ADMIN_USERNAME ?? "admin", ...String(env.ADMIN_USERNAMES ?? "").split(",")];
+  return new Set(names.map(name => String(name).trim()).filter(name => name && !CONTROL.test(name)));
+}
+
+export const grantsAdmin = user => user.is_admin === 1 || user.scopes.split(",").map(scope => scope.trim()).includes("admin");
+
 // Reads are idempotent: retry once so a transient D1 error does not reject a valid key.
 async function read(query) {
   try { return await query(); }
-  catch { return query(); }
+  catch (error) {
+    logFailure("account_storage_retry", error);
+    return query();
+  }
+}
+
+function audit(db, operation, outcome, user) {
+  return db.prepare(`INSERT INTO control_user_audit (at, operation, outcome, username, is_admin, scopes, api_key_prefix, revoked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(new Date().toISOString(), operation, outcome, user.username,
+    user.is_admin ?? null, user.scopes ?? null, user.api_key_prefix ?? null, user.revoked_at ?? null);
 }
 
 /** Unrevoked accounts for a key prefix, shared by the Container RPC and the edge. */
@@ -37,7 +61,7 @@ export async function activeUsersByPrefix(db, prefix) {
   return results;
 }
 
-async function boundedBody(request) {
+export async function boundedBody(request, maxBytes = MAX_BODY_BYTES) {
   if (!request.body) throw new Error("Missing body");
   const reader = request.body.getReader();
   const chunks = [];
@@ -47,7 +71,7 @@ async function boundedBody(request) {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_BODY_BYTES) { void reader.cancel().catch(() => {}); throw new Error("Oversized body"); }
+      if (size > maxBytes) { void reader.cancel().catch(() => {}); throw new Error("Oversized body"); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
@@ -95,14 +119,23 @@ export async function handleControlUsersRequest(request, env) {
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"]) || !validUser(body.user)) break;
         const user = body.user;
-        await db.prepare(`INSERT INTO control_users (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        if (grantsAdmin(user) && !adminUsernames(env).has(user.username)) {
+          logFailure("account_admin_refused", new Error("Administration is not configured for this username"));
+          await audit(db, "upsert", "refused", user).run();
+          return reply({ error: "admin_not_allowed" }, 403);
+        }
+        // The write and its audit row commit together, or neither does.
+        await db.batch([db.prepare(`INSERT INTO control_users (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(username) DO UPDATE SET ${USER_FIELDS.slice(1).map(name => `${name}=excluded.${name}`).join(", ")}`)
-          .bind(...USER_FIELDS.map(name => user[name])).run();
+          .bind(...USER_FIELDS.map(name => user[name])), audit(db, "upsert", "stored", user)]);
         return reply({ version: 1, stored: true });
       }
       case "delete": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
-        const result = await db.prepare("DELETE FROM control_users WHERE username=?").bind(body.username).run();
+        const [result] = await db.batch([db.prepare("DELETE FROM control_users WHERE username=?").bind(body.username),
+          db.prepare(`INSERT INTO control_user_audit (at, operation, outcome, username)
+            VALUES (?, 'delete', CASE WHEN changes() = 1 THEN 'deleted' ELSE 'missing' END, ?)`)
+            .bind(new Date().toISOString(), body.username)]);
         return reply({ version: 1, deleted: result.meta.changes === 1 });
       }
       case "touch": {
@@ -116,7 +149,8 @@ export async function handleControlUsersRequest(request, env) {
         break;
     }
     return reply({ error: "invalid_request" }, 400);
-  } catch {
+  } catch (error) {
+    logFailure("account_storage_failed", error, { operation: OPERATIONS.has(body.operation) ? body.operation : "unknown" });
     return reply({ error: "storage_unavailable" }, 503);
   }
 }

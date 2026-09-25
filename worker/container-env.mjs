@@ -122,14 +122,14 @@ function shouldPassThroughKey(key) {
 }
 
 /**
- * Dashboard accounts use D1 when the Worker has its binding and no external
- * PostgreSQL control plane is configured; AUTH_STORAGE_BACKEND overrides this.
+ * Dashboard accounts use D1 only when AUTH_STORAGE_BACKEND=d1 is configured. Having the
+ * D1 binding is not enough: accounts need the control_users migration, and switching a
+ * deployment's account store implicitly caused an outage when it had not been applied.
  * The edge uses the same rule, so both always read the same account store.
  */
 export function authStorageBackend(source = {}) {
   const configured = typeof source.AUTH_STORAGE_BACKEND === "string" ? source.AUTH_STORAGE_BACKEND.trim() : "";
-  if (configured) return configured;
-  return source.INTELLIGENCE_DB && !String(source.CONTROL_PLANE_DATABASE_URL ?? "").trim() ? "d1" : "sql";
+  return configured || "sql";
 }
 
 export function collectContainerEnv(source = {}) {

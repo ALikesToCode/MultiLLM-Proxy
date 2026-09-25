@@ -37,6 +37,11 @@ def unavailable():
     return APIError("Account storage is unavailable", 503, {"error": "account_storage_unavailable"})
 
 
+def admin_not_allowed():
+    return APIError("Administrator accounts must be listed in the Worker's ADMIN_USERNAME or ADMIN_USERNAMES",
+                    403, {"error": "admin_not_allowed"})
+
+
 def _transient(error):
     # A 4xx means the request itself was refused; retrying cannot change that.
     return not isinstance(error, PrivateIntelligenceError) or error.status >= 500
@@ -55,6 +60,8 @@ def _call(operation, **values):
         except Exception as error:
             cause = (f"{error.status} {error.code}" if isinstance(error, PrivateIntelligenceError)
                      else getattr(error, "code", None) or type(error).__name__)
+            if isinstance(error, PrivateIntelligenceError) and error.code == "admin_not_allowed":
+                raise admin_not_allowed() from None
             retry = attempt < attempts and _transient(error)
             logger.warning("Account storage %s failed (%s)%s", operation, cause,
                            "; retrying once" if retry else "")

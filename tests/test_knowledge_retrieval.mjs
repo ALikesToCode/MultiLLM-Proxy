@@ -204,8 +204,62 @@ test("cache reads fail closed when policy or sources are revoked during lookup",
       }
       return result;
     };
-    await assert.rejects(run(f), { code: revokePolicy ? "policy_changed" : "corpus_changed" });
+    if (revokePolicy) {
+      await assert.rejects(run(f), { code: "policy_changed" });
+      continue;
+    }
+    // The stale entry is skipped and the answer is validated against the current corpus.
+    const result = await run(f);
+    assert.notEqual(result.path, "cache");
+    assert.deepEqual(result.excerpts, []);
+    assert.equal(result.status, "insufficient_evidence");
   }
+});
+
+test("parallel queries that discover sources neither fail nor skip the cache", async () => {
+  const f = await fixture();
+  const { revision, ...policy } = f.policy;
+  await f.authority.call("policy.update", { ...policy, allowed_hosts: ["*"], expected_revision: revision });
+  let lookups = 0;
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
+    const topic = intent.query.match(/topic (\d)/)[1];
+    lookups += 1;
+    await delay(5);
+    return { observations: [{ kind: "source_excerpt", provider, url: `https://docs-${topic}.example-public-docs.dev/guide/`,
+      text: `${f.text} Topic ${topic}.`, freshness: "live" }], warnings: [] };
+  });
+  const queries = [1, 2, 3].map(topic => request({ query: `How are request size limits configured for topic ${topic}?` }));
+  const results = await Promise.all(queries.map(query => run(f, query)));
+  assert.deepEqual(results.map(result => result.path), ["live", "live", "live"]);
+  assert.ok(results.every(result => result.excerpts.length === 1 && result.excerpts[0].source_review === "unreviewed"));
+  const again = await Promise.all(queries.map(query => run(f, query)));
+  assert.deepEqual(again.map(result => result.path), ["cache", "cache", "cache"], "each discovering answer is cached");
+  assert.equal(lookups, 3);
+});
+
+test("publication during final validation is revalidated instead of failing a paid query", async () => {
+  const f = await fixture();
+  const call = f.authority.call.bind(f.authority);
+  const operations = [];
+  let publications = 1;
+  let registered = 0;
+  f.authority.call = async (operation, payload) => {
+    operations.push(operation);
+    const result = await call(operation, payload);
+    if (operation === "artifact.get" && publications > 0) {
+      publications -= 1;
+      await call("source.create", { url: `https://react.dev/learn/${registered++}`, product: "react" });
+    }
+    return result;
+  };
+  const result = await run(f);
+  assert.equal(result.excerpts.length, 1);
+  assert.equal(result.excerpts[0].source_review, "reviewed");
+  assert.equal(f.counts.providers, 1, "the paid lookup is not repeated");
+  assert.ok(!operations.includes("snapshot"), "queries read the lightweight catalogue state");
+  assert.notEqual((await run(f)).path, "cache", "an answer from an older corpus is not cached");
+  publications = Infinity;
+  await assert.rejects(run(f, request({ query: "Which limits apply to uploaded files?" })), { code: "corpus_changed", status: 409 });
 });
 
 test("source disable during a snapshot read removes the excerpt before return", async () => {

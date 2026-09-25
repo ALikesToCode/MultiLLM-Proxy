@@ -1,13 +1,15 @@
 import { fail, fields, integer, parseSource, publicUrl, validId, PROVIDER_IDS } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
-import { defaultPolicy, validatePolicy, withProviderDefaults } from "./policy.mjs";
-import { reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
+import { defaultPolicy, retentionHours, validatePolicy, withProviderDefaults } from "./policy.mjs";
+import { ledgerStats, reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
 import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
 import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const RECONCILE_AFTER_MS = 10 * 60000;
+// Hourly maintenance re-polls an unresolved upload for a day before giving up on it.
+const RECONCILE_ATTEMPTS = 24;
 const STATES = new Set([...ACTIVE, ...TERMINAL]);
 const JOB_LIMIT = 1000;
 const REGISTERED_SOURCE_LIMIT = 200;
@@ -72,7 +74,9 @@ async function createSource(tx, input, now, discovered = false) {
     : { ...parsed, id, identity_confirmed: !discovered, revision: 1, fence: 0, current_artifact: null,
       created_at: new Date(now).toISOString(), last_checked_at: null };
   await tx.put(`source:${id}`, source);
-  await bump(tx);
+  // A new discovery has no revision yet, so no cached answer or excerpt depends on it.
+  // Bumping here made every parallel query that discovered a source fail with corpus_changed.
+  if (!discovered) await bump(tx);
   return source;
 }
 
@@ -155,15 +159,27 @@ async function dueSources(tx, now) {
 // Uploads that outlived the Workflow's verification polls stay pending until reconciled.
 // Discoveries are never refreshed on a schedule, so maintenance re-polls these jobs in a
 // bounded rotation; reconciliation reuses the job and never submits the upload again.
+// A job that can never finish ends as failed, so it stops blocking refreshes of its source;
+// its reservation and any revision claim stay in the ledger.
 async function reconcilableJobs(tx, now) {
-  const jobs = (await values(tx, "job:")).filter(job => ["pending_index", "unknown"].includes(job.status)
-    && (now - Date.parse(job.updated_at) >= RECONCILE_AFTER_MS || !Number.isFinite(Date.parse(job.updated_at))))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const stale = (await values(tx, "job:")).filter(job => ["pending_index", "unknown"].includes(job.status)
+    && (now - Date.parse(job.updated_at) >= RECONCILE_AFTER_MS || !Number.isFinite(Date.parse(job.updated_at))));
+  const timestamp = new Date(now).toISOString();
+  const jobs = [];
+  for (const job of stale) {
+    // An acquisition with an unknown outcome saved no revision: there is nothing to reconcile.
+    const reason = !job.artifact_id ? job.reason || "acquisition_outcome_unknown"
+      : (job.reconcile_attempts ?? 0) >= RECONCILE_ATTEMPTS ? "reconcile_exhausted" : null;
+    if (reason) await tx.put(`job:${job.id}`, { ...job, status: "failed", reason, updated_at: timestamp });
+    else jobs.push(job);
+  }
+  jobs.sort((a, b) => a.id.localeCompare(b.id));
   const cursor = await tx.get("reconcile_cursor") ?? "";
   const next = jobs.findIndex(job => job.id > cursor);
   const offset = next < 0 ? 0 : next;
   const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 5);
   if (selected.length) await tx.put("reconcile_cursor", selected.at(-1).id);
+  for (const job of selected) await tx.put(`job:${job.id}`, { ...job, reconcile_attempts: (job.reconcile_attempts ?? 0) + 1 });
   return selected.map(job => ({ id: job.id, source_id: job.source_id, artifact_id: job.artifact_id }));
 }
 
@@ -214,7 +230,7 @@ async function saveArtifact(tx, artifact) {
   retainedByPolicy(artifact, policy);
   if (!Number.isFinite(Date.parse(artifact.expires_at)) || !Number.isFinite(Date.parse(artifact.fetched_at))) fail("invalid_artifact", "Invalid artifact timestamps.");
   // Retention counts from acquisition under the current duration, even if it was lowered in flight.
-  const retainUntil = Date.parse(artifact.fetched_at) + policy.retention_hours * 3600000;
+  const retainUntil = Date.parse(artifact.fetched_at) + retentionHours(source, policy) * 3600000;
   if (Date.parse(artifact.expires_at) > retainUntil) artifact = { ...artifact, expires_at: new Date(retainUntil).toISOString() };
   const existing = await tx.get(`artifact:${artifact.id}`);
   if (existing) {
@@ -261,11 +277,19 @@ export class KnowledgeAuthority {
       const now = this.now();
       if (operation.startsWith("credentials.")) return credentialOperation(tx, operation, input, now);
       if (operation.startsWith("alexandria.")) return alexandriaCatalogue(tx, operation, input, await policyOf(tx), now);
+      // Queries and provider tools read only what admission needs, not every job and receipt.
+      if (operation === "catalogue.state") {
+        return { generation: await generationOf(tx), policy: await policyOf(tx), sources: await values(tx, "source:") };
+      }
       if (operation === "snapshot") {
         const policy = await policyOf(tx);
         const receipts = await values(tx, "reservation:");
+        const jobs = await values(tx, "job:");
+        const jobCounts = {};
+        for (const job of jobs) jobCounts[job.status] = (jobCounts[job.status] ?? 0) + 1;
         return { generation: await generationOf(tx), policy, sources: await values(tx, "source:"),
-          jobs: (await values(tx, "job:")).sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100),
+          jobs: jobs.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100), job_counts: jobCounts,
+          ledger: ledgerStats(receipts, now),
           usage: PROVIDER_IDS.map(provider => ({ ...usageFor(receipts, provider, now), limit: policy.providers[provider].limit })) };
       }
       if (operation === "policy.update") {

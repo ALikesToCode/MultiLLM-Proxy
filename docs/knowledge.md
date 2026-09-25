@@ -185,6 +185,14 @@ serve the same catalogue: `routes/knowledge_mcp.py` is the source and
 host (private, reserved and credential-bearing URLs are always refused). With `*`, Exa
 and Mintlify search the whole web instead of the listed domains.
 
+A source is *reviewed* when an operator registered it or listed its host explicitly;
+a discovery that only `*` admits is *unreviewed*. Every excerpt carries
+`source_review: "reviewed" | "unreviewed"`. "Verified" means the text matches the
+retained copy, not that its host is authoritative, so treat unreviewed excerpts as
+untrusted. Unreviewed revisions are retained for at most `unreviewed_retention_hours`
+(default 24, at most `retention_hours`); list a host, or register the source, to keep
+it for the full retention period.
+
 `economy` asks one provider. `smart` answers from the index when an indexed revision
 matches and otherwise asks every eligible provider in parallel (Context7 needs a
 product or repository; DeepWiki needs a repository); `deep` always asks them all and
@@ -198,10 +206,24 @@ excerpts.
 Provider tools (`knowledge_<provider>_<tool>`, or `POST /v1/knowledge/native/<tool>`)
 expose each provider's own features with its native parameters. Their contracts live in
 `worker/knowledge/native-tools.json`, which the Knowledge Worker validates and the MCP
-catalogue publishes. Each call reserves the provider's allowance (one unit per call, a
-crawl's page limit or one unit per extract URL; status reads are free), uses the
-numbered key pool, may wait up to 45 s and returns at most 4 MiB. Results are not
-retained or indexed. Firecrawl crawl and extract jobs belong to the Firecrawl account
+catalogue publishes. Each call reserves allowance units that follow the work it asks
+for, multiplied by the provider's `units_per_call`: one unit per basic request; Exa adds
+deep search types (2 to 5), results above 10 and content pages (per started block of
+ten pages per content type, subpages included); Firecrawl charges per page at its
+credit weights (LLM formats and enhanced or stealth proxies cost up to five), search
+2 per 10 results plus scraped pages, crawl its page limit, extract five per URL and 25
+pages per glob; status reads are free. These are estimates that bound work, not
+invoices. Keys without `knowledge:manage` are agent keys that read untrusted provider
+text: they cannot send custom headers, browser actions, skipped TLS checks, enhanced
+or stealth proxies, external links, extract globs or web search, and are limited to
+25 search results, 25 content URLs, 5 subpages and 100 crawl pages. Calls use the
+numbered key pool, may wait up to 45 s and return at most 4 MiB. Results are not
+retained or indexed. Crawl, extract, Exa answer and Exa search are not marked
+read-only for MCP clients, so clients that auto-approve read-only tools still ask.
+`tools/list` can be narrowed with `/mcp?toolsets=core,exa` (toolsets `core`,
+`alexandria`, `context7`, `exa`, `firecrawl`, `deepwiki`, `mintlify`, `manage`); every
+tool stays callable. The status contract check compares the provider tool contracts
+and operations the deployed Knowledge Worker serves with this build's catalogue. Firecrawl crawl and extract jobs belong to the Firecrawl account
 that started them; with several Firecrawl keys, a status read may reach another account.
 
 ## Evidence, freshness and recovery
@@ -224,8 +246,20 @@ An upload acknowledgement alone is not readiness. After bounded polling,
 `pending_index`/`unknown` remain visible; refreshing the source resumes
 reconciliation using the same job and operation receipts. The hourly scheduler
 also re-polls up to five such jobs that have been idle for ten minutes, including
-discovered sources, so their uploads publish without a manual refresh. Ambiguous
-acquisition or upload is never automatically paid for again. Cancellation stops
+discovered sources, so their uploads publish without a manual refresh. A job that can
+never finish ends as `failed`, so it stops blocking refreshes of its source: an
+acquisition with an unknown outcome saved no revision and fails on the first pass
+(`acquisition_outcome_unknown`), and an unresolved upload fails after 24 hourly
+re-polls (`reconcile_exhausted`). Its ledger reservation and revision claim remain, so
+an upload is still never submitted twice; status reports `job_counts` by state.
+Ambiguous acquisition or upload is never automatically paid for again.
+
+Queries compare the corpus generation only for publication, expiry, operator and
+policy changes; discovering a new source does not change it, so parallel queries that
+discover sources neither fail nor skip the cache. If the corpus changes while a query
+finishes, its excerpts are revalidated against the current state instead of failing a
+query whose providers were already paid; only a corpus that keeps changing returns
+409 `corpus_changed`. Cancellation stops
 future steps; accepted upstream work and its charge may still complete.
 
 Every result reports `index_diagnostics`: index hits returned, hits admitted as
@@ -245,15 +279,20 @@ the rest. Review private R2 lifecycle settings and AI Search retained items as p
 production operations.
 
 Allowances are gateway operation units over a rolling 24-hour window, not provider
-balances or dollar spend. Confirmed work ages out of admission; pending and
-unknown work remains charged until reviewed. Readiness/status reads, catalogue
+balances or dollar spend. For unit-metered providers a pending or unknown outcome is
+assumed charged when it was reserved and leaves the window with confirmed work.
+Alexandria spends real credits, so its pending and unknown charges count until a
+receipt resolves them. Readiness/status reads, catalogue
 storage, Workflow control, index polling, R2 reads and runtime overhead are not
 individual provider reservations. Include those costs in platform limits. Current
 bounds are 200 registered sources, 200 discovered sources, 1,000 retained manifests,
-1,000 jobs and 5,000 ledger records; capacity errors fail closed. A full discovery pool
-evicts its oldest discovery that retains no revision and has no active job. Completed,
-failed and cancelled jobs are pruned after 30 days, or oldest first when a new job needs
-room. Only confirmed ledger rows older than 30 days are automatically pruned. Source
+1,000 jobs and 5,000 ledger records inside the daily window; capacity errors fail
+closed. Ledger rows that no longer count toward any allowance are pruned hourly and
+before a reservation would be refused, so only a day of traffic can fill the ledger;
+status reports `ledger` (rows, limit, counting, pending, unknown). A full discovery
+pool evicts its oldest discovery that retains no revision and has no active job.
+Completed, failed and cancelled jobs are pruned after 30 days, or oldest first when a
+new job needs room. Source
 retention permission and billing hard stops are operator acknowledgements, not account
 checks performed by this application.
 

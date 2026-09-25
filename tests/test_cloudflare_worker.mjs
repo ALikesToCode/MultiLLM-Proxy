@@ -1529,7 +1529,8 @@ test("worker deploy config keeps LinkAPI secrets private and samples observabili
   assert.equal(config.compatibility_date, "2026-07-30");
   assert.equal(config.observability?.enabled, true);
   assert.equal(config.observability?.logs?.enabled, true);
-  assert.equal(config.observability?.logs?.head_sampling_rate, 0.05);
+  // Every failure line is kept: the Worker logs little besides errors, so full sampling is cheap.
+  assert.equal(config.observability?.logs?.head_sampling_rate, 1);
   assert.equal(config.observability?.logs?.invocation_logs, false);
   assert.equal(config.observability?.traces?.enabled, true);
   assert.equal(config.observability?.traces?.head_sampling_rate, 0.01);

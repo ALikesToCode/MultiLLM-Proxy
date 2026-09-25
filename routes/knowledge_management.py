@@ -53,6 +53,8 @@ TOOLS = [
         "expected_revision": _REVISION, "enabled": _BOOLEAN,
         "cache_ttl_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
         "retention_hours": {"type": "integer", "minimum": 1, "maximum": 720},
+        "unreviewed_retention_hours": {"type": "integer", "minimum": 1, "maximum": 720, "default": 24,
+                                       "description": "Retention for discoveries from hosts that only * admits."},
         "allowed_hosts": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
                           "items": {"type": "string"}},
         "providers": {"type": "object", "additionalProperties": False,

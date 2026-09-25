@@ -131,3 +131,12 @@ test("LinkAPI fast path rejects unknown GPT Image moderation", async () => {
   assert.equal(upstreamCalls, 0);
   assert.match((await response.json()).message, /auto, low/);
 });
+
+test("gpt-image-2.5 and its automatic route share the GPT Image moderation default", async () => {
+  const { applyGptImageModerationDefault, isGptImageModel } = await import("../worker/gpt-image-moderation.mjs");
+  for (const model of ["gpt-image-2.5", "gguu:gpt-image-2.5", "auto:gpt-image-2.5"]) {
+    assert.equal(isGptImageModel(model), true, model);
+    assert.equal(applyGptImageModerationDefault({ model, prompt: "x" }).payload.moderation, "low");
+  }
+  assert.equal(isGptImageModel("gpt-image-25"), false);
+});

@@ -8,6 +8,7 @@ GPT_IMAGE_MODEL_FAMILIES = (
     "gpt-image-1-mini",
     "gpt-image-1.5",
     "gpt-image-2",
+    "gpt-image-2.5",
 )
 GPT_IMAGE_MODERATION_VALUES = frozenset({"auto", "low"})
 

@@ -435,10 +435,15 @@ class AuthServicePersistenceTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ADMIN_USERNAME"):
                 self.AuthService.initialize()
 
-    def test_verify_default_admin_key_fails_closed_without_admin_row(self):
+    def test_default_admin_key_authenticates_from_the_environment_without_admin_row(self):
+        # ADMIN_API_KEY is the bootstrap credential: a missing or unreachable stored record
+        # must not lock the administrator out; startup restores the record.
         self.AuthService._users = {}
 
-        self.assertIsNone(self.AuthService.verify_api_key("seed-admin-key"))
+        user = self.AuthService.verify_api_key("seed-admin-key")
+        self.assertEqual(user["username"], "admin")
+        self.assertTrue(user["is_admin"])
+        self.assertIsNone(self.AuthService.verify_api_key("seed-admin-key-wrong"))
 
     def test_verify_api_key_uses_prefix_lookup_before_hash_check(self):
         self.AuthService.initialize()

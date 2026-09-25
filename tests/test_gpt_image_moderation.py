@@ -15,6 +15,9 @@ class GPTImageModerationPolicyTest(unittest.TestCase):
             "gpt-image-2-free",
             "openai/gpt-image-2",
             "linkapi:gpt-image-2-c",
+            "gpt-image-2.5",
+            "gguu:gpt-image-2.5",
+            "auto:gpt-image-2.5",
         )
 
         for model_id in model_ids:

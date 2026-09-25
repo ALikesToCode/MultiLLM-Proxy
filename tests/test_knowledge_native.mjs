@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { dispatchNative, NATIVE_OPERATIONS } from "../worker/knowledge/native.mjs";
+import { dispatchNative, NATIVE_OPERATIONS, nativeUnits } from "../worker/knowledge/native.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
-import { fixture, principal } from "./knowledge_fixture.mjs";
+import { fixture, manager, principal } from "./knowledge_fixture.mjs";
 
 const EXA_KEY = "synthetic-test-key";
 
@@ -23,22 +23,83 @@ async function setup({ hosts } = {}) {
       ? new Response(reply.text, { headers: { "content-type": reply.type ?? "text/plain" } })
       : Response.json(reply.json);
   };
-  const call = (tool, payload) => dispatchNative(f.env, f.authority, principal, `native.${tool}`, payload, { fetchImpl });
+  const call = (tool, payload, identity = principal) => dispatchNative(f.env, f.authority, identity, `native.${tool}`, payload, { fetchImpl });
   const reservations = async () => [...(await f.storage.list({ prefix: "reservation:" })).values()];
   return { f, calls, replies, call, reservations };
 }
 
-test("every native tool is a read operation with a provider request", async () => {
+test("every native tool contract names its provider, metering and a strict object schema", async () => {
   const contracts = JSON.parse(await readFile(new URL("../worker/knowledge/native-tools.json", import.meta.url), "utf8"));
   assert.equal(NATIVE_OPERATIONS.length, Object.keys(contracts).length);
   for (const [name, spec] of Object.entries(contracts)) {
     assert.ok(["context7", "exa", "firecrawl", "deepwiki", "mintlify"].includes(spec.provider), name);
+    assert.ok(spec.units.free === true || spec.units.metered === true, name);
     assert.equal(spec.input.type, "object");
     assert.equal(spec.input.additionalProperties, false);
   }
+  // Clients that auto-approve read-only tools must still ask before these spend.
+  assert.deepEqual(Object.keys(contracts).filter(name => contracts[name].read_only === false).sort(),
+    ["exa_answer", "exa_search", "firecrawl_crawl", "firecrawl_extract"]);
 });
 
-test("Exa tools send the provider's own parameters with the pooled key and one unit", async () => {
+test("provider tools reserve units that follow the pages and content they request", () => {
+  const allocation = { units_per_call: 1 };
+  for (const [tool, payload, units] of [
+    ["exa_search", { query: "x" }, 1],
+    ["exa_search", { query: "x", numResults: 100, contents: { text: true, summary: true } }, 1 + 9 + 2 * 10],
+    ["exa_search", { query: "x", type: "deep-reasoning", numResults: 10, contents: { highlights: true, subpages: 4 } }, 5 + 5],
+    ["exa_contents", { urls: ["https://a.dev/"] }, 1],
+    ["exa_contents", { urls: Array(100).fill("https://a.dev/"), subpages: 10, text: true, highlights: true, summary: true }, 3 * 110],
+    ["exa_answer", { query: "x", text: true }, 2],
+    ["firecrawl_scrape", { url: "https://a.dev/" }, 1],
+    ["firecrawl_scrape", { url: "https://a.dev/", formats: [{ type: "json", prompt: "title" }], proxy: "enhanced" }, 9],
+    ["firecrawl_search", { query: "x" }, 2],
+    ["firecrawl_search", { query: "x", limit: 100, scrapeOptions: { formats: ["markdown"] } }, 20 + 100],
+    ["firecrawl_search", { query: "x", limit: 100, scrapeOptions: { formats: ["json"] } }, 20 + 500],
+    ["firecrawl_map", { url: "https://a.dev/", limit: 5000 }, 1],
+    ["firecrawl_crawl", { url: "https://a.dev/" }, 10],
+    ["firecrawl_crawl", { url: "https://a.dev/", limit: 40, scrapeOptions: { proxy: "stealth" } }, 200],
+    ["firecrawl_extract", { urls: ["https://a.dev/", "https://b.dev/*"] }, 5 * 26],
+    ["firecrawl_extract", { urls: ["https://a.dev/"], enableWebSearch: true }, 5 + 125],
+    ["firecrawl_crawl_status", { id: "job" }, 0],
+    ["deepwiki_ask", { repoName: "a/b", question: "x" }, 1],
+  ]) assert.equal(nativeUnits(tool, payload, allocation), units, `${tool} ${JSON.stringify(payload).slice(0, 80)}`);
+  assert.equal(nativeUnits("firecrawl_crawl", { url: "https://a.dev/", limit: 10000, scrapeOptions: { proxy: "enhanced" } },
+    { units_per_call: 3 }), 100000, "reservations stay within the ledger's bound");
+});
+
+test("read keys cannot steer the Firecrawl browser or exceed read limits; manage keys can", async () => {
+  const { f, calls, call, reservations } = await setup({ hosts: ["*"] });
+  f.policy.providers.firecrawl.limit = 1000;
+  f.policy.providers.exa.limit = 1000;
+  await f.storage.put("policy", f.policy);
+  const url = "https://docs.example-public-docs.dev/";
+  for (const [tool, payload] of [
+    ["firecrawl_scrape", { url, headers: { cookie: "session=1" } }],
+    ["firecrawl_scrape", { url, actions: [{ type: "click", selector: "#login" }] }],
+    ["firecrawl_scrape", { url, skipTlsVerification: true }],
+    ["firecrawl_scrape", { url, proxy: "stealth" }],
+    ["firecrawl_search", { query: "x", scrapeOptions: { headers: { authorization: "token" } } }],
+    ["firecrawl_search", { query: "x", limit: 26 }],
+    ["firecrawl_crawl", { url, limit: 101 }],
+    ["firecrawl_crawl", { url, allowExternalLinks: true }],
+    ["firecrawl_extract", { urls: [`${url}*`] }],
+    ["firecrawl_extract", { urls: [url], enableWebSearch: true }],
+    ["exa_search", { query: "x", numResults: 26 }],
+    ["exa_search", { query: "x", contents: { text: true, subpages: 6 } }],
+    ["exa_contents", { urls: Array(26).fill(url) }],
+  ]) await assert.rejects(call(tool, payload), { code: "insufficient_scope", status: 403 }, `${tool} ${JSON.stringify(payload).slice(0, 60)}`);
+  assert.equal(calls.length, 0);
+  assert.equal((await reservations()).length, 0);
+  await call("firecrawl_scrape", { url, proxy: "auto", skipTlsVerification: false });
+  await call("exa_search", { query: "x", numResults: 25 });
+  await call("firecrawl_scrape", { url, headers: { "accept-language": "en" }, proxy: "enhanced" }, manager);
+  await call("firecrawl_extract", { urls: [`${url}*`], prompt: "pricing" }, manager);
+  assert.deepEqual(calls.map(item => new URL(item.url).pathname), ["/v2/scrape", "/search", "/v2/scrape", "/v2/extract"]);
+  assert.deepEqual((await reservations()).map(item => item.units).sort((a, b) => a - b), [1, 3, 5, 125]);
+});
+
+test("Exa tools send the provider's own parameters with the pooled key and metered units", async () => {
   const { calls, replies, call, reservations } = await setup();
   replies.push({ json: { results: [{ url: "https://example.org/a", title: "A" }], costDollars: { total: 0.005 } } });
   const result = await call("exa_search", { query: "rust async runtimes", type: "deep", numResults: 20,
@@ -48,7 +109,8 @@ test("Exa tools send the provider's own parameters with the pooled key and one u
   assert.deepEqual(calls[0].body, { query: "rust async runtimes", type: "deep", numResults: 20, includeDomains: ["docs.rs"],
     contents: { highlights: true, maxAgeHours: 0 } });
   assert.equal(result.result.results[0].url, "https://example.org/a");
-  assert.deepEqual(result.usage, { provider: "exa", units: 1 });
+  // A deep search (3) with 10 results above the first 10 (1) and highlights for 20 pages (2).
+  assert.deepEqual(result.usage, { provider: "exa", units: 6 });
   assert.equal(result.verification, "provider_generated_unverified");
   await call("exa_code_context", { query: "Express middleware" });
   assert.deepEqual(calls[1].body, { tokensNum: "dynamic", query: "Express middleware" });
@@ -92,7 +154,7 @@ test("an any-public-host policy lets provider tools fetch any public site", asyn
   const { calls, call } = await setup({ hosts: ["*"] });
   await call("firecrawl_scrape", { url: "https://unlisted.example.org/page", formats: ["markdown", { type: "json", prompt: "title" }] });
   assert.equal(calls[0].body.url, "https://unlisted.example.org/page");
-  await call("firecrawl_extract", { urls: ["https://another-site.dev/*"], prompt: "pricing" });
+  await call("firecrawl_extract", { urls: ["https://another-site.dev/pricing"], prompt: "pricing" });
   await assert.rejects(call("firecrawl_scrape", { url: "http://intranet.internal/" }), { code: "source_not_allowed" });
 });
 

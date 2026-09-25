@@ -218,15 +218,36 @@ npx wrangler secret put GOOGLE_ENDPOINT
 
 ## Deploy
 
+Deploy with the ordered script, never with a bare `wrangler deploy`:
+
 ```bash
-npx wrangler deploy
+npm run deploy            # scripts/deploy.sh
 ```
 
-Wrangler will:
+It applies `intelligence-migrations/` to the `multillm-intelligence` D1 database,
+stops unless every migration file is recorded as applied, then deploys the
+Knowledge Worker (`wrangler.knowledge.jsonc`) and finally this Worker and its
+Container. Extra arguments go to the final deploy, for example
+`npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a
+changed Container image. `/ready` answers 503 with `d1_schema_missing` and the
+missing tables until the schema is migrated, so check it after every deploy.
 
-1. Build the container image from `Dockerfile`
-2. Push it to Cloudflare
-3. Deploy the Worker + Durable Object + container binding
+**Workers Builds.** The connected build currently runs the default
+`npx wrangler deploy`, which applies no migrations. In the Worker's
+**Settings → Builds**, set the deploy command to `npm run deploy` and give the build
+token *D1 Edit* permission and access to deploy `multillm-knowledge`; until then
+every push can deploy code whose tables do not exist yet.
+
+**Alerts.** Worker logs are sampled at 100% (`head_sampling_rate: 1`): the Worker
+writes little besides structured failure lines such as `account_storage_failed`,
+`knowledge_edge_account_lookup_failed` and `d1_schema_missing`, about 50,000 events
+a month at current traffic. In **Observability**, save queries on those events and
+on HTTP 5xx for `multillm-proxy` and `multillm-knowledge`, and create a
+notification (or a monitor on `/ready`) so an outage pages someone instead of being
+found by users.
+
+The final `wrangler deploy` builds the container image from `Dockerfile`, pushes it
+to Cloudflare, and deploys the Worker, Durable Objects and container binding.
 
 ## Runtime shape
 
@@ -245,4 +266,4 @@ Wrangler will:
 
 - The deployment is pinned to a single named container instance (`primary`) to avoid auth/session drift from the app's in-memory state.
 - `wrangler.jsonc` sets `max_instances=1` for the same reason.
-- Container disk is ephemeral. Dashboard accounts are stored in D1 ([details](control-plane-storage.md#dashboard-accounts-in-d1)), but model-disable overrides and rate-limit rows use SQLite under `/tmp` and are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential.
+- Container disk is ephemeral. Dashboard accounts (with `AUTH_STORAGE_BACKEND=d1`) and automatic routes are stored in D1 ([details](control-plane-storage.md#dashboard-accounts-in-d1)), but model-disable overrides and rate-limit rows use SQLite under `/tmp` and are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential; it authenticates even while D1 is unavailable.

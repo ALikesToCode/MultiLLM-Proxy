@@ -1,3 +1,5 @@
+import { logFailure } from "./log.mjs";
+
 export const INTEGRATION_SCOPES = Object.freeze(["chat", "models", "audio", "embeddings",
   "knowledge:read", "knowledge:manage"]);
 const scopesAllowed = new Set(INTEGRATION_SCOPES);
@@ -116,7 +118,8 @@ export async function handleIntelligenceAuthRequest(request, env) {
     return reply({error: "invalid_request"}, 400);
   } catch (error) {
     // Unique constraints retain old prefixes and prevent reprovisioning or key reuse.
-    return reply({error: /UNIQUE constraint failed/.test(String(error?.message))
-      ? "credential_conflict" : "storage_unavailable"}, /UNIQUE constraint failed/.test(String(error?.message)) ? 409 : 503);
+    const conflict = /UNIQUE constraint failed/.test(String(error?.message));
+    if (!conflict) logFailure("integration_credentials_failed", error, { operation: typeof body.operation === "string" ? body.operation.slice(0, 20) : "unknown" });
+    return reply({error: conflict ? "credential_conflict" : "storage_unavailable"}, conflict ? 409 : 503);
   }
 }

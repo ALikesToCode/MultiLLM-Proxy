@@ -1,16 +1,37 @@
 import { fail, integer, PROVIDER_IDS, string } from "./contracts.mjs";
 
 const DAY = 86400000;
+// Rows that still count toward an allowance, plus unresolved credit charges. Rows outside
+// the window are pruned first, so only a day of real traffic can fill the ledger.
+export const LEDGER_LIMIT = 5000;
+// Alexandria spends real credits: its pending and unknown charges count until a receipt
+// resolves them. The other providers are metered in allowance units, a daily budget in
+// which a pending or unknown charge is assumed spent when it was reserved.
+const STRICT_PROVIDERS = new Set(["alexandria"]);
+
+export function countsToward(row, now) {
+  if (STRICT_PROVIDERS.has(row.provider) && row.state !== "confirmed") return true;
+  return row.created_at >= now - DAY;
+}
 
 export function usageFor(records, provider, now = Date.now()) {
   const usage = { provider, confirmed: 0, pending: 0, unknown: 0, background: 0, total: 0 };
   for (const row of records) {
-    if (row.provider !== provider || (row.state === "confirmed" && row.created_at < now - DAY)) continue;
+    if (row.provider !== provider || !countsToward(row, now)) continue;
     usage[row.state] += row.units;
     usage.total += row.units;
     if (row.background) usage.background += row.units;
   }
   return usage;
+}
+
+export function ledgerStats(records, now = Date.now()) {
+  const stats = { rows: records.length, limit: LEDGER_LIMIT, counting: 0, pending: 0, unknown: 0 };
+  for (const row of records) {
+    if (countsToward(row, now)) stats.counting += 1;
+    if (row.state === "pending" || row.state === "unknown") stats[row.state] += 1;
+  }
+  return stats;
 }
 
 export async function reserve(tx, policy, input, now) {
@@ -47,8 +68,10 @@ export async function reserve(tx, policy, input, now) {
     const claim = await tx.get(`submission:${input.revision_id}`);
     if (claim) return { ...claim, replay: true };
   }
-  const records = [...(await tx.list({ prefix: "reservation:" })).values()];
-  if (records.length >= 5000) fail("ledger_full", "Reservation history needs maintenance before new work can be admitted.", 503);
+  let records = [...(await tx.list({ prefix: "reservation:" })).values()];
+  // Hourly maintenance normally keeps the ledger small; a burst between runs prunes here.
+  if (records.length >= LEDGER_LIMIT) records = await pruneSettled(tx, now);
+  if (records.length >= LEDGER_LIMIT) fail("ledger_full", "A day of reservations fills the ledger. Wait for older operations to leave the daily window.", 503);
   const used = usageFor(records, input.provider, now);
   // Native provider calls reserve their own bound (for example a crawl's page limit).
   const units = input.provider === "alexandria" ? integer(input.credits, 0, 100000, "reserved credits")
@@ -81,9 +104,16 @@ export async function settle(tx, input, now) {
   return updated;
 }
 
+/**
+ * Remove rows that no longer count toward any allowance and returns the rest. Operation
+ * identifiers are single-use request or job IDs, and index uploads keep their own
+ * revision claims, so a pruned row cannot authorize a replay.
+ */
 export async function pruneSettled(tx, now) {
-  // Unknown and pending charges never expire merely because a billing window ended.
+  const kept = [];
   for (const [key, receipt] of await tx.list({ prefix: "reservation:" })) {
-    if (receipt.state === "confirmed" && receipt.created_at < now - 30 * DAY) await tx.delete(key);
+    if (countsToward(receipt, now)) kept.push(receipt);
+    else await tx.delete(key);
   }
+  return kept;
 }

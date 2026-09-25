@@ -12,6 +12,17 @@ import { providerStatus } from "./providers/index.mjs";
 
 export const NATIVE_TOOLS = TOOLS;
 export const NATIVE_OPERATIONS = Object.keys(TOOLS).map(name => `native.${name}`);
+
+// Sorted-key JSON, byte-identical to Python's json.dumps(sort_keys=True, separators=(",", ":"),
+// ensure_ascii=False), so the edge catalogue and this Worker agree on the contract they serve.
+const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
+  : isRecord(value) ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+  : JSON.stringify(value);
+
+export async function nativeToolsHash(tools = TOOLS) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical(tools)));
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 const NATIVE_TIMEOUT_MS = 45000;
 const NATIVE_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_ARGUMENT_BYTES = 64 * 1024;
@@ -69,10 +80,86 @@ function checkTarget(tool, value, allowedHosts) {
   if (!hostAllowed(url.hostname, allowedHosts)) fail("source_not_allowed", `The Knowledge host policy does not allow ${url.hostname}.`);
 }
 
-function units(spec, payload, allocation) {
-  if (spec.free) return 0;
-  const count = spec.field ? payload[spec.field] ?? spec.default : spec.count ? payload[spec.count].length : 1;
-  return Math.min(100000, allocation.units_per_call * count);
+/*
+ * Allowance units follow provider billing, so one call cannot fetch unbounded pages for a
+ * single unit. One unit is one basic request; pages are charged per started block of ten
+ * per content type (Exa), or per page at Firecrawl's credit weights, where LLM formats
+ * and enhanced proxies cost up to five credits. These are estimates that bound work, not
+ * invoices, and units_per_call scales every count.
+ */
+const blocks = count => Math.ceil(count / 10);
+const DEEP_SEARCH = { "deep-lite": 2, deep: 3, "deep-reasoning": 5 };
+const LLM_FORMATS = new Set(["json", "summary", "changeTracking"]);
+const ENHANCED_PROXIES = new Set(["enhanced", "stealth"]);
+// Extraction runs an LLM over every page; a glob can expand to many pages.
+const EXTRACT_PAGE = 5;
+const EXTRACT_GLOB_PAGES = 25;
+const isGlob = url => url.includes("*");
+const contentKinds = options => ["text", "highlights", "summary"].filter(kind => options?.[kind]).length;
+
+function scrapeCost(options = {}) {
+  const formats = Array.isArray(options.formats) ? options.formats : [];
+  const llm = formats.some(format => LLM_FORMATS.has(typeof format === "string" ? format : format?.type));
+  return 1 + (llm ? 4 : 0) + (ENHANCED_PROXIES.has(options.proxy) ? 4 : 0);
+}
+
+const WORK = {
+  exa_search: p => {
+    const results = p.numResults ?? 10;
+    return (DEEP_SEARCH[p.type] ?? 1) + blocks(Math.max(0, results - 10))
+      + contentKinds(p.contents) * blocks(results * (1 + (p.contents?.subpages ?? 0)));
+  },
+  // Exa returns text when no content type is named.
+  exa_contents: p => Math.max(1, contentKinds(p)) * blocks(p.urls.length * (1 + (p.subpages ?? 0))),
+  exa_answer: p => 1 + (p.text ? 1 : 0),
+  firecrawl_scrape: p => scrapeCost(p),
+  firecrawl_search: p => 2 * blocks(p.limit ?? 5) + (p.scrapeOptions ? (p.limit ?? 5) * scrapeCost(p.scrapeOptions) : 0),
+  firecrawl_crawl: p => (p.limit ?? 10) * scrapeCost(p.scrapeOptions),
+  firecrawl_extract: p => EXTRACT_PAGE * p.urls.reduce((pages, url) => pages + (isGlob(url) ? EXTRACT_GLOB_PAGES : 1), 0)
+    + (p.enableWebSearch ? EXTRACT_PAGE * EXTRACT_GLOB_PAGES : 0),
+};
+
+export function nativeUnits(tool, payload, allocation) {
+  if (TOOLS[tool].units.free) return 0;
+  return Math.min(100000, allocation.units_per_call * (WORK[tool]?.(payload) ?? 1));
+}
+
+const canManage = principal => principal.scopes.includes("admin") || principal.scopes.includes("knowledge:manage");
+
+// Read keys are agent keys: they read untrusted provider text, so they cannot steer the
+// gateway's Firecrawl browser with their own headers, scripts, TLS or proxy settings,
+// reach hosts beyond the request, or make one call fetch unbounded pages.
+const SCRAPE_CONTROLS = ["headers", "actions", "skipTlsVerification"];
+const READ_LIMITS = {
+  exa_search: p => [["numResults", p.numResults, 25], ["contents.subpages", p.contents?.subpages, 5]],
+  exa_contents: p => [["urls", p.urls.length, 25], ["subpages", p.subpages, 5]],
+  firecrawl_search: p => [["limit", p.limit, 25]],
+  firecrawl_crawl: p => [["limit", p.limit ?? 10, 100]],
+};
+
+function managedOptions(tool, payload) {
+  const scrape = tool === "firecrawl_scrape" ? payload : payload.scrapeOptions;
+  const used = [];
+  if (tool.startsWith("firecrawl_") && scrape && typeof scrape === "object") {
+    const prefix = scrape === payload ? "" : "scrapeOptions.";
+    used.push(...SCRAPE_CONTROLS.filter(name => scrape[name] !== undefined && scrape[name] !== false).map(name => prefix + name));
+    if (ENHANCED_PROXIES.has(scrape.proxy)) used.push(`${prefix}proxy`);
+  }
+  if (["firecrawl_crawl", "firecrawl_extract"].includes(tool) && payload.allowExternalLinks) used.push("allowExternalLinks");
+  if (tool === "firecrawl_extract") {
+    if (payload.enableWebSearch) used.push("enableWebSearch");
+    if (payload.urls.some(isGlob)) used.push("urls (glob)");
+  }
+  return used;
+}
+
+function authorizeArguments(tool, payload, principal) {
+  if (canManage(principal)) return;
+  const [option] = managedOptions(tool, payload);
+  if (option) fail("insufficient_scope", `The ${tool} option ${option} requires knowledge:manage.`, 403);
+  for (const [name, value, limit] of READ_LIMITS[tool]?.(payload) ?? []) {
+    if (value !== undefined && value > limit) fail("insufficient_scope", `The ${tool} ${name} above ${limit} requires knowledge:manage.`, 403);
+  }
 }
 
 const get = (base, parameters) => {
@@ -111,7 +198,8 @@ export async function dispatchNative(env, authority, principal, operation, paylo
   if (!spec) fail("unknown_operation", "Unknown Knowledge operation.", 404);
   if (!isRecord(payload) || JSON.stringify(payload).length > MAX_ARGUMENT_BYTES) invalid(tool, "");
   check(tool, spec.input, payload, "");
-  const snapshot = await authority.call("snapshot");
+  authorizeArguments(tool, payload, principal);
+  const snapshot = await authority.call("catalogue.state");
   const allocation = snapshot.policy.providers[spec.provider];
   if (!snapshot.policy.enabled || !allocation?.enabled) {
     fail("provider_disabled", `Enable Knowledge and the ${spec.provider} allowance before using its tools.`, 503);
@@ -122,7 +210,7 @@ export async function dispatchNative(env, authority, principal, operation, paylo
   for (const field of spec.url_fields ?? []) {
     for (const value of [].concat(payload[field])) checkTarget(tool, value, snapshot.policy.allowed_hosts);
   }
-  const reserved = units(spec.units, payload, allocation);
+  const reserved = nativeUnits(tool, payload, allocation);
   const requestId = crypto.randomUUID();
   const context = {
     env, authority, signal: options.signal, fetchImpl: options.fetchImpl, timeoutMs: NATIVE_TIMEOUT_MS,

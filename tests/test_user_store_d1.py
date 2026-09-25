@@ -1,5 +1,7 @@
 """Dashboard accounts in D1 survive Container restarts and never fall back to local SQLite."""
 
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -65,6 +67,7 @@ def restart(monkeypatch):
     monkeypatch.setattr(AuthService, "_storage_path", None)
     monkeypatch.setattr(AuthService, "_users", {})
     monkeypatch.setattr(AuthService, "_api_key_prefix_index", {})
+    monkeypatch.setattr(AuthService, "_verified_keys", {})
     AuthService.initialize()
 
 
@@ -197,3 +200,68 @@ def test_account_lookups_get_a_longer_transport_budget(monkeypatch):
     store.request_private_intelligence({"operation": "lookup", "keyPrefix": "x"}, endpoint="auth")
     assert captured["users"] == ((3, 8), 10)
     assert captured["auth"] == ((2, 3), 5)
+
+
+def test_the_environment_admin_key_authenticates_while_account_storage_is_down(d1, monkeypatch):
+    d1.down = True
+    user = AuthService.verify_api_key("synthetic-d1-admin-key")
+    assert user["username"] == "admin" and user["is_admin"] is True
+    restart(monkeypatch)
+    assert AuthService.verify_api_key("synthetic-d1-admin-key")["scopes"] == ["admin", "chat", "metrics", "models", "users"]
+    with pytest.raises(APIError) as caught:
+        AuthService.verify_api_key("synthetic-d1-admin-key-but-wrong")
+    assert caught.value.status_code == 503, "any other key still fails closed"
+
+
+def test_verified_keys_skip_storage_for_a_minute_and_account_changes_apply_at_once(d1, monkeypatch):
+    key = create("agent", ["chat"])
+    assert AuthService.verify_api_key(key)["username"] == "agent"
+    d1.calls.clear()
+    d1.down = True
+    assert AuthService.verify_api_key(key)["username"] == "agent"
+    assert "by_prefix" not in d1.calls, "a recently verified key needs no storage read"
+    d1.down = False
+    with patch.object(AuthService, "get_current_user", return_value={"username": "admin", "is_admin": True}):
+        rotated = AuthService.rotate_api_key("agent")["api_key"]
+    assert AuthService.verify_api_key(key) is None, "rotation clears the memo"
+    assert AuthService.verify_api_key(rotated)["username"] == "agent"
+    later = time.monotonic() + 61
+    monkeypatch.setattr("services.auth_service.time.monotonic", lambda: later)
+    d1.calls.clear()
+    assert AuthService.verify_api_key(rotated)["username"] == "agent"
+    assert "by_prefix" in d1.calls, "the memo expires after a minute"
+
+
+def test_the_worker_refusal_of_an_unconfigured_admin_is_reported_as_forbidden(d1):
+    original = FakeUsersDomain.__call__
+
+    def refuse_admins(self, payload, *, endpoint):
+        if payload["operation"] == "upsert" and payload["user"]["is_admin"] and payload["user"]["username"] != "admin":
+            raise PrivateIntelligenceError(403, "admin_not_allowed")
+        return original(self, payload, endpoint=endpoint)
+
+    with patch.object(FakeUsersDomain, "__call__", refuse_admins), \
+            patch.object(AuthService, "get_current_user", return_value={"username": "admin", "is_admin": True}), \
+            pytest.raises(APIError) as caught:
+        AuthService.create_user("deputy", is_admin=True)
+    assert caught.value.status_code == 403
+    assert caught.value.payload["error"] == "admin_not_allowed"
+    assert "deputy" not in d1.rows
+
+
+def test_account_reads_have_their_own_transport_slots(monkeypatch):
+    from services import intelligence_d1_store as store
+    from services.intelligence_contract import GatewayError
+
+    def fake_submit(url, body, stopped, deadline, results, slots, success_statuses, timeout=store._TIMEOUT):
+        results.put_nowait((True, {"version": 1, "policy": None}))
+        slots.release()
+
+    monkeypatch.setattr(store, "_submit", fake_submit)
+    monkeypatch.setattr(store, "_ENDPOINT_SLOTS", {"users": threading.BoundedSemaphore(0)})
+    before = store.transport_stats().get("users", {}).get("slot_exhausted", 0)
+    with pytest.raises(GatewayError):
+        store.request_private_intelligence({"operation": "get", "username": "a"}, endpoint="users")
+    assert store.request_private_intelligence({"operation": "policy"}) == {"version": 1, "policy": None}, \
+        "exhausted account slots leave the store's slots free"
+    assert store.transport_stats()["users"]["slot_exhausted"] == before + 1

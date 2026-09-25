@@ -4,6 +4,7 @@ import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
 import { confirmSnapshot, metered } from "./operations.mjs";
 import { cacheKey, readCache, writeCache } from "./cache.mjs";
+import { retentionHours, sourceReviewed } from "./policy.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
 // Economy asks one provider; smart and deep ask every eligible provider in parallel.
@@ -17,6 +18,8 @@ const MAX_LIVE_ATTEMPTS = { economy: 6, smart: 6, deep: 10 };
 const PROVIDER_BUDGET_MS = 14000;
 const LIVE_BUDGET_MS = 19000;
 const RETRIEVAL_DEADLINE_MS = 24000;
+// Publication or expiry elsewhere can change the corpus while a query runs.
+const MAX_REVALIDATIONS = 3;
 const nowIso = () => new Date().toISOString();
 
 function eligibleArtifact(artifact, snapshot, now) {
@@ -62,6 +65,8 @@ async function untilDeadline(callback, signal) {
   try { return await Promise.race([callback(), cancelled]); }
   finally { signal.removeEventListener("abort", listener); }
 }
+
+const reviewOf = (source, policy) => sourceReviewed(source, policy) ? "reviewed" : "unreviewed";
 
 function originIsFresh(artifact) {
   const checked = Date.parse(artifact.checked_at);
@@ -129,7 +134,9 @@ async function indexedEvidence(state) {
       }
       if (request.freshness === "fresh" && !originIsFresh(artifact)) { skip("not_fresh"); continue; }
       diagnostics.admitted += 1;
-      state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: row.score });
+      const source = snapshot.sources.find(item => item.id === artifact.source_id);
+      state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: row.score,
+        source_review: reviewOf(source, snapshot.policy) });
     }
   } catch (error) {
     failed(state, safeCode(error), "Indexed retrieval could not complete.");
@@ -144,7 +151,7 @@ async function storeObservation(state, observation, sequence) {
   const source = await authority.call("source.discover", { url, product: request.product || new URL(url).hostname,
     version: request.version, provider: observation.provider, title: observation.title?.slice(0, 200) || new URL(url).hostname });
   if (!source.enabled) return false;
-  const candidate = await createArtifact({ ...source, retention_hours: snapshot.policy.retention_hours,
+  const candidate = await createArtifact({ ...source, retention_hours: retentionHours(source, snapshot.policy),
     origin_checked: observation.freshness === "live" }, text, observation.provider);
   // Record the immutable manifest before R2 so interrupted writes remain discoverable
   // for retention cleanup. An unreadable snapshot can never become an excerpt.
@@ -158,7 +165,8 @@ async function storeObservation(state, observation, sequence) {
   const artifact = await confirmSnapshot(authority, corpus, candidate, written);
   const excerpt = validateChunk(artifact, text, selectPassage(text, request.query));
   if (excerpt && (request.freshness !== "fresh" || originIsFresh(artifact))) {
-    state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: 0.75 });
+    state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: 0.75,
+      source_review: reviewOf(source, snapshot.policy) });
   } else if (request.freshness === "fresh") {
     state.gaps.push({ code: "freshness_unverified", message: "The acquired source did not establish a recent origin check." });
   }
@@ -235,11 +243,11 @@ async function liveEvidence(state, env, retrieveFn) {
   if (!providers.length) state.gaps.push({ code: "no_eligible_provider", message: "Configure a provider and its allowance to retrieve missing evidence." });
 }
 
-async function revalidateCandidates(state, snapshot) {
+async function revalidateCandidates(state, snapshot, candidates) {
   const result = [];
-  const artifacts = await settledInOrder(state.candidates, candidate => candidate.artifact_id,
+  const artifacts = await settledInOrder(candidates, candidate => candidate.artifact_id,
     candidate => state.authority.call("artifact.get", { id: candidate.artifact_id }));
-  for (const [index, candidate] of state.candidates.entries()) {
+  for (const [index, candidate] of candidates.entries()) {
     if (artifacts[index].status === "rejected") throw artifacts[index].reason;
     const artifact = artifacts[index].value;
     if (!eligibleArtifact(artifact, snapshot, Date.now())) continue;
@@ -251,30 +259,47 @@ async function revalidateCandidates(state, snapshot) {
   return result;
 }
 
+// A corpus change since the key was computed makes the entry stale, not the query invalid:
+// the query continues as a miss and is validated against the corpus it finishes with.
 async function cacheHit(cache, key, state) {
   const bundle = await untilDeadline(() => readCache(cache, key), state.signal);
   if (!bundle) return null;
-  const latest = await state.authority.call("snapshot");
-  assertUnchanged(state.snapshot, latest);
-  state.candidates = [...bundle.excerpts, ...(bundle.related_evidence || [])];
-  const valid = await revalidateCandidates(state, latest);
-  assertUnchanged(latest, await state.authority.call("snapshot"));
-  if (valid.length !== state.candidates.length) { state.candidates = []; return null; }
+  const latest = await state.authority.call("catalogue.state");
+  assertPolicy(state.snapshot, latest);
+  if (latest.generation !== state.snapshot.generation) return null;
+  const candidates = [...bundle.excerpts, ...(bundle.related_evidence || [])];
+  const valid = await revalidateCandidates(state, latest, candidates);
+  const confirmed = await state.authority.call("catalogue.state");
+  assertPolicy(state.snapshot, confirmed);
+  if (confirmed.generation !== latest.generation || valid.length !== candidates.length) return null;
   return { ...bundle, path: "cache", providers_used: [], evidence_providers: [...new Set(valid.map(item => item.provider))],
     usage: [], elapsed_ms: Math.round(performance.now() - state.started), served_at: nowIso() };
 }
 
-function assertUnchanged(previous, latest) {
+function assertPolicy(previous, latest) {
   if (!latest.policy.enabled || latest.policy.revision !== previous.policy.revision) {
     fail("policy_changed", "Knowledge policy changed during retrieval. Submit a new query using the current policy.", 409);
   }
-  if (latest.generation !== previous.generation) {
-    fail("corpus_changed", "The corpus changed during retrieval. Submit a new query using the current sources.", 409);
+}
+
+// Revalidate against a catalogue state that stayed unchanged for the whole check, instead
+// of failing a query whose providers were already paid because unrelated work published.
+async function currentCandidates(state) {
+  for (let attempt = 1; ; attempt += 1) {
+    const latest = await state.authority.call("catalogue.state");
+    assertPolicy(state.snapshot, latest);
+    const candidates = await revalidateCandidates(state, latest, state.candidates);
+    const confirmed = await state.authority.call("catalogue.state");
+    assertPolicy(state.snapshot, confirmed);
+    if (confirmed.generation === latest.generation) return { latest, candidates };
+    if (attempt >= MAX_REVALIDATIONS) {
+      fail("corpus_changed", "The corpus kept changing during retrieval. Submit the query again.", 409);
+    }
   }
 }
 
 async function runRetrieval(env, authority, principal, request, options, signal, started, meterAuthority) {
-  const snapshot = await authority.call("snapshot");
+  const snapshot = await authority.call("catalogue.state");
   if (!snapshot.policy.enabled) fail("knowledge_disabled", "Enable Knowledge and configure provider allowances before querying.", 503);
   if (!env.KNOWLEDGE_SNAPSHOTS || !env.KNOWLEDGE_INDEX) fail("storage_unavailable", "Configure the Knowledge snapshot and index bindings.", 503);
   const state = { authority, corpus: options.corpus || new KnowledgeCorpus(env), request, snapshot, signal,
@@ -314,12 +339,8 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     fail(limit ? "allowance_exhausted" : "retrieval_failed", limit ? "The configured Knowledge allowance is exhausted."
       : "All attempted retrieval providers failed; no successful empty result was recorded.", limit ? 429 : 502);
   }
-  const latest = await authority.call("snapshot");
-  state.candidates = await revalidateCandidates(state, latest);
-  assertUnchanged(latest, await authority.call("snapshot"));
-  if (latest.policy.revision !== snapshot.policy.revision || !latest.policy.enabled) {
-    fail("policy_changed", "Knowledge policy changed during retrieval. Submit a new query using the current policy.", 409);
-  }
+  const { latest, candidates } = await currentCandidates(state);
+  state.candidates = candidates;
   // Verified excerpts keep most of the budget; provider context gets up to 40% of it,
   // or all of it when no source excerpt was found.
   const providerContext = packProviderContext(state.providerContext,

@@ -6,7 +6,8 @@ import { retrieveKnowledge } from "./retrieval.mjs";
 import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs";
 import { dispatchAlexandria } from "./alexandria/service.mjs";
 import { configuredKeys } from "./providers/keys.mjs";
-import { dispatchNative, NATIVE_OPERATIONS } from "./native.mjs";
+import { dispatchNative, NATIVE_OPERATIONS, nativeToolsHash } from "./native.mjs";
+import { logFailure } from "../log.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
   "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
@@ -36,14 +37,16 @@ async function status(env, authority) {
   const ready = setup.every(item => item.configured) && snapshot.policy.enabled
     && providers.some(item => ["firecrawl", "exa"].includes(item.id) && item.configured && item.enabled)
     && snapshot.policy.providers.ai_search.enabled;
-  return { ...snapshot, enabled: snapshot.policy.enabled, ready, setup, providers };
+  // The deployed contract, so a gateway built from different tool contracts is visible.
+  const contract = { native_tools_hash: await nativeToolsHash(), operations: [...OPERATIONS].sort() };
+  return { ...snapshot, enabled: snapshot.policy.enabled, ready, setup, providers, contract };
 }
 
 export async function scheduleSource(env, authority, sourceId, signal, artifactId) {
   const active = () => { if (signal?.aborted) fail("retrieval_deadline", "The retrieval deadline was reached.", 504); };
   active();
   if (!env.KNOWLEDGE_INGESTION) fail("ingestion_unavailable", "The ingestion Workflow is not configured.", 503);
-  const snapshot = await authority.call("snapshot");
+  const snapshot = await authority.call("catalogue.state");
   const source = snapshot.sources.find(item => item.id === sourceId);
   if (!source) fail("source_missing", "The source was not found.", 404);
   if (!snapshot.policy.enabled || !(artifactId ? ["ai_search"] : [source.provider, "ai_search"]).every(id => {
@@ -64,7 +67,8 @@ export async function scheduleSource(env, authority, sourceId, signal, artifactI
       // reconciliation with the same durable receipts; acquisition/upload cannot replay.
       if (["complete", "errored"].includes(current.status)) await instance.restart();
     }
-  } catch {
+  } catch (error) {
+    logFailure("knowledge_schedule_unconfirmed", error, { job_id: job.id });
     // A timed-out creation can still have succeeded. Keep the same durable job ID.
     fail("schedule_unconfirmed", "The job is saved but Workflow creation is unconfirmed. Refresh the same source to reconcile scheduling.", 503);
   }
@@ -73,7 +77,7 @@ export async function scheduleSource(env, authority, sourceId, signal, artifactI
 
 async function artifactResult(env, authority, id, corpus) {
   if (!validId(id)) fail("invalid_artifact", "Invalid artifact identifier.");
-  const snapshot = await authority.call("snapshot");
+  const snapshot = await authority.call("catalogue.state");
   const artifact = await authority.call("artifact.get", { id });
   const source = snapshot.sources.find(item => item.id === artifact?.source_id);
   if (!snapshot.policy.enabled || !artifact || artifact.status === "expiring" || !source?.enabled || Date.parse(artifact.expires_at) <= Date.now()
@@ -83,7 +87,7 @@ async function artifactResult(env, authority, id, corpus) {
   publicUrl(artifact.canonical_url, snapshot.policy.allowed_hosts);
   const text = await (corpus || new KnowledgeCorpus(env)).getSnapshot(artifact);
   if (!text) fail("artifact_unavailable", "The source snapshot is no longer retained.", 404);
-  const latest = await authority.call("snapshot");
+  const latest = await authority.call("catalogue.state");
   if (!latest.policy.enabled || latest.policy.revision !== snapshot.policy.revision || latest.generation !== snapshot.generation) {
     fail("artifact_unavailable", "The source eligibility changed while reading the snapshot.", 409);
   }
@@ -128,12 +132,16 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
       const claimed = await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
       await corpus.removeArtifact(claimed);
       await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
-    } catch { /* The claimed revision stays unreadable until a later run removes it. */ }
+    } catch (error) {
+      // The claimed revision stays unreadable until a later run removes it.
+      logFailure("knowledge_expiry_failed", error, { artifact_id: artifact.id });
+    }
   }
   for (const source of await authority.call("sources.due")) {
-    await scheduleSource(env, authority, source.id).catch(() => {});
+    await scheduleSource(env, authority, source.id).catch(error => logFailure("knowledge_refresh_not_scheduled", error, { source_id: source.id }));
   }
   for (const job of await authority.call("jobs.reconcilable")) {
-    await scheduleSource(env, authority, job.source_id, undefined, job.artifact_id ?? undefined).catch(() => {});
+    await scheduleSource(env, authority, job.source_id, undefined, job.artifact_id ?? undefined)
+      .catch(error => logFailure("knowledge_reconcile_not_scheduled", error, { job_id: job.id }));
   }
 }

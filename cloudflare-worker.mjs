@@ -1,5 +1,6 @@
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
+import { d1Readiness } from "./worker/d1-schema.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
@@ -1826,6 +1827,16 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (readyPath) {
+      // Not ready until the D1 schema the Worker and Container depend on is migrated.
+      const schema = await d1Readiness(env.INTELLIGENCE_DB);
+      if (!schema.ready) {
+        return applyCorsHeaders(request, jsonResponse({ status: "not_ready",
+          reason: schema.missing ? "d1_schema_missing" : "d1_unavailable", missing_tables: schema.missing ?? [] },
+        { status: 503, headers: { "Cache-Control": "no-store" } }), env);
+      }
     }
 
     if (apiPath && !readyPath) {

@@ -1,6 +1,7 @@
 """Private, single-submission access to the Worker's durable intelligence store."""
 
 import json
+import logging
 import os
 import queue
 import re
@@ -14,10 +15,13 @@ from requests.adapters import HTTPAdapter
 from services.intelligence_contract import GatewayError
 from services.intelligence_policy import DEFAULT_POLICY, validate_policy
 
+logger = logging.getLogger(__name__)
+
 _ENDPOINTS = {
     "store": "http://intelligence.internal/v1/store",
     "auth": "http://intelligence.internal/v1/auth",
     "users": "http://intelligence.internal/v1/users",
+    "auto_routes": "http://intelligence.internal/v1/auto-routes",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
@@ -27,10 +31,42 @@ _DEADLINE_SECONDS = 5
 # of failing a valid key.
 _ENDPOINT_LIMITS = {"users": ((3, 8), 10)}
 _TRANSPORT_SLOTS = threading.BoundedSemaphore(16)
+# A worker thread holds its slot until the private call finishes, up to the transport
+# timeout, even after its caller gave up. Account reads authenticate every request, so they
+# get their own slots: a burst of them cannot take the chat store's reserve and settle
+# slots, and store calls cannot starve authentication.
+_ENDPOINT_SLOTS = {"users": threading.BoundedSemaphore(8), "auto_routes": threading.BoundedSemaphore(4)}
+_SLOW_CALL_SECONDS = 2.0
+_STATS_LOCK = threading.Lock()
+_STATS = {}
 _RESERVATION_ID = re.compile(r"[0-9a-f]{32}\Z")
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _MAX_INTEGER = 2**53 - 1
 _KINDS = frozenset({"chat", "transcriptions", "speech", "embeddings"})
+
+
+def _record(endpoint, *, exhausted=False, failed=False, elapsed=None):
+    with _STATS_LOCK:
+        stats = _STATS.setdefault(endpoint, {"calls": 0, "failures": 0, "slot_exhausted": 0, "slow_calls": 0, "slowest_ms": 0})
+        if exhausted:
+            stats["slot_exhausted"] += 1
+            count = stats["slot_exhausted"]
+        else:
+            stats["calls"] += 1
+            stats["failures"] += int(failed)
+            if elapsed is not None:
+                stats["slowest_ms"] = max(stats["slowest_ms"], round(elapsed * 1000))
+                stats["slow_calls"] += int(elapsed >= _SLOW_CALL_SECONDS)
+    if exhausted:
+        logger.warning("Private %s transport has no free slot (%d refusals since start)", endpoint, count)
+    elif elapsed is not None and elapsed >= _SLOW_CALL_SECONDS:
+        logger.warning("Private %s call took %d ms", endpoint, round(elapsed * 1000))
+
+
+def transport_stats():
+    """Per-endpoint private call counts, slot refusals and latency since the process started."""
+    with _STATS_LOCK:
+        return {endpoint: dict(stats) for endpoint, stats in _STATS.items()}
 
 
 def storage_unavailable():
@@ -164,8 +200,11 @@ def request_private_intelligence(payload, *, endpoint="store"):
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise storage_unavailable() from None
-    slots = _TRANSPORT_SLOTS
-    if len(body) > _MAX_BYTES or not slots.acquire(blocking=False):
+    slots = _ENDPOINT_SLOTS.get(endpoint, _TRANSPORT_SLOTS)
+    if len(body) > _MAX_BYTES:
+        raise storage_unavailable()
+    if not slots.acquire(blocking=False):
+        _record(endpoint, exhausted=True)
         raise storage_unavailable()
     stopped, results = threading.Event(), queue.Queue(maxsize=1)
     timeout, deadline_seconds = _ENDPOINT_LIMITS.get(endpoint, (_TIMEOUT, _DEADLINE_SECONDS))
@@ -190,12 +229,15 @@ def request_private_intelligence(payload, *, endpoint="store"):
     except Exception:
         slots.release()
         raise storage_unavailable() from None
+    started = time.monotonic()
     try:
         success, result = results.get(timeout=max(0, deadline - time.monotonic()))
     except queue.Empty:
+        _record(endpoint, failed=True, elapsed=time.monotonic() - started)
         raise storage_unavailable() from None
     finally:
         stopped.set()
+    _record(endpoint, failed=not success, elapsed=time.monotonic() - started)
     if not success:
         raise result from None
     return result

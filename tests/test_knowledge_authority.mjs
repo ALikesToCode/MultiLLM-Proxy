@@ -108,21 +108,32 @@ test("credential failover persists across SQLite restarts and concurrent selecti
   assert.equal((await f.call("credentials.select", { ...selection, provider: "alexandria" })).status, 400);
 });
 
-test("background work preserves interactive reserve and uncertain work outlives the daily window", async t => {
+test("background work preserves interactive reserve and unit charges leave the daily window whatever their outcome", async t => {
   const f = await fixture(t);
   const policy = enabledPolicy(4);
   policy.providers.firecrawl.interactive_reserve = 2;
+  policy.providers.alexandria = { ...policy.providers.firecrawl, interactive_reserve: 0 };
   await f.call("policy.update", policy);
   for (let i = 0; i < 2; i++) assert.equal((await f.call("reserve", { operation_id: `bg-${i}`, provider: "firecrawl", background: true })).status, 200);
   assert.equal((await f.call("reserve", { operation_id: "bg-2", provider: "firecrawl", background: true })).status, 429);
+  assert.equal((await f.call("reserve", { operation_id: "credits", provider: "alexandria", background: false, credits: 3 })).status, 200);
   await f.call("settle", { id: "bg-0", outcome: "unknown" });
   await f.call("settle", { id: "bg-1", outcome: "confirmed" });
+  await f.call("settle", { id: "credits", outcome: "unknown" });
+  let usage = (await f.call("snapshot")).result.usage.find(item => item.provider === "firecrawl");
+  assert.equal(usage.unknown, 1, "an unknown outcome is assumed charged inside the window");
   f.advance(2 * 86400000);
   await f.reopen();
-  const usage = (await f.call("snapshot")).result.usage.find(item => item.provider === "firecrawl");
-  assert.equal(usage.unknown, 1);
+  const snapshot = (await f.call("snapshot")).result;
+  usage = snapshot.usage.find(item => item.provider === "firecrawl");
+  assert.equal(usage.unknown, 0, "unit charges expire with the daily window");
   assert.equal(usage.confirmed, 0);
+  assert.equal(snapshot.usage.find(item => item.provider === "alexandria").unknown, 3, "credit charges stay until resolved");
+  assert.deepEqual(snapshot.ledger, { rows: 3, limit: 5000, counting: 1, pending: 0, unknown: 2 });
   assert.equal((await f.call("settle", { id: "bg-0", outcome: "confirmed" })).result.state, "unknown");
+  await f.call("maintenance");
+  assert.deepEqual((await f.call("snapshot")).result.ledger, { rows: 1, limit: 5000, counting: 1, pending: 0, unknown: 1 });
+  assert.equal((await f.call("reserve", { operation_id: "bg-3", provider: "firecrawl", background: true })).status, 200);
 });
 
 test("source disabling cancels jobs and fences stale publication", async t => {

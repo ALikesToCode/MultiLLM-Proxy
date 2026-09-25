@@ -22,7 +22,7 @@ export function renderPolicy(policy) {
   if (!policy) return;
   form.dataset.revision = String(policy.revision);
   form.elements.namedItem("enabled").checked = policy.enabled;
-  for (const name of ["cache_ttl_seconds", "retention_hours"]) form.elements.namedItem(name).value = policy[name];
+  for (const name of ["cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours"]) form.elements.namedItem(name).value = policy[name] ?? 24;
   form.elements.namedItem("allowed_hosts").value = (policy.allowed_hosts || []).join("\n");
   const cards = element("knowledge-provider-policy");
   cards.replaceChildren();
@@ -54,5 +54,6 @@ export function policyPayload(values, revision) {
   }
   return { expected_revision: Number(revision), enabled: values.get("enabled") === "on",
     cache_ttl_seconds: Number(values.get("cache_ttl_seconds")), retention_hours: Number(values.get("retention_hours")),
+    unreviewed_retention_hours: Number(values.get("unreviewed_retention_hours")),
     allowed_hosts: String(values.get("allowed_hosts") || "").split(/\s+/).filter(Boolean), providers };
 }

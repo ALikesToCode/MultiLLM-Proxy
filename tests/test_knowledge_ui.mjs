@@ -93,13 +93,15 @@ test("form payloads retain exact versions and omit blank optional fields", () =>
 });
 
 test("policy serializes all providers with finite numeric fields and unchecked acknowledgements false", () => {
-  const values = new Map(Object.entries({ enabled: "on", cache_ttl_seconds: "300", retention_hours: "168", allowed_hosts: "docs.example\nrelease.example" }));
+  const values = new Map(Object.entries({ enabled: "on", cache_ttl_seconds: "300", retention_hours: "168", unreviewed_retention_hours: "24",
+    allowed_hosts: "docs.example\nrelease.example" }));
   for (const id of ["context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria"]) {
     for (const key of ["limit", "background_limit", "interactive_reserve"]) values.set(`${id}.${key}`, "0");
     values.set(`${id}.units_per_call`, "1");
   }
   const policy = policyPayload(values, "5");
   assert.equal(policy.expected_revision, 5);
+  assert.equal(policy.unreviewed_retention_hours, 24);
   assert.equal(Object.keys(policy.providers).length, 7);
   assert.deepEqual(policy.allowed_hosts, ["docs.example", "release.example"]);
   assert.deepEqual(policy.providers.exa, { enabled: false, hard_limit_confirmed: false, retention_allowed: false,

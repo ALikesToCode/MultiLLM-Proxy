@@ -12,7 +12,7 @@ from routes import knowledge_management as management
 from routes import knowledge_mcp as mcp
 from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
-from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch
+from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch as _dispatch
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _CATALOGUE = mcp.catalogue()
@@ -95,6 +95,14 @@ def _rpc_result(identifier, result):
     return jsonify({"jsonrpc": "2.0", "id": identifier, "result": result})
 
 
+def dispatch(operation, user, payload=None):
+    result = _dispatch(operation, user, payload)
+    # Status shows whether the deployed Knowledge Worker serves the contract this build advertises.
+    if operation == "status" and isinstance(result, dict) and "contract" in result:
+        result = {**result, "contract_check": mcp.contract_check(result)}
+    return result
+
+
 def _valid_origin():
     origin = request.headers.get("Origin")
     if origin is None:
@@ -125,7 +133,7 @@ def _mcp_initialize(identifier, params):
                        "instructions": mcp.INSTRUCTIONS})
 
 
-def _mcp_tool(identifier, params, protocol):
+def _mcp_tool(identifier, params):
     tool_name = params.get("name")
     entry = _TOOLS.get(tool_name) if isinstance(tool_name, str) else None
     if entry is None:
@@ -150,9 +158,8 @@ def _mcp_tool(identifier, params, protocol):
         else:
             payload = _query(arguments)
         result = dispatch(operation, g.authenticated_user, payload)
-        tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": bool(result.get("error"))}
-        if protocol == "2025-06-18":
-            tool_result["structuredContent"] = result
+        tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": bool(result.get("error")),
+                       "structuredContent": result}
         return _rpc_result(identifier, tool_result)
     except KnowledgeError as error:
         return _rpc_result(identifier, {"isError": True, "content": [{"type": "text",
@@ -176,6 +183,10 @@ def _mcp():
         return _rpc_error(None, -32700 if error.code == "invalid_json" else -32600,
                           error.message, error.status)
     identifier = body.get("id")
+    # A client's reply to a server request carries no method; it is accepted without a body.
+    if (body.get("jsonrpc") == "2.0" and "method" not in body and "id" in body
+            and ("result" in body) != ("error" in body)):
+        return Response(status=202)
     method, params = body.get("method"), body.get("params", {})
     if (body.get("jsonrpc") != "2.0" or not isinstance(method, str)
             or not isinstance(params, dict)
@@ -190,11 +201,16 @@ def _mcp():
     if method == "ping":
         return _rpc_result(identifier, {})
     if method == "tools/list":
+        try:
+            toolsets = mcp.requested_toolsets(request.args.get("toolsets"))
+        except ValueError:
+            return _rpc_error(identifier, -32602, f"Unknown toolset. Use any of: {', '.join(mcp.TOOLSETS)}.")
         return _rpc_result(identifier, {"tools": [entry["definition"] for entry in _CATALOGUE["tools"]
-            if management.permits(g.authenticated_user, entry["scope"])]})
+            if management.permits(g.authenticated_user, entry["scope"])
+            and (toolsets is None or entry["toolset"] in toolsets)]})
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
-    return _mcp_tool(identifier, params, protocol)
+    return _mcp_tool(identifier, params)
 
 
 def register_knowledge_routes(app, csrf):
@@ -236,10 +252,12 @@ def register_knowledge_routes(app, csrf):
     def knowledge_artifact(artifact_id):
         return jsonify(dispatch("artifact", g.authenticated_user, {"id": _identifier(artifact_id)}))
 
+    # Either Knowledge scope opens MCP; a key with neither is told the smaller one it needs.
     app.add_url_rule("/mcp", "knowledge_mcp",
                      csrf.exempt(api_authenticate_only(required_scope=lambda:
-                         "knowledge:read" if management.permits(g.authenticated_user, "knowledge:read")
-                         else "knowledge:manage")(_mcp)),
+                         "knowledge:manage" if management.permits(g.authenticated_user, "knowledge:manage")
+                         and not management.permits(g.authenticated_user, "knowledge:read")
+                         else "knowledge:read")(_mcp)),
                      methods=["POST", "GET", "DELETE"])
 
     @app.get("/knowledge")

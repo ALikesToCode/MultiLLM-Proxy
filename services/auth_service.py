@@ -7,7 +7,9 @@ import subprocess
 import json
 import shutil
 import threading
+import hashlib
 import hmac
+import time
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -48,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 
 USAGE_WRITE_INTERVAL_SECONDS = 60
+# A verified dashboard key skips storage and scrypt for this long. Every account change in
+# this process clears the memo; a change made elsewhere applies within this window.
+VERIFIED_KEY_SECONDS = 60
+MAX_VERIFIED_KEYS = 1024
 
 
 def _utcnow() -> datetime:
@@ -64,6 +70,8 @@ class AuthService:
     _google_token_expiry: Optional[datetime] = None
     _google_token_lock = threading.Lock()
     _storage_lock = threading.Lock()
+    _verified_keys: Dict[str, tuple[float, str]] = {}
+    _verified_lock = threading.Lock()
     _storage_path: Optional[Path] = None
     _jwt_secret: Optional[str] = os.environ.get("JWT_SECRET")
 
@@ -363,6 +371,7 @@ class AuthService:
         rotated_at: Optional[datetime] = None,
         revoked_at: Optional[datetime] = None,
     ) -> None:
+        cls._forget_verified_keys()
         if user_store.using_d1():
             user_store.upsert_user({
                 "username": username,
@@ -422,6 +431,32 @@ class AuthService:
                 connection.commit()
         cls._reload_user_cache()
 
+    @staticmethod
+    def _key_digest(api_key: str) -> str:
+        return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _remembered_username(cls, api_key: str) -> Optional[str]:
+        digest = cls._key_digest(api_key)
+        with cls._verified_lock:
+            entry = cls._verified_keys.get(digest)
+            if entry and entry[0] > time.monotonic():
+                return entry[1]
+            cls._verified_keys.pop(digest, None)
+        return None
+
+    @classmethod
+    def _remember_key(cls, api_key: str, username: str) -> None:
+        with cls._verified_lock:
+            if len(cls._verified_keys) >= MAX_VERIFIED_KEYS:
+                cls._verified_keys.pop(next(iter(cls._verified_keys)))
+            cls._verified_keys[cls._key_digest(api_key)] = (time.monotonic() + VERIFIED_KEY_SECONDS, username)
+
+    @classmethod
+    def _forget_verified_keys(cls) -> None:
+        with cls._verified_lock:
+            cls._verified_keys.clear()
+
     @classmethod
     def _persist_user_with_api_key(
         cls,
@@ -454,6 +489,7 @@ class AuthService:
 
     @classmethod
     def _delete_user_record(cls, username: str) -> None:
+        cls._forget_verified_keys()
         if user_store.using_d1():
             user_store.delete_user(username)
         else:
@@ -577,6 +613,7 @@ class AuthService:
     def initialize(cls) -> None:
         """Initialize the auth service and load persisted users."""
         cls._jwt_secret = os.environ.get("JWT_SECRET")
+        cls._forget_verified_keys()
         cls._ensure_storage()
         try:
             cls._reload_user_cache()
@@ -879,36 +916,66 @@ class AuthService:
             and admin_api_key
             and hmac.compare_digest(api_key, admin_api_key)
         ):
-            user = cls._load_user_by_username(default_username)
-            if user is None and user_store.using_d1():
-                # Startup could not reach D1; write the environment-managed admin now.
-                cls._ensure_default_admin_user()
-                user = cls._load_user_by_username(default_username)
-            if (
-                user
-                and user.get("is_admin")
-                and not user.get("revoked_at")
-                and check_password_hash(user["api_key_hash"], api_key)
-            ):
-                cls._update_key_usage(default_username, remote_addr)
-                return cls._public_user(default_username, cls._users[default_username])
-            logger.error(
-                "Default admin API key matched but its persistent admin record is invalid",
-                extra={"username": default_username},
-            )
-            return None
+            return cls._verify_bootstrap_admin(default_username, api_key, remote_addr)
 
         if api_key.startswith(KEY_NAMESPACE):
             return verify_integration_key(api_key)
+
+        remembered = cls._remembered_username(api_key)
+        user = cls._users.get(remembered) if remembered else None
+        if remembered and user and not user.get("revoked_at"):
+            cls._update_key_usage(remembered, remote_addr)
+            return cls._public_user(remembered, user)
 
         for username, user in cls._load_users_by_api_key_prefix(
             build_api_key_prefix(api_key)
         ):
             if check_password_hash(user["api_key_hash"], api_key):
+                cls._remember_key(api_key, username)
                 cls._update_key_usage(username, remote_addr)
                 return cls._public_user(username, cls._users[username])
 
         return None
+
+    @staticmethod
+    def _is_bootstrap_record(user: Optional[Dict[str, Any]], api_key: str) -> bool:
+        return bool(user and user.get("is_admin") and not user.get("revoked_at")
+                    and check_password_hash(user["api_key_hash"], api_key))
+
+    @classmethod
+    def _verify_bootstrap_admin(cls, username: str, api_key: str, remote_addr: Optional[str]) -> Dict[str, Any]:
+        """ADMIN_API_KEY from the environment authenticates without account storage.
+
+        It is the bootstrap credential that startup writes back to storage, and the edge
+        already accepts it from the environment, so a slow or unavailable account store must
+        not lock the administrator out. The stored record supplies metadata when it answers.
+        """
+        user = cls._users.get(username)
+        if cls._remembered_username(api_key) != username or not user:
+            try:
+                user = cls._load_user_by_username(username)
+                if user is None and user_store.using_d1():
+                    # Startup could not reach D1; write the environment-managed admin now.
+                    cls._ensure_default_admin_user()
+                    user = cls._users.get(username)
+            except APIError:
+                logger.warning("Account storage is unavailable; ADMIN_API_KEY authenticated from the environment",
+                               extra={"username": username})
+                return cls._public_user(username, cls._environment_admin(username, api_key))
+            if not cls._is_bootstrap_record(user, api_key):
+                logger.warning("The stored admin record does not match ADMIN_API_KEY; startup will restore it",
+                               extra={"username": username})
+                return cls._public_user(username, cls._environment_admin(username, api_key))
+            cls._remember_key(api_key, username)
+        cls._update_key_usage(username, remote_addr)
+        return cls._public_user(username, cls._users[username])
+
+    @staticmethod
+    def _environment_admin(username: str, api_key: str) -> Dict[str, Any]:
+        return {"username": username, "api_key_hash": "", "api_key_prefix": build_api_key_prefix(api_key),
+                "scopes": list(DEFAULT_ADMIN_SCOPES), "is_admin": True, "created_at": _utcnow(),
+                "last_login": None, "last_used_at": None, "last_used_ip": None, "created_by": "system",
+                "rotated_at": None, "revoked_at": None}
 
     @classmethod
     def authenticate_user(cls, username: str, api_key: str) -> bool:

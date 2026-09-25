@@ -22,6 +22,23 @@ def test_fingerprint_tracks_sources_not_generated_stamp_or_private_configuration
     assert fingerprint(tmp_path) != before
 
 
+def test_fingerprint_tracks_tool_contracts_migrations_and_worker_configuration(tmp_path):
+    for name in ("cloudflare-worker.mjs", "Dockerfile", "requirements.lock"):
+        (tmp_path / name).write_text("synthetic fixture\n")
+    contract = tmp_path / "worker/knowledge/native-tools.json"
+    contract.parent.mkdir(parents=True)
+    contract.write_text("{}\n")
+    (tmp_path / "intelligence-migrations").mkdir()
+    fingerprints = [fingerprint(tmp_path)]
+    contract.write_text('{"exa_search": {}}\n')
+    fingerprints.append(fingerprint(tmp_path))
+    (tmp_path / "intelligence-migrations/0001_example.sql").write_text("CREATE TABLE example (id INTEGER);\n")
+    fingerprints.append(fingerprint(tmp_path))
+    (tmp_path / "wrangler.knowledge.jsonc").write_text("{}\n")
+    fingerprints.append(fingerprint(tmp_path))
+    assert len(set(fingerprints)) == 4
+
+
 def test_fingerprint_tracks_published_skill_content(tmp_path):
     for name in ("cloudflare-worker.mjs", "Dockerfile", "requirements.lock"):
         (tmp_path / name).write_text("synthetic fixture\n")

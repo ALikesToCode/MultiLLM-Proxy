@@ -6,6 +6,8 @@ from pathlib import Path
 
 import requests
 
+from services.intelligence_d1_store import transport_stats
+
 
 def _storage():
     if os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip():
@@ -24,7 +26,8 @@ def container_release():
         value = ""
     storage, warning = _storage()
     return {"build_id": value if re.fullmatch(r"[a-f0-9]{64}", value) else None,
-            "compatibility": 1, "storage": storage, "durability_warning": warning}
+            "compatibility": 1, "storage": storage, "durability_warning": warning,
+            "private_transport": transport_stats()}
 
 
 def deployment_status(worker):

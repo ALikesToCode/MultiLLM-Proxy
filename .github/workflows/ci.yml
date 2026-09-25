@@ -67,6 +67,28 @@ jobs:
       - name: Client header contracts
         run: node --test tests/test_client_headers_worker.mjs
 
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install Python dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements-ci.lock
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Python accounts and routes through the Worker and a real D1
+        env:
+          PYTHON: python
+        run: npm run test:integration
+
   cloudflare-build:
     runs-on: ubuntu-latest
     steps:

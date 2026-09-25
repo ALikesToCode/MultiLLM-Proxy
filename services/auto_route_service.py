@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 from providers.registry import get_registry
+from services import auto_route_d1
 from services.model_registry import ModelRegistry
 from services.sqlite_store import connect, storage_path
 
@@ -18,7 +19,8 @@ DEFAULT_AUTO_ROUTES = {
         "opencode:glm-5.2",
         "navyai:glm-5.2",
     ),
-    # Image route: add more providers that serve gpt-image-2.5 in Operations.
+    # Image route. Operations edits persist in D1 when the Worker provides it; on
+    # Container-local SQLite they last only until the Container restarts.
     "auto:gpt-image-2.5": ("gguu:gpt-image-2.5",),
 }
 LEGACY_DEFAULT_AUTO_ROUTES = {
@@ -211,7 +213,21 @@ class AutoRouteService:
         ]
 
     @classmethod
+    def _durable_routes(cls) -> list[AutoRoute]:
+        """Seeded defaults overlaid by the routes operators saved in D1."""
+        stored = auto_route_d1.stored_routes()
+        routes = {route_id: AutoRoute(route_id, candidates, "") for route_id, candidates in DEFAULT_AUTO_ROUTES.items()}
+        for route_id, (candidates, updated_at) in stored.items():
+            # A route still holding a retired default follows the current default.
+            if candidates == LEGACY_DEFAULT_AUTO_ROUTES.get(route_id):
+                candidates = DEFAULT_AUTO_ROUTES[route_id]
+            routes[route_id] = AutoRoute(route_id, candidates, updated_at)
+        return [routes[route_id] for route_id in sorted(routes)]
+
+    @classmethod
     def list_routes(cls) -> list[AutoRoute]:
+        if auto_route_d1.using_d1():
+            return cls._durable_routes()
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -229,6 +245,8 @@ class AutoRouteService:
     @classmethod
     def get_route(cls, route_id: object) -> AutoRoute | None:
         normalized = cls.normalize_route_id(route_id)
+        if auto_route_d1.using_d1():
+            return next((route for route in cls._durable_routes() if route.id == normalized), None)
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -256,6 +274,9 @@ class AutoRouteService:
         normalized_route_id = cls.normalize_route_id(route_id)
         normalized_candidates = cls.normalize_candidates(candidates, base_urls)
         updated_at = _utcnow_iso()
+        if auto_route_d1.using_d1():
+            auto_route_d1.save_route(normalized_route_id, normalized_candidates, updated_at)
+            return AutoRoute(id=normalized_route_id, candidates=normalized_candidates, updated_at=updated_at)
 
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)

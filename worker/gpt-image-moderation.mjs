@@ -3,6 +3,7 @@ const GPT_IMAGE_MODEL_FAMILIES = Object.freeze([
   "gpt-image-1-mini",
   "gpt-image-1.5",
   "gpt-image-2",
+  "gpt-image-2.5",
 ]);
 const GPT_IMAGE_MODERATION_VALUES = new Set(["auto", "low"]);
 

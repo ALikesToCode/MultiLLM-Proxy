@@ -172,11 +172,14 @@ priorities** panel can:
 - create additional virtual models such as `auto:kimi-k3`; and
 - show whether each provider currently has a configured server credential.
 
-Saving writes the complete order to the SQLite database selected by
-`MODEL_REGISTRY_DB_PATH`. There is no separate routing configuration file.
-Container or serverless deployments that place this database in `/tmp` lose
-dashboard changes when that ephemeral filesystem is replaced; use durable
-storage before relying on saved priorities in production.
+On Cloudflare, saving writes the complete order to the `auto_routes` table of the
+Worker's D1 database, so it survives Container sleep and redeploys (see
+[control-plane storage](control-plane-storage.md#automatic-routes-in-d1)). If D1
+cannot be read, routing keeps the last stored order or the seeded defaults, and a
+save fails with 503 rather than being kept only on Container disk. Without the D1
+store, saving writes to the SQLite database selected by `MODEL_REGISTRY_DB_PATH`;
+deployments that place it in `/tmp` lose dashboard changes when that ephemeral
+filesystem is replaced. There is no separate routing configuration file.
 
 The authenticated dashboard API is `GET` and `PUT /admin/auto-routes`. A PUT
 body has this shape:

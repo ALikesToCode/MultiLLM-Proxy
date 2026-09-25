@@ -97,6 +97,29 @@ test("source ingestion reserves each external stage, persists references and pub
   assert.equal(f.counts.upload, 1);
 });
 
+test("Workflow steps persist JSON text and resume from object results an older release cached", async () => {
+  const f = await fixture();
+  const step = workflow();
+  const stored = [];
+  const record = step.do.bind(step);
+  step.do = async (name, options, operation) => {
+    const value = await record(name, options, operation);
+    stored.push(value);
+    return value;
+  };
+  assert.equal((await f.run(step)).status, "completed");
+  assert.ok(stored.length >= 3 && stored.every(value => typeof value === "string"), "no step result is an object");
+  // Instances started before this release replay cached object results.
+  const older = await fixture();
+  const objects = workflow();
+  const replay = objects.do.bind(objects);
+  objects.do = async (name, options, operation) => {
+    const value = await replay(name, options, operation);
+    return typeof value === "string" ? JSON.parse(value) : value;
+  };
+  assert.equal((await older.run(objects)).status, "completed");
+});
+
 test("the Firecrawl adapter carries a forced live acquisition through ingestion", async () => {
   const f = await fixture();
   let calls = 0;

@@ -2,6 +2,7 @@ import { publicUrl } from "./contracts.mjs";
 import { createArtifact, normalizeSourceText } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { confirmSnapshot } from "./operations.mjs";
+import { logFailure } from "../log.mjs";
 
 const NO_RETRY = { retries: { limit: 0, delay: "1 second" }, timeout: "2 minutes" };
 const READ_RETRY = { retries: { limit: 2, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" };
@@ -15,6 +16,14 @@ const REFUSED_ERRORS = new Set(["provider_disabled", "allowance_exhausted", "led
   "provider_not_configured", "provider_keys_exhausted", "invalid_source_policy", "source_not_allowed",
   "primary_source_unavailable", "invalid_source", "source_too_large", "invalid_snapshot", "artifact_conflict",
   "artifact_expiring"]);
+
+// Steps return JSON text: a step that returns an object is reported to make run() log a
+// false "Worker's code had hung" cancellation (cloudflare/workers-sdk#14959). Results cached
+// as objects by instances started before this change are still accepted.
+async function durableStep(step, name, config, callback) {
+  const value = await step.do(name, config, async () => JSON.stringify(await callback()));
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
 
 function ingestionError(code) {
   return Object.assign(new Error("The knowledge ingestion job could not complete."), { code });
@@ -93,7 +102,7 @@ async function acquire(context) {
     return recoverSnapshot(context, job, artifact);
   }
   if (job.status !== "queued") throw ingestionError("acquisition_outcome_unknown");
-  const { policy } = await context.authority.call("snapshot");
+  const { policy } = await context.authority.call("catalogue.state");
   await update(context, { status: "acquiring" });
   const response = await context.retrieve(source.provider, {
     query: source.title || source.product || source.url, product: source.product,
@@ -194,11 +203,11 @@ export async function runIngestion(env, step, jobId, supplied = {}) {
   try {
     const initial = await context.authority.call("job.get", { id: jobId });
     if (initial?.job && TERMINAL.has(initial.job.status)) return initial.job;
-    const reference = await step.do("acquire-source", NO_RETRY, () => acquire(context));
-    const submission = await step.do("submit-index-revision", NO_RETRY, () => submit(context, reference.artifact_id));
+    const reference = await durableStep(step, "acquire-source", NO_RETRY, () => acquire(context));
+    const submission = await durableStep(step, "submit-index-revision", NO_RETRY, () => submit(context, reference.artifact_id));
     let uncertain = submission.uncertain;
     for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
-      const result = await step.do(`verify-index-${attempt}`, READ_RETRY, () => inspect(context, reference, submission));
+      const result = await durableStep(step, `verify-index-${attempt}`, READ_RETRY, () => inspect(context, reference, submission));
       if (result.done) return result.job;
       uncertain = result.uncertain;
       if (attempt + 1 < MAX_POLLS) await step.sleep(`wait-for-index-${attempt}`, "10 seconds");
@@ -208,6 +217,7 @@ export async function runIngestion(env, step, jobId, supplied = {}) {
       reason: uncertain ? "upload_outcome_unknown" : "awaiting_verified_index",
     });
   } catch (error) {
+    logFailure("knowledge_ingestion_failed", error, { code: safeCode(error) });
     return recordFailure(context, error);
   }
 }

@@ -119,6 +119,42 @@ test("maintenance re-polls stuck index jobs in bounded rotation without new uplo
   assert.ok(reserved.every(item => !stuck.has(item.job_id)), "reconciliation spends no allowance");
 });
 
+test("jobs that can never reconcile end as failed and stop blocking refreshes", async () => {
+  const f = await fixture();
+  f.policy.providers.firecrawl.background_limit = 0;
+  await f.storage.put("policy", f.policy);
+  let now = Date.parse("2026-09-24T00:00:00Z");
+  const authority = new KnowledgeAuthority(f.storage, () => now);
+  const lost = await authority.call("job.enqueue", { source_id: f.source.id });
+  await authority.call("job.update", { id: lost.id, status: "unknown", reason: "acquisition_outcome_unknown" });
+  const source = await authority.call("source.discover", { url: "https://flask.palletsprojects.com/en/3.1.3/upload/", product: "flask", provider: "exa" });
+  const artifact = await authority.call("artifact.save", { artifact: await createArtifact({ ...source, origin_checked: true }, f.text, "exa", now) });
+  const upload = await authority.call("job.enqueue", { source_id: source.id, artifact_id: artifact.id });
+  await authority.call("job.update", { id: upload.id, status: "unknown", reason: "upload_outcome_unknown" });
+  const restarted = [];
+  f.env.KNOWLEDGE_INGESTION = {
+    async createBatch() { return []; },
+    async get(id) { return { status: async () => ({ status: "errored" }), restart: async () => { restarted.push(id); } }; },
+  };
+  const corpus = { async removeArtifact() {} };
+  now += 11 * 60000;
+  await maintainKnowledge(f.env, { authority, corpus });
+  assert.deepEqual(restarted, [upload.id]);
+  let state = await authority.call("job.get", { id: lost.id });
+  assert.deepEqual([state.job.status, state.job.reason], ["failed", "acquisition_outcome_unknown"]);
+  assert.notEqual((await authority.call("job.enqueue", { source_id: f.source.id })).id, lost.id, "the source can refresh again");
+  for (let run = 0; run < 24; run++) {
+    now += 3600000;
+    await maintainKnowledge(f.env, { authority, corpus });
+  }
+  state = await authority.call("job.get", { id: upload.id });
+  assert.deepEqual([state.job.status, state.job.reason], ["failed", "reconcile_exhausted"]);
+  assert.equal(restarted.filter(id => id === upload.id).length, 24, "each unresolved upload is re-polled for a day");
+  const status = await submit(f, "status");
+  assert.equal(status.job_counts.failed, 2);
+  assert.ok(status.jobs.some(job => job.id === upload.id && job.reason === "reconcile_exhausted"));
+});
+
 test("maintenance rotates eligible due sources so failed scheduling cannot starve later work", async () => {
   const f = await fixture();
   f.policy.providers.firecrawl.enabled = false;

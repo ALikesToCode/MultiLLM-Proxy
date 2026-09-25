@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
+import { applyMigrations } from "./d1_migrations.mjs";
 import { authStorageBackend, collectContainerEnv } from "../worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 
@@ -17,8 +17,7 @@ const user = (username, changes = {}) => ({
 async function database() {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: "export default {fetch(){return new Response('ok')}}", d1Databases: ["INTELLIGENCE_DB"] }));
   const db = await mf.getD1Database("INTELLIGENCE_DB");
-  const migration = await readFile(new URL("../intelligence-migrations/0003_control_users.sql", import.meta.url), "utf8");
-  for (const statement of migration.split(";").filter(item => item.trim())) await db.prepare(statement).run();
+  await applyMigrations(db);
   const call = async body => {
     const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }) }), { INTELLIGENCE_DB: db });
@@ -84,13 +83,46 @@ test("the users RPC is private, bounded and never reveals storage errors", async
   assert.equal(routed.status, 503, "the outbound router reaches the users domain");
 });
 
-test("accounts use D1 unless an external control plane or explicit backend is configured", () => {
-  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {} }), "d1");
+test("accounts use D1 only when explicitly configured, never merely because the binding exists", () => {
+  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {} }), "sql");
   assert.equal(authStorageBackend({}), "sql");
-  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {}, CONTROL_PLANE_DATABASE_URL: "postgresql://db" }), "sql");
-  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {}, AUTH_STORAGE_BACKEND: "sql" }), "sql");
-  assert.equal(collectContainerEnv({ INTELLIGENCE_DB: {} }).AUTH_STORAGE_BACKEND, "d1");
-  assert.equal(collectContainerEnv({}).AUTH_STORAGE_BACKEND, "sql");
+  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {}, AUTH_STORAGE_BACKEND: "d1" }), "d1");
+  assert.equal(authStorageBackend({ INTELLIGENCE_DB: {}, AUTH_STORAGE_BACKEND: " sql " }), "sql");
+  assert.equal(collectContainerEnv({ INTELLIGENCE_DB: {} }).AUTH_STORAGE_BACKEND, "sql");
+  assert.equal(collectContainerEnv({ INTELLIGENCE_DB: {}, AUTH_STORAGE_BACKEND: "d1" }).AUTH_STORAGE_BACKEND, "d1");
+});
+
+test("the Worker refuses durable admin accounts it did not configure and audits every account write", async () => {
+  const { mf, db, call } = await database();
+  const env = { INTELLIGENCE_DB: db, ADMIN_USERNAME: "owner", ADMIN_USERNAMES: "deputy, auditor" };
+  const send = async body => {
+    const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }) }), env);
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    for (const planted of [user("mallory", { is_admin: 1 }), user("mallory", { scopes: "chat,admin" })]) {
+      const refused = await send({ operation: "upsert", user: planted });
+      assert.deepEqual([refused.status, refused.body.error.code], [403, "admin_not_allowed"]);
+    }
+    assert.equal((await send({ operation: "get", username: "mallory" })).body.user, null);
+    for (const name of ["owner", "deputy", "auditor"]) {
+      assert.equal((await send({ operation: "upsert", user: user(name, { is_admin: 1, scopes: "admin,chat" }) })).status, 200);
+    }
+    assert.equal((await send({ operation: "upsert", user: user("mallory") })).status, 200, "ordinary accounts are unaffected");
+    await send({ operation: "touch", username: "mallory", last_used_at: "2026-09-25T00:00:00+00:00", last_used_ip: null });
+    await send({ operation: "delete", username: "mallory" });
+    await send({ operation: "delete", username: "mallory" });
+    const { results } = await db.prepare("SELECT operation, outcome, username, is_admin FROM control_user_audit ORDER BY id").all();
+    assert.deepEqual(results.map(row => [row.operation, row.outcome, row.username, row.is_admin]), [
+      ["upsert", "refused", "mallory", 1], ["upsert", "refused", "mallory", 0],
+      ["upsert", "stored", "owner", 1], ["upsert", "stored", "deputy", 1], ["upsert", "stored", "auditor", 1],
+      ["upsert", "stored", "mallory", 0], ["delete", "deleted", "mallory", null], ["delete", "missing", "mallory", null],
+    ], "usage updates are not account changes");
+    await db.prepare("DROP TABLE control_user_audit").run();
+    assert.equal((await send({ operation: "upsert", user: user("erin") })).status, 503, "an unaudited write is refused");
+    assert.equal((await send({ operation: "get", username: "erin" })).body.user, null);
+  } finally { await mf.dispose(); }
 });
 
 test("a transient D1 error on an account read is retried once", async () => {

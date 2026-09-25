@@ -14,24 +14,51 @@ Deploying without migrating existing authentication records can lock users out.
 ## Dashboard accounts in D1
 
 On Cloudflare, dashboard accounts (usernames, scopes, key hashes and usage
-metadata) live in the `control_users` table of the `INTELLIGENCE_DB` D1 database,
-so Access keys survive Container sleep and redeploys. The Worker selects this with
-`AUTH_STORAGE_BACKEND=d1` whenever the D1 binding exists and
-`CONTROL_PLANE_DATABASE_URL` is not configured; set `AUTH_STORAGE_BACKEND=sql` to
-keep accounts in SQLite or PostgreSQL. The Container reaches the table only through
-the private `intelligence.internal/v1/users` operations (list, get, by prefix,
-upsert, delete, touch), never with SQL. The edge reads the same table to verify
-Knowledge requests, and the environment-managed `ADMIN_API_KEY` account is written
-at startup or on its first use.
+metadata) can live in the `control_users` table of the `INTELLIGENCE_DB` D1
+database, so Access keys survive Container sleep and redeploys. This is an explicit
+opt-in: set `AUTH_STORAGE_BACKEND=d1` (the repository's `wrangler.jsonc` does). The
+D1 binding alone never switches the account store, because D1 accounts need their
+migration and switching a deployment implicitly once caused an outage. Without the
+setting, accounts stay in SQLite or PostgreSQL. The Container reaches the table only
+through the private `intelligence.internal/v1/users` operations (list, get, by
+prefix, upsert, delete, touch), never with SQL. The edge reads the same table to
+verify Knowledge requests.
 
-Apply `intelligence-migrations/0003_control_users.sql` before deploying code that
-selects D1 (`npx wrangler d1 migrations apply multillm-intelligence --remote`);
-without it every account lookup fails closed with 503. An unavailable D1 never
-falls back to local SQLite. Last-used times are advisory and written at most once a
-minute per key and address. Existing SQLite accounts are not migrated; on Cloudflare
-they were already lost with the Container disk. Rate limits, model overrides and
-other control-plane tables still use SQLite, and encrypted control-plane backups
-do not include D1 accounts: recover them through Cloudflare's D1 tooling.
+Only usernames the Worker's own configuration names can hold administration:
+`ADMIN_USERNAME` and the optional comma-separated `ADMIN_USERNAMES`. The Worker
+refuses to store `is_admin` or the `admin` scope for any other username (the
+dashboard reports 403 `admin_not_allowed`), and the edge grants management scopes
+only to those names, so a compromised Container cannot persist an administrator.
+Add a username to `ADMIN_USERNAMES` before making it an administrator. Every account
+write and refusal is appended to `control_user_audit`; the Worker exposes no
+statement that changes or deletes audit rows.
+
+`ADMIN_API_KEY` is the bootstrap credential. It authenticates from the environment
+even when D1 is slow or unavailable, and startup writes its account record back. Other
+dashboard keys fail closed with 503 while D1 is unavailable. A verified key is
+remembered in the Container for up to 60 seconds, so authentication does not wait on
+D1 for every request; account changes made in the dashboard apply immediately, and
+changes made directly in D1 apply within that minute. Last-used times are advisory
+and written at most once a minute per key and address.
+
+Apply every migration before deploying (`npm run deploy` does it, see
+[Cloudflare deployment](cloudflare-containers.md#deploy)); `/ready` answers 503 with
+the missing tables until they exist. An unavailable D1 never falls back to local
+SQLite. Existing SQLite accounts are not migrated; on Cloudflare they were already
+lost with the Container disk. Rate limits, model overrides and other control-plane
+tables still use SQLite, and encrypted control-plane backups do not include D1
+accounts: recover them through Cloudflare's D1 tooling.
+
+## Automatic routes in D1
+
+When the Worker provides its durable intelligence store (`INTELLIGENCE_DB`),
+operator edits to automatic routes are saved in the `auto_routes` D1 table through
+the private `intelligence.internal/v1/auto-routes` operations, so they survive
+Container sleep and redeploys. Seeded defaults apply to any route without a stored
+row. The Container caches routes for 30 seconds. If D1 cannot be read, routing uses
+the last stored copy, or the seeded defaults if there is none, and a save fails with
+503 instead of being kept only on Container disk.
+
 Model override reads bypass the process-local cache in PostgreSQL mode so another
 replica's changes are visible. Short control-plane transactions use a database-wide
 advisory lock, matching SQLite's single-writer semantics for quota reservations.

@@ -2,7 +2,14 @@ import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
 import { KnowledgeAuthority } from "./authority.mjs";
 import { dispatchKnowledge, maintainKnowledge } from "./service.mjs";
 import { runIngestion } from "./ingestion.mjs";
-import { errorReply, fail, fields, readJson, reply } from "./contracts.mjs";
+import { errorReply, fail, fields, KnowledgeError, readJson, reply } from "./contracts.mjs";
+import { logFailure } from "../log.mjs";
+
+// Refusals are answers; unexpected faults and server-side failures are logged.
+function failure(event, error) {
+  if (!(error instanceof KnowledgeError) || error.status >= 500) logFailure(event, error, { code: error?.code ?? "knowledge_unavailable" });
+  return errorReply(error);
+}
 
 export class KnowledgeCatalogue extends DurableObject {
   constructor(ctx, env) {
@@ -16,7 +23,7 @@ export class KnowledgeCatalogue extends DurableObject {
       const body = await readJson(request);
       fields(body, ["operation", "payload"], ["operation", "payload"]);
       return reply(await this.authority.call(body.operation, body.payload));
-    } catch (error) { return errorReply(error); }
+    } catch (error) { return failure("knowledge_catalogue_failed", error); }
   }
 }
 
@@ -32,7 +39,9 @@ export default {
         || url.search || url.hash || url.username || url.password) fail("not_found", "Unknown Knowledge route.", 404);
       const body = await readJson(request);
       return reply(await dispatchKnowledge(env, body, { signal: request.signal }));
-    } catch (error) { return errorReply(error); }
+    } catch (error) { return failure("knowledge_request_failed", error); }
   },
-  async scheduled(_event, env, ctx) { ctx.waitUntil(maintainKnowledge(env)); },
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(maintainKnowledge(env).catch(error => { logFailure("knowledge_maintenance_failed", error); throw error; }));
+  },
 };

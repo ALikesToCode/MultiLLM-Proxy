@@ -47,6 +47,7 @@ function environment({ result = { status: "ok" }, status = 200, overrides = {} }
   const env = {
     ADMIN_API_KEY: ADMIN_KEY,
     ADMIN_USERNAME: " operator ",
+    AUTH_STORAGE_BACKEND: "d1",
     INTELLIGENCE_DB: database(records),
     KNOWLEDGE_SERVICE: {
       async fetch(url, init) {
@@ -234,19 +235,26 @@ test("dashboard accounts stored in D1 are verified at the edge with their Knowle
   const reader = await account("reader", "knowledge:read");
   const chat = await account("chatter", "chat,models");
   const admin = await account("owner", "admin,chat,metrics,models,users", { is_admin: 1 });
+  const planted = await account("mallory", "admin,knowledge:read", { is_admin: 1 });
   const revoked = await account("revoked", "knowledge:read", { revoked_at: "2026-09-24T01:00:00+00:00" });
   const legacy = await account("legacy", "knowledge:read", { api_key_hash: "pbkdf2:sha256:600000$salt$" + "b".repeat(64) });
   const { env, dispatched } = environment();
-  env.INTELLIGENCE_DB = database(new Map(), { lookups: 0 }, [reader.row, chat.row, admin.row, revoked.row, legacy.row]);
+  env.INTELLIGENCE_DB = database(new Map(), { lookups: 0 }, [reader.row, chat.row, admin.row, revoked.row, legacy.row, planted.row]);
+  env.ADMIN_USERNAMES = "owner";
   const tools = (await (await call(env, mcpRequest(reader.key, "tools/list"))).json()).result.tools;
   assert.equal(tools.length, catalogue.tools.filter(entry => entry.scope === "knowledge:read").length);
   await call(env, mcpRequest(admin.key, "tools/call", { name: "knowledge_status" }));
   assert.deepEqual(dispatched.at(-1).principal, { id: "owner", scopes: ["knowledge:read", "knowledge:manage"] });
+  await call(env, mcpRequest(planted.key, "tools/call", { name: "knowledge_search", arguments: { query: "x" } }));
+  assert.deepEqual(dispatched.at(-1).principal, { id: "mallory", scopes: ["knowledge:read"] },
+    "an admin row for a username the Worker does not configure gets no management scope");
   assert.equal((await call(env, mcpRequest(chat.key, "ping"))).status, 403);
   for (const key of [revoked.key, reader.key.slice(0, -1) + "x"]) assert.equal((await call(env, mcpRequest(key, "ping"))).status, 401);
   assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(legacy.key, "ping"), env), null, "unverifiable hashes use the Container");
-  const external = { ...env, CONTROL_PLANE_DATABASE_URL: "postgresql://control" };
+  const external = { ...env, AUTH_STORAGE_BACKEND: undefined, CONTROL_PLANE_DATABASE_URL: "postgresql://control" };
   assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(reader.key, "ping"), external), null, "PostgreSQL accounts stay in the Container");
+  const implicit = { ...env, AUTH_STORAGE_BACKEND: undefined };
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(reader.key, "ping"), implicit), null, "a D1 binding alone never selects D1 accounts");
 });
 
 test("provider tools are served at the edge over MCP and REST", async () => {
@@ -264,4 +272,78 @@ test("provider tools are served at the edge over MCP and REST", async () => {
     principal: { id: "integration:agents", scopes: ["knowledge:read"] }, payload: { url: "https://docs.python.org/3/" } });
   assert.equal(await handleKnowledgeEdgeRequest(new Request(`${ORIGIN}/v1/knowledge/native/unknown_tool`, { method: "POST",
     headers: { authorization: `Bearer ${reader.key}` } }), env), null);
+});
+
+test("MCP accepts client replies, returns structured results without a version header and names the scope it needs", async () => {
+  const { env } = environment({ result: { status: "ok", excerpts: [] } });
+  const reply = await call(env, new Request(`${ORIGIN}/mcp`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "server-1", result: {} }) }));
+  assert.equal(reply.status, 202);
+  assert.equal(await reply.text(), "");
+  const body = await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_context", arguments: { query: "x" } }))).json();
+  assert.deepEqual(body.result.structuredContent, { status: "ok", excerpts: [] });
+  const old = await (await call(env, mcpRequest(reader.key, "initialize", { protocolVersion: "2025-03-26" }))).json();
+  assert.equal(old.result.protocolVersion, "2025-06-18", "batching versions are not offered");
+  assert.equal((await call(env, mcpRequest(reader.key, "ping", undefined, { "mcp-protocol-version": "2025-03-26" }))).status, 400);
+  const forbidden = await call(env, mcpRequest(chatOnly.key, "tools/list"));
+  assert.equal((await forbidden.json()).message, "The authenticated key requires the knowledge:read scope");
+});
+
+test("status reports whether the deployed Knowledge Worker serves this edge's contract", async () => {
+  const operations = [...new Set(catalogue.tools.map(entry => entry.operation))];
+  const { env } = environment({ result: { enabled: true, contract: { native_tools_hash: catalogue.nativeToolsHash, operations } } });
+  const status = async () => (await (await call(env, new Request(`${ORIGIN}/v1/knowledge/status`, {
+    headers: { authorization: `Bearer ${manager.key}` } }))).json()).contract_check;
+  assert.deepEqual(await status(), { matched: true, expected_native_tools_hash: catalogue.nativeToolsHash, missing_operations: [] });
+  const stale = environment({ result: { contract: { native_tools_hash: "0".repeat(64), operations: operations.slice(1) } } }).env;
+  const check = (await (await call(stale, new Request(`${ORIGIN}/v1/knowledge/status`, {
+    headers: { authorization: `Bearer ${manager.key}` } }))).json()).contract_check;
+  assert.equal(check.matched, false);
+  assert.deepEqual(check.missing_operations, [operations[0]]);
+});
+
+test("wrong keys for one prefix are throttled without locking out a verified key", async () => {
+  const owner = await generateIntegrationCredential();
+  const { env, records } = environment();
+  records.set(owner.keyPrefix, { id: "integration:owner", scopes: ["knowledge:read"], keyHash: owner.keyHash });
+  assert.equal((await call(env, mcpRequest(owner.key, "ping"))).status, 200);
+  // Same prefix, never the owner's key: the suffixes differ from the key's own.
+  const suffixes = ["aa", "ab", "ac", "ad", "ae", "af", "ag"].filter(suffix => !owner.key.endsWith(suffix));
+  const wrong = index => owner.key.slice(0, -2) + suffixes[index % suffixes.length];
+  for (let index = 0; index < 5; index++) assert.equal((await call(env, mcpRequest(wrong(index), "ping"))).status, 401);
+  const throttled = await call(env, mcpRequest(wrong(5), "ping"));
+  assert.equal(throttled.status, 429);
+  assert.equal(throttled.headers.get("retry-after"), "60");
+  assert.equal((await call(env, mcpRequest(owner.key, "ping"))).status, 200, "the verified owner keeps working");
+});
+
+test("concurrent key checks are bounded so wrong keys cannot exhaust the isolate", async () => {
+  const credentials = await Promise.all(Array.from({ length: 20 }, () => generateIntegrationCredential()));
+  const { env, records } = environment();
+  for (const [index, credential] of credentials.entries()) {
+    records.set(credential.keyPrefix, { id: `integration:load-${index}`, scopes: ["knowledge:read"], keyHash: credential.keyHash });
+  }
+  const responses = await Promise.all(credentials.map(credential =>
+    call(env, mcpRequest(credential.key.slice(0, -1) + (credential.key.endsWith("A") ? "B" : "A"), "ping"))));
+  const statuses = responses.map(response => response.status);
+  assert.equal(statuses.filter(status => status === 401).length, 18, "two running checks plus sixteen queued");
+  assert.equal(statuses.filter(status => status === 503).length, 2);
+  assert.equal(responses.find(response => response.status === 503).headers.get("retry-after"), "1");
+});
+
+test("toolsets narrow MCP discovery without hiding tools from calls", async () => {
+  const { env, dispatched } = environment({ result: { provider: "exa", result: {} } });
+  const list = async query => (await (await call(env, new Request(`${ORIGIN}/mcp${query}`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) }))).json());
+  assert.deepEqual((await list("?toolsets=core")).result.tools.map(tool => tool.name), ["knowledge_context", "knowledge_search", "knowledge_artifact"]);
+  const exa = (await list("?toolsets=core,exa")).result.tools.map(tool => tool.name);
+  assert.ok(exa.includes("knowledge_exa_search") && !exa.includes("knowledge_firecrawl_scrape"));
+  assert.equal((await list("")).result.tools.length, catalogue.tools.filter(entry => entry.scope === "knowledge:read").length);
+  assert.equal((await list("?toolsets=everything")).error.code, -32602);
+  await call(env, new Request(`${ORIGIN}/mcp?toolsets=core`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "knowledge_firecrawl_map", arguments: { url: "https://docs.python.org/3/" } } }) }));
+  assert.equal(dispatched.at(-1).operation, "native.firecrawl_map");
 });

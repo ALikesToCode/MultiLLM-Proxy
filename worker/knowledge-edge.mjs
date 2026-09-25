@@ -9,8 +9,9 @@ import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import catalogue from "./knowledge-mcp-catalogue.json" with { type: "json" };
 import { authStorageBackend } from "./container-env.mjs";
-import { activeUsersByPrefix, validUser } from "./control-users-d1.mjs";
+import { activeUsersByPrefix, adminUsernames, grantsAdmin, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
+import { logFailure } from "./log.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
 const KEY_NAMESPACE = "mllm_intelligence_";
@@ -33,6 +34,17 @@ const SCRYPT = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 // Only the expensive hash check is memoized; each request still reads the current
 // D1 row, so rotation and revocation take effect immediately.
 const verifiedHashes = new Map();
+// Each check holds 32 MiB in an isolate that also serves chat. Bound concurrent checks,
+// and after repeated wrong keys for one prefix stop deriving for a minute; a key this
+// isolate already verified still passes, so a guessed prefix cannot lock out its owner.
+const SCRYPT_SLOTS = 2;
+const SCRYPT_QUEUE = 16;
+const FAILURE_WINDOW_MS = 60000;
+const FAILURES_PER_PREFIX = 5;
+const MAX_TRACKED_PREFIXES = 1024;
+const prefixFailures = new Map();
+const scryptWaiters = [];
+let scryptActive = 0;
 
 class KnowledgeEdgeError extends Error {
   constructor(code, message, status) {
@@ -48,7 +60,7 @@ const isRecord = value => value !== null && typeof value === "object" && !Array.
 const noStore = { "cache-control": "no-store" };
 const json = (value, status = 200, headers = {}) => Response.json(value, { status, headers: { ...noStore, ...headers } });
 const restError = (code, message, status) => json({ error: { code, message } }, status);
-const rpcError = (id, code, message, status = 200) => json({ jsonrpc: "2.0", id, error: { code, message } }, status);
+const rpcError = (id, code, message, status = 200, headers = {}) => json({ jsonrpc: "2.0", id, error: { code, message } }, status, headers);
 const rpcResult = (id, result) => json({ jsonrpc: "2.0", id, result });
 
 export function isKnowledgeEdgePath(pathname) {
@@ -85,40 +97,78 @@ function validRecord(record, prefix) {
     && typeof record.createdAt === "string" && (record.revokedAt === null || typeof record.revokedAt === "string");
 }
 
-async function matchesHash(key, keyHash) {
-  const [, salt, expected] = HASH_PATTERN.exec(keyHash);
-  const memo = `${keyHash}\n${createHash("sha256").update(key).digest("hex")}`;
-  if (verifiedHashes.has(memo)) return true;
-  const derived = await new Promise((resolve, reject) => {
-    scrypt(key, salt, 64, SCRYPT, (error, value) => (error ? reject(error) : resolve(value)));
-  });
-  if (!timingSafeEqual(derived, Buffer.from(expected, "hex"))) return false;
-  if (verifiedHashes.size >= MAX_VERIFIED) verifiedHashes.delete(verifiedHashes.keys().next().value);
-  verifiedHashes.set(memo, true);
-  return true;
+async function withScryptSlot(callback) {
+  if (scryptActive < SCRYPT_SLOTS) scryptActive += 1;
+  else if (scryptWaiters.length >= SCRYPT_QUEUE) {
+    throw new KnowledgeEdgeError("knowledge_busy", "Too many keys are being verified. Retry shortly.", 503);
+  } else await new Promise(resolve => scryptWaiters.push(resolve));
+  try { return await callback(); }
+  finally {
+    // A waiting check inherits this slot; otherwise it is released.
+    const next = scryptWaiters.shift();
+    if (next) next(); else scryptActive -= 1;
+  }
 }
 
-// Mirrors the Container: administrators hold both Knowledge scopes.
-function accountScopes(user) {
-  const scopes = user.scopes.split(",").map(scope => scope.trim()).filter(Boolean);
-  return user.is_admin === 1 || scopes.includes("admin") ? [...KNOWLEDGE_SCOPES]
-    : scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope));
+function prefixThrottled(prefix, now = Date.now()) {
+  const record = prefixFailures.get(prefix);
+  return Boolean(record && record.until > now && record.count >= FAILURES_PER_PREFIX);
+}
+
+function recordPrefixFailure(prefix, now = Date.now()) {
+  const previous = prefixFailures.get(prefix);
+  const record = previous && previous.until > now ? previous : { count: 0, until: now + FAILURE_WINDOW_MS };
+  record.count += 1;
+  prefixFailures.delete(prefix);
+  prefixFailures.set(prefix, record);
+  if (prefixFailures.size > MAX_TRACKED_PREFIXES) prefixFailures.delete(prefixFailures.keys().next().value);
+}
+
+/** Index of the stored hash the key matches, or -1 after recording a failure for the prefix. */
+async function matchingHash(key, keyHashes, prefix) {
+  const digest = createHash("sha256").update(key).digest("hex");
+  const known = keyHashes.findIndex(keyHash => verifiedHashes.has(`${keyHash}\n${digest}`));
+  if (known >= 0) return known;
+  if (prefixThrottled(prefix)) {
+    throw new KnowledgeEdgeError("key_throttled", "Too many invalid keys were presented for this key prefix. Retry in a minute.", 429);
+  }
+  for (const [index, keyHash] of keyHashes.entries()) {
+    const [, salt, expected] = HASH_PATTERN.exec(keyHash);
+    const derived = await withScryptSlot(() => new Promise((resolve, reject) => {
+      scrypt(key, salt, 64, SCRYPT, (error, value) => (error ? reject(error) : resolve(value)));
+    }));
+    if (!timingSafeEqual(derived, Buffer.from(expected, "hex"))) continue;
+    if (verifiedHashes.size >= MAX_VERIFIED) verifiedHashes.delete(verifiedHashes.keys().next().value);
+    verifiedHashes.set(`${keyHash}\n${digest}`, true);
+    return index;
+  }
+  recordPrefixFailure(prefix);
+  return -1;
+}
+
+// Mirrors the Container: administrators hold both Knowledge scopes. Only usernames the
+// Worker configures can be administrators, whatever a stored row claims.
+function accountScopes(user, env) {
+  if (grantsAdmin(user) && adminUsernames(env).has(user.username)) return [...KNOWLEDGE_SCOPES];
+  return user.scopes.split(",").map(scope => scope.trim()).filter(scope => KNOWLEDGE_SCOPES.includes(scope));
 }
 
 // Dashboard accounts in D1 use the Container's key prefix and Werkzeug hashes.
 async function accountPrincipal(env, key) {
   if (key.length > MAX_KEY_LENGTH) return { denied: true };
+  const prefix = `mllm_${key.slice(0, 8)}`;
   let users;
-  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, `mllm_${key.slice(0, 8)}`); }
-  catch { return null; }
-  let unverifiable = false;
-  for (const user of users) {
-    if (!validUser(user)) return null;
-    if (!HASH_PATTERN.test(user.api_key_hash)) { unverifiable = true; continue; }
-    if (await matchesHash(key, user.api_key_hash)) return { principal: { id: user.username, scopes: accountScopes(user) } };
+  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, prefix); }
+  catch (error) {
+    logFailure("knowledge_edge_account_lookup_failed", error);
+    return null;
   }
+  if (!users.every(validUser)) return null;
+  const verifiable = users.filter(user => HASH_PATTERN.test(user.api_key_hash));
+  const index = verifiable.length ? await matchingHash(key, verifiable.map(user => user.api_key_hash), prefix) : -1;
+  if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env) } };
   // A hash format the edge cannot check is left to the Container.
-  return unverifiable ? null : { denied: true };
+  return verifiable.length < users.length ? null : { denied: true };
 }
 
 /**
@@ -138,10 +188,13 @@ async function resolvePrincipal(request, env) {
   const prefix = key.slice(0, KEY_NAMESPACE.length + 16);
   let record;
   try { record = await lookupIntegrationPrincipal(env.INTELLIGENCE_DB, prefix); }
-  catch { return null; }
+  catch (error) {
+    logFailure("knowledge_edge_credential_lookup_failed", error);
+    return null;
+  }
   if (record === null) return { denied: true };
   if (!validRecord(record, prefix)) return null;
-  if (record.revokedAt !== null || !(await matchesHash(key, record.keyHash))) return { denied: true };
+  if (record.revokedAt !== null || await matchingHash(key, [record.keyHash], prefix) < 0) return { denied: true };
   return { principal: { id: record.id, scopes: record.scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope)) } };
 }
 
@@ -176,6 +229,15 @@ async function readBody(request) {
   return payload;
 }
 
+// Whether the deployed Knowledge Worker serves the contract this edge advertises.
+function contractCheck(status) {
+  const reported = isRecord(status.contract) ? status.contract : {};
+  const operations = new Set(Array.isArray(reported.operations) ? reported.operations : []);
+  const missing = [...new Set(catalogue.tools.map(entry => entry.operation))].filter(operation => !operations.has(operation)).sort();
+  return { matched: reported.native_tools_hash === catalogue.nativeToolsHash && missing.length === 0,
+    expected_native_tools_hash: catalogue.nativeToolsHash, missing_operations: isRecord(status.contract) ? missing : null };
+}
+
 async function dispatch(env, operation, principal, payload, signal) {
   const body = JSON.stringify({ version: 1, operation, principal, payload });
   if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) {
@@ -190,7 +252,8 @@ async function dispatch(env, operation, principal, payload, signal) {
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     });
     result = await response.json();
-  } catch {
+  } catch (error) {
+    logFailure(deadline.aborted ? "knowledge_service_timeout" : "knowledge_service_failed", error, { operation });
     if (deadline.aborted) {
       throw new KnowledgeEdgeError("knowledge_timeout",
         "The Knowledge request timed out. Accepted work may still finish; no retry was started.", 504);
@@ -198,13 +261,15 @@ async function dispatch(env, operation, principal, payload, signal) {
     throw unavailable();
   }
   if (response.ok && isRecord(result) && result.version === 1 && (isRecord(result.result) || Array.isArray(result.result))) {
-    return result.result;
+    return operation === "status" && isRecord(result.result) && Object.hasOwn(result.result, "contract")
+      ? { ...result.result, contract_check: contractCheck(result.result) } : result.result;
   }
   const error = result?.error;
   if (!response.ok && response.status >= 400 && isRecord(error) && ERROR_CODE.test(error.code ?? "")
     && typeof error.message === "string" && error.message.length > 0 && error.message.length <= 1000) {
     throw new KnowledgeEdgeError(error.code, error.message, response.status);
   }
+  logFailure("knowledge_service_invalid_reply", new Error(`HTTP ${response.status}`), { operation });
   throw unavailable();
 }
 
@@ -228,7 +293,7 @@ function acceptsJson(header) {
   });
 }
 
-async function callTool(env, request, principal, id, params, protocol) {
+async function callTool(env, request, principal, id, params) {
   const entry = typeof params.name === "string" ? TOOLS.get(params.name) : undefined;
   if (!entry) return rpcError(id, -32602, "Unknown Knowledge tool.");
   const failure = (code, message) => rpcResult(id, { isError: true, content: [{ type: "text",
@@ -242,7 +307,7 @@ async function callTool(env, request, principal, id, params, protocol) {
     // The private service validates every contract identically for REST and MCP.
     const result = await dispatch(env, entry.operation, principal, args, request.signal);
     const toolResult = { content: [{ type: "text", text: JSON.stringify(result) }], isError: Boolean(result?.error) };
-    if (protocol === "2025-06-18" && isRecord(result)) toolResult.structuredContent = result;
+    if (isRecord(result)) toolResult.structuredContent = result;
     return rpcResult(id, toolResult);
   } catch (error) {
     if (!(error instanceof KnowledgeEdgeError)) throw error;
@@ -268,6 +333,11 @@ async function handleMcp(request, env, principal) {
   const { id, method } = body;
   const params = body.params ?? {};
   const hasId = Object.hasOwn(body, "id");
+  // A client's reply to a server request carries no method; it is accepted without a body.
+  if (body.jsonrpc === "2.0" && !Object.hasOwn(body, "method") && hasId
+    && Object.hasOwn(body, "result") !== Object.hasOwn(body, "error")) {
+    return new Response(null, { status: 202, headers: noStore });
+  }
   if (body.jsonrpc !== "2.0" || typeof method !== "string" || !isRecord(params)
     || (hasId && !((typeof id === "string" && id.length <= 200) || Number.isSafeInteger(id)))) {
     return rpcError(null, -32600, "Invalid JSON-RPC request.", 400);
@@ -286,10 +356,17 @@ async function handleMcp(request, env, principal) {
   }
   if (method === "ping") return rpcResult(id, {});
   if (method === "tools/list") {
-    return rpcResult(id, { tools: catalogue.tools.filter(entry => permits(principal, entry.scope)).map(entry => entry.definition) });
+    // /mcp?toolsets=core,exa narrows discovery to what an agent uses; every tool stays callable.
+    const requested = new URL(request.url).searchParams.get("toolsets");
+    const toolsets = requested === null ? null : new Set(requested.split(",").map(name => name.trim()).filter(Boolean));
+    if (toolsets && (!toolsets.size || [...toolsets].some(name => !catalogue.toolsets.includes(name)))) {
+      return rpcError(id, -32602, `Unknown toolset. Use any of: ${catalogue.toolsets.join(", ")}.`);
+    }
+    return rpcResult(id, { tools: catalogue.tools.filter(entry => permits(principal, entry.scope)
+      && (!toolsets || toolsets.has(entry.toolset))).map(entry => entry.definition) });
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found.");
-  return callTool(env, request, principal, id, params, protocol);
+  return callTool(env, request, principal, id, params);
 }
 
 function restRoute(method, pathname) {
@@ -342,12 +419,19 @@ export async function handleKnowledgeEdgeRequest(request, env) {
   if (!env.KNOWLEDGE_SERVICE || request.method === "OPTIONS") return null;
   const route = pathname === "/mcp" ? "mcp" : restRoute(request.method, pathname);
   if (!route) return null;
-  const resolved = await resolvePrincipal(request, env);
+  let resolved;
+  try { resolved = await resolvePrincipal(request, env); }
+  catch (error) {
+    if (!(error instanceof KnowledgeEdgeError)) throw error;
+    const retry = { "retry-after": error.status === 429 ? "60" : "1" };
+    return route === "mcp" ? rpcError(null, -32000, error.message, error.status, retry) : json({ error: { code: error.code, message: error.message } }, error.status, retry);
+  }
   if (!resolved) return null;
   if (resolved.denied) return json({ error: "Invalid API key", message: "The provided API key is not valid" }, 401);
   const { principal } = resolved;
   if (!KNOWLEDGE_SCOPES.some(scope => permits(principal, scope))) {
-    const scope = route === "mcp" ? "knowledge:manage" : route.scope;
+    // Either Knowledge scope opens MCP, so a key with neither needs the smaller one.
+    const scope = route === "mcp" ? "knowledge:read" : route.scope;
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${scope} scope` }, 403);
   }
   try {
