@@ -76,6 +76,22 @@ def test_media_skill_and_llms_txt_teach_agents_to_generate_images_and_video(clie
     assert "POST https://gateway.example/v1/videos" in llms and "GET /v1/videos/{id}" in llms
 
 
+def test_chat_skill_and_llms_txt_teach_agents_to_call_chat_models_from_code(client):
+    skill = client.get("/agent-onboarding/chat/SKILL.md?download=1", base_url="https://gateway.example")
+    assert skill.status_code == 200 and skill.content_type.startswith("text/markdown")
+    text = skill.get_data(as_text=True)
+    assert text.startswith("---\nname: multillm-chat\n")
+    assert "`MULTILLM_BASE_URL=https://gateway.example`" in text
+    for fact in ("/v1/models", "/v1/chat/completions", "/v1/responses", "auto:glm-5.2", "free:text", "max_retries=0"):
+        assert fact in text, fact
+    assert 'attachment; filename="SKILL.md"' == skill.headers["Content-Disposition"]
+    llms = client.get("/llms.txt", base_url="https://gateway.example").get_data(as_text=True)
+    assert llms.startswith("# MultiLLM Proxy")
+    for link in ("https://gateway.example/agent-onboarding/chat/SKILL.md", "https://gateway.example/agent-onboarding/SKILL.md",
+                 "OpenAI SDK base URL `https://gateway.example/v1`", "POST https://gateway.example/v1/chat/completions"):
+        assert link in llms, link
+
+
 def test_client_configs_reference_environment_credentials(client):
     html = client.get("/agent-onboarding", base_url="https://gateway.example").get_data(as_text=True)
     def snippet(identifier):

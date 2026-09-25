@@ -431,6 +431,11 @@ runs many prompts and sizes in one call; and `/v1/videos` creates asynchronous V
 Grok Imagine Video and Sora jobs. See [Image and video generation](docs/media-generation.md);
 agents can install `/agent-onboarding/media/SKILL.md`.
 
+LLMs and coding agents can learn the gateway from `/llms.txt` and three installable
+skills: `/agent-onboarding/chat/SKILL.md` (chat models from code),
+`/agent-onboarding/media/SKILL.md` (images, batches and video) and
+`/agent-onboarding/SKILL.md` (Knowledge).
+
 ### Provider-Specific Features
 
 - **OpenAI**: Full support for chat completions, embeddings, and function calling

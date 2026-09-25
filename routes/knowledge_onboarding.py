@@ -11,14 +11,16 @@ from routes import knowledge_mcp
 PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_setup", "knowledge_llms", "knowledge_llms_full",
     "knowledge_agent_skill", "knowledge_agent_prompt", "knowledge_agent_config", "media_agent_skill",
+    "chat_agent_skill",
 })
 _SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-knowledge" / "SKILL.md"
-_MEDIA_SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-media" / "SKILL.md"
+_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 _RESOURCES = [
     ("/llms.txt", "Discovery index for agents: setup links, access model and providers."),
     ("/llm.txt", "Alias of llms.txt for clients that request the singular name."),
     ("/llms-full.txt", "Complete operating instructions; the same text as the skill."),
     ("/agent-onboarding/SKILL.md", "Installable skill for Codex and Claude Code."),
+    ("/agent-onboarding/chat/SKILL.md", "Installable skill for chat models from code: SDK setup, routes and retries."),
     ("/agent-onboarding/media/SKILL.md", "Installable skill for image, image batch and video generation."),
     ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
     ("/agent-onboarding/config.json", "Endpoint, protocol versions, scopes and tool catalogue."),
@@ -89,10 +91,18 @@ def _skill():
     return content.replace("# MultiLLM Knowledge\n", "# MultiLLM Knowledge\n" + connection, 1)
 
 
-def _media_skill():
-    content = _MEDIA_SKILL_PATH.read_text(encoding="utf-8")
+def _gateway_skill(name, title):
+    """A chat or media skill with this gateway's origin, as agents install it."""
+    content = (_SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
     connection = f"\nGateway origin: `{_origin()}`. Set `MULTILLM_BASE_URL={_origin()}` for the examples below.\n"
-    return content.replace("# MultiLLM Media\n", "# MultiLLM Media\n" + connection, 1)
+    return content.replace(f"# {title}\n", f"# {title}\n" + connection, 1)
+
+
+def _download(content):
+    response = _text(content, markdown=True)
+    if request.args.get("download") == "1":
+        response.headers["Content-Disposition"] = 'attachment; filename="SKILL.md"'
+    return response
 
 
 def _text(content, *, markdown=False):
@@ -117,32 +127,30 @@ def register_knowledge_onboarding_routes(app):
     @app.get("/llms.txt")
     def knowledge_llms():
         origin = _origin()
-        return _text(f"""# MultiLLM Knowledge Gateway
+        return _text(f"""# MultiLLM Proxy
 
-> One scoped knowledge service for technical evidence, public documentation indexing,
-> and credit-priced structured data. Clients use a proxy key; provider keys stay private.
+> One OpenAI-compatible gateway for chat models, image and video generation, and cited
+> technical knowledge. Clients use a scoped proxy key; provider keys stay private.
 
-## Setup
-- [Agent setup]({origin}/agent-onboarding): Copyable setup prompt and client configuration.
-- [Installable skill]({origin}/agent-onboarding/SKILL.md): Complete operating instructions.
-- [Setup prompt]({origin}/agent-onboarding/prompt.txt): Configure this service as the default knowledge entry point.
-- [Machine configuration]({origin}/agent-onboarding/config.json): Endpoint, scopes and tool catalogue.
-- [Full instructions]({origin}/llms-full.txt): Evidence, management, cost and retry contracts.
+## Skills for LLMs and coding agents
+Install these in Claude Code, Codex or another agent, or read them before writing code.
+- [Chat skill]({origin}/agent-onboarding/chat/SKILL.md): Call chat models from code: SDK setup, model discovery, automatic routes, free pools, headers and retries.
+- [Media skill]({origin}/agent-onboarding/media/SKILL.md): Generate images, image batches and videos from code.
+- [Knowledge skill]({origin}/agent-onboarding/SKILL.md): Cited evidence, documentation indexing and Firecrawl Alexandria.
 
-## Access
-- [MCP]({origin}/mcp): Streamable HTTP POST with a scoped Bearer proxy key.
-- [Administrator dashboard]({origin}/knowledge): Sources, jobs, connections and allowances; login required.
+## Chat
+- OpenAI SDK base URL `{origin}/v1` with `Authorization: Bearer $MULTILLM_API_KEY`
+  (scope `chat`, plus `models` for discovery). Keep the key on a server.
+- `GET {origin}/v1/models`: exact model IDs (`provider:model`, `auto:<name>`, `free:text`,
+  `free:vision`) and their chat, image and video capabilities.
+- `POST {origin}/v1/chat/completions`: Chat Completions with optional `stream: true`.
+  `auto:` routes fall back between providers; `free:` pools use only free models.
+- `POST {origin}/v1/responses`: the Responses API for an explicit `provider:model`.
+- `POST {origin}/optimize/v1/chat/completions`: compacts long histories before sending.
 
-Use knowledge:read for retrieval and retained artifacts; knowledge:manage for status,
-sources, jobs and policy. Tools are filtered to the authenticated key's scopes.
-Providers: Context7, Firecrawl, Exa, Mintlify Index, DeepWiki, Cloudflare AI Search,
-and Firecrawl Alexandria. Availability depends on configured credentials and policy.
-Public setup material contains no credentials, source inventory, or account status.
-Alexandria discovery and inspection are free. Execution spends the discovered price;
-report actual receipt costs and keep the same request ID after uncertain outcomes.
+Set SDK retries to 0: a retried generation can be billed twice.
 
 ## Media generation
-- [Media skill]({origin}/agent-onboarding/media/SKILL.md): Images, image batches and videos for LLMs and coding agents.
 - `POST {origin}/v1/images/generations` with `model: "auto:image"`: the best current model
   (GPT Image 2.5 Sunburst) at `max` quality, falling back across GGUU, Cloudflare AI,
   OpenAI, xAI, Together, AIHubMix and Workers AI.
@@ -153,6 +161,23 @@ report actual receipt costs and keep the same request ID after uncertain outcome
 
 Media requests use a proxy key with the `chat` scope. Videos and large batches cost money;
 confirm with the user first.
+
+## Knowledge
+- [Agent setup]({origin}/agent-onboarding): Copyable setup prompt and client configuration.
+- [Setup prompt]({origin}/agent-onboarding/prompt.txt): Configure this service as the default knowledge entry point.
+- [Machine configuration]({origin}/agent-onboarding/config.json): Endpoint, scopes and tool catalogue.
+- [Full instructions]({origin}/llms-full.txt): Evidence, management, cost and retry contracts.
+- [MCP]({origin}/mcp): Streamable HTTP POST with a scoped Bearer proxy key.
+- [Administrator dashboard]({origin}/knowledge): Sources, jobs, connections and allowances; login required.
+
+Use knowledge:read for retrieval and retained artifacts; knowledge:manage for status,
+sources, jobs and policy. Tools are filtered to the authenticated key's scopes.
+Providers: Context7, Firecrawl, Exa, Mintlify Index, DeepWiki, Cloudflare AI Search,
+and Firecrawl Alexandria. Availability depends on configured credentials and policy.
+Alexandria discovery and inspection are free. Execution spends the discovered price;
+report actual receipt costs and keep the same request ID after uncertain outcomes.
+
+Public setup material contains no credentials, source inventory, or account status.
 """, markdown=True)
 
     @app.get("/llms-full.txt")
@@ -168,10 +193,11 @@ confirm with the user first.
 
     @app.get("/agent-onboarding/media/SKILL.md")
     def media_agent_skill():
-        response = _text(_media_skill(), markdown=True)
-        if request.args.get("download") == "1":
-            response.headers["Content-Disposition"] = 'attachment; filename="SKILL.md"'
-        return response
+        return _download(_gateway_skill("multillm-media", "MultiLLM Media"))
+
+    @app.get("/agent-onboarding/chat/SKILL.md")
+    def chat_agent_skill():
+        return _download(_gateway_skill("multillm-chat", "MultiLLM Chat"))
 
     @app.get("/agent-onboarding/prompt.txt")
     def knowledge_agent_prompt():

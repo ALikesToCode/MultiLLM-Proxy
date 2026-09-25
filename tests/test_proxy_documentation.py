@@ -89,6 +89,8 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertIn("http://localhost/v1/models", payload["agent_setup_prompt"])
+        self.assertIn("http://localhost/agent-onboarding/chat/SKILL.md", payload["agent_setup_prompt"])
+        self.assertIn("auto:image", payload["agent_setup_prompt"])
         self.assertIn("http://localhost/v1/knowledge/context", payload["agent_setup_prompt"])
         self.assertIn("http://localhost/mcp", payload["agent_setup_prompt"])
         self.assertIn("knowledge:read", payload["agent_setup_prompt"])

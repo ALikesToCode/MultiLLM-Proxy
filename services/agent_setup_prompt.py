@@ -7,6 +7,9 @@ def build_agent_setup_prompt(base_url: str) -> str:
 Gateway origin: {base_url}
 OpenAI-compatible SDK base URL: {base_url}/v1
 Credential environment variable: MULTILLM_API_KEY
+Agent skills: {base_url}/agent-onboarding/chat/SKILL.md (chat from code),
+{base_url}/agent-onboarding/media/SKILL.md (images, image batches, video) and
+{base_url}/agent-onboarding/SKILL.md (Knowledge). Discovery index: {base_url}/llms.txt
 
 1. Inspect the application's existing client and configuration before editing.
    Reuse its conventions and preserve unrelated work.
@@ -22,15 +25,18 @@ Credential environment variable: MULTILLM_API_KEY
    and I want automatic routing. An SDK base URL ends in /v1; a raw HTTP request
    uses the complete endpoint. Do not append /v1 twice.
 5. Select other contracts only when my task needs them: /v1/responses for
-   Responses-compatible clients and /v1/images/generations for explicit image
-   models. Check model capabilities and the setup guide at {base_url}/docs.
+   Responses-compatible clients; /v1/images/generations with model auto:image
+   (the best image model, quality max, falling back across providers) or an
+   explicit image model; /v1/images/batch for several prompts or sizes; and
+   /v1/videos for asynchronous video jobs (poll /v1/videos/{{id}}, then download
+   /content). Check model capabilities and the setup guide at {base_url}/docs.
    The guide and /docs.json require dashboard login, not just an API bearer key.
    Provider-native routes have their own model IDs, protocols, and permissions;
    do not switch to them automatically or assume a user key grants admin access.
 6. Keep credentials on the server. Handle HTTP errors and SSE completion or
    interruption explicitly. Disable automatic retries of generation POSTs:
    a timeout or 5xx can follow billable work, and the proxy provides no
-   idempotency guarantee. Keep image providers explicit.
+   idempotency guarantee. Automatic routes already fall back between providers.
 7. Verify configuration and model discovery first. Run a minimal generation
    only within my task's authorized scope. Report the selected endpoint and
    model, checks performed, and any failures without exposing credentials.

@@ -83,6 +83,59 @@ curl -sS "$MULTILLM_BASE_URL/v1/videos" \
   `image_url` (https or a PNG, JPEG or WebP data URL) to animate a still image, and
   `generate_audio` (default true where supported).
 
+## Use from code
+
+Python (OpenAI SDK; `quality="max"` and 4K sizes pass through even where the SDK's
+type hints list fewer values):
+
+```python
+import base64, os, pathlib, time
+import requests
+from openai import OpenAI
+
+base, key = os.environ["MULTILLM_BASE_URL"], os.environ["MULTILLM_API_KEY"]
+client = OpenAI(base_url=base + "/v1", api_key=key, max_retries=0, timeout=600)
+
+image = client.images.generate(model="auto:image", prompt="A paper lantern festival at dusk",
+                               size="2048x2048", quality="max", response_format="b64_json")
+pathlib.Path("lantern.png").write_bytes(base64.b64decode(image.data[0].b64_json))
+
+headers = {"Authorization": f"Bearer {key}"}
+batch = requests.post(f"{base}/v1/images/batch", headers=headers, timeout=900, json={
+    "defaults": {"model": "auto:image", "response_format": "url"},
+    "items": [{"id": "wide", "prompt": "Desert road at noon", "size": "3840x2160"},
+              {"id": "square", "prompt": "Desert road icon", "size": "1024x1024"}]}).json()
+for item in batch["data"]:
+    print(item["id"], item["status"], [image["url"] for image in item.get("images", [])])
+
+job = requests.post(f"{base}/v1/videos", headers=headers, timeout=900,
+                    json={"prompt": "Waves rolling onto a black sand beach", "seconds": 8}).json()
+while job["status"] not in ("completed", "failed"):
+    time.sleep(15)
+    job = requests.get(f"{base}/v1/videos/{job['id']}", headers=headers, timeout=60).json()
+if job["status"] == "completed":
+    video = requests.get(f"{base}/v1/videos/{job['id']}/content", headers=headers, timeout=600)
+    pathlib.Path("waves.mp4").write_bytes(video.content)
+```
+
+TypeScript (`fetch`, so every gateway field is allowed):
+
+```ts
+const base = process.env.MULTILLM_BASE_URL!;
+const headers = { Authorization: `Bearer ${process.env.MULTILLM_API_KEY}`, "Content-Type": "application/json" };
+
+const response = await fetch(`${base}/v1/images/generations`, {
+  method: "POST", headers,
+  body: JSON.stringify({ model: "auto:image", prompt: "Isometric city block, soft light", size: "1536x1024", response_format: "url" }),
+});
+if (!response.ok) throw new Error(`Image failed: ${response.status} ${await response.text()}`);
+const { data } = await response.json();
+console.log(data[0].url, response.headers.get("X-MultiLLM-Auto-Selected-Model"));
+```
+
+Keep generation on the server (the key must not reach a browser), keep SDK retries at 0,
+and allow long timeouts: `max` quality at 4K can take several minutes.
+
 ## Check providers
 
 - `GET /v1/media/providers` lists each route's candidates, whether they can run now and
