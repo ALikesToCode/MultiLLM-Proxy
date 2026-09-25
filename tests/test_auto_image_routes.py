@@ -44,15 +44,17 @@ class AutoImageRouteTest(UnifiedApiTestCase):
     def save(self, route_id, candidates):
         AutoRouteService.save_route(route_id, candidates, self.app.config["API_BASE_URLS"])
 
-    def test_seeded_gpt_image_2_5_route_generates_through_gguu(self):
+    def test_seeded_gpt_image_2_5_route_generates_through_gguu_at_max_quality(self):
         response, make_request = self.generate("auto:gpt-image-2.5", [upstream(200, IMAGE)])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), IMAGE)
         forwarded = make_request.call_args.kwargs
         self.assertEqual(forwarded["url"], "https://gguuai.com/v1/images/generations")
-        self.assertEqual(json.loads(forwarded["data"])["model"], "gpt-image-2.5")
+        body = json.loads(forwarded["data"])
+        self.assertEqual((body["model"], body["quality"], body["moderation"]), ("gpt-image-2.5-sunburst", "max", "low"))
+        self.assertEqual(forwarded["timeout_override"], (10, 600), "maximum-quality images may take minutes")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Route"], "auto:gpt-image-2.5")
-        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gguu:gpt-image-2.5")
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gguu:gpt-image-2.5-sunburst")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
 
     def test_image_route_skips_unconfigured_and_chat_only_candidates_then_fails_over_after_refusal(self):
@@ -71,14 +73,23 @@ class AutoImageRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Priority"], "4")
 
-    def test_image_route_never_repeats_a_paid_request_after_an_ambiguous_failure(self):
+    def test_image_route_fails_over_after_a_provider_error_but_never_after_an_ambiguous_timeout(self):
         self.save("auto:image-test", ["gguu:gpt-image-2.5", "latix:gpt-image-2"])
         response, make_request = self.generate(
-            "auto:image-test", [upstream(500, {"error": {"message": "upstream failed"}})],
+            "auto:image-test", [upstream(500, {"error": {"message": "upstream failed"}}), upstream(200, IMAGE)],
         )
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(make_request.call_count, 1)
-        self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
+        self.assertEqual(response.status_code, 200, "an HTTP error delivered no image")
+        self.assertEqual(make_request.call_count, 2)
+        timed_out = upstream(502, {"error": {"message": "GGUU upstream transport request failed"}})
+        timed_out.multillm_transport_failure = "timeout"
+        response, make_request = self.generate("auto:image-test", [timed_out])
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(make_request.call_count, 1, "a sent request may already have been billed")
+        self.assertEqual(response.headers["X-MultiLLM-Transport-Failure"], "timeout")
+        refused = upstream(502, {"error": {"message": "connection refused"}})
+        refused.multillm_transport_failure = "connect"
+        response, make_request = self.generate("auto:image-test", [refused, upstream(200, IMAGE)])
+        self.assertEqual(response.status_code, 200, "a request that never connected can move on")
 
     def test_missing_or_unavailable_image_routes_are_reported(self):
         response, make_request = self.generate("auto:not-configured", [])
@@ -93,6 +104,7 @@ class AutoImageRouteTest(UnifiedApiTestCase):
         response = self.client.get("/v1/models", headers={"Authorization": "Bearer admin-test-key"})
         routes = {model["id"]: model for model in response.get_json()["data"] if model.get("owned_by") == "multillm-auto"}
         self.assertTrue(routes["auto:gpt-image-2.5"]["capabilities"]["supports_images"])
+        self.assertTrue(routes["auto:image"]["capabilities"]["supports_images"])
         self.assertFalse(routes["auto:gpt-image-2.5"]["capabilities"]["supports_chat"])
         self.assertTrue(routes["auto:glm-5.2"]["capabilities"]["supports_chat"])
         self.assertFalse(routes["auto:glm-5.2"]["capabilities"]["supports_images"])

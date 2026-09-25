@@ -721,6 +721,7 @@ export async function loadWorkerModule() {
   const patchedSource = source
     .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/d1-schema.mjs";', `from "${new URL("../../worker/d1-schema.mjs", import.meta.url)}";`)
+    .replace('from "./worker/ai-outbound.mjs";', `from "${new URL("../../worker/ai-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/knowledge-edge.mjs";', `from "${new URL("../../worker/knowledge-edge.mjs", import.meta.url)}";`)
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)

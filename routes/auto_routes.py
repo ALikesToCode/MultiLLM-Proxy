@@ -5,8 +5,10 @@ from flask import Response, g, has_request_context, jsonify, request
 
 from error_handlers import APIError
 from providers.registry import get_registry
+from services import cloudflare_ai
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.image_relay_catalog import refresh_image_relay_catalog
+from services.media_catalog import image_profile, is_video_model
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
@@ -69,12 +71,13 @@ def dispatch_auto_route(
     *,
     validate_candidate: Callable[[str], None],
     dispatch_candidate: Callable[[dict, str, str], Response],
+    fail_over: Callable[[Response], bool] = _is_fallback_response,
 ) -> Response:
     """Run an explicit priority list through injected validation and transport.
 
-    Chat and image generation share this policy: only a refusal that proves the
-    candidate generated nothing moves on, so a paid request is never repeated
-    after an uncertain outcome.
+    By default only a refusal that proves the candidate generated nothing moves on,
+    so a paid chat request is never repeated after an uncertain outcome. Image routes
+    pass their own rule (routes.media_images.image_fail_over).
     """
     route = AutoRouteService.get_route(payload.get("model"))
     if route is None:
@@ -115,7 +118,7 @@ def dispatch_auto_route(
                 type(error).__name__,
             )
             continue
-        if not _is_fallback_response(response):
+        if not fail_over(response):
             if last_failure is not None:
                 last_failure.close()
             return _decorate_response(
@@ -149,13 +152,23 @@ def dispatch_auto_route(
 dispatch_auto_route_chat_completion = dispatch_auto_route
 
 
+def _candidate_capabilities(candidate: str, catalog_capabilities: dict) -> dict:
+    # Provider capabilities describe the account; media models only generate media.
+    provider, provider_model = ModelRegistry.parse_model_id(candidate)
+    if image_profile(provider, provider_model) is not None:
+        return {"supports_chat": False, "supports_images": True, "supports_video": False}
+    if is_video_model(provider_model):
+        return {"supports_chat": False, "supports_images": False, "supports_video": True}
+    return catalog_capabilities
+
+
 def _route_capabilities(route: AutoRoute, catalog: list[dict]) -> dict[str, bool]:
     """A route can do what at least one of its candidates can do."""
     by_id = {model["id"]: model.get("capabilities") or {} for model in catalog}
-    candidates = [by_id.get(candidate, {}) for candidate in route.candidates]
+    candidates = [_candidate_capabilities(candidate, by_id.get(candidate, {})) for candidate in route.candidates]
     return {
         name: any(bool(capabilities.get(name)) for capabilities in candidates)
-        for name in ("supports_chat", "supports_images")
+        for name in ("supports_chat", "supports_images", "supports_video")
     }
 
 
@@ -176,6 +189,8 @@ def openai_auto_route_models(catalog: list[dict] | None = None) -> list[dict]:
 
 
 def _provider_is_configured(auth_service_cls, provider: str) -> bool:
+    if provider == "cloudflare":
+        return cloudflare_ai.enabled()
     if provider == "googleai":
         return bool(auth_service_cls.get_google_token())
     if provider == "nanogpt":

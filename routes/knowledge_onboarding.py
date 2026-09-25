@@ -10,14 +10,16 @@ from routes import knowledge_mcp
 
 PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_setup", "knowledge_llms", "knowledge_llms_full",
-    "knowledge_agent_skill", "knowledge_agent_prompt", "knowledge_agent_config",
+    "knowledge_agent_skill", "knowledge_agent_prompt", "knowledge_agent_config", "media_agent_skill",
 })
 _SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-knowledge" / "SKILL.md"
+_MEDIA_SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-media" / "SKILL.md"
 _RESOURCES = [
     ("/llms.txt", "Discovery index for agents: setup links, access model and providers."),
     ("/llm.txt", "Alias of llms.txt for clients that request the singular name."),
     ("/llms-full.txt", "Complete operating instructions; the same text as the skill."),
     ("/agent-onboarding/SKILL.md", "Installable skill for Codex and Claude Code."),
+    ("/agent-onboarding/media/SKILL.md", "Installable skill for image, image batch and video generation."),
     ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
     ("/agent-onboarding/config.json", "Endpoint, protocol versions, scopes and tool catalogue."),
 ]
@@ -87,6 +89,12 @@ def _skill():
     return content.replace("# MultiLLM Knowledge\n", "# MultiLLM Knowledge\n" + connection, 1)
 
 
+def _media_skill():
+    content = _MEDIA_SKILL_PATH.read_text(encoding="utf-8")
+    connection = f"\nGateway origin: `{_origin()}`. Set `MULTILLM_BASE_URL={_origin()}` for the examples below.\n"
+    return content.replace("# MultiLLM Media\n", "# MultiLLM Media\n" + connection, 1)
+
+
 def _text(content, *, markdown=False):
     response = Response(content, mimetype="text/markdown" if markdown else "text/plain")
     response.headers["Cache-Control"] = "public, max-age=300"
@@ -132,6 +140,19 @@ and Firecrawl Alexandria. Availability depends on configured credentials and pol
 Public setup material contains no credentials, source inventory, or account status.
 Alexandria discovery and inspection are free. Execution spends the discovered price;
 report actual receipt costs and keep the same request ID after uncertain outcomes.
+
+## Media generation
+- [Media skill]({origin}/agent-onboarding/media/SKILL.md): Images, image batches and videos for LLMs and coding agents.
+- `POST {origin}/v1/images/generations` with `model: "auto:image"`: the best current model
+  (GPT Image 2.5 Sunburst) at `max` quality, falling back across GGUU, Cloudflare AI,
+  OpenAI, xAI, Together, AIHubMix and Workers AI.
+- `POST {origin}/v1/images/batch`: different prompts, sizes and models in one call.
+- `POST {origin}/v1/videos`, then `GET /v1/videos/{{id}}` and `/content`: asynchronous video
+  (Veo 3.1, Grok Imagine Video, Sora 2).
+- `GET {origin}/v1/media/providers`: which providers can run now, without cost.
+
+Media requests use a proxy key with the `chat` scope. Videos and large batches cost money;
+confirm with the user first.
 """, markdown=True)
 
     @app.get("/llms-full.txt")
@@ -141,6 +162,13 @@ report actual receipt costs and keep the same request ID after uncertain outcome
     @app.get("/agent-onboarding/SKILL.md")
     def knowledge_agent_skill():
         response = _text(_skill(), markdown=True)
+        if request.args.get("download") == "1":
+            response.headers["Content-Disposition"] = 'attachment; filename="SKILL.md"'
+        return response
+
+    @app.get("/agent-onboarding/media/SKILL.md")
+    def media_agent_skill():
+        response = _text(_media_skill(), markdown=True)
         if request.args.get("download") == "1":
             response.headers["Content-Disposition"] = 'attachment; filename="SKILL.md"'
         return response

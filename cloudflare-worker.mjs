@@ -3,6 +3,7 @@ import { collectContainerEnv } from "./worker/container-env.mjs";
 import { d1Readiness } from "./worker/d1-schema.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
+import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 
 export { ContainerProxy };
@@ -1786,6 +1787,7 @@ export class MultiLLMProxyContainer extends Container {
 MultiLLMProxyContainer.outboundByHost = {
   "intelligence.internal": handleIntelligenceOutbound,
   "knowledge.internal": handleKnowledgeOutbound,
+  "ai.internal": handleAiOutbound,
 };
 
 export default {

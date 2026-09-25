@@ -33,39 +33,42 @@ across providers.
 
 ## Image generation
 
-`POST /v1/images/generations` accepts an `auto:<name>` model. Candidates are
-tried in order; a candidate is skipped before any request when its provider
-cannot generate images, has no configured credential, or the model is disabled
-in Operations. Each candidate receives the same OpenAI Images body with its own
-`provider:model` translated as a direct request would be.
+`POST /v1/images/generations` accepts an `auto:<name>` model; `auto:image`,
+`auto:image-fast`, `auto:gpt-image-2.5` and `auto:video` are seeded
+([media generation](media-generation.md)). Candidates are tried in order; a
+candidate is skipped before any request when its provider cannot generate images,
+has no configured credential, or the model is disabled in Operations. `quality`
+defaults to `max`, and each candidate receives the closest settings its model
+supports (quality, size or aspect ratio, and only the fields it accepts).
 
 ```bash
 curl "$PROXY_BASE_URL/v1/images/generations" \
   -H "Authorization: Bearer $MULTILLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "auto:gpt-image-2.5",
+    "model": "auto:image",
     "prompt": "A glass observatory at sunrise",
     "size": "2048x2048",
-    "quality": "high",
-    "moderation": "low",
     "response_format": "url",
     "n": 1
   }'
 ```
 
-Image generation is paid, so failover follows the chat rule strictly: the next
-candidate is tried only after `401`, `402`, `403`, `404` or `429`, or while the
-provider's circuit is open. Those responses mean the candidate generated
-nothing. A `5xx`, timeout or transport failure is returned as-is and never
-repeated on another provider. Responses carry `X-MultiLLM-Auto-Route`,
+Any HTTP error from an image provider, `5xx` included, means it delivered no
+image, so the next candidate is tried; so is a request that never connected. A
+timeout or a connection dropped after the request was sent may already be billed:
+it is returned with `X-MultiLLM-Transport-Failure` and never repeated on another
+provider. `n` above 1 sends one request per image, each with its own failover.
+Chat routes keep the strict rule (only `401`, `402`, `403`, `404`, `429` or an
+open circuit move on). Responses carry `X-MultiLLM-Auto-Route`,
 `X-MultiLLM-Auto-Selected-Model`, `X-MultiLLM-Auto-Selected-Priority` and
 `X-MultiLLM-Auto-Attempts`. Image edits still use a provider's native
 `/<provider>/v1/images/edits` path.
 
 `GET /v1/models` reports each automatic model's `capabilities` as
-`supports_chat` and `supports_images`, true when at least one candidate can
-serve that endpoint.
+`supports_chat`, `supports_images` and `supports_video`, true when at least one
+candidate can serve that endpoint. Image and video models count only for media,
+even on providers that also serve chat.
 
 Live entries retain safe provider metadata rather than reducing every model to
 an ID and token limits. NavyAI entries, for example, expose endpoint,

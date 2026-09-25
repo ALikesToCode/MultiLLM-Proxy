@@ -17,9 +17,10 @@ test("the container selects D1 only when the Worker holds its binding", () => {
 test("the Worker exports the private container egress entrypoint", async () => {
   const module = await loadWorkerModule();
   assert.equal(typeof module.ContainerProxy, "function");
-  assert.deepEqual(Object.keys(module.MultiLLMProxyContainer.outboundByHost), ["intelligence.internal", "knowledge.internal"]);
+  assert.deepEqual(Object.keys(module.MultiLLMProxyContainer.outboundByHost), ["intelligence.internal", "knowledge.internal", "ai.internal"]);
   assert.equal(module.MultiLLMProxyContainer.outboundByHost["intelligence.internal"], handleIntelligenceOutbound);
   assert.equal(module.MultiLLMProxyContainer.outboundByHost["knowledge.internal"], handleKnowledgeOutbound);
+  assert.equal(typeof module.MultiLLMProxyContainer.outboundByHost["ai.internal"], "function");
 });
 
 test("private storage rejects other targets, paths and methods before accessing D1", async () => {

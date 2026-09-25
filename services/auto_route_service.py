@@ -13,23 +13,68 @@ from services.sqlite_store import connect, storage_path
 
 AUTO_ROUTE_PREFIX = "auto:"
 MAX_AUTO_ROUTE_CANDIDATES = 16
+# Media routes follow the Artificial Analysis image arena (Sep 2026): GPT Image 2.5
+# Sunburst and Flare lead, then GPT Image 2 and Grok Imagine Image 2.0. GGUU serves
+# them first at a flat ¥0.04 per image (1K to 4K); OpenAI charges about $0.21 at max.
+# Cloudflare AI (AI Gateway billing, zero data retention), xAI, Together and AIHubMix
+# follow, and a Workers AI model is the last resort. Operations edits persist in D1
+# when the Worker provides it; on Container-local SQLite until the Container restarts.
 DEFAULT_AUTO_ROUTES = {
     "auto:glm-5.2": (
         "nanogpt:zai-org/glm-5.2:thinking",
         "opencode:glm-5.2",
         "navyai:glm-5.2",
     ),
-    # Image route. Operations edits persist in D1 when the Worker provides it; on
-    # Container-local SQLite they last only until the Container restarts.
-    "auto:gpt-image-2.5": ("gguu:gpt-image-2.5",),
-}
-LEGACY_DEFAULT_AUTO_ROUTES = {
-    "auto:glm-5.2": (
-        "nanogpt:glm-5.2",
-        "opencode:glm-5.2",
-        "navyai:glm-5.2",
+    "auto:image": (
+        "gguu:gpt-image-2.5-sunburst",
+        "gguu:gpt-image-2.5-flare",
+        "gguu:gpt-image-2",
+        "gguu:grok-imagine-image-2.0",
+        "cloudflare:openai/gpt-image-2.5-sunburst",
+        "openai:gpt-image-2.5-sunburst",
+        "xai:grok-imagine-image-2.0",
+        "together:openai/gpt-image-2",
+        "aihubmix:gpt-image-2-free",
+        "cloudflare:@cf/leonardo/lucid-origin",
+    ),
+    "auto:image-fast": (
+        "gguu:gpt-image-2.5-flare",
+        "gguu:gpt-image-2",
+        "cloudflare:openai/gpt-image-2.5-flare",
+        "openai:gpt-image-2.5-flare",
+        "xai:grok-imagine-image-2.0",
+        "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+    ),
+    "auto:gpt-image-2.5": (
+        "gguu:gpt-image-2.5-sunburst",
+        "gguu:gpt-image-2.5",
+        "gguu:gpt-image-2.5-flare",
+        "cloudflare:openai/gpt-image-2.5-sunburst",
+        "openai:gpt-image-2.5-sunburst",
+        "openai:gpt-image-2.5-flare",
+    ),
+    # Asynchronous video jobs; see services/video_generation.py.
+    "auto:video": (
+        "gemini:veo-3.1-generate-preview",
+        "xai:grok-imagine-video-1.5",
+        "cloudflare:google/veo-3.1",
+        "openai:sora-2-pro",
+        "openai:sora-2",
     ),
 }
+# Earlier seeded defaults. A stored route that still holds one follows the current default.
+LEGACY_DEFAULT_AUTO_ROUTES = {
+    "auto:glm-5.2": (
+        (
+            "nanogpt:glm-5.2",
+            "opencode:glm-5.2",
+            "navyai:glm-5.2",
+        ),
+    ),
+    "auto:gpt-image-2.5": (("gguu:gpt-image-2.5",),),
+}
+# Providers served by the Worker rather than a credentialed OpenAI-compatible adapter.
+MEDIA_ONLY_PROVIDERS = frozenset({"cloudflare"})
 _ROUTE_ID_PATTERN = re.compile(r"^auto:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$")
 
@@ -115,7 +160,7 @@ class AutoRouteService:
                     (route_id,),
                 ).fetchall()
             )
-            if current_candidates != LEGACY_DEFAULT_AUTO_ROUTES.get(route_id):
+            if current_candidates not in LEGACY_DEFAULT_AUTO_ROUTES.get(route_id, ()):
                 continue
             connection.execute(
                 "DELETE FROM auto_route_candidates WHERE route_id = ?",
@@ -169,7 +214,7 @@ class AutoRouteService:
                 f"Auto route supports at most {MAX_AUTO_ROUTE_CANDIDATES} candidates"
             )
 
-        supported_providers = set(get_registry(base_urls))
+        supported_providers = set(get_registry(base_urls)) | MEDIA_ONLY_PROVIDERS
         normalized: list[str] = []
         seen: set[str] = set()
         for candidate in candidates:
@@ -219,7 +264,7 @@ class AutoRouteService:
         routes = {route_id: AutoRoute(route_id, candidates, "") for route_id, candidates in DEFAULT_AUTO_ROUTES.items()}
         for route_id, (candidates, updated_at) in stored.items():
             # A route still holding a retired default follows the current default.
-            if candidates == LEGACY_DEFAULT_AUTO_ROUTES.get(route_id):
+            if candidates in LEGACY_DEFAULT_AUTO_ROUTES.get(route_id, ()):
                 candidates = DEFAULT_AUTO_ROUTES[route_id]
             routes[route_id] = AutoRoute(route_id, candidates, updated_at)
         return [routes[route_id] for route_id in sorted(routes)]

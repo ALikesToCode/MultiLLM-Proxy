@@ -118,7 +118,7 @@ PROVIDER_SPECS = (
         ProviderCapabilities(supports_images=True),
     ),
     ("chutes", "v1/chat/completions", ProviderCapabilities()),
-    ("xai", "v1/chat/completions", ProviderCapabilities()),
+    ("xai", "v1/chat/completions", ProviderCapabilities(supports_images=True)),
     ("cerebras", "v1/chat/completions", ProviderCapabilities()),
     ("azure", "v1/chat/completions", ProviderCapabilities()),
     ("scaleway", "chat/completions", ProviderCapabilities()),

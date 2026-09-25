@@ -145,6 +145,7 @@ export function collectContainerEnv(source = {}) {
     ...(source.INTELLIGENCE_DB ? { INTELLIGENCE_STORAGE_BACKEND: "d1" } : {}),
     AUTH_STORAGE_BACKEND: authStorageBackend(source),
     ...(source.KNOWLEDGE_SERVICE ? { KNOWLEDGE_SERVICE_ENABLED: "true" } : {}),
+    ...(source.AI ? { CLOUDFLARE_AI_ENABLED: "true" } : {}),
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
     PYTHONUNBUFFERED: "1",

@@ -424,6 +424,13 @@ Administrators can reorder candidates and create more virtual models from the
 Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)
 for the exact retry boundary, response headers, persistence behavior, and API.
 
+Image and video generation use the same routes: `auto:image` serves the leading
+image model (GPT Image 2.5 Sunburst at `max` quality, GGUU first) with fallback
+across GGUU, Cloudflare AI, OpenAI, xAI, Together and AIHubMix; `/v1/images/batch`
+runs many prompts and sizes in one call; and `/v1/videos` creates asynchronous Veo,
+Grok Imagine Video and Sora jobs. See [Image and video generation](docs/media-generation.md);
+agents can install `/agent-onboarding/media/SKILL.md`.
+
 ### Provider-Specific Features
 
 - **OpenAI**: Full support for chat completions, embeddings, and function calling

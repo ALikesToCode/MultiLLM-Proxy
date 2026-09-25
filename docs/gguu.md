@@ -1,9 +1,12 @@
 # GGUU AI image generation
 
 MultiLLM exposes GGUU AI as a credential-isolated OpenAI Images provider. The
-normalized IDs use `gguu:<provider-model>`, including `gguu:gpt-image-2` and
-the live-discovered `gguu:gpt-image-2.5`; native requests use the `/gguu/*`
-namespace. Chat and Responses routes are not advertised because GGUU's
+normalized IDs use `gguu:<provider-model>`; built in are `gguu:gpt-image-2`,
+`gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`,
+`gguu:grok-imagine-image-2.0` and `gguu:grok-imagine-image-quality`, all priced at a
+flat ¥0.04 per image from 1K to 4K on GGUU's public model plaza. GGUU is the first
+provider of every automatic image route ([media generation](media-generation.md)).
+Native requests use the `/gguu/*` namespace. Chat and Responses routes are not advertised because GGUU's
 GPT Image 2 guide documents the Images API only.
 
 ## Configuration
@@ -67,11 +70,12 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
 ```
 
 The unified endpoint removes the `gguu:` prefix and preserves the remaining
-OpenAI Images request and response fields. The seeded automatic model
-`auto:gpt-image-2.5` routes to `gguu:gpt-image-2.5`; add other providers of that
-model in **Operations** to fail over between them ([automatic routes](auto-routing.md#image-generation)).
-Only `gpt-image-2` receives the automatic `moderation: "low"` default, so send
-`moderation` explicitly for `gpt-image-2.5`.
+OpenAI Images request and response fields. `auto:image` and `auto:gpt-image-2.5`
+start with GPT Image 2.5 Sunburst on GGUU at `max` quality and fall back to other
+GGUU models, Cloudflare AI and OpenAI ([media generation](media-generation.md)). GPT
+Image models, including the 2.5 family, receive the automatic `moderation: "low"`
+default. GGUU keys belong to a group: the `gpt-image` group serves GPT Image and the
+`Grok-image` group serves Grok Imagine.
 
 ## Native endpoints
 

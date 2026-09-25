@@ -100,7 +100,9 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         backup_base_url="https://api.aiaimax.com",
         credential_env="GGUU_API_KEY",
         credential_env_aliases=("GGUUAI_API_KEY",),
-        models=("gpt-image-2",),
+        # GGUU's public model plaza (Sep 2026): each image costs ¥0.04 at 1K, 2K and 4K.
+        models=("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare",
+                "grok-imagine-image-2.0", "grok-imagine-image-quality"),
         supports_chat=False,
     ),
     ImageRelaySpec(

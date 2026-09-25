@@ -15,6 +15,8 @@ from providers.aihubmix import (
 from providers.image_relays import image_relay_backup_base_url
 from route_helpers import copy_raw_provider_response_headers
 
+IMAGE_GENERATION_TIMEOUT = (10, 600)
+
 
 def send_unified_provider_request(
     proxy_service_cls,
@@ -104,6 +106,8 @@ def send_unified_image_request(
         "api_provider": provider,
         "use_cache": False,
         "force_raw_passthrough": True,
+        # Maximum-quality and 4K images can take minutes at every provider.
+        "timeout_override": IMAGE_GENERATION_TIMEOUT,
     }
     return send_unified_provider_request(
         proxy_service_cls,

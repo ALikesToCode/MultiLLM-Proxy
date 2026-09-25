@@ -202,6 +202,20 @@ class ProxyService:
             return True
         return cls._has_idempotency_key(headers)
 
+    @staticmethod
+    def _transport_failure_kind(error: requests.exceptions.RequestException) -> str:
+        """connect: the request never reached the provider; otherwise it may have been accepted."""
+        if isinstance(error, requests.exceptions.ConnectTimeout):
+            return "connect"
+        if isinstance(error, requests.exceptions.ConnectionError):
+            reason = getattr(error.args[0], "reason", None) if error.args else None
+            if type(reason).__name__ in {"NewConnectionError", "NameResolutionError", "ConnectTimeoutError"}:
+                return "connect"
+            return "interrupted"
+        if isinstance(error, requests.exceptions.Timeout):
+            return "timeout"
+        return "interrupted"
+
     @classmethod
     def _should_retry_exception(cls, method: str, data: Optional[bytes], error: requests.exceptions.RequestException) -> bool:
         if isinstance(error, requests.exceptions.ConnectTimeout):
@@ -1407,6 +1421,8 @@ class ProxyService:
                     }
                 ).encode("utf-8")
                 error_response.headers = {"Content-Type": "application/json"}
+                # An attribute, not a header: upstream headers cannot forge it.
+                error_response.multillm_transport_failure = cls._transport_failure_kind(e)
                 return error_response
 
             logger.error(

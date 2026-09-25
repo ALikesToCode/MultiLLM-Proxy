@@ -9,6 +9,7 @@ from typing import Any
 from providers.image_relays import image_relay_specs
 from providers.registry import get_registry
 from proxy import PROVIDER_DETAILS
+from services import cloudflare_ai
 from services.agent_setup_prompt import build_agent_setup_prompt
 from services.auto_route_service import AutoRouteService
 from services.model_catalog_service import build_model_catalog
@@ -44,6 +45,8 @@ PROVIDER_DISPLAY_NAMES = {
 
 
 def _provider_is_configured(auth_service_cls, provider: str) -> bool:
+    if provider == "cloudflare":
+        return cloudflare_ai.enabled()
     if provider == "googleai":
         return any(
             os.environ.get(name)
@@ -225,7 +228,9 @@ def build_proxy_documentation(
                     "provider": provider,
                     "model": provider_model,
                     "priority": priority,
-                    "configured": provider_by_id[provider]["configured"],
+                    # Media-only providers such as Cloudflare AI have no documented chat entry.
+                    "configured": provider_by_id[provider]["configured"] if provider in provider_by_id
+                    else _provider_is_configured(auth_service_cls, provider),
                 }
             )
         auto_routes.append(

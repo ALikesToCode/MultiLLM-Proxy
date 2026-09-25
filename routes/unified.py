@@ -42,6 +42,7 @@ from routes.responses_compat import (
     chat_response_to_responses_payload,
     responses_input_to_messages,
 )
+from routes.media_images import dispatch_auto_image_generation
 from routes.unified_transport import (
     normalized_aihubmix_image_response,
     send_configured_unified_provider_request,
@@ -49,6 +50,8 @@ from routes.unified_transport import (
 )
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
+from services import cloudflare_ai
+from services.media_catalog import TRANSPORT_FAILURE_HEADER
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
@@ -553,6 +556,15 @@ def dispatch_unified_chat_completion(
     )
 
 
+def _validate_image_candidate(app, auth_service_cls, proxy_service_cls, model_id: str) -> None:
+    provider, _ = ModelRegistry.parse_model_id(model_id)
+    if provider == "cloudflare":
+        if not cloudflare_ai.enabled():
+            raise APIError("Cloudflare AI is not bound to this deployment", status_code=503)
+        return
+    _validate_direct_image_target(app, auth_service_cls, proxy_service_cls, model_id)
+
+
 def dispatch_unified_image_generation(
     app,
     auth_service_cls,
@@ -565,16 +577,12 @@ def dispatch_unified_image_generation(
 ):
     """Dispatch an OpenAI Images request, translating provider-native models."""
     if AutoRouteService.is_auto_route(payload.get("model")):
-        def validate_candidate(candidate: str) -> None:
-            _validate_direct_image_target(
-                app,
-                auth_service_cls,
-                proxy_service_cls,
-                candidate,
-            )
-
-        def dispatch_candidate(candidate_payload: dict, candidate: str, route_decision: str) -> Response:
-            return dispatch_unified_image_generation(
+        return dispatch_auto_image_generation(
+            payload,
+            validate_candidate=lambda candidate: _validate_image_candidate(
+                app, auth_service_cls, proxy_service_cls, candidate
+            ),
+            dispatch_candidate=lambda candidate_payload: dispatch_unified_image_generation(
                 app,
                 auth_service_cls,
                 metrics_service_cls,
@@ -582,13 +590,18 @@ def dispatch_unified_image_generation(
                 candidate_payload,
                 request_headers=request_headers,
                 request_args=request_args,
-            )
-
-        return dispatch_auto_route(
-            payload,
-            validate_candidate=validate_candidate,
-            dispatch_candidate=dispatch_candidate,
+            ),
         )
+
+    if cloudflare_ai.is_cloudflare_model(payload.get("model")):
+        start_time = time.time()
+        response = cloudflare_ai.generate_image(payload)
+        metrics_service_cls.get_instance().track_request(
+            provider="cloudflare",
+            status_code=response.status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+        return response
 
     start_time = time.time()
     provider = "unknown"
@@ -665,6 +678,9 @@ def dispatch_unified_image_generation(
                 if provider == "aihubmix"
                 else None
             ) or stream_upstream_response(response)
+            transport_failure = getattr(response, "multillm_transport_failure", None)
+            if transport_failure:
+                downstream_response.headers[TRANSPORT_FAILURE_HEADER] = transport_failure
         return _add_credential_attempt_headers(
             downstream_response,
             provider,

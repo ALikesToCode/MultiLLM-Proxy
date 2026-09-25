@@ -62,6 +62,20 @@ def test_discovery_and_skill_download_agree(client):
     assert client.get("/llm.txt").data == client.get("/llms.txt").data
 
 
+def test_media_skill_and_llms_txt_teach_agents_to_generate_images_and_video(client):
+    skill = client.get("/agent-onboarding/media/SKILL.md?download=1", base_url="https://gateway.example")
+    assert skill.status_code == 200 and skill.content_type.startswith("text/markdown")
+    text = skill.get_data(as_text=True)
+    assert text.startswith("---\nname: multillm-media\n")
+    assert "`MULTILLM_BASE_URL=https://gateway.example`" in text
+    for endpoint in ("/v1/images/generations", "/v1/images/batch", "/v1/videos", "/v1/media/providers", "auto:image", "auto:video"):
+        assert endpoint in text, endpoint
+    assert 'attachment; filename="SKILL.md"' == skill.headers["Content-Disposition"]
+    llms = client.get("/llms.txt", base_url="https://gateway.example").get_data(as_text=True)
+    assert "https://gateway.example/agent-onboarding/media/SKILL.md" in llms
+    assert "POST https://gateway.example/v1/videos" in llms and "GET /v1/videos/{id}" in llms
+
+
 def test_client_configs_reference_environment_credentials(client):
     html = client.get("/agent-onboarding", base_url="https://gateway.example").get_data(as_text=True)
     def snippet(identifier):

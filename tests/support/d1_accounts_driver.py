@@ -72,7 +72,7 @@ def unmigrated():
     restart()  # startup tolerates the missing table and serves without a boot-time copy
     return {"dashboard_key": status(lambda: AuthService.verify_api_key("mllm_unknown-dashboard-key-000000")),
             "admin": AuthService.verify_api_key(os.environ["ADMIN_API_KEY"])["username"],
-            "route": list(AutoRouteService.get_route("auto:gpt-image-2.5").candidates),
+            "route": list(AutoRouteService.get_route("auto:gpt-image-2.5").candidates)[:2],
             "save_route": status(lambda: AutoRouteService.save_route("auto:x", ["gguu:gpt-image-2.5"], {"gguu": "https://gguu.example"}))}
 
 

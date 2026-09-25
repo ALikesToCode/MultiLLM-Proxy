@@ -49,20 +49,20 @@ def test_saved_routes_survive_a_container_restart_over_the_seeded_defaults(route
 
 
 def test_reads_are_cached_and_an_outage_keeps_the_last_stored_routes(routes):
-    AutoRouteService.save_route("auto:image", ["gguu:gpt-image-2.5"], BASE_URLS)
+    AutoRouteService.save_route("auto:image-test", ["gguu:gpt-image-2.5"], BASE_URLS)
     auto_route_d1.reset_cache()
     for _ in range(3):
-        assert AutoRouteService.get_route("auto:image").candidates == ("gguu:gpt-image-2.5",)
+        assert AutoRouteService.get_route("auto:image-test").candidates == ("gguu:gpt-image-2.5",)
     assert routes.calls.count("list") == 1
     routes.down = True
     auto_route_d1._cache["expires"] = 0
     for _ in range(3):
-        assert AutoRouteService.get_route("auto:image").candidates == ("gguu:gpt-image-2.5",)
+        assert AutoRouteService.get_route("auto:image-test").candidates == ("gguu:gpt-image-2.5",)
     assert routes.calls.count("list") == 2, "a failed read is retried after a pause, not on every request"
     with pytest.raises(APIError) as caught:
-        AutoRouteService.save_route("auto:image", ["openai:gpt-image-2.5"], BASE_URLS)
+        AutoRouteService.save_route("auto:image-test", ["openai:gpt-image-2.5"], BASE_URLS)
     assert caught.value.status_code == 503
     auto_route_d1.reset_cache()
     assert AutoRouteService.get_route("auto:gpt-image-2.5").candidates == DEFAULT_AUTO_ROUTES["auto:gpt-image-2.5"], \
         "without any stored copy the seeded defaults still route"
-    assert AutoRouteService.get_route("auto:image") is None
+    assert AutoRouteService.get_route("auto:image-test") is None

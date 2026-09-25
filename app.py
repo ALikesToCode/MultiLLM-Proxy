@@ -26,6 +26,7 @@ from routes.free_routes import register_free_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.unified import register_unified_routes
+from routes.media import register_media_routes
 from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
@@ -115,6 +116,7 @@ def create_app() -> Flask:
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_media_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_intelligence_media_routes(app, csrf, AuthService, ProxyService)
     register_free_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)

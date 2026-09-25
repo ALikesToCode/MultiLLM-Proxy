@@ -12,6 +12,7 @@
     "request_signal_passthrough"
   ],
   "services": [{ "binding": "KNOWLEDGE_SERVICE", "service": "multillm-knowledge" }],
+  "ai": { "binding": "AI" },
   "containers": [
     {
       "class_name": "MultiLLMProxyContainer",
