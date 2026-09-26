@@ -4,6 +4,7 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css', v='2') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/usage.css', v='1') }}">
 {% endblock %}
 
 {% block content %}
@@ -117,6 +118,13 @@
                             </th>
                             <td role="cell" data-label="Permissions">
                                 <span class="tag-list">{% for scope in user.scopes %}<span class="tag">{{ scope_labels.get(scope, scope) }}</span>{% else %}<span class="cell-secondary">None</span>{% endfor %}</span>
+                                {% set limits = [] %}
+                                {% if user.daily_budget_usd is not none %}{% set _ = limits.append('$%.2f a day' | format(user.daily_budget_usd)) %}{% endif %}
+                                {% if user.monthly_budget_usd is not none %}{% set _ = limits.append('$%.2f a month' | format(user.monthly_budget_usd)) %}{% endif %}
+                                {% if user.allowed_models %}{% set _ = limits.append(user.allowed_models | length ~ (' model pattern' if user.allowed_models | length == 1 else ' model patterns')) %}{% endif %}
+                                {% if user.allowed_ips %}{% set _ = limits.append(user.allowed_ips | length ~ (' address range' if user.allowed_ips | length == 1 else ' address ranges')) %}{% endif %}
+                                {% if user.expires_at %}{% set _ = limits.append('expires ' ~ user.expires_at[:10]) %}{% endif %}
+                                {% if limits %}<span class="key-controls-summary">{{ limits | join(' · ') }}</span>{% endif %}
                             </td>
                             <td role="cell" data-label="Key prefix"><code>{{ user.api_key_prefix }}</code></td>
                             <td role="cell" data-label="Activity" class="activity-cell">
@@ -126,6 +134,9 @@
                             {% if current_user.is_admin %}
                             <td role="cell" data-label="Actions">
                                 <div class="table-actions">
+                                    <button class="button button--secondary button--sm" type="button" data-controls-user="{{ user.username }}"
+                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at} | tojson }}'
+                                        aria-label="Limits for {{ user.username }}">Limits</button>
                                     <button class="button button--secondary button--sm" type="button" data-rotate-user="{{ user.username }}" aria-label="Rotate key for {{ user.username }}">Rotate key</button>
                                     <button class="button button--danger button--sm" type="button" data-delete-user="{{ user.username }}" aria-label="Delete {{ user.username }}"
                                         {% if user.username == current_user.username %}disabled title="You cannot delete your own signed-in account"{% endif %}>Delete</button>
@@ -145,6 +156,39 @@
         </section>
     </div>
 
+    {% if current_user.is_admin %}
+    <dialog id="key-controls-dialog" class="dialog key-controls-dialog" aria-labelledby="key-controls-title">
+        <form id="key-controls-form" class="dialog__body form-stack" method="dialog">
+            <p class="eyebrow">Key limits</p>
+            <h2 id="key-controls-title">Limits for <span id="key-controls-user"></span></h2>
+            <p class="field-hint">Leave a field empty for no limit. Budgets count priced requests in UTC days and calendar months; administrators are exempt unless a budget is set here.</p>
+            <div class="form-grid form-grid--2">
+                <label class="form-field" for="key-daily-budget">Daily budget (USD)
+                    <input id="key-daily-budget" name="daily_budget_usd" class="field" type="number" min="0" step="0.01" inputmode="decimal">
+                </label>
+                <label class="form-field" for="key-monthly-budget">Monthly budget (USD)
+                    <input id="key-monthly-budget" name="monthly_budget_usd" class="field" type="number" min="0" step="0.01" inputmode="decimal">
+                </label>
+            </div>
+            <label class="form-field" for="key-allowed-models">Allowed models
+                <textarea id="key-allowed-models" name="allowed_models" class="field-textarea" rows="3" spellcheck="false" aria-describedby="key-allowed-models-hint"></textarea>
+            </label>
+            <span class="field-hint" id="key-allowed-models-hint">One per line. Use <code>*</code> as a wildcard, for example <code>auto:*</code>, <code>free:*</code>, <code>openai:gpt-4.1</code> or <code>gguu:*</code>. <code>/v1/models</code> lists only these.</span>
+            <label class="form-field" for="key-allowed-ips">Client addresses
+                <textarea id="key-allowed-ips" name="allowed_ips" class="field-textarea" rows="2" spellcheck="false" aria-describedby="key-allowed-ips-hint"></textarea>
+            </label>
+            <span class="field-hint" id="key-allowed-ips-hint">One IP address or CIDR range per line, such as <code>203.0.113.0/24</code>.</span>
+            <label class="form-field" for="key-expires-at">Expires (UTC)
+                <input id="key-expires-at" name="expires_at" class="field" type="datetime-local">
+            </label>
+            <div class="dialog__actions">
+                <button id="key-controls-cancel" class="button button--secondary" type="button">Cancel</button>
+                <button class="button button--primary" type="submit">Save limits</button>
+            </div>
+        </form>
+    </dialog>
+    {% endif %}
+
     <dialog id="secret-dialog" class="dialog" aria-labelledby="secret-dialog-title" aria-describedby="secret-dialog-description">
         <div class="dialog__body">
             <p class="eyebrow">One-time secret</p>
@@ -162,4 +206,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/users.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/key-controls.js', v='1') }}"></script>
 {% endblock %}

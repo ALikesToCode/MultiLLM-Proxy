@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Usage · MultiLLM Proxy{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/usage.css', v='1') }}">
+{% endblock %}
+
+{% block content %}
+<div id="usage-console" data-usage-endpoint="{{ url_for('usage_data') }}" data-admin="{{ 'true' if is_admin else 'false' }}">
+    <header class="page-header">
+        <div class="page-header__text">
+            <p class="eyebrow">Spend and limits</p>
+            <h1 class="page-header__title">Usage</h1>
+            <p class="page-header__lede">Daily requests, errors, estimated cost and latency per key and per model, from the durable usage ledger. Costs use the configured model prices; requests to unpriced models count without a cost.</p>
+        </div>
+    </header>
+
+    <section class="panel usage-filters" aria-labelledby="usage-filter-heading">
+        <h2 id="usage-filter-heading" class="sr-only">Filters</h2>
+        <form id="usage-filter-form" class="form-grid">
+            {% if is_admin %}
+            <label class="form-field" for="usage-principal">
+                Key
+                <select id="usage-principal" name="principal" class="field-select">
+                    <option value="">All keys</option>
+                </select>
+            </label>
+            {% else %}
+            <p class="field-hint">Showing your own key, <strong>{{ user.username }}</strong>.</p>
+            {% endif %}
+            <label class="form-field" for="usage-days">
+                Range
+                <select id="usage-days" name="days" class="field-select">
+                    <option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+            </label>
+        </form>
+        <p id="usage-status" class="field-hint" role="status" aria-live="polite">Loading usage…</p>
+    </section>
+
+    <div class="usage-grid">
+        <section class="panel" aria-labelledby="usage-totals-heading">
+            <header class="panel__header"><div><h2 id="usage-totals-heading">Totals</h2><p>For the selected range.</p></div></header>
+            <div class="panel__body">
+                <dl class="meta-list" id="usage-totals">
+                    <div><dt>Estimated cost</dt><dd data-total="cost_usd">–</dd></div>
+                    <div><dt>Requests</dt><dd data-total="requests">–</dd></div>
+                    <div><dt>Errors</dt><dd data-total="errors">–</dd></div>
+                    <div><dt>Latency p50 / p95</dt><dd data-total="latency">–</dd></div>
+                    <div><dt>Tokens in / out</dt><dd data-total="tokens">–</dd></div>
+                </dl>
+            </div>
+        </section>
+
+        <section class="panel" id="usage-budget-panel" aria-labelledby="usage-budget-heading" hidden>
+            <header class="panel__header"><div><h2 id="usage-budget-heading">Budget and controls</h2><p>Periods are UTC days and calendar months.</p></div></header>
+            <div class="panel__body">
+                <dl class="meta-list" id="usage-budget">
+                    <div><dt>Today</dt><dd data-budget="daily">–</dd></div>
+                    <div><dt>This month</dt><dd data-budget="monthly">–</dd></div>
+                    <div><dt>Allowed models</dt><dd data-budget="models">–</dd></div>
+                    <div><dt>Key expires</dt><dd data-budget="expires">–</dd></div>
+                    <div><dt>Client addresses</dt><dd data-budget="ips">–</dd></div>
+                </dl>
+            </div>
+        </section>
+    </div>
+
+    <section class="panel" aria-labelledby="usage-daily-heading">
+        <header class="panel__header"><div><h2 id="usage-daily-heading">By day</h2><p>Newest first.</p></div></header>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th scope="col">Day (UTC)</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
+                <tbody id="usage-daily"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="panel" aria-labelledby="usage-models-heading">
+        <header class="panel__header"><div><h2 id="usage-models-heading">By model</h2><p>The model that served each request; automatic routes show their selected candidate.</p></div></header>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th scope="col">Model</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Tokens in / out</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
+                <tbody id="usage-models"></tbody>
+            </table>
+        </div>
+    </section>
+
+    {% if is_admin %}
+    <section class="panel" id="usage-keys-panel" aria-labelledby="usage-keys-heading">
+        <header class="panel__header"><div><h2 id="usage-keys-heading">By key</h2><p>Select a key to see its budget and controls.</p></div></header>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th scope="col">Key</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
+                <tbody id="usage-keys"></tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/usage.js', v='1') }}"></script>
+{% endblock %}

@@ -1,0 +1,48 @@
+/* Usage page and the Access key-controls dialog. Shared components come from controls/components/content.css. */
+
+#usage-console {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.usage-filters {
+    padding: 1rem 1.25rem;
+}
+
+.usage-filters .form-grid {
+    max-width: 36rem;
+}
+
+.usage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    align-items: start;
+    gap: 1.25rem;
+}
+
+.usage-key-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 650;
+    text-align: left;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+}
+
+.key-controls-summary {
+    display: block;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+.key-controls-dialog {
+    width: min(100% - 2rem, 40rem);
+}
+
+.key-controls-dialog .field-textarea {
+    min-height: 4.5rem;
+}

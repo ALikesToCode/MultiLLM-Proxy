@@ -39,7 +39,7 @@ def app(tmp_path, monkeypatch):
     result.register_error_handler(CSRFError, handle_csrf_error)
     result.add_url_rule("/v1/chat/completions", "fixture_chat",
                         csrf.exempt(api_authenticate_only(required_scope="chat")(lambda: {})), methods=["POST"])
-    for endpoint in ("status_page", "workbench", "manage_users", "proxy_documentation", "openrouter_dashboard", "logout", "login"):
+    for endpoint in ("status_page", "workbench", "manage_users", "usage_page", "proxy_documentation", "openrouter_dashboard", "logout", "login"):
         result.add_url_rule("/fixture/" + endpoint, endpoint, lambda: "fixture")
     knowledge.register_knowledge_routes(result, csrf)
     return result

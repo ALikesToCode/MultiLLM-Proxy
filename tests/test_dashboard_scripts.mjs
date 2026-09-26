@@ -337,3 +337,24 @@ test('service worker cache write failures do not break fresh assets or intercept
   }
   assert.equal(fetches, 1);
 });
+
+test('usage page and key limit dialog helpers format budgets and build control payloads', () => {
+  const context = browserContext();
+  vm.runInContext(readFileSync('static/js/usage.js', 'utf8'), context);
+  vm.runInContext(readFileSync('static/js/key-controls.js', 'utf8'), context);
+  const usage = context.window.MultiLLMUsage;
+  assert.equal(usage.formatCost(1.5), '$1.50');
+  assert.equal(usage.formatCost(0.0021), '$0.002100');
+  assert.equal(usage.formatBudget(null, 0.2, null, null), '$0.20 spent · no limit');
+  assert.equal(usage.formatBudget(5, 1, 4, '2026-09-27T00:00:00+00:00'), '$1.00 of $5.00 · $4.00 left · resets 2026-09-27 00:00 UTC');
+  assert.equal(usage.formatErrors({ errors: 2, error_rate: 12.5 }), '2 (12.5%)');
+  const payload = context.window.MultiLLMKeyControls.controlsPayload({
+    daily_budget_usd: '2.5', monthly_budget_usd: '', allowed_models: 'auto:*\nfree:*, openai:gpt-4.1',
+    allowed_ips: ' 203.0.113.0/24 ', expires_at: '2026-12-31T23:30',
+  });
+  assert.equal(JSON.stringify(payload), JSON.stringify({ daily_budget_usd: 2.5, monthly_budget_usd: null,
+    allowed_models: ['auto:*', 'free:*', 'openai:gpt-4.1'], allowed_ips: ['203.0.113.0/24'], expires_at: '2026-12-31T23:30:00Z' }));
+  for (const source of ['static/js/usage.js', 'static/js/key-controls.js']) {
+    assert.doesNotMatch(readFileSync(source, 'utf8'), /innerHTML/, source);
+  }
+});

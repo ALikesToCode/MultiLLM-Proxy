@@ -30,6 +30,7 @@ from routes.proxy import register_proxy_routes
 from routes.status_page import register_status_routes
 from routes.unified import register_unified_routes
 from routes.media import register_media_routes
+from routes.usage import register_usage_routes
 from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
@@ -131,6 +132,7 @@ def create_app() -> Flask:
     register_knowledge_routes(app, csrf)
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
+    register_usage_routes(app, csrf)
     # Restore the dashboard's recent requests from the durable ledger in the background.
     usage_ledger.start(MetricsService.get_instance())
 
