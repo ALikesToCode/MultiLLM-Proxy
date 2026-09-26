@@ -37,8 +37,9 @@ return `400` on automatic routes.
 ## Image generation
 
 `POST /v1/images/generations` accepts an `auto:<name>` model; `auto:image`,
-`auto:image-fast`, `auto:gpt-image-2.5` and `auto:video` are seeded
-([media generation](media-generation.md)). Candidates are tried in order; a
+`auto:image-fast`, `auto:gpt-image-2.5`, `auto:image-edit` and `auto:video` are seeded
+([media generation](media-generation.md)), as are `auto:embed`, `auto:tts` and
+`auto:stt` for embeddings, speech and transcription. Candidates are tried in order; a
 candidate is skipped before any request when its provider cannot generate images,
 has no configured credential, or the model is disabled in Operations. `quality`
 defaults to `max`, and each candidate receives the closest settings its model
@@ -63,8 +64,10 @@ timeout or a connection dropped after the request was sent may already be billed
 it is returned with `X-MultiLLM-Transport-Failure` and never repeated on another
 provider. `n` above 1 sends one request per image, each with its own failover.
 Chat routes use a narrower rule, described under [Failover boundary](#failover-boundary).
-Responses carry the same `X-MultiLLM-Auto-*` headers as chat. Image edits still
-use a provider's native `/<provider>/v1/images/edits` path.
+Responses carry the same `X-MultiLLM-Auto-*` headers as chat. `POST /v1/images/edits`
+routes the same way over candidates that accept source images; embedding, speech and
+transcription routes move on only after a definite refusal (see
+[media generation](media-generation.md)).
 
 `GET /v1/models` reports each automatic model's `capabilities` as
 `supports_chat`, `supports_images` and `supports_video`, true when at least one

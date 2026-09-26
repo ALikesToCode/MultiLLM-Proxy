@@ -1,7 +1,8 @@
-# Image and video generation
+# Image, video and audio generation
 
-MultiLLM serves the leading image and video models behind automatic routes that try
-providers in order and fall back when one fails. Agents can learn the API from
+MultiLLM serves the leading image and video models, and embeddings, speech and
+transcription, behind automatic routes that try providers in order and fall back when
+one fails. Agents can learn the API from
 `/agent-onboarding/media/SKILL.md` (linked from `/llms.txt`). With an R2 bucket bound,
 generated media is kept and returned as durable gateway links; see
 [media storage](media-storage.md).
@@ -133,6 +134,47 @@ and the key's user. The Container keeps no job state, so jobs survive restarts, 
 another key gets `404`. Without either secret, jobs last only until the Container
 restarts.
 
+## Embeddings, speech and transcription
+
+`POST /v1/embeddings`, `POST /v1/audio/speech` and `POST /v1/audio/transcriptions` take
+the OpenAI bodies and run on an automatic route (the default when `model` is omitted)
+or on an explicit `provider:model`. They need the `embeddings` or `audio` scope and count
+against the normal rate limits.
+
+| Route | Candidates in order |
+| --- | --- |
+| `auto:embed` | `openai:text-embedding-3-small`, `nanogpt:text-embedding-3-small` |
+| `auto:tts` | `openai:gpt-4o-mini-tts`, `cloudflare:@cf/deepgram/aura-2-en` |
+| `auto:stt` | `openai:gpt-4o-mini-transcribe`, `nanogpt:gpt-4o-mini-transcribe`, `together:openai/whisper-large-v3`, `cloudflare:@cf/openai/whisper-large-v3-turbo` |
+
+`auto:embed` serves one model from two providers, because vectors from different
+models cannot be compared; pin a model for anything you store. Explicit models may use
+OpenAI, NanoGPT (pay-as-you-go), NavyAI and Together for all three operations, Gemini's
+OpenAI-compatible embeddings (`gemini:gemini-embedding-001`), and Workers AI through the
+`AI` binding: `@cf/baai/bge-m3`, `@cf/baai/bge-large-en-v1.5` and `@cf/baai/bge-base-en-v1.5`
+for text embeddings (no `dimensions` or base64), `@cf/deepgram/aura-2-en` for speech
+(OpenAI voices become `luna`) and `@cf/openai/whisper-large-v3-turbo` for audio up to
+8 MiB.
+
+- Embeddings: `input` is a string, up to 2,048 strings or token arrays, with optional
+  `dimensions`, `encoding_format` (`float` or `base64`) and `user`.
+- Speech: `input` up to 4,096 characters, `voice` (default `alloy`), `response_format`
+  (`mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`), `speed` and `instructions`. The reply is
+  audio.
+- Transcription: multipart with one `file` (up to 25 MiB), optional `language`,
+  `prompt`, `temperature` and `response_format` (`json` or `text`).
+
+These calls are cheap but billable, so a route moves on only after a refusal that
+proves no work was done (`400`, `401`, `402`, `403`, `404`, `409`, `413`, `415`, `422`,
+`429`, an open circuit, or a connection that never opened). A `5xx`, timeout or dropped
+connection stops the route.
+
+The [intelligence gateway](intelligence-gateway.md#audio-and-embeddings) keeps its own
+path: requests from intelligence principals, and requests naming exactly the model the
+enabled policy pins for the operation, use its pinned, accounted handling. When the
+policy cannot be read, an explicit `provider:model` stays on that path and fails closed;
+`auto:` routes never consult the policy.
+
 ## Cloudflare AI
 
 `wrangler.jsonc` binds `AI`. The Worker exposes it to the Container as
@@ -144,9 +186,11 @@ Cloudflare candidates are skipped when the binding is absent.
 
 ## Checking providers
 
-- `GET /v1/media/providers` lists every media route's candidates with `available`
-  (credential or binding present, model enabled), the provider circuit state and its
-  last status. It never generates anything.
+- `GET /v1/media/providers` lists every media route with its `kind` (`image`,
+  `image_edit`, `video`, `embeddings`, `speech` or `transcriptions`) and its candidates
+  with `available` (credential or binding present, model enabled, operation supported),
+  the provider circuit state and its last status. `storage`, `batches` and `webhooks`
+  report whether those bindings are present. It never generates anything.
 - `POST /v1/media/probe` with `{"route": "auto:image"}` needs an admin key. It generates
   one 1024x1024 `low` quality image on each available candidate, one at a time, and
   reports `status`, `seconds`, `error` and the `working` list. Expect to spend about

@@ -1,8 +1,9 @@
 /**
  * Cloudflare AI for the Container, reachable only through its private outbound handler
  * (`http://ai.internal`). Third-party models (OpenAI GPT Image, Google Veo) run through
- * AI Gateway with Cloudflare billing and zero data retention; `@cf/` models run on
- * Workers AI. Replies use OpenAI shapes so the Container treats this like any provider.
+ * AI Gateway with Cloudflare billing and zero data retention; `@cf/` models (images,
+ * embeddings, Aura speech and Whisper transcription) run on Workers AI. Replies use
+ * OpenAI shapes so the Container treats this like any provider.
  */
 import { Buffer } from "node:buffer";
 import { logFailure } from "./log.mjs";
@@ -22,6 +23,22 @@ const WORKERS_AI_IMAGE = {
   "@cf/leonardo/phoenix-1.0": { maxEdge: 2048, maxSteps: 50, dimensions: true },
   "@cf/black-forest-labs/flux-1-schnell": { maxEdge: 0, maxSteps: 8, dimensions: false },
 };
+// Workers AI models behind /v1/embeddings, /v1/audio/speech and /v1/audio/transcriptions.
+const WORKERS_AI_EMBEDDINGS = new Set(["@cf/baai/bge-m3", "@cf/baai/bge-large-en-v1.5", "@cf/baai/bge-base-en-v1.5"]);
+const WORKERS_AI_SPEECH = new Set(["@cf/deepgram/aura-2-en"]);
+const WORKERS_AI_TRANSCRIPTION = new Set(["@cf/openai/whisper-large-v3-turbo"]);
+const AURA_SPEAKERS = new Set(["amalthea", "andromeda", "apollo", "arcas", "aries", "asteria", "athena", "atlas", "aurora",
+  "callista", "cora", "cordelia", "delia", "draco", "electra", "harmonia", "helena", "hera", "hermes", "hyperion", "iris",
+  "janus", "juno", "jupiter", "luna", "mars", "minerva", "neptune", "odysseus", "ophelia", "orion", "orpheus", "pandora",
+  "phoebe", "pluto", "saturn", "thalia", "theia", "vesta", "zeus"]);
+// OpenAI speech formats as Aura encoding, container and media type.
+const SPEECH_FORMATS = { mp3: ["mp3", null, "audio/mpeg"], opus: ["opus", "ogg", "audio/ogg"], aac: ["aac", null, "audio/aac"],
+  flac: ["flac", null, "audio/flac"], wav: ["linear16", "wav", "audio/wav"], pcm: ["linear16", "none", "audio/pcm"] };
+const MAX_EMBEDDING_BODY_BYTES = 1024 * 1024;
+// Base64 of the 8 MiB audio the Container sends at most.
+const MAX_TRANSCRIPTION_BODY_BYTES = 12 * 1024 * 1024;
+const BODY_LIMITS = { "/v1/images/edits": MAX_EDIT_BODY_BYTES, "/v1/embeddings": MAX_EMBEDDING_BODY_BYTES,
+  "/v1/audio/transcriptions": MAX_TRANSCRIPTION_BODY_BYTES };
 
 const failure = (code, message, status) => Response.json({ error: { code, message } },
   { status, headers: { "cache-control": "no-store" } });
@@ -119,6 +136,51 @@ async function editImage(env, body) {
   return generateImage(env, body);
 }
 
+async function embeddings(env, body) {
+  if (!WORKERS_AI_EMBEDDINGS.has(body.model)) return failure("model_not_found", "This embedding model is not served here.", 404);
+  const input = typeof body.input === "string" ? [body.input] : body.input;
+  if (!Array.isArray(input) || !input.length || input.length > 100 || !input.every(text => typeof text === "string" && text)) {
+    return failure("invalid_request", "input must be a string or 1 to 100 strings.", 400);
+  }
+  const result = await run(env, body.model, { text: input });
+  const vectors = result?.data;
+  if (!Array.isArray(vectors) || vectors.length !== input.length) throw new Error("Workers AI returned no embeddings");
+  return Response.json({ object: "list", model: body.model,
+    data: vectors.map((embedding, index) => ({ object: "embedding", index, embedding })) }, { headers: { "cache-control": "no-store" } });
+}
+
+async function speech(env, body) {
+  if (!WORKERS_AI_SPEECH.has(body.model)) return failure("model_not_found", "This speech model is not served here.", 404);
+  if (typeof body.input !== "string" || !body.input.trim() || body.input.length > 4096) {
+    return failure("invalid_request", "input must be 1 to 4096 characters.", 400);
+  }
+  const [encoding, container, type] = SPEECH_FORMATS[body.response_format ?? "mp3"] ?? [];
+  if (!encoding) return failure("invalid_request", "Unsupported response_format.", 400);
+  const input = { text: body.input, speaker: AURA_SPEAKERS.has(body.voice) ? body.voice : "luna", encoding,
+    ...(container ? { container } : {}) };
+  const result = await env.AI.run(body.model, input, { gateway: { id: env.AI_GATEWAY_ID || "default" } });
+  let audio = null;
+  if (result instanceof ReadableStream) audio = result;
+  else if (result instanceof Response) audio = result.body;
+  else if (typeof result?.audio === "string") audio = Buffer.from(result.audio, "base64");
+  if (!audio) throw new Error("Workers AI returned no audio");
+  return new Response(audio, { headers: { "content-type": type, "cache-control": "no-store" } });
+}
+
+async function transcribe(env, body) {
+  if (!WORKERS_AI_TRANSCRIPTION.has(body.model)) return failure("model_not_found", "This transcription model is not served here.", 404);
+  if (typeof body.audio !== "string" || !body.audio || !/^[A-Za-z0-9+/=]+$/.test(body.audio)) {
+    return failure("invalid_request", "audio must be base64.", 400);
+  }
+  const input = { audio: body.audio };
+  if (typeof body.language === "string" && /^[a-z]{2,3}$/.test(body.language)) input.language = body.language;
+  if (typeof body.prompt === "string" && body.prompt) input.initial_prompt = body.prompt.slice(0, 4000);
+  const result = await run(env, body.model, input);
+  const text = result?.text ?? result?.transcription_info?.text;
+  if (typeof text !== "string") throw new Error("Workers AI returned no transcription");
+  return Response.json({ text }, { headers: { "cache-control": "no-store" } });
+}
+
 async function generateVideo(env, body) {
   if (!THIRD_PARTY_VIDEO.has(body.model)) return failure("model_not_found", "This video model is not served through Cloudflare AI here.", 404);
   if (typeof body.prompt !== "string" || !body.prompt.trim()) return failure("invalid_request", "A prompt is required.", 400);
@@ -143,9 +205,10 @@ export async function handleAiOutbound(request, env) {
     return failure("invalid_request", "Use application/json.", 415);
   }
   const edit = url.pathname === "/v1/images/edits";
-  const body = await boundedJson(request, edit ? MAX_EDIT_BODY_BYTES : MAX_BODY_BYTES);
+  const limit = BODY_LIMITS[url.pathname] ?? MAX_BODY_BYTES;
+  const body = await boundedJson(request, limit);
   if (!body) {
-    return failure("invalid_request", `The request body must be a JSON object of at most ${edit ? "24 MiB" : "64 KiB"}.`, 400);
+    return failure("invalid_request", `The request body must be a JSON object of at most ${Math.round(limit / 1024)} KiB.`, 400);
   }
   try {
     if (url.pathname === "/v1/images/generations") {
@@ -153,6 +216,9 @@ export async function handleAiOutbound(request, env) {
       return await generateImage(env, body);
     }
     if (edit) return await editImage(env, body);
+    if (url.pathname === "/v1/embeddings") return await embeddings(env, body);
+    if (url.pathname === "/v1/audio/speech") return await speech(env, body);
+    if (url.pathname === "/v1/audio/transcriptions") return await transcribe(env, body);
     if (url.pathname === "/v1/videos/generations") return await generateVideo(env, body);
     return failure("not_found", "Unknown Cloudflare AI operation.", 404);
   } catch (error) {

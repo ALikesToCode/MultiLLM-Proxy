@@ -6,7 +6,7 @@
 - [GPT Image 2 relay research and setup](gpt-image-2-reseller-research.md)
 - [GPT Image moderation defaults](gpt-image-moderation.md)
 - [GGUU AI GPT Image 2 generation and editing](gguu.md)
-- [Image and video generation](media-generation.md)
+- [Image, video and audio generation](media-generation.md)
 - [Media storage in R2, asynchronous batches and webhooks](media-storage.md)
 
 - Live setup guide: sign in to a running proxy and open `/docs` for

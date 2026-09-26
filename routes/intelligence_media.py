@@ -1,4 +1,14 @@
-"""Authenticated, pinned audio and embedding operations with no submission replay."""
+"""Audio and embedding operations: the intelligence gateway's pinned path or media routes.
+
+Precedence for `/v1/embeddings`, `/v1/audio/speech` and `/v1/audio/transcriptions`:
+
+1. Intelligence principals (`integration:` keys) always use the pinned, accounted path.
+2. Other keys use it when they name exactly the model the enabled intelligence policy
+   pins for the operation. If the policy cannot be read, an explicit `provider:model`
+   stays on this path too (fail closed), because it might be governed.
+3. Everything else, including every `auto:` route and an omitted model, runs on the
+   media routes in routes/media_audio.py with the normal rate limits.
+"""
 
 import json
 import math
@@ -9,9 +19,11 @@ import requests
 from flask import Response, g, request
 
 from error_handlers import get_request_id
-from route_helpers import api_authenticate_only
+from route_helpers import api_auth_required, api_authenticate_only
 from routes.auto_routes import _is_fallback_response
 from routes.intelligence import error_response, load_policy, reject_idempotency
+from routes.media_audio import dispatch_media_route
+from services.auto_route_service import AutoRouteService
 from services.intelligence_cancellation import CallerCancellation
 from services.intelligence_contract import GatewayError
 from services.intelligence_gateway import rejection
@@ -19,6 +31,7 @@ from services.intelligence_output import decode_completion
 from services.intelligence_policy import eligible
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_transport import IntelligenceTransport
+from services.metrics_service import MetricsService
 
 JOB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 AUDIO_TYPES = {
@@ -320,10 +333,40 @@ def _dispatch(operation, app, auth, proxy):
             IntelligenceStore.settle(reservation, charged, complete)
 
 
+def _requested_model(operation):
+    if operation == "transcriptions":
+        return request.form.get("model")
+    body = request.get_json(silent=True)
+    return body.get("model") if isinstance(body, dict) else None
+
+
+def governed_by_intelligence(operation):
+    """Whether this request keeps the intelligence gateway's pinned, accounted path."""
+    user = getattr(g, "authenticated_user", None) or {}
+    if any(isinstance(value, str) and value.startswith("integration:") for value in (user.get("id"), user.get("username"))):
+        return True
+    model = _requested_model(operation)
+    if not isinstance(model, str) or not model or AutoRouteService.is_auto_route(model):
+        return False
+    try:
+        policy = IntelligenceStore.policy()
+    except Exception:
+        return True
+    settings = policy["media"].get(operation) if policy.get("enabled") else None
+    return bool(settings) and settings["candidate"]["model"] == model
+
+
 def register_intelligence_media_routes(app, csrf, auth, proxy):
     def register(operation, scope, path):
+        # The media routes reserve the normal per-key rate budget; the pinned path keeps
+        # its own allowance ledger instead.
+        media_route = api_auth_required(required_scope=scope)(
+            lambda: dispatch_media_route(operation, app, auth, MetricsService, proxy))
+
         def handle():
-            return _dispatch(operation, app, auth, proxy)
+            if governed_by_intelligence(operation):
+                return _dispatch(operation, app, auth, proxy)
+            return media_route()
 
         handle.__name__ = f"intelligence_{operation}"
         app.route(path, methods=["POST", "OPTIONS"])(

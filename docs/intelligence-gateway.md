@@ -180,6 +180,14 @@ chat candidates. A key needs scope `audio` for transcription/speech and
 `embeddings` for embeddings (admin keys already authorize both). This change does
 not grant scopes or change existing account permissions.
 
+The same endpoints also serve automatic media routes (`auto:embed`, `auto:tts`,
+`auto:stt`) and explicit models without this policy ([media
+generation](media-generation.md#embeddings-speech-and-transcription)). The pinned path
+described here applies to requests from intelligence principals, which always use it,
+and to other keys only when they name exactly the model the enabled policy pins for
+the operation. If the policy cannot be read, an explicit `provider:model` stays on the
+pinned path and fails with its error rather than bypassing the policy.
+
 Each `media.transcriptions`, `media.speech`, or `media.embeddings` entry contains
 `candidate` in the reviewed candidate format, plus `max_input_bytes`,
 `daily_requests`, and `principal_daily_requests`. Speech also requires `voice`;

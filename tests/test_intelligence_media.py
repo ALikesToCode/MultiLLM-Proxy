@@ -129,13 +129,20 @@ class IntelligenceMediaTests(IntelligenceApiTestCase):
 
     def test_media_is_independently_configured_and_scoped(self):
         self.seed()
-        with self.requests() as send:
+        # Intelligence principals always take the pinned path, which needs media settings.
+        with self.requests() as send, patch.object(
+            self.app_module.AuthService,
+            "verify_api_key",
+            return_value={"id": "integration:omni", "username": "integration:omni", "scopes": ["audio"],
+                          "is_admin": False},
+        ):
             response = self.client.post(
                 "/v1/audio/speech",
                 headers=self.headers,
                 json={"model": "openai:small", "input": "hello"},
             )
         assert response.status_code == 503 and send.call_count == 0
+        assert response.json["error"]["code"] == "media_not_configured"
         with patch.object(
             self.app_module.AuthService,
             "verify_api_key",

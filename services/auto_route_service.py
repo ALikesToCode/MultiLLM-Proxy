@@ -65,6 +65,22 @@ DEFAULT_AUTO_ROUTES = {
         "xai:grok-imagine-image-2.0",
         "aihubmix:gpt-image-2-free",
     ),
+    # Embeddings, speech and transcription (routes/media_audio.py). Vectors from different
+    # embedding models are not comparable, so auto:embed serves one model from two providers.
+    "auto:embed": (
+        "openai:text-embedding-3-small",
+        "nanogpt:text-embedding-3-small",
+    ),
+    "auto:tts": (
+        "openai:gpt-4o-mini-tts",
+        "cloudflare:@cf/deepgram/aura-2-en",
+    ),
+    "auto:stt": (
+        "openai:gpt-4o-mini-transcribe",
+        "nanogpt:gpt-4o-mini-transcribe",
+        "together:openai/whisper-large-v3",
+        "cloudflare:@cf/openai/whisper-large-v3-turbo",
+    ),
     # Asynchronous video jobs; see services/video_generation.py.
     "auto:video": (
         "gemini:veo-3.1-generate-preview",

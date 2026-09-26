@@ -55,7 +55,8 @@ def post(path: str, payload: dict, timeout) -> requests.Response | Response:
                 body.extend(chunk)
                 if len(body) > MAX_RESPONSE_BYTES:
                     return _transport_failure("interrupted")
-            return Response(bytes(body), status=response.status_code, content_type="application/json")
+            return Response(bytes(body), status=response.status_code,
+                            content_type=response.headers.get("Content-Type") or "application/json")
 
 
 def _not_bound() -> Response:
@@ -68,6 +69,11 @@ def generate_image(payload: dict) -> Response:
         return _not_bound()
     body = {**payload, "model": payload["model"].split(":", 1)[1]}
     return post("/v1/images/generations", body, IMAGE_TIMEOUT)
+
+
+def run_audio(path: str, body: dict, timeout) -> Response:
+    """Workers AI embeddings, Aura speech or Whisper transcription (`body["model"]` has no prefix)."""
+    return post(path, body, timeout) if enabled() else _not_bound()
 
 
 def edit_image(payload: dict, images: list[str]) -> Response:

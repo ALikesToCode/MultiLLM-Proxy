@@ -114,7 +114,7 @@ class ProxyDocumentationTest(UnifiedApiTestCase):
             models["opencode:live-only-model"]["capabilities"]["supports_chat"]
         )
         self.assertIn("auto:glm-5.2", models)
-        self.assertEqual(payload["auto_routes"][0]["id"], "auto:glm-5.2")
+        self.assertIn("auto:glm-5.2", [route["id"] for route in payload["auto_routes"]])
         self.assertEqual(payload["nanogpt"]["billing_mode"], "subscription")
         self.assertTrue(payload["nanogpt"]["subscription_only"])
         self.assertEqual(

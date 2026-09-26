@@ -11,7 +11,15 @@ from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
-from routes.media_edits import dispatch_image_edit, parse_json_edit, parse_multipart_edit
+from routes.media_audio import OPERATIONS, MediaRequest, validate_media_candidate
+from routes.media_edits import (
+    EditInputs,
+    SourceImage,
+    dispatch_image_edit,
+    parse_json_edit,
+    parse_multipart_edit,
+    validate_edit_candidate,
+)
 from routes.media_batches import principal_user, read_request_principal, register_media_batch_routes
 from routes.media_files import register_media_file_routes, stream_stored_file, unavailable
 from routes.media_images import image_fail_over, run_image_batch
@@ -38,8 +46,22 @@ def _owner() -> str:
     return str(owner)
 
 
-def _is_media_route(route) -> bool:
-    return "image" in route.id or "video" in route.id
+def _route_kind(route) -> str | None:
+    """The media operation a route serves, from its ID; None for chat routes."""
+    if "video" in route.id:
+        return "video"
+    if "image" in route.id:
+        return "image_edit" if "edit" in route.id else "image"
+    for name, operation in OPERATIONS.items():
+        if route.id == operation.route or route.id.startswith(f"{operation.route}-"):
+            return name
+    return None
+
+
+# Stand-in requests for checking candidates without generating anything.
+_SAMPLE_EDIT = EditInputs((SourceImage(b"", "image/png"),))
+_SAMPLE_MEDIA = {"embeddings": {"input": "sample"}, "speech": {"input": "sample", "response_format": "mp3"},
+                 "transcriptions": {}}
 
 
 def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
@@ -246,12 +268,23 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     @api_authenticate_only
     def media_providers():
         """Which media route candidates can run now, without generating anything."""
-        routes = [route for route in AutoRouteService.list_routes() if _is_media_route(route)]
-        return jsonify({"cloudflare_ai": cloudflare_ai.enabled(), "routes": [
-            {"id": route.id, "kind": "video" if "video" in route.id else "image", "candidates": [
-                candidate_status(candidate, validate_video_candidate if "video" in route.id else validate_image_candidate)
-                for candidate in route.candidates]}
-            for route in routes]})
+        def validator(kind: str):
+            if kind == "video":
+                return validate_video_candidate
+            if kind == "image":
+                return validate_image_candidate
+            if kind == "image_edit":
+                return lambda candidate: validate_edit_candidate(app, auth_service_cls, proxy_service_cls, candidate,
+                                                                 _SAMPLE_EDIT)
+            sample = MediaRequest(OPERATIONS[kind], OPERATIONS[kind].route, _SAMPLE_MEDIA[kind], b"sample")
+            return lambda candidate: validate_media_candidate(app, auth_service_cls, sample, candidate)
+
+        routes = [(route, _route_kind(route)) for route in AutoRouteService.list_routes()]
+        return jsonify({"cloudflare_ai": cloudflare_ai.enabled(), "storage": media_storage.enabled(),
+                        "batches": media_jobs.enabled() and media_storage.enabled(), "webhooks": media_jobs.enabled(),
+                        "routes": [{"id": route.id, "kind": kind, "candidates": [
+                            candidate_status(candidate, validator(kind)) for candidate in route.candidates]}
+                            for route, kind in routes if kind]})
 
     @app.route("/v1/media/probe", methods=["POST", "OPTIONS"])
     @csrf.exempt

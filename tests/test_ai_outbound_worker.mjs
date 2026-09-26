@@ -90,6 +90,30 @@ test("GPT Image edits send the source images to AI Gateway and nothing else acce
   assert.equal(env.AI.calls.length, 1);
 });
 
+test("Workers AI embeddings, Aura speech and Whisper transcription answer in OpenAI shapes", async () => {
+  const embed = { AI: ai({ shape: [2, 2], data: [[0.1, 0.2], [0.3, 0.4]] }) };
+  const vectors = await (await post("/v1/embeddings", { model: "@cf/baai/bge-m3", input: ["a", "b"] }, embed)).json();
+  assert.deepEqual(vectors.data, [{ object: "embedding", index: 0, embedding: [0.1, 0.2] }, { object: "embedding", index: 1, embedding: [0.3, 0.4] }]);
+  assert.deepEqual(embed.AI.calls[0].input, { text: ["a", "b"] });
+  assert.equal((await post("/v1/embeddings", { model: "@cf/baai/bge-m3", input: [1, 2] }, embed)).status, 400);
+  assert.equal((await post("/v1/embeddings", { model: "@cf/unknown/embed", input: "a" }, embed)).status, 404);
+
+  const speak = { AI: ai(() => new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([7, 8])); controller.close(); } })) };
+  const audio = await post("/v1/audio/speech", { model: "@cf/deepgram/aura-2-en", input: "Hello", voice: "orion", response_format: "wav" }, speak);
+  assert.equal(audio.headers.get("content-type"), "audio/wav");
+  assert.deepEqual(new Uint8Array(await audio.arrayBuffer()), new Uint8Array([7, 8]));
+  assert.deepEqual(speak.AI.calls[0].input, { text: "Hello", speaker: "orion", encoding: "linear16", container: "wav" });
+  await post("/v1/audio/speech", { model: "@cf/deepgram/aura-2-en", input: "Hello", voice: "alloy" }, speak);
+  assert.deepEqual(speak.AI.calls[1].input, { text: "Hello", speaker: "luna", encoding: "mp3" });
+
+  const hear = { AI: ai({ text: "hello world", word_count: 2 }) };
+  const text = await (await post("/v1/audio/transcriptions", { model: "@cf/openai/whisper-large-v3-turbo", audio: "AAAA",
+    language: "en", prompt: "names" }, hear)).json();
+  assert.deepEqual(text, { text: "hello world" });
+  assert.deepEqual(hear.AI.calls[0].input, { audio: "AAAA", language: "en", initial_prompt: "names" });
+  assert.equal((await post("/v1/audio/transcriptions", { model: "@cf/openai/whisper-large-v3-turbo", audio: "not base64!" }, hear)).status, 400);
+});
+
 test("the Container learns about Cloudflare AI only when the binding exists", () => {
   assert.equal(collectContainerEnv({ AI: {} }).CLOUDFLARE_AI_ENABLED, "true");
   assert.equal(collectContainerEnv({}).CLOUDFLARE_AI_ENABLED, undefined);
