@@ -134,6 +134,8 @@ def parse_media_request(operation_name: str) -> MediaRequest:
             raise APIError(f"input may hold at most {MAX_EMBEDDING_INPUTS} items", status_code=400)
         if fields.get("encoding_format", "float") not in ("float", "base64"):
             raise APIError("encoding_format must be float or base64", status_code=400)
+        if "dimensions" in fields and (type(fields["dimensions"]) is not int or not 1 <= fields["dimensions"] <= 8192):
+            raise APIError("dimensions must be an integer from 1 to 8192", status_code=400)
     else:
         if set(fields) - {"input", "voice", "response_format", "speed", "instructions"}:
             raise APIError("Speech accepts model, input, voice, response_format, speed and instructions", status_code=400)

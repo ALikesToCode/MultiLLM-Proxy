@@ -9,7 +9,7 @@ from providers.image_relays import is_image_relay_model
 from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
-from services.media_catalog import image_profile, is_video_model
+from services.media_catalog import image_profile, is_speech_or_embedding_model, is_video_model
 from services.model_registry import ModelRegistry
 from services.provider_catalog_metadata import (
     model_supports_tools,
@@ -107,7 +107,12 @@ def _model_capabilities(
         else None
     )
     media_only = text_output is False or (
-        text_output is None and (image_model or capabilities["supports_video"])
+        text_output is None
+        and (
+            image_model
+            or capabilities["supports_video"]
+            or is_speech_or_embedding_model(model_id)
+        )
     )
     if media_only:
         capabilities.update(

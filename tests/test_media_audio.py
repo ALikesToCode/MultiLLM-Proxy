@@ -165,6 +165,18 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
                                                         if route["id"] == "auto:image-edit")["candidates"]}
         self.assertFalse(edit["cloudflare:openai/gpt-image-2.5-sunburst"]["available"])
 
+    def test_model_listing_never_offers_audio_or_embedding_routes_for_chat(self):
+        from services.media_catalog import is_speech_or_embedding_model
+
+        for model in ("text-embedding-3-small", "gemini-embedding-001", "@cf/baai/bge-m3", "openai/whisper-large-v3",
+                      "gpt-4o-mini-tts", "gpt-4o-mini-transcribe", "@cf/deepgram/aura-2-en", "whisper-1"):
+            self.assertTrue(is_speech_or_embedding_model(model), model)
+        for model in ("gpt-4o-mini", "glm-5.2", "gpt-image-2", "tts-something-chat"):
+            self.assertFalse(is_speech_or_embedding_model(model), model)
+        models = {model["id"]: model for model in self.client.get("/v1/models", headers=ADMIN).get_json()["data"]}
+        for route in ("auto:embed", "auto:tts", "auto:stt"):
+            self.assertFalse(any(models[route]["capabilities"].values()), route)
+
     def test_routes_never_read_the_policy_and_an_unreadable_policy_keeps_explicit_models_pinned(self):
         with patch.object(IntelligenceStore, "policy", side_effect=RuntimeError("store down")) as read_policy, \
                 patch("routes.intelligence_media._dispatch", return_value=Response("pinned", status=503)) as pinned:

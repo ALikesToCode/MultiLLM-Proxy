@@ -9,7 +9,12 @@ from providers.registry import get_registry
 from services import cloudflare_ai
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.image_relay_catalog import refresh_image_relay_catalog
-from services.media_catalog import TRANSPORT_FAILURE_HEADER, image_profile, is_video_model
+from services.media_catalog import (
+    TRANSPORT_FAILURE_HEADER,
+    image_profile,
+    is_speech_or_embedding_model,
+    is_video_model,
+)
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
@@ -275,6 +280,8 @@ def _candidate_capabilities(candidate: str, catalog_capabilities: dict) -> dict:
         return {"supports_chat": False, "supports_images": True, "supports_video": False}
     if is_video_model(provider_model):
         return {"supports_chat": False, "supports_images": False, "supports_video": True}
+    if is_speech_or_embedding_model(provider_model):
+        return {"supports_chat": False, "supports_images": False, "supports_video": False}
     return catalog_capabilities
 
 

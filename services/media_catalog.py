@@ -49,7 +49,8 @@ def image_profile(provider: str, provider_model: str) -> ImageProfile | None:
     """The settings a model accepts, or None to pass the request through unchanged."""
     name = provider_model.rsplit("/", 1)[-1].lower()
     if provider == "cloudflare" and provider_model.startswith("@cf/"):
-        return WORKERS_AI_IMAGE
+        # Workers AI also serves embeddings and audio, which are not image models.
+        return None if is_speech_or_embedding_model(provider_model) else WORKERS_AI_IMAGE
     if name.startswith("gpt-image-2.5"):
         # Cloudflare's GPT Image adapter accepts only the standard sizes.
         return ImageProfile(QUALITY_ORDER, max_edge=0) if provider == "cloudflare" else GPT_IMAGE_25
@@ -116,6 +117,16 @@ def prepare_image_edit_payload(provider: str, provider_model: str, payload: dict
         # OpenAI's GPT Image models always return base64 and reject response_format.
         edited.pop("response_format", None)
     return edited
+
+
+_SPEECH_OR_EMBEDDING_MODEL = re.compile(
+    r"(?:^|/)(?:text-embedding|gemini-embedding|bge-|whisper|gpt-4o(?:-mini)?-(?:tts|transcribe)|tts-1|aura-)",
+    re.IGNORECASE)
+
+
+def is_speech_or_embedding_model(provider_model: str) -> bool:
+    """Embedding, text-to-speech and transcription models serve no chat, images or video."""
+    return bool(_SPEECH_OR_EMBEDDING_MODEL.search(provider_model))
 
 
 def is_video_model(provider_model: str) -> bool:
