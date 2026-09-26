@@ -403,9 +403,12 @@ For detailed usage examples with headers and request bodies, refer to the API En
 `POST /v1/chat/completions` accepts dashboard-managed virtual models such as
 `auto:glm-5.2`. The seeded route tries NanoGPT's exact
 `zai-org/glm-5.2:thinking` model, OpenCode, then NavyAI and moves
-forward only after a definite authentication, payment, model-availability,
-rate-limit, or local circuit rejection. Direct `provider:model` requests remain
-unchanged.
+forward only before any output reached the caller: after a definite
+authentication, payment, model-availability, rate-limit, or local circuit
+rejection, an upstream `500`, `502` or `503`, or a connection that never opened.
+Timeouts, `504` and started streams are never repeated elsewhere. Direct
+`provider:model` requests remain unchanged. Routes can optionally order
+candidates by recent health and latency.
 
 Unified GLM-5.2 requests default to the strongest reasoning level supported by
 the selected provider. An explicit `reasoning_effort` still lowers the effort;
@@ -417,12 +420,17 @@ subscription-only mode deliberately omits that flag because NanoGPT routes it
 through PAYG provider selection. Known affinity-key transports receive a stable
 hashed key, and automatic-cache providers keep their native schema. Configure `PROMPT_CACHE_ENABLED` and
 `PROMPT_CACHE_MIN_TOKENS`; response headers report the selected mode. This does
-not cache or replay generated responses, and raw provider routes remain
-caller-controlled.
+not replay generated responses, and raw provider routes remain caller-controlled.
+A caller can opt in to replaying deterministic chat answers with
+`X-MultiLLM-Cache: on` (see [response cache](docs/auto-routing.md#response-cache)).
 
 Administrators can reorder candidates and create more virtual models from the
 Operations dashboard. See [Automatic model priorities](docs/auto-routing.md)
 for the exact retry boundary, response headers, persistence behavior, and API.
+`/status` and `/status.json` publish route and provider health without a login,
+and a Worker cron runs free provider checks; see
+[status and health](docs/status-and-health.md) for health-aware ordering,
+the checks, keep-warm and its cost.
 
 Image and video generation use the same routes: `auto:image` serves the leading
 image model (GPT Image 2.5 Sunburst at `max` quality, GGUU first) with fallback

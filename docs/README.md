@@ -13,6 +13,8 @@
   returns the same credential-safe data for an authenticated dashboard session.
 - [Cloudflare Containers deployment](cloudflare-containers.md)
 - [Dashboard single sign-on and the audit log](dashboard-sso.md)
+- [Automatic model priorities and the response cache](auto-routing.md)
+- [Status page, route health, scheduled checks and keep-warm](status-and-health.md)
 - [Gemini setup](gemini_setup.md)
 - [Gemini and Gemma integration notes](gemini_integration_instructions.md)
 - [OpenRouter setup](openrouter_setup.md)

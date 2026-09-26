@@ -59,11 +59,9 @@ image, so the next candidate is tried; so is a request that never connected. A
 timeout or a connection dropped after the request was sent may already be billed:
 it is returned with `X-MultiLLM-Transport-Failure` and never repeated on another
 provider. `n` above 1 sends one request per image, each with its own failover.
-Chat routes keep the strict rule (only `401`, `402`, `403`, `404`, `429` or an
-open circuit move on). Responses carry `X-MultiLLM-Auto-Route`,
-`X-MultiLLM-Auto-Selected-Model`, `X-MultiLLM-Auto-Selected-Priority` and
-`X-MultiLLM-Auto-Attempts`. Image edits still use a provider's native
-`/<provider>/v1/images/edits` path.
+Chat routes use a narrower rule, described under [Failover boundary](#failover-boundary).
+Responses carry the same `X-MultiLLM-Auto-*` headers as chat. Image edits still
+use a provider's native `/<provider>/v1/images/edits` path.
 
 `GET /v1/models` reports each automatic model's `capabilities` as
 `supports_chat`, `supports_images` and `supports_video`, true when at least one
@@ -163,8 +161,61 @@ paid route. Response headers report
 the attempted mode through `X-MultiLLM-Prompt-Cache`,
 `X-MultiLLM-Prompt-Cache-Mode`, and
 `X-MultiLLM-Prompt-Cache-Estimated-Tokens`. This is upstream prompt caching,
-not generated-response caching: MultiLLM never replays a stored completion and
-never adds cache fields to raw provider passthrough bodies.
+not generated-response caching: it never replays a stored completion and never
+adds cache fields to raw provider passthrough bodies. Replaying a completion
+requires the caller's opt-in to the [response cache](#response-cache).
+
+## Response cache
+
+`POST /v1/chat/completions` can answer a repeated deterministic request from a
+Container-local cache. It is opt-in per request, never a key default, so a
+shared key never starts replaying answers unexpectedly:
+
+```bash
+curl "$PROXY_BASE_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $MULTILLM_API_KEY" \
+  -H "X-MultiLLM-Cache: on" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "auto:glm-5.2", "temperature": 0,
+       "messages": [{"role": "user", "content": "Summarize RFC 9110 in one line"}]}'
+```
+
+A request is eligible when it is not streamed, asks for one choice (`n` absent
+or 1), is deterministic (`temperature` is 0 or `seed` is an integer), offers no
+`tools` or `functions` unless `tool_choice` is `"none"`, and does not use
+`auto:intelligence` or `routing`. The key is a SHA-256 of the API key's
+identity, the path and the request body encoded as canonical JSON (sorted keys),
+so an entry is never served to another key and any body change is a miss.
+Request headers are not part of the key.
+
+Authentication, scope and rate-limit checks run before a hit is served. Only a
+complete `200` JSON answer is stored: every choice must end with `stop` (or an
+equivalent) and carry no tool call. Errors, truncated (`length`) or filtered
+answers and streams are never stored.
+
+| Request header | Effect |
+| --- | --- |
+| `X-MultiLLM-Cache: on` | Serve a stored answer, or store a new one |
+| `X-MultiLLM-Cache: refresh` or `Cache-Control: no-cache` | Skip the lookup and store the new answer |
+| `Cache-Control: max-age=N` | Serve only an answer at most `N` seconds old |
+| `Cache-Control: no-store` | No lookup and no storage |
+
+The response carries `X-MultiLLM-Cache: hit`, `miss`, or `bypass` when the
+request opted in but is not eligible; a hit also has `Age` and
+`X-MultiLLM-Route-Decision: cache-hit`. Requests without the opt-in header are
+unchanged and carry no cache header.
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `RESPONSE_CACHE_ENABLED` | `true` | Honour the opt-in header at all |
+| `RESPONSE_CACHE_TTL_SECONDS` | `300` | Lifetime of a stored answer (1 to 86400) |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `512` | Entry limit; least recently used entries go first |
+| `RESPONSE_CACHE_MAX_BYTES` | `16777216` | Byte budget; one answer may use an eighth |
+
+The cache lives in Container memory: it is lost when the Container sleeps or is
+replaced and is not shared between instances. A model disabled in Operations
+stops receiving new requests at once, but an answer stored earlier can be
+served until its TTL ends.
 
 The authenticated `/docs` route presents the same combined catalog alongside
 copyable chat and image requests, runtime credential status, native provider
@@ -240,33 +291,72 @@ chat completions.
 
 ## Failover boundary
 
-MultiLLM advances to the next locally available candidate only when the
-current attempt returns a definite pre-generation availability rejection:
+A chat route advances to the next locally available candidate only when the
+current attempt ended before any response byte reached the caller and did not
+leave a generation running:
 
 - `401` or `403`: provider credential rejected;
 - `402`: provider balance or payment requirement prevents generation;
 - `404`: provider/model unavailable;
-- `429`: provider rate limit reached; or
+- `429`: provider rate limit reached;
 - a local `503` marked with `X-MultiLLM-Circuit-State: open` or `half_open`,
-  which means no upstream request was sent.
+  which means no upstream request was sent;
+- `500`, `502` or `503` returned by the upstream. The decision is made on the
+  status line, before the body or any stream byte is forwarded, so the caller
+  has received nothing; or
+- a connection that was never established (DNS failure, refused connection or
+  connect timeout), reported as `X-MultiLLM-Transport-Failure: connect`.
 
 Disabled models and providers without a configured credential are skipped
-before transport. The first response outside this list is returned unchanged,
-including `400`, `408`, generic `5xx`, network failures, and successful stream
-starts. Those outcomes may be ambiguous after a paid generation began, so the
-proxy does not replay them through another provider. It never fabricates a
-successful fallback body.
+before transport. Any other outcome is returned unchanged and never repeated on
+another provider: `400` and other client errors, `408`, `504`, a read timeout or
+a connection dropped after the request was sent (`X-MultiLLM-Transport-Failure:
+timeout` or `interrupted`), and every successful status, including a stream that
+has started. A `504` or a timeout may hide a generation that is still running
+and billed upstream. A streaming request whose upstream answers with an error
+status receives that status and body, not a `200` event stream, so the rule
+applies to streams as well. The proxy never fabricates a successful fallback
+body.
+
+Earlier releases returned upstream `500`, `502`, `503` and connect failures to
+the caller; only the first five items in the list moved on.
 
 Every selected response includes:
 
 - `X-MultiLLM-Auto-Route`
 - `X-MultiLLM-Auto-Selected-Model`
-- `X-MultiLLM-Auto-Attempts`
-- `X-MultiLLM-Auto-Selected-Priority`
+- `X-MultiLLM-Auto-Attempts`: candidates dispatched after the credential check
+- `X-MultiLLM-Auto-Selected-Priority`: the candidate's configured position
+- `X-MultiLLM-Auto-Ordering`: `priority`, `health` or `health-probe`
+- `X-MultiLLM-Auto-Failover-Reasons`, when another candidate was passed over:
+  `model=reason` pairs such as `nanogpt:zai-org/glm-5.2:thinking=http_503` or
+  `navyai:glm-5.2=skipped`
 
+When every candidate fails, the last failure is returned with these headers.
 The standard `X-MultiLLM-Provider`, `X-MultiLLM-Model`, and
-`X-MultiLLM-Route-Decision` headers report the actual selected candidate and
-whether it was the primary route or a failover.
+`X-MultiLLM-Route-Decision` headers report the actual selected candidate.
+`X-MultiLLM-Route-Decision` is `auto-primary` for the configured first
+candidate, `auto-health` when health ordering put another candidate first, and
+`auto-failover` after an earlier candidate was skipped or failed.
+
+## Health-aware ordering
+
+Candidates are tried in their configured order unless a route opts in to health
+ordering. Then candidates with a recently poor success rate or much slower
+responses move behind healthier ones, candidates whose provider circuit is open
+go last, and the configured order remains the tiebreaker: a candidate passes the
+one before it only when its score is higher by more than a margin. Scores decay
+back to healthy while a candidate receives no traffic, so a provider that
+recovers is tried again in its configured place.
+
+```dotenv
+AUTO_ROUTE_ORDERING=priority                    # or health, for every route
+AUTO_ROUTE_ORDERING_OVERRIDES=auto:glm-5.2=health,auto:image=priority
+```
+
+The per-route override wins over the global setting. Scoring, cost weighting,
+exploration, persistence in D1 and the other settings are described in
+[status and health](status-and-health.md#health-aware-ordering).
 
 ## NanoGPT key pools
 
@@ -279,7 +369,9 @@ Because those statuses reject the request before generation, unified Chat,
 Responses, and image requests may immediately try the next configured NanoGPT
 key. `X-MultiLLM-Credential-Attempts` reports how many keys were tried. An auto
 route advances to the next provider only after NanoGPT's usable keys are
-exhausted. Ambiguous transport and `5xx` failures are never replayed.
+exhausted. A `5xx` or transport failure is never retried with another NanoGPT
+key; an automatic route may still move to the next provider under the
+[failover boundary](#failover-boundary).
 
 Direct `/nanogpt/*` routes preserve the raw gateway's single-attempt contract.
 They invalidate a rejected configured key for the next request but return the
