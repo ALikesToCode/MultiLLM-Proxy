@@ -4049,3 +4049,108 @@ test("worker preserves quoted and colon-prefixed streamed thinking text", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("worker forwards unified Anthropic Messages to the Container, never to LinkAPI", async () => {
+  const origin = "https://claude.example";
+  const forwarded = [];
+  const stub = makeEnv(
+    async (request) => {
+      forwarded.push({
+        url: new URL(request.url),
+        headers: new Headers(request.headers),
+        body: await request.text(),
+      });
+      if (new URL(request.url).pathname === "/v1/messages/count_tokens") {
+        return new Response(JSON.stringify({ input_tokens: 3 }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        makeChunkedBody([
+          'event: message_start\ndata: {"type":"message_start"}\n\n',
+          'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+        ]),
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    },
+    { ADMIN_API_KEY: "admin-live-key", LINKAPI_KEY: "linkapi-live-key" },
+  );
+  const headers = {
+    Origin: origin,
+    "Content-Type": "application/json",
+    "x-api-key": "admin-live-key",
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": "interleaved-thinking-2025-05-14",
+  };
+
+  await withGlobalFetch(
+    async () => {
+      throw new Error("the LinkAPI fast path must only serve /linkapi");
+    },
+    async () => {
+      const response = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/v1/messages", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: "auto:glm-5.2",
+            max_tokens: 16,
+            stream: true,
+            messages: [{ role: "user", content: "hi" }],
+          }),
+        }),
+        stub.env,
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+      assert.equal(response.headers.get("X-Accel-Buffering"), "no");
+      assert.match(await response.text(), /event: message_stop/);
+
+      const counted = await worker.fetch(
+        new Request("https://multillm-proxy.cserules.workers.dev/v1/messages/count_tokens", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ model: "auto:glm-5.2", messages: [{ role: "user", content: "hi" }] }),
+        }),
+        stub.env,
+      );
+      assert.deepEqual(await counted.json(), { input_tokens: 3 });
+    },
+  );
+
+  assert.equal(stub.getCalls(), 2);
+  const [messages, countTokens] = forwarded;
+  assert.equal(messages.url.pathname, "/v1/messages");
+  assert.equal(countTokens.url.pathname, "/v1/messages/count_tokens");
+  for (const request of forwarded) {
+    assert.equal(request.headers.get("x-api-key"), "admin-live-key");
+    assert.equal(request.headers.get("anthropic-version"), "2023-06-01");
+    assert.equal(request.headers.get("anthropic-beta"), "interleaved-thinking-2025-05-14");
+  }
+  assert.equal(JSON.parse(messages.body).model, "auto:glm-5.2");
+});
+
+test("worker answers unified Messages CORS preflight for Anthropic headers", async () => {
+  const stub = makeEnv(async () => {
+    throw new Error("preflight should not reach the container");
+  });
+
+  const response = await worker.fetch(
+    new Request("https://multillm-proxy.cserules.workers.dev/v1/messages", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://claude.example",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "x-api-key, anthropic-version, anthropic-beta, content-type",
+      },
+    }),
+    stub.env,
+  );
+
+  assert.equal(response.status, 204);
+  assert.equal(stub.getCalls(), 0);
+  assert.equal(
+    response.headers.get("Access-Control-Allow-Headers"),
+    "x-api-key, anthropic-version, anthropic-beta, content-type",
+  );
+});
