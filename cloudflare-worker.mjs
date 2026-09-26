@@ -5,6 +5,7 @@ import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
+import { withAccessIdentity } from "./worker/access-sso.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
@@ -1976,6 +1977,8 @@ export default {
       const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
       const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
       const headers = new Headers(request.headers);
+      // Client copies of the Access identity headers never reach the Container.
+      await withAccessIdentity(request, env, headers);
       headers.delete("content-length");
       headers.delete("host");
       headers.set("x-forwarded-proto", requestUrl.protocol.slice(0, -1));

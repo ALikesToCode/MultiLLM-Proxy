@@ -723,6 +723,7 @@ export async function loadWorkerModule() {
     .replace('from "./worker/d1-schema.mjs";', `from "${new URL("../../worker/d1-schema.mjs", import.meta.url)}";`)
     .replace('from "./worker/ai-outbound.mjs";', `from "${new URL("../../worker/ai-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/knowledge-edge.mjs";', `from "${new URL("../../worker/knowledge-edge.mjs", import.meta.url)}";`)
+    .replace('from "./worker/access-sso.mjs";', `from "${new URL("../../worker/access-sso.mjs", import.meta.url)}";`)
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)
