@@ -55,6 +55,16 @@ DEFAULT_AUTO_ROUTES = {
         "openai:gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-flare",
     ),
+    # Edits and reference images: only candidates that accept source images. Cloudflare
+    # and xAI take no mask and are skipped when one is sent; see routes/media_edits.py.
+    "auto:image-edit": (
+        "gguu:gpt-image-2.5-sunburst",
+        "gguu:gpt-image-2",
+        "cloudflare:openai/gpt-image-2.5-sunburst",
+        "openai:gpt-image-2.5-sunburst",
+        "xai:grok-imagine-image-2.0",
+        "aihubmix:gpt-image-2-free",
+    ),
     # Asynchronous video jobs; see services/video_generation.py.
     "auto:video": (
         "gemini:veo-3.1-generate-preview",

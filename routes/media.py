@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import time
 
-from flask import g, jsonify, url_for
+from flask import g, jsonify, request, url_for
 
 from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
+from routes.media_edits import dispatch_image_edit, parse_json_edit, parse_multipart_edit
 from routes.media_images import image_fail_over, run_image_batch
 from routes.unified import _validate_image_candidate, dispatch_unified_image_generation
 from services import cloudflare_ai, video_generation
@@ -74,6 +75,16 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     @api_auth_required
     def image_batch():
         return jsonify(run_image_batch(json_object_body(), generate_image))
+
+    @app.route("/v1/images/edits", methods=["POST", "OPTIONS"])
+    @csrf.exempt
+    @api_auth_required
+    def image_edits():
+        if request.mimetype == "multipart/form-data":
+            payload, inputs = parse_multipart_edit()
+        else:
+            payload, inputs = parse_json_edit(json_object_body())
+        return dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, inputs)
 
     @app.route("/v1/videos", methods=["POST", "OPTIONS"])
     @csrf.exempt

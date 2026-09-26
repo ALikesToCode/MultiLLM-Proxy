@@ -58,9 +58,21 @@ def post(path: str, payload: dict, timeout) -> requests.Response | Response:
             return Response(bytes(body), status=response.status_code, content_type="application/json")
 
 
+def _not_bound() -> Response:
+    return Response(json.dumps({"error": {"message": "Cloudflare AI is not bound to this deployment"}}),
+                    status=503, content_type="application/json")
+
+
 def generate_image(payload: dict) -> Response:
     if not enabled():
-        return Response(json.dumps({"error": {"message": "Cloudflare AI is not bound to this deployment"}}),
-                        status=503, content_type="application/json")
+        return _not_bound()
     body = {**payload, "model": payload["model"].split(":", 1)[1]}
     return post("/v1/images/generations", body, IMAGE_TIMEOUT)
+
+
+def edit_image(payload: dict, images: list[str]) -> Response:
+    """Edit through AI Gateway: `images` are data URLs, sent to OpenAI's edit endpoint."""
+    if not enabled():
+        return _not_bound()
+    body = {**payload, "model": payload["model"].split(":", 1)[1], "images": images}
+    return post("/v1/images/edits", body, IMAGE_TIMEOUT)

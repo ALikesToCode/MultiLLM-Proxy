@@ -4,6 +4,7 @@ import { d1Readiness } from "./worker/d1-schema.mjs";
 import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleAiOutbound } from "./worker/ai-outbound.mjs";
+import { handleMediaOutbound } from "./worker/media-outbound.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
@@ -1797,6 +1798,7 @@ MultiLLMProxyContainer.outboundByHost = {
   "intelligence.internal": handleIntelligenceOutbound,
   "knowledge.internal": handleKnowledgeOutbound,
   "ai.internal": handleAiOutbound,
+  "media.internal": handleMediaOutbound,
 };
 
 export default {

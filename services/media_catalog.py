@@ -12,6 +12,8 @@ import math
 import re
 from dataclasses import dataclass
 
+from providers.image_relays import image_relay_spec
+
 DEFAULT_IMAGE_QUALITY = "max"
 # Set on proxy-generated transport failures: "connect" means the request never reached
 # the provider; "timeout" or "interrupted" means it may have been accepted and billed.
@@ -60,6 +62,60 @@ def image_profile(provider: str, provider_model: str) -> ImageProfile | None:
     if name.startswith("grok-imagine-image"):
         return GROK_IMAGE
     return None
+
+
+@dataclass(frozen=True)
+class EditSupport:
+    """How a model accepts source images: `multipart` is OpenAI's form upload, `xai` is
+    xAI's JSON body with image URLs, `cloudflare` is the AI binding's `images` array."""
+
+    transport: str
+    max_images: int
+    mask: bool
+
+
+_GPT_IMAGE_NAME = re.compile(r"(?:openai/)?(?:gpt-image-|chatgpt-image-)[a-z0-9.-]+\Z")
+# OpenAI's edit form takes these fields; `moderation` is generation-only.
+EDIT_FIELDS = frozenset({"model", "prompt", "n", "size", "quality", "background", "output_format",
+                         "output_compression", "response_format", "user", "input_fidelity"})
+
+
+def image_edit_support(provider: str, provider_model: str) -> EditSupport | None:
+    """Whether a model edits images from references, and how; None when it cannot."""
+    name = provider_model.lower()
+    if provider == "cloudflare":
+        # AI Gateway sends `images` to OpenAI's edit endpoint; it takes no mask.
+        return EditSupport("cloudflare", 16, False) if name.startswith("openai/gpt-image-") else None
+    if provider == "xai":
+        return EditSupport("xai", 3, False) if name.startswith("grok-imagine-image") else None
+    if name == "dall-e-2" and provider == "openai":
+        return EditSupport("multipart", 1, True)
+    if not _GPT_IMAGE_NAME.match(name):
+        return None
+    if provider in ("openai", "aihubmix", "linkapi"):
+        return EditSupport("multipart", 16, True)
+    spec = image_relay_spec(provider)
+    # Relays forward OpenAI's edit form for the GPT Image family they declare.
+    return EditSupport("multipart", 16, True) if spec is not None and spec.supports_edits else None
+
+
+def prepare_image_edit_payload(provider: str, provider_model: str, payload: dict) -> dict:
+    """Edit settings for one candidate: generation settings minus fields edits reject."""
+    prepared = prepare_image_payload(provider, provider_model, payload)
+    support = image_edit_support(provider, provider_model)
+    if support is not None and support.transport == "xai":
+        # xAI edits take the prompt and output count; the source image sets the shape.
+        return {name: prepared[name] for name in ("model", "prompt", "n", "response_format") if name in prepared}
+    fields = EDIT_FIELDS
+    if "mini" in provider_model.lower() or provider_model.lower() == "dall-e-2":
+        fields = fields - {"input_fidelity"}
+    edited = {name: value for name, value in prepared.items() if name in fields}
+    if "input_fidelity" in payload and "input_fidelity" in fields:
+        edited["input_fidelity"] = payload["input_fidelity"]
+    if provider == "openai" and provider_model.lower() != "dall-e-2":
+        # OpenAI's GPT Image models always return base64 and reject response_format.
+        edited.pop("response_format", None)
+    return edited
 
 
 def is_video_model(provider_model: str) -> bool:

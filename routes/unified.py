@@ -50,6 +50,7 @@ from routes.protocol_bridge import (
 )
 from routes.unified_messages import register_unified_messages_routes
 from routes.media_images import dispatch_auto_image_generation
+from routes.media_edits import dispatch_reference_generation, has_reference_images
 from routes.unified_transport import (
     normalized_aihubmix_image_response,
     send_configured_unified_provider_request,
@@ -1051,6 +1052,10 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @api_auth_required
     def unified_image_generations():
         payload = json_object_body()
+        if has_reference_images(payload):
+            return dispatch_reference_generation(
+                app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
+            )
         return dispatch_unified_image_generation(
             app,
             auth_service_cls,

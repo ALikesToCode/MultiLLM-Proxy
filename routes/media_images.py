@@ -55,10 +55,11 @@ def _image_count(payload: dict) -> int:
 
 
 def _dispatch_single(payload: dict, validate_candidate: Callable[[str], None],
-                     dispatch_candidate: Callable[[dict], Response]) -> Response:
+                     dispatch_candidate: Callable[[dict], Response],
+                     prepare: Callable[[str, str, dict], dict] = prepare_image_payload) -> Response:
     def dispatch_prepared(candidate_payload: dict, candidate: str, route_decision: str) -> Response:
         provider, provider_model = ModelRegistry.parse_model_id(candidate)
-        prepared = prepare_image_payload(provider, provider_model, candidate_payload)
+        prepared = prepare(provider, provider_model, candidate_payload)
         prepared["model"] = candidate
         try:
             return dispatch_candidate(prepared)
@@ -108,17 +109,21 @@ def _error(result: dict) -> dict:
 
 
 def dispatch_auto_image_generation(payload: dict, *, validate_candidate: Callable[[str], None],
-                                   dispatch_candidate: Callable[[dict], Response]) -> Response:
-    """One image request through an automatic route, fanning n images out in parallel."""
+                                   dispatch_candidate: Callable[[dict], Response],
+                                   prepare: Callable[[str, str, dict], dict] = prepare_image_payload) -> Response:
+    """One image request through an automatic route, fanning n images out in parallel.
+
+    Edits pass their own `prepare`, which keeps only the fields an edit accepts.
+    """
     payload = dict(payload)
     payload.setdefault("quality", DEFAULT_IMAGE_QUALITY)
     count = _image_count(payload)
     if count == 1:
-        return _dispatch_single(payload, validate_candidate, dispatch_candidate)
+        return _dispatch_single(payload, validate_candidate, dispatch_candidate, prepare)
     # Many image models generate one image per request, so each image is its own
     # request and may fall back independently.
     single = {**payload, "n": 1}
-    results = run_image_tasks([lambda: _dispatch_single(single, validate_candidate, dispatch_candidate)] * count)
+    results = run_image_tasks([lambda: _dispatch_single(single, validate_candidate, dispatch_candidate, prepare)] * count)
     succeeded = [result for result in results if result["status"] < 400 and result["body"]]
     if not succeeded:
         failure = results[-1]

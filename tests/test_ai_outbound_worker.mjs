@@ -73,6 +73,23 @@ test("Veo runs through Cloudflare AI and returns the finished clip", async () =>
   assert.equal((await post("/v1/videos/generations", { model: "openai/sora-2", prompt: "x" }, env)).status, 404);
 });
 
+test("GPT Image edits send the source images to AI Gateway and nothing else accepts them", async () => {
+  const env = { AI: ai({ image: "https://images.example/edit.png" }) };
+  const source = "data:image/png;base64,iVBORw0KGgo=";
+  const response = await post("/v1/images/edits", { model: "openai/gpt-image-2.5-flare", prompt: "Clay", images: [source],
+    quality: "max", response_format: "url" }, env);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).data, [{ url: "https://images.example/edit.png" }]);
+  assert.deepEqual(env.AI.calls[0].input, { prompt: "Clay", quality: "max", images: [source] });
+  for (const body of [{ model: "@cf/leonardo/lucid-origin", prompt: "x", images: [source] },
+    { model: "openai/gpt-image-2", prompt: "x", images: [] },
+    { model: "openai/gpt-image-2", prompt: "x", images: ["https://images.example/a.png"] }]) {
+    assert.notEqual((await post("/v1/images/edits", body, env)).status, 200, JSON.stringify(body));
+  }
+  assert.equal((await post("/v1/images/generations", { model: "openai/gpt-image-2", prompt: "x", images: [source] }, env)).status, 400);
+  assert.equal(env.AI.calls.length, 1);
+});
+
 test("the Container learns about Cloudflare AI only when the binding exists", () => {
   assert.equal(collectContainerEnv({ AI: {} }).CLOUDFLARE_AI_ENABLED, "true");
   assert.equal(collectContainerEnv({}).CLOUDFLARE_AI_ENABLED, undefined);

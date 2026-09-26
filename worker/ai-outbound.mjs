@@ -8,6 +8,9 @@ import { Buffer } from "node:buffer";
 import { logFailure } from "./log.mjs";
 
 const MAX_BODY_BYTES = 64 * 1024;
+// Edits carry up to 16 source images as base64 data URLs.
+const MAX_EDIT_BODY_BYTES = 24 * 1024 * 1024;
+const DATA_IMAGE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/;
 const MAX_FETCHED_IMAGE_BYTES = 40 * 1024 * 1024;
 const THIRD_PARTY_IMAGE = /^openai\/gpt-image-[a-z0-9.-]{1,40}$/;
 const THIRD_PARTY_VIDEO = new Set(["google/veo-3.1"]);
@@ -24,11 +27,11 @@ const failure = (code, message, status) => Response.json({ error: { code, messag
   { status, headers: { "cache-control": "no-store" } });
 const isRecord = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
-async function boundedJson(request) {
+async function boundedJson(request, maxBytes = MAX_BODY_BYTES) {
   const length = request.headers.get("content-length");
-  if (length !== null && Number(length) > MAX_BODY_BYTES) return null;
+  if (length !== null && Number(length) > maxBytes) return null;
   const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return null;
+  if (text.length > maxBytes) return null;
   try {
     const body = JSON.parse(text);
     return isRecord(body) ? body : null;
@@ -59,6 +62,8 @@ export function imageInput(body) {
   const input = { prompt: body.prompt };
   if (THIRD_PARTY_IMAGE.test(body.model)) {
     for (const field of IMAGE_FIELDS) if (body[field] !== undefined) input[field] = body[field];
+    // AI Gateway sends a request with `images` to OpenAI's edit endpoint.
+    if (Array.isArray(body.images)) input.images = body.images;
     return input;
   }
   const spec = WORKERS_AI_IMAGE[body.model];
@@ -103,6 +108,17 @@ async function generateImage(env, body) {
     { headers: { "cache-control": "no-store" } });
 }
 
+async function editImage(env, body) {
+  if (!THIRD_PARTY_IMAGE.test(body.model ?? "")) {
+    return failure("model_not_found", "Only OpenAI GPT Image models edit images through Cloudflare AI here.", 404);
+  }
+  if (!Array.isArray(body.images) || !body.images.length || body.images.length > 16
+    || !body.images.every(image => typeof image === "string" && DATA_IMAGE.test(image))) {
+    return failure("invalid_request", "images must hold 1 to 16 PNG, JPEG or WebP data URLs.", 400);
+  }
+  return generateImage(env, body);
+}
+
 async function generateVideo(env, body) {
   if (!THIRD_PARTY_VIDEO.has(body.model)) return failure("model_not_found", "This video model is not served through Cloudflare AI here.", 404);
   if (typeof body.prompt !== "string" || !body.prompt.trim()) return failure("invalid_request", "A prompt is required.", 400);
@@ -126,10 +142,17 @@ export async function handleAiOutbound(request, env) {
   if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
     return failure("invalid_request", "Use application/json.", 415);
   }
-  const body = await boundedJson(request);
-  if (!body) return failure("invalid_request", "The request body must be a JSON object of at most 64 KiB.", 400);
+  const edit = url.pathname === "/v1/images/edits";
+  const body = await boundedJson(request, edit ? MAX_EDIT_BODY_BYTES : MAX_BODY_BYTES);
+  if (!body) {
+    return failure("invalid_request", `The request body must be a JSON object of at most ${edit ? "24 MiB" : "64 KiB"}.`, 400);
+  }
   try {
-    if (url.pathname === "/v1/images/generations") return await generateImage(env, body);
+    if (url.pathname === "/v1/images/generations") {
+      if (body.images !== undefined) return failure("invalid_request", "Send source images to /v1/images/edits.", 400);
+      return await generateImage(env, body);
+    }
+    if (edit) return await editImage(env, body);
     if (url.pathname === "/v1/videos/generations") return await generateVideo(env, body);
     return failure("not_found", "Unknown Cloudflare AI operation.", 404);
   } catch (error) {

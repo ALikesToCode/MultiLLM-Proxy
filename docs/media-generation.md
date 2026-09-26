@@ -17,6 +17,7 @@ OpenRouter is not used.
 | `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `together:openai/gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
 | `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `cloudflare:openai/gpt-image-2.5-flare`, `openai:gpt-image-2.5-flare`, `xai:grok-imagine-image-2.0`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
 | `auto:gpt-image-2.5` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-flare`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-flare` |
+| `auto:image-edit` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `aihubmix:gpt-image-2-free` |
 | `auto:video` | `gemini:veo-3.1-generate-preview`, `xai:grok-imagine-video-1.5`, `cloudflare:google/veo-3.1`, `openai:sora-2-pro`, `openai:sora-2` |
 
 A candidate without a credential (or Cloudflare AI without its binding) is skipped before
@@ -55,6 +56,32 @@ moves on. A timeout or a dropped connection after the request was sent does not:
 generation may already be billed, so the route stops with `504` and
 `X-MultiLLM-Transport-Failure: timeout` (or `interrupted`). Chat routes keep their
 stricter rule, which only moves on after refusals.
+
+### Edits and reference images
+
+`POST /v1/images/edits` takes OpenAI's multipart form: `image` (or `image[]`, up to 16
+PNG, JPEG or WebP files of at most 20 MiB each and 30 MiB together), an optional PNG
+`mask` (at most 4 MiB, applied to the first image), `prompt`, `model` (default
+`auto:image-edit`), `size`, `quality`, `n`, `background`, `output_format`,
+`output_compression`, `input_fidelity` and `response_format`. JSON works too, with the
+images as HTTPS or data URLs:
+
+```json
+{"model": "auto:image-edit", "prompt": "Put the cat in a spacesuit",
+ "images": ["https://example.com/cat.png", {"image_url": "data:image/png;base64,..."}]}
+```
+
+The Worker downloads HTTPS images (public hosts only, at most three redirects), so a URL
+never reaches the Container's private network. A `POST /v1/images/generations` body with
+`images` is sent the same way: the images become references for the models that accept
+them, and other candidates of the route are skipped.
+
+Each provider receives the edit in its own format. OpenAI, AIHubMix, LinkAPI and the image
+relays (GGUU's GPT Image group and the others with edits enabled) take OpenAI's form.
+xAI takes JSON image URLs, at most three and no mask. Cloudflare's GPT Image models take
+up to 16 images (16 MiB in total) and no mask. Settings are translated as for
+generation, without `moderation`. A candidate that cannot take the request is skipped
+before anything is sent; after that the failover rule above applies.
 
 ### Batches
 
