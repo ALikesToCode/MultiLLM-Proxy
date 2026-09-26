@@ -232,6 +232,19 @@ npx wrangler secret put LOCATION
 npx wrangler secret put GOOGLE_ENDPOINT
 ```
 
+Optional dashboard single sign-on through Cloudflare Access needs a Worker secret
+and a few variables; see [Dashboard single sign-on](dashboard-sso.md):
+
+```bash
+npx wrangler secret put CF_ACCESS_PROOF_SECRET   # at least 32 random characters
+# Variables: CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, CF_ACCESS_ALLOWED_EMAILS,
+# optionally DASHBOARD_SSO_ONLY=true and ADMIN_USERNAMES.
+```
+
+The Worker verifies the Access token and forwards only a signed identity assertion to
+the Container; `CF_ACCESS_AUD` stays on the Worker. Migration `0010` adds the
+`control_audit_events` table behind the administrator audit log at `/admin/audit`.
+
 Do not place API keys in `wrangler.jsonc` `vars`. Use Worker secrets.
 NanoGPT's non-secret deployment default is subscription-only text routing via
 `NANOGPT_BILLING_MODE=subscription`; `wrangler.jsonc` supplies the corresponding

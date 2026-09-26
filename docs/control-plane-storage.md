@@ -31,7 +31,11 @@ dashboard reports 403 `admin_not_allowed`), and the edge grants management scope
 only to those names, so a compromised Container cannot persist an administrator.
 Add a username to `ADMIN_USERNAMES` before making it an administrator. Every account
 write and refusal is appended to `control_user_audit`; the Worker exposes no
-statement that changes or deletes audit rows.
+statement that changes or deletes audit rows. Sign-ins, sign-outs, refused single
+sign-on and administrator setting changes go to `control_audit_events` through the
+`audit_record` operation, and administrators read both tables on the audit log page
+through the read-only `audit_list` operation; see
+[Dashboard single sign-on and the audit log](dashboard-sso.md).
 
 `ADMIN_API_KEY` is the bootstrap credential. It authenticates from the environment
 even when D1 is slow or unavailable, and startup writes its account record back. Other
