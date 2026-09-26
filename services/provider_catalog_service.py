@@ -11,6 +11,7 @@ from typing import Any
 
 from providers.image_relays import image_relay_specs
 from providers.opencode_go import is_opencode_zen_free_model
+from services import provider_catalog_d1
 from services.provider_capability_discovery import enrich_model_capabilities
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
@@ -70,10 +71,42 @@ def _utcnow_iso() -> str:
 
 
 class ProviderCatalogService:
-    """Discover and cache provider model IDs without persisting credentials."""
+    """Discover and cache provider model IDs without persisting credentials.
+
+    With the Worker's D1 store the last good catalog of each provider is kept there
+    (services.provider_catalog_d1), so a new Container starts with it.
+    """
 
     _catalog_cache: dict[str, tuple[ProviderCatalogModel, ...]] = {}
     _catalog_cache_lock = threading.RLock()
+    _durable_catalog: tuple[int, tuple[ProviderCatalogModel, ...]] = (-1, ())
+
+    @classmethod
+    def _durable_models(cls) -> tuple[ProviderCatalogModel, ...]:
+        snapshots, version = provider_catalog_d1.snapshots()
+        with cls._catalog_cache_lock:
+            if cls._durable_catalog[0] == version:
+                return cls._durable_catalog[1]
+        models = tuple(
+            sorted(
+                (
+                    ProviderCatalogModel(
+                        provider=provider,
+                        model_id=model_id,
+                        discovered_at=discovered_at,
+                        context_window=context_window,
+                        max_output_tokens=max_output_tokens,
+                        metadata=decode_provider_metadata(metadata_json),
+                    )
+                    for provider, (discovered_at, rows) in snapshots.items()
+                    for model_id, context_window, max_output_tokens, metadata_json in rows
+                ),
+                key=lambda model: (model.provider, model.model_id),
+            )
+        )
+        with cls._catalog_cache_lock:
+            cls._durable_catalog = (version, models)
+        return models
 
     @staticmethod
     def _cache_key() -> str:
@@ -130,6 +163,8 @@ class ProviderCatalogService:
 
     @classmethod
     def list_models(cls) -> list[ProviderCatalogModel]:
+        if provider_catalog_d1.using_d1():
+            return list(cls._durable_models())
         cache_key = cls._cache_key()
         with cls._catalog_cache_lock:
             cached = cls._catalog_cache.get(cache_key)
@@ -172,6 +207,11 @@ class ProviderCatalogService:
     @classmethod
     def has_model(cls, provider: str, model_id: str) -> bool:
         """Return whether a model appears in the last successful live catalog."""
+        if provider_catalog_d1.using_d1():
+            return any(
+                model.provider == provider and model.model_id == model_id
+                for model in cls._durable_models()
+            )
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -193,7 +233,8 @@ class ProviderCatalogService:
         models: tuple[str | ProviderCatalogModel, ...],
         *,
         discovered_at: str | None = None,
-    ) -> None:
+    ) -> bool:
+        """Replace one provider's catalog; False when D1 is in use and did not store it."""
         timestamp = discovered_at or _utcnow_iso()
         records = [
             (
@@ -212,6 +253,10 @@ class ProviderCatalogService:
             )
             for model in models
         ]
+        if provider_catalog_d1.using_d1():
+            return provider_catalog_d1.save(
+                provider, timestamp, [(record[1], *record[3:]) for record in records]
+            )
         cache_key = cls._cache_key()
         with cls._catalog_cache_lock:
             with closing(cls._connect()) as connection:
@@ -238,6 +283,7 @@ class ProviderCatalogService:
                 )
                 connection.commit()
             cls._catalog_cache.pop(cache_key, None)
+        return True
 
     @staticmethod
     def _model_collection(payload: Any) -> list[Any]:
@@ -602,7 +648,11 @@ class ProviderCatalogService:
                         }
                     if result["status"] == "updated":
                         models = tuple(result.pop("models"))
-                        cls.replace_provider_models(result["provider"], models)
+                        if not cls.replace_provider_models(result["provider"], models):
+                            result["message"] = (
+                                "Updated in this Container only; the durable copy "
+                                "could not be saved"
+                            )
                         result["model_count"] = len(models)
                     results.append(result)
 

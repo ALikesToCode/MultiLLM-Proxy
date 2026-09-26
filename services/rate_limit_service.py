@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 from flask import request
 from config import Config
+from services import rate_limit_d1
 from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
@@ -307,6 +308,45 @@ class RateLimitService:
     def _iso_cutoff(seconds: int) -> str:
         return (_utcnow() - timedelta(seconds=seconds)).isoformat()
 
+    @staticmethod
+    def _denial(
+        minute_count: int,
+        token_limited: bool,
+        daily_count: int,
+        rpm_limit: int,
+        daily_limit: int,
+        metadata: Dict[str, Any],
+    ) -> Optional[LimitDecision]:
+        """The first exceeded limit, checked in the same order by every ledger."""
+        if minute_count >= rpm_limit:
+            return LimitDecision(
+                False,
+                status_code=429,
+                error="rate_limit_exceeded",
+                message="Request-per-minute limit exceeded.",
+                retry_after=60,
+                metadata=metadata,
+            )
+        if token_limited:
+            return LimitDecision(
+                False,
+                status_code=429,
+                error="token_rate_limit_exceeded",
+                message="Token-per-minute limit exceeded.",
+                retry_after=60,
+                metadata=metadata,
+            )
+        if daily_count >= daily_limit:
+            return LimitDecision(
+                False,
+                status_code=429,
+                error="daily_budget_exceeded",
+                message="Daily request budget exceeded.",
+                retry_after=60 * 60,
+                metadata=metadata,
+            )
+        return None
+
     @classmethod
     def check_request_size(cls, provider: str, payload_bytes: bytes) -> LimitDecision:
         """Apply the provider body-size safety limit without reserving usage."""
@@ -383,6 +423,23 @@ class RateLimitService:
             "daily_request_limit": daily_limit,
         }
 
+        if rate_limit_d1.active():
+            # D1 mode: in-memory ledger plus the other instances' cached usage; no D1 call here.
+            with rate_limit_d1.transaction() as usage:
+                minute_count, minute_tokens, daily_count = usage.window(identity, provider)
+                denial = cls._denial(
+                    minute_count,
+                    minute_tokens >= tpm_limit or minute_tokens + output_tokens > tpm_limit,
+                    daily_count,
+                    rpm_limit,
+                    daily_limit,
+                    metadata,
+                )
+                if denial is not None:
+                    return denial
+                metadata["reservation_id"] = usage.admit(identity, provider, 0)
+            return LimitDecision(True, metadata=metadata)
+
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -410,39 +467,17 @@ class RateLimitService:
                     (identity, provider, cls._iso_cutoff(24 * 60 * 60)),
                 ).fetchone()["request_count"]
             )
-            if minute_count >= rpm_limit:
+            denial = cls._denial(
+                minute_count,
+                minute_tokens >= tpm_limit or minute_tokens + output_tokens > tpm_limit,
+                daily_count,
+                rpm_limit,
+                daily_limit,
+                metadata,
+            )
+            if denial is not None:
                 connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="rate_limit_exceeded",
-                    message="Request-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if (
-                minute_tokens >= tpm_limit
-                or minute_tokens + output_tokens > tpm_limit
-            ):
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="token_rate_limit_exceeded",
-                    message="Token-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if daily_count >= daily_limit:
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="daily_budget_exceeded",
-                    message="Daily request budget exceeded.",
-                    retry_after=60 * 60,
-                    metadata=metadata,
-                )
+                return denial
 
             cursor = connection.execute(
                 """
@@ -562,6 +597,33 @@ class RateLimitService:
             "reservation_id": reservation_id,
         }
 
+        if rate_limit_d1.active():
+            with rate_limit_d1.transaction() as usage:
+                if not usage.owns(reservation_id, identity, provider):
+                    return LimitDecision(
+                        False,
+                        status_code=500,
+                        error="invalid_rate_reservation",
+                        message="The request rate-limit reservation was not found.",
+                        metadata=metadata,
+                    )
+                minute_count, minute_tokens, daily_count = usage.window(
+                    identity, provider, exclude=reservation_id
+                )
+                denial = cls._denial(
+                    minute_count,
+                    bool(estimated_tokens)
+                    and minute_tokens + estimated_tokens > tpm_limit,
+                    daily_count,
+                    rpm_limit,
+                    daily_limit,
+                    metadata,
+                )
+                if denial is not None:
+                    return denial
+                usage.settle(reservation_id, estimated_tokens)
+            return LimitDecision(True, metadata=metadata)
+
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -609,36 +671,17 @@ class RateLimitService:
                     ),
                 ).fetchone()["request_count"]
             )
-            if minute_count >= rpm_limit:
+            denial = cls._denial(
+                minute_count,
+                bool(estimated_tokens) and minute_tokens + estimated_tokens > tpm_limit,
+                daily_count,
+                rpm_limit,
+                daily_limit,
+                metadata,
+            )
+            if denial is not None:
                 connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="rate_limit_exceeded",
-                    message="Request-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if estimated_tokens and minute_tokens + estimated_tokens > tpm_limit:
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="token_rate_limit_exceeded",
-                    message="Token-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if daily_count >= daily_limit:
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="daily_budget_exceeded",
-                    message="Daily request budget exceeded.",
-                    retry_after=60 * 60,
-                    metadata=metadata,
-                )
+                return denial
 
             connection.execute(
                 """
@@ -733,6 +776,34 @@ class RateLimitService:
         rpm_limit = cls._provider_limit(provider, "RATE_LIMIT_RPM", cls.RATE_LIMITS.get(provider, cls.RATE_LIMITS["default"])["requests"])
         tpm_limit = cls._provider_limit(provider, "RATE_LIMIT_TPM", 200000)
         daily_limit = cls._provider_limit(provider, "DAILY_REQUEST_LIMIT", 10000)
+        metadata = {
+            "identity": identity,
+            "provider": provider,
+            "key_prefix": key_prefix,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_tokens": estimated_tokens,
+            "rpm_limit": rpm_limit,
+            "tpm_limit": tpm_limit,
+            "daily_request_limit": daily_limit,
+        }
+
+        if rate_limit_d1.active():
+            with rate_limit_d1.transaction() as usage:
+                minute_count, minute_tokens, daily_count = usage.window(identity, provider)
+                denial = cls._denial(
+                    minute_count,
+                    bool(estimated_tokens)
+                    and minute_tokens + estimated_tokens > tpm_limit,
+                    daily_count,
+                    rpm_limit,
+                    daily_limit,
+                    metadata,
+                )
+                if denial is not None:
+                    return denial
+                usage.admit(identity, provider, estimated_tokens)
+            return LimitDecision(True, metadata=metadata)
 
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
@@ -762,48 +833,17 @@ class RateLimitService:
             minute_tokens = int(minute_stats["token_count"])
             daily_count = int(daily_stats["request_count"])
 
-            metadata = {
-                "identity": identity,
-                "provider": provider,
-                "key_prefix": key_prefix,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "estimated_tokens": estimated_tokens,
-                "rpm_limit": rpm_limit,
-                "tpm_limit": tpm_limit,
-                "daily_request_limit": daily_limit,
-            }
-
-            if minute_count >= rpm_limit:
+            denial = cls._denial(
+                minute_count,
+                bool(estimated_tokens) and minute_tokens + estimated_tokens > tpm_limit,
+                daily_count,
+                rpm_limit,
+                daily_limit,
+                metadata,
+            )
+            if denial is not None:
                 connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="rate_limit_exceeded",
-                    message="Request-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if estimated_tokens and minute_tokens + estimated_tokens > tpm_limit:
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="token_rate_limit_exceeded",
-                    message="Token-per-minute limit exceeded.",
-                    retry_after=60,
-                    metadata=metadata,
-                )
-            if daily_count >= daily_limit:
-                connection.rollback()
-                return LimitDecision(
-                    False,
-                    status_code=429,
-                    error="daily_budget_exceeded",
-                    message="Daily request budget exceeded.",
-                    retry_after=60 * 60,
-                    metadata=metadata,
-                )
+                return denial
 
             connection.execute(
                 """

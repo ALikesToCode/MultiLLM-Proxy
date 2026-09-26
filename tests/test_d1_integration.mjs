@@ -1,5 +1,5 @@
 /**
- * Python account and auto-route code -> the Worker's private handlers -> a real local D1,
+ * Python account, auto-route and control-state code -> the Worker's private handlers -> a real local D1,
  * with and without the migrations applied. Runs in CI where both Python and Node exist.
  */
 import assert from "node:assert/strict";
@@ -31,6 +31,12 @@ async function privateStore(t, skip = []) {
   return { db, url: (await mf.ready).href };
 }
 
+async function driveState(url, scenario) {
+  const { stdout } = await run(PYTHON, ["-I", "tests/support/d1_control_state_driver.py", scenario],
+    { env: { PATH: process.env.PATH, PRIVATE_BASE_URL: url }, timeout: 120000 });
+  return JSON.parse(stdout.trim().split("\n").at(-1));
+}
+
 async function drive(url, scenario) {
   const { stdout } = await run(PYTHON, ["-I", "tests/support/d1_accounts_driver.py", scenario],
     { env: { PATH: process.env.PATH, PRIVATE_BASE_URL: url }, timeout: 120000 });
@@ -52,4 +58,21 @@ test("a D1 without the account migration fails closed for dashboard keys but not
   const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql"]);
   assert.deepEqual(await drive(url, "unmigrated"), { dashboard_key: 503, admin: "admin",
     route: ["gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5"], save_route: 503 });
+});
+
+test("control-plane state survives Container restarts through the Worker in D1", async t => {
+  const { db, url } = await privateStore(t);
+  assert.deepEqual(await driveState(url, "migrated"), {
+    usage: ["allowed", "allowed", "daily_budget_exceeded", "allowed", "daily_budget_exceeded"],
+    login: [true, false, false], status: "disabled", cooldown: true, profiles: ["Flash"], catalog: 401, catalog_limit: 200000,
+    local_files: [] });
+  const identities = (await db.prepare("SELECT DISTINCT identity FROM control_rate_usage").all()).results;
+  assert.equal(identities.length, 1);
+  assert.match(identities[0].identity, /^[0-9a-f]{64}$/, "usage rows hold a keyed hash, not the username");
+});
+
+test("before migration 0006 requests and sign-in keep working and admin saves fail visibly", async t => {
+  const { url } = await privateStore(t, ["0006_control_state.sql"]);
+  assert.deepEqual(await driveState(url, "unmigrated"), { usage: ["allowed", "allowed", "daily_budget_exceeded"],
+    login: [true, false], status: "available", disable: 503, profile: 503, cooldown: true, catalog: false, catalog_models: 1 });
 });

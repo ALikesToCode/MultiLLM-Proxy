@@ -16,6 +16,7 @@ from providers.opencode_go import (
     OPENCODE_ZEN_FREE_MODEL_IDS,
 )
 from providers.registry import get_registry
+from services import model_override_d1
 from services.provider_catalog_service import ProviderCatalogService
 from services.sqlite_store import connect, storage_path
 
@@ -117,6 +118,8 @@ class ModelRegistry:
 
     @classmethod
     def _status_overrides(cls) -> Dict[str, str]:
+        if model_override_d1.using_d1():
+            return dict(model_override_d1.overrides())
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             rows = connection.execute("SELECT model_id, status FROM model_overrides").fetchall()
@@ -186,6 +189,9 @@ class ModelRegistry:
 
     @classmethod
     def get_model_status(cls, model_id: str) -> str:
+        if model_override_d1.using_d1():
+            # D1 overrides are shared by every instance; the module caches them for 30 seconds.
+            return model_override_d1.overrides().get(model_id, "available")
         cache_key = (str(cls._get_storage_path().absolute()), model_id)
         shared = bool(os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip())
         with cls._status_cache_lock:
@@ -215,6 +221,9 @@ class ModelRegistry:
 
     @classmethod
     def disable_model(cls, model_id: str) -> None:
+        if model_override_d1.using_d1():
+            model_override_d1.save(model_id, "disabled")
+            return
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.execute(

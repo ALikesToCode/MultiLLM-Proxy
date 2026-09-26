@@ -1,4 +1,8 @@
-"""Shared free-pool cooldowns, without retaining credentials or request content."""
+"""Shared free-pool cooldowns, without retaining credentials or request content.
+
+With the Worker's D1 store the cooldowns are shared by every instance through
+services.free_quota_d1; otherwise they live in the local control-plane database.
+"""
 
 import math
 import re
@@ -6,6 +10,7 @@ import time
 from contextlib import closing
 from email.utils import parsedate_to_datetime
 
+from services import free_quota_d1
 from services.sqlite_store import connect, storage_path
 
 MAX_COOLDOWN = 7 * 24 * 3600
@@ -66,6 +71,8 @@ class FreeQuotaService:
     @classmethod
     def remaining(cls, scope: str, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
+        if free_quota_d1.using_d1():
+            return free_quota_d1.remaining(scope, now)
         with closing(cls._connect()) as connection:
             row = connection.execute(
                 "SELECT blocked_until FROM free_route_cooldowns WHERE scope = ?",
@@ -78,6 +85,9 @@ class FreeQuotaService:
         until = (time.time() if now is None else now) + min(
             MAX_COOLDOWN, max(1, seconds)
         )
+        if free_quota_d1.using_d1():
+            free_quota_d1.block(scope, until)
+            return
         with closing(cls._connect()) as connection, connection:
             connection.execute(
                 """INSERT INTO free_route_cooldowns (scope, blocked_until)

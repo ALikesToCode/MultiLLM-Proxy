@@ -8,6 +8,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import Optional
 
+from services import login_attempt_d1
 from services.sqlite_store import connect, storage_path
 
 
@@ -25,7 +26,11 @@ class LoginAttemptDecision:
 
 
 class LoginAttemptService:
-    """Persist bounded login-failure state without retaining user identifiers."""
+    """Persist bounded login-failure state without retaining user identifiers.
+
+    The local store always records attempts. When the Worker provides D1, attempts are
+    also counted there across instances and restarts, and the stricter record decides.
+    """
 
     @classmethod
     def _connect(cls) -> sqlite3.Connection:
@@ -105,6 +110,23 @@ class LoginAttemptService:
         )
 
     @classmethod
+    def _with_shared(
+        cls,
+        decision: LoginAttemptDecision,
+        shared_locked_until: Optional[float],
+        now: float,
+    ) -> LoginAttemptDecision:
+        """The stricter of the local decision and the shared D1 lock, if D1 answered."""
+        if shared_locked_until is None:
+            return decision
+        shared = cls._decision_for_lock(shared_locked_until, now)
+        if shared.allowed:
+            return decision
+        if decision.allowed or (shared.retry_after or 0) > (decision.retry_after or 0):
+            return shared
+        return decision
+
+    @classmethod
     def check(
         cls,
         remote_addr: Optional[str],
@@ -115,7 +137,17 @@ class LoginAttemptService:
         current_time = time.time() if now is None else now
         identity_hash = cls._identity_hash(remote_addr, username)
         _, window_seconds, _, _ = cls._settings()
+        decision = cls._check_local(identity_hash, current_time, window_seconds)
+        if login_attempt_d1.using_d1():
+            decision = cls._with_shared(
+                decision, login_attempt_d1.locked_until(identity_hash), current_time
+            )
+        return decision
 
+    @classmethod
+    def _check_local(
+        cls, identity_hash: str, current_time: float, window_seconds: int
+    ) -> LoginAttemptDecision:
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
@@ -155,6 +187,24 @@ class LoginAttemptService:
     ) -> LoginAttemptDecision:
         current_time = time.time() if now is None else now
         identity_hash = cls._identity_hash(remote_addr, username)
+        decision = cls._record_failure_local(identity_hash, current_time)
+        if login_attempt_d1.using_d1():
+            max_attempts, window_seconds, lockout_seconds, _ = cls._settings()
+            shared = login_attempt_d1.record_failure(
+                identity_hash,
+                current_time,
+                max_attempts=max_attempts,
+                window_seconds=window_seconds,
+                lockout_seconds=lockout_seconds,
+                retention_seconds=max(window_seconds, lockout_seconds) * 2,
+            )
+            decision = cls._with_shared(decision, shared, current_time)
+        return decision
+
+    @classmethod
+    def _record_failure_local(
+        cls, identity_hash: str, current_time: float
+    ) -> LoginAttemptDecision:
         max_attempts, window_seconds, lockout_seconds, max_identities = cls._settings()
 
         with closing(cls._connect()) as connection:
@@ -224,6 +274,8 @@ class LoginAttemptService:
                 (identity_hash,),
             )
             connection.commit()
+        if login_attempt_d1.using_d1():
+            login_attempt_d1.record_success(identity_hash)
 
     @classmethod
     def _prune(

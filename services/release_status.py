@@ -10,9 +10,18 @@ from services.intelligence_d1_store import transport_stats
 
 
 def _storage():
+    # With the Worker's D1 store, usage, throttling, overrides, cooldowns, workbench records,
+    # catalog snapshots and automatic routes live in D1 (services/control_state_d1.py).
+    d1_state = os.environ.get("INTELLIGENCE_STORAGE_BACKEND", "").strip() == "d1"
+    d1_accounts = os.environ.get("AUTH_STORAGE_BACKEND", "").strip().lower() == "d1"
     if os.environ.get("CONTROL_PLANE_DATABASE_URL", "").strip():
-        return "postgresql", None
-    if os.environ.get("AUTH_STORAGE_BACKEND", "").strip().lower() == "d1":
+        return ("postgresql+d1-state" if d1_state else "postgresql"), None
+    if d1_state and d1_accounts:
+        return "d1", None
+    if d1_state:
+        return "sqlite+d1-state", ("Control-plane state is durable in D1, but dashboard accounts use "
+                                   "Container-local SQLite and may be lost on replacement. Set AUTH_STORAGE_BACKEND=d1.")
+    if d1_accounts:
         return "sqlite+d1-accounts", ("Accounts are durable in D1. Other Container-local SQLite state "
                                       "(rate limits, model overrides) may be lost on replacement.")
     return "sqlite", "Container-local SQLite may be lost on replacement. Configure durable storage before rollout."

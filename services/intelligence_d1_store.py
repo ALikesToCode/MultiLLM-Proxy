@@ -22,6 +22,13 @@ _ENDPOINTS = {
     "auth": "http://intelligence.internal/v1/auth",
     "users": "http://intelligence.internal/v1/users",
     "auto_routes": "http://intelligence.internal/v1/auto-routes",
+    # Control-plane state; see services/control_state_d1.py.
+    "rate_limits": "http://intelligence.internal/v1/state/limits",
+    "login_attempts": "http://intelligence.internal/v1/state/login",
+    "model_overrides": "http://intelligence.internal/v1/state/models",
+    "free_quotas": "http://intelligence.internal/v1/state/quotas",
+    "workbench": "http://intelligence.internal/v1/state/workbench",
+    "provider_catalog": "http://intelligence.internal/v1/state/catalog",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
@@ -36,6 +43,18 @@ _TRANSPORT_SLOTS = threading.BoundedSemaphore(16)
 # get their own slots: a burst of them cannot take the chat store's reserve and settle
 # slots, and store calls cannot starve authentication.
 _ENDPOINT_SLOTS = {"users": threading.BoundedSemaphore(8), "auto_routes": threading.BoundedSemaphore(4)}
+# Background usage and cooldown syncs run one at a time. Login throttling and the model
+# override reads that routing waits on keep their own slots, so a stalled sync or catalog
+# download cannot delay them; admin-only workbench and catalog state share a few.
+_ADMIN_STATE_SLOTS = threading.BoundedSemaphore(4)
+_ENDPOINT_SLOTS.update({
+    "rate_limits": threading.BoundedSemaphore(2),
+    "free_quotas": threading.BoundedSemaphore(2),
+    "login_attempts": threading.BoundedSemaphore(4),
+    "model_overrides": threading.BoundedSemaphore(2),
+    "workbench": _ADMIN_STATE_SLOTS,
+    "provider_catalog": _ADMIN_STATE_SLOTS,
+})
 _SLOW_CALL_SECONDS = 2.0
 _STATS_LOCK = threading.Lock()
 _STATS = {}

@@ -8,6 +8,7 @@ import uuid
 from contextlib import closing
 
 from error_handlers import APIError
+from services import workbench_d1
 from services.sqlite_store import connect, storage_path
 
 PROVIDERS = {"nanogpt", "opencode", "openrouter", "linkapi", "navyai"}
@@ -67,6 +68,8 @@ def profile_connection(profile, origin, wire_effort=None):
 
 
 class WorkbenchStore:
+    """Per-owner profiles and comparison results; in D1 whenever the Worker provides it."""
+
     @staticmethod
     def connection():
         return connect(storage_path("CONNECTION_PROFILES_DB_PATH", "workbench.sqlite3"))
@@ -78,6 +81,8 @@ class WorkbenchStore:
 
     @classmethod
     def profiles(cls, owner):
+        if workbench_d1.using_d1():
+            return workbench_d1.profiles(owner)
         with closing(cls.connection()) as connection:
             cls.ensure(connection)
             rows = connection.execute("SELECT id, settings, created_at FROM connection_profiles WHERE owner = ? ORDER BY created_at DESC", (owner,)).fetchall()
@@ -88,6 +93,9 @@ class WorkbenchStore:
     def save_profile(cls, owner, profile):
         profile = validate_profile(profile)
         identifier = uuid.uuid4().hex
+        if workbench_d1.using_d1():
+            workbench_d1.save_profile(owner, identifier, profile, time.time())
+            return identifier
         with closing(cls.connection()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cls.ensure(connection)
@@ -118,12 +126,15 @@ class WorkbenchStore:
                 value = row[field]
                 if value is not None and (type(value) not in (float, int) or not math.isfinite(value) or not 0 <= value <= 10_000_000):
                     raise APIError("Invalid comparison measurement", status_code=400)
+        identifier = uuid.uuid4().hex
+        if workbench_d1.using_d1():
+            workbench_d1.save_report(owner, identifier, rows, time.time())
+            return identifier
         with closing(cls.connection()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             cls.ensure(connection)
             if connection.execute("SELECT COUNT(*) AS n FROM comparison_results WHERE owner = ?", (owner,)).fetchone()["n"] >= 100:
                 raise APIError("Comparison history limit reached (100)", status_code=409)
-            identifier = uuid.uuid4().hex
             connection.execute("INSERT INTO comparison_results (id, owner, created_at, data) VALUES (?, ?, ?, ?)",
                                (identifier, owner, time.time(), json.dumps(rows, allow_nan=False)))
             connection.commit()
@@ -131,9 +142,14 @@ class WorkbenchStore:
 
     @classmethod
     def reports(cls, owner):
-        with closing(cls.connection()) as connection:
-            cls.ensure(connection)
-            rows = connection.execute("SELECT id, created_at, data FROM comparison_results WHERE owner = ? ORDER BY created_at DESC LIMIT 100", (owner,)).fetchall()
-            connection.commit()
-        return [{"id": row["id"], "created_at": row["created_at"], "measurements": json.loads(row["data"]),
-                 "measurement_source": "browser-observed timing and provider-reported token usage; human quality ratings"} for row in rows]
+        if workbench_d1.using_d1():
+            records = [(row["id"], row["created_at"], row["data"]) for row in workbench_d1.reports(owner)]
+        else:
+            with closing(cls.connection()) as connection:
+                cls.ensure(connection)
+                rows = connection.execute("SELECT id, created_at, data FROM comparison_results WHERE owner = ? ORDER BY created_at DESC LIMIT 100", (owner,)).fetchall()
+                connection.commit()
+            records = [(row["id"], row["created_at"], json.loads(row["data"])) for row in rows]
+        return [{"id": identifier, "created_at": created_at, "measurements": data,
+                 "measurement_source": "browser-observed timing and provider-reported token usage; human quality ratings"}
+                for identifier, created_at, data in records]
