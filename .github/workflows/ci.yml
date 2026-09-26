@@ -62,6 +62,10 @@ jobs:
         run: node --test tests/test_frontend_build.mjs
       - name: Worker tests
         run: npm run test:worker
+      - name: D1 migration checks
+        run: npm run cf:migrations:check
+      - name: Deploy pipeline tests
+        run: npm run test:deploy
       - name: Free pool Worker contracts
         run: node --test tests/test_free_routes_worker.mjs
       - name: Client header contracts
