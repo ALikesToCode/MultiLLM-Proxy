@@ -36,6 +36,7 @@ from routes.auto_routes import (
     mark_transport_failure,
     register_auto_route_admin_routes,
 )
+from routes.chat_cache import cached_chat_completion
 from routes.free_routes import dispatch_free_chat
 from routes.model_discovery import register_model_discovery_route
 from routes.intelligence import dispatch_intelligence_chat, register_intelligence_routes
@@ -728,6 +729,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
     @csrf.exempt
     @api_auth_required
+    @cached_chat_completion
     def unified_chat_completions():
         payload = json_object_body()
         return dispatch_unified_chat_completion(
