@@ -233,8 +233,13 @@ class GatewayMcpTest(UnifiedApiTestCase):
         self.assertEqual(len(result["content"]), 2)
 
     def test_generate_images_batch_reports_each_item(self):
-        with patch.object(self.app_module.ProxyService, "make_request",
-                          side_effect=[upstream(200, IMAGE), upstream(200, {"created": 1, "data": [{"b64_json": PNG}]})]):
+        def transport(**kwargs):
+            # Batch items run in parallel, so answer by prompt rather than by call order.
+            if json.loads(kwargs["data"])["prompt"] == "Lake":
+                return upstream(200, IMAGE)
+            return upstream(200, {"created": 1, "data": [{"b64_json": PNG}]})
+
+        with patch.object(self.app_module.ProxyService, "make_request", side_effect=transport):
             result = self.call("generate_images_batch", {
                 "defaults": {"model": "gguu:gpt-image-2"},
                 "items": [{"id": "hero", "prompt": "Lake"}, {"id": "icon", "prompt": "Icon"}]})
