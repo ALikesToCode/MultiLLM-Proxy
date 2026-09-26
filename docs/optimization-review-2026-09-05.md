@@ -256,7 +256,7 @@ stale assets, missing terminal frames, error events, cancellation, and partial t
 ### 8. Architectural prerequisite: durable control-plane state before scaling out
 
 Evidence: [container database defaults](../cloudflare-worker.mjs#L284),
-[documented persistence boundary](deployment-cloudflare.md#important-state-limitation).
+[documented persistence boundary](deployment-cloudflare.md#state-and-container-instances).
 
 The supplied container configuration puts auth, rate-limit, and model-registry
 databases under `/tmp`. The deployment documentation explicitly identifies the disk

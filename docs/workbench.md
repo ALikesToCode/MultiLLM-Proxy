@@ -7,11 +7,12 @@ The server uses its configured administrator credential; the browser never
 receives provider keys. Do not put credentials in profiles or exported files.
 
 Local installations use `CONNECTION_PROFILES_DB_PATH` (default
-`instance/workbench.sqlite3`). Cloudflare Container files are ephemeral. Configure
-external PostgreSQL and migrate existing records before replacing a Container
-whose local data must be retained. See [control-plane persistence and encrypted
-backups](control-plane-storage.md). Provisioning that database is a separate
-operator action; enabling the dashboard does not provision or migrate storage.
+`instance/workbench.sqlite3`) or external PostgreSQL. On Cloudflare, profiles and
+comparison results are stored in D1 whenever the Worker provides it, so they survive
+Container restarts; see [control-plane persistence and encrypted
+backups](control-plane-storage.md#control-plane-state-in-d1). Provisioning a database
+is a separate operator action; enabling the dashboard does not provision or migrate
+storage.
 
 ## Connection profiles
 

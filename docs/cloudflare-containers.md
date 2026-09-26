@@ -264,6 +264,5 @@ to Cloudflare, and deploys the Worker, Durable Objects and container binding.
 
 ## Notes
 
-- The deployment is pinned to a single named container instance (`primary`) to avoid auth/session drift from the app's in-memory state.
-- `wrangler.jsonc` sets `max_instances=1` for the same reason.
-- Container disk is ephemeral. Dashboard accounts (with `AUTH_STORAGE_BACKEND=d1`) and automatic routes are stored in D1 ([details](control-plane-storage.md#dashboard-accounts-in-d1)), but model-disable overrides and rate-limit rows use SQLite under `/tmp` and are not durable after container restart. Keep `ADMIN_API_KEY` as the bootstrap credential; it authenticates even while D1 is unavailable.
+- The deployment is pinned to a single named container instance (`primary`), and `wrangler.jsonc` sets `max_instances=1`. Control-plane state is shared through D1, so more instances are possible; see [what running more than one requires](deployment-cloudflare.md#running-more-than-one-container-instance).
+- Container disk is ephemeral. Dashboard accounts (with `AUTH_STORAGE_BACKEND=d1`), automatic routes, rate-limit usage, login throttling, model-disable overrides, free-route cooldowns, workbench records and provider catalog snapshots are stored in D1 ([details](control-plane-storage.md#control-plane-state-in-d1)) and survive Container restarts. Keep `ADMIN_API_KEY` as the bootstrap credential; it authenticates even while D1 is unavailable.

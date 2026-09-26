@@ -177,25 +177,71 @@ The summary model must use the final model's provider by default. Eligible histo
 
 Set `OPTIMIZER_MAX_REQUEST_BYTES` to control the pre-parse ingress cap (default 16 MiB) and `OPTIMIZER_SUMMARY_TIMEOUT_SECONDS` for the summary read timeout (default 45 seconds, clamped to 5-120). The transformed final body still must satisfy the selected provider's body/prompt/output limits. The target model/key, output cap, and RPM/daily capacity are checked before a paid summary.
 
-## Important State Limitation
+## State and Container Instances
 
-Cloudflare Containers have ephemeral disk when an instance sleeps or restarts. The Worker passes these default SQLite paths into the container:
+Container disk is ephemeral: it is reset whenever the Container sleeps (after 15 idle
+minutes) or a deploy replaces it. Durable state therefore lives outside it:
 
-- `AUTH_DB_PATH=/tmp/auth.sqlite3`
-- `RATE_LIMIT_DB_PATH=/tmp/rate_limits.sqlite3`
-- `MODEL_REGISTRY_DB_PATH=/tmp/model_registry.sqlite3`
+- **D1 (`INTELLIGENCE_DB`).** Dashboard accounts and key hashes (with
+  `AUTH_STORAGE_BACKEND=d1`, which `wrangler.jsonc` sets), automatic routes, request
+  usage for rate limits and daily budgets, login throttling, disabled models,
+  free-route cooldowns, workbench profiles and comparison results, the last good
+  provider model catalog, and the intelligence gateway's policy, reservations and
+  integration keys. See [control-plane persistence](control-plane-storage.md#control-plane-state-in-d1)
+  for how each is cached and what happens during a D1 outage.
+- **Durable Objects.** Roleplay sessions (`RoleplaySession`) survive isolate and
+  Container restarts, with a 30-day inactivity TTL by default.
 
-This is fast and cheap for bootstrap state, but it is not durable. Created users, rotated keys, disabled model overrides, and rate-limit history can disappear after container restart. Keep `ADMIN_API_KEY` configured as the bootstrap admin key. The direct LinkAPI and Codex Everywhere fast paths intentionally authenticate against this bootstrap key because they do not wake or query the Container's SQLite database.
+The Worker still passes SQLite paths under `/tmp` (`AUTH_DB_PATH`,
+`RATE_LIMIT_DB_PATH`, `MODEL_REGISTRY_DB_PATH`). With D1 they hold only this
+Container's login-throttling record, which backs up the shared one, and nothing there
+needs to survive a restart. Keep `ADMIN_API_KEY` configured as the bootstrap admin
+key: it authenticates even while D1 is unavailable, and the direct LinkAPI and Codex
+Everywhere fast paths authenticate against it because they do not wake the Container.
 
-Roleplay state is different: `RoleplaySession` uses Cloudflare Durable Object
-storage and survives isolate or Container restarts. Its default inactivity TTL
-is 30 days.
+Apply migration `0006_control_state.sql` before deploying code that uses it
+(`npm run deploy` does). Until it exists, `/ready` reports the missing tables, the
+Container keeps that state in memory with a logged warning, and admin saves to it
+answer 503.
 
-Use one of these architectures before relying on durable app state:
+### What stays per process
 
-- Move Python state to an external DB reachable from the container.
-- Port the small auth/model/rate-limit state layer to Cloudflare D1 or Durable Object storage.
-- Keep Cloudflare as the Worker/container edge and run durable state on another managed backend.
+Each Container process keeps the following in memory only. It is rebuilt after a
+restart and is not shared between instances:
+
+- NanoGPT key-pool health (the active key and keys cooling down after a rejection)
+  and the NanoGPT speed-suffix breaker.
+- Provider circuit breakers.
+- Caches: responses, prompt analysis, provider usage figures, and verified API keys
+  (up to 60 seconds).
+- Dashboard metrics and the recent-request history.
+- Groq per-key token accounting and the image-relay catalog refresh schedule.
+- The in-memory side of the shared state: usage and cooldowns not yet sent to D1, and
+  the cached copies described in [control-plane persistence](control-plane-storage.md#limits-without-a-d1-round-trip).
+
+### Running more than one Container instance
+
+`wrangler.jsonc` keeps `max_instances: 1`, and the Worker sends every Container
+request to one named instance (`getContainer(env.MULTILLM_PROXY_CONTAINER, "primary")`).
+The shared D1 state makes more instances safe, but running them is a deployment
+decision that needs:
+
+1. Migration `0006` applied and `AUTH_STORAGE_BACKEND=d1`, so accounts and all
+   control-plane state are in D1 rather than on one instance's disk.
+2. The same `FLASK_SECRET_KEY` and `JWT_SECRET` on every instance. They are Worker
+   secrets, so this holds by default; dashboard sessions, CSRF tokens, video job IDs
+   and the keyed identity hashes in D1 depend on them.
+3. A Worker change that spreads requests, for example
+   `getRandom(env.MULTILLM_PROXY_CONTAINER, N)` from `@cloudflare/containers`, with
+   `max_instances` raised to at least N. Raising `max_instances` alone changes nothing.
+4. Accepting per-instance behavior. Limits can briefly admit more than configured
+   (by what other instances admitted within one `RATE_LIMIT_SYNC_SECONDS` interval);
+   each instance learns provider failures and NanoGPT key health on its own; metrics
+   cover one instance each; a disabled model reaches the other instances within 30
+   seconds, and an account change made on another instance within 60.
+5. Budgeting D1 load. Each busy instance makes one usage sync every
+   `RATE_LIMIT_SYNC_SECONDS` (5 by default), a cooldown refresh every 10 seconds while
+   the free pool is in use, and a model-override read every 30 seconds.
 
 ## Required Secrets
 
@@ -421,11 +467,11 @@ GUNICORN_TIMEOUT=120
 GUNICORN_GRACEFUL_TIMEOUT=30
 ```
 
-Increase workers or container instances only after replacing process-local auth/model caches with a durable read-through store.
+With D1, more Gunicorn worker processes behave like more instances: each keeps its own ledger and shares usage through D1. Read [State and Container Instances](#state-and-container-instances) before adding either.
 
 ## Rollback
 
-Revert the commit on `main` so the deploy workflow ships the previous code, or use `npx wrangler rollback` for an immediate rollback that lasts until the next deploy. D1 migrations are not rolled back; because they are additive, the previous code keeps working with the newer schema. Because the Container's SQLite files are ephemeral, there is no durable SQLite rollback.
+Revert the commit on `main` so the deploy workflow ships the previous code, or use `npx wrangler rollback` for an immediate rollback that lasts until the next deploy. D1 migrations are not rolled back; because they are additive, the previous code keeps working with the newer schema. Container SQLite files are ephemeral and need no rollback; restore D1 data itself with D1 Time Travel.
 
 ## Sources
 
