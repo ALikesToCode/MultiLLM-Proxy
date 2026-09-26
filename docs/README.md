@@ -19,6 +19,7 @@
 - [Gemini and Gemma integration notes](gemini_integration_instructions.md)
 - [OpenRouter setup](openrouter_setup.md)
 - [Provider usage aggregation](provider-usage.md)
+- [Usage ledger, budgets and key controls](usage-and-budgets.md)
 - [OpenCode Go integration](opencode-go.md)
 - [Cloudflare-native roleplay endpoint](roleplay.md)
 - [NanoGPT raw gateway](nanogpt.md)

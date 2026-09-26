@@ -45,6 +45,15 @@ D1 for every request; account changes made in the dashboard apply immediately, a
 changes made directly in D1 apply within that minute. Last-used times are advisory
 and written at most once a minute per key and address.
 
+Accounts also carry optional per-key controls: daily and monthly dollar budgets, a
+model allowlist, an expiry time and client address ranges (migration 0007, the
+`daily_budget_usd`, `monthly_budget_usd`, `allowed_models`, `allowed_ips` and
+`expires_at` columns; the same columns on the SQLite/PostgreSQL `users` table). The
+Worker validates them on every write, and the edge never serves an expired key or one
+used outside its address ranges. Until 0007 is applied, account reads fall back to the
+older columns and controls cannot be saved. See
+[usage, budgets and key controls](usage-and-budgets.md).
+
 Apply every migration before deploying (`npm run deploy` does it, see
 [Cloudflare deployment](cloudflare-containers.md#deploy)); `/ready` answers 503 with
 the missing tables until they exist. An unavailable D1 never falls back to local
@@ -153,10 +162,23 @@ older version-one backups restore with empty intelligence tables. They do not ca
 or restore D1 records, including the control-plane state above. Manage D1 recovery separately through Cloudflare. See
 [intelligence configuration](intelligence-gateway.md).
 
+## Usage ledger
+
+Billable requests are recorded write-behind in a usage ledger: raw rows in
+`usage_events`, daily per-key, per-model totals in `usage_daily`, and applied flush
+batches in `usage_batches`. With the Worker's D1 store they live in `INTELLIGENCE_DB`
+(migration 0007) behind the private `intelligence.internal/v1/usage` operations
+(record, totals, summary, recent, prune), so usage history and budgets survive
+Container sleep and redeploys. Without D1 they live in SQLite (`USAGE_DB_PATH`) or
+PostgreSQL. Requests never wait on a ledger write; see
+[usage, budgets and key controls](usage-and-budgets.md) for batching, retention and
+the choice of D1 over Workers Analytics Engine.
+
 ## Encrypted backups and an empty-destination migration
 
 These are operator-only commands, not dashboard downloads. Backups include key
-hashes and account metadata. Supply `CONTROL_PLANE_BACKUP_KEY` as a Fernet key from
+hashes and account metadata, including per-key controls; older backups without them
+restore with no controls. The usage ledger is not included. Supply `CONTROL_PLANE_BACKUP_KEY` as a Fernet key from
 a secret manager and keep it separately from the encrypted backup. The command
 does not load `.env` files or print records or credentials.
 

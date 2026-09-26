@@ -197,6 +197,12 @@ caller's requested output limit; they are operational planning signals, not
 provider invoices. If no output limit is supplied, MultiLLM does not invent one.
 When no matching price is configured, the request remains visibly unpriced.
 
+Every billable request is recorded in a durable usage ledger (D1 on Cloudflare,
+SQLite or PostgreSQL elsewhere). Each key can have daily and monthly dollar budgets,
+a model allowlist, an expiry time and client address ranges; the dashboard's Usage
+page and `GET /v1/usage` show spend and remaining budget, and request telemetry can be
+exported over OTLP. See [usage, budgets and key controls](docs/usage-and-budgets.md).
+
 Administrators can query `GET /admin/providers/usage` from an authenticated
 dashboard session to combine provider-account allowances with local request,
 latency, failure, and configured-cost telemetry. See
