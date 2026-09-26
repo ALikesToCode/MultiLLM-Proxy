@@ -26,6 +26,8 @@ TABLES = {
     "intelligence_reservations": ("models", "id principal kind created_at reserved charged state"),
 }
 ADDITIVE_TABLES = {"intelligence_policy", "intelligence_reservations"}
+# Columns added later; older backups omit them and restore them as NULL.
+OPTIONAL_FIELDS = {"users": ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at")}
 STORES = {
     "auth": ("AUTH_DB_PATH", "auth.sqlite3"),
     "models": ("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3"),
@@ -73,8 +75,12 @@ def capture():
             if not _exists(connection, table):
                 tables[table] = []
                 continue
-            # Both identifiers originate only in the fixed TABLES definition.
-            rows = connection.execute(f"SELECT {', '.join(fields.split())} FROM {table}").fetchall()  # nosec B608
+            columns = fields.split()
+            if table in OPTIONAL_FIELDS:
+                present = {row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+                columns += [name for name in OPTIONAL_FIELDS[table] if name in present]
+            # Every identifier originates only in the fixed TABLES and OPTIONAL_FIELDS definitions.
+            rows = connection.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall()  # nosec B608
             tables[table] = [dict(row) for row in rows]
     return {"format": "multillm-control-plane", "version": 1,
             "created_at": datetime.now(timezone.utc).isoformat(), "tables": tables}
@@ -91,8 +97,9 @@ def validate(document):
         rows = tables.get(table, [])
         if not isinstance(rows, list) or len(rows) > 100_000:
             raise ValueError("Invalid backup row count")
+        required = set(fields.split())
         for row in rows:
-            if not isinstance(row, dict) or set(row) != set(fields.split()):
+            if not isinstance(row, dict) or not required <= set(row) <= required | set(OPTIONAL_FIELDS.get(table, ())):
                 raise ValueError("Invalid backup columns")
             if any(value is not None and type(value) not in (str, int, float) for value in row.values()):
                 raise ValueError("Invalid backup field type")
@@ -168,9 +175,9 @@ def restore_empty(document):
                     raise ValueError("Destination is not empty; restore refused")
             _initialize(connections)
             for table, (store, fields) in TABLES.items():
-                columns = fields.split()
+                columns = fields.split() + list(OPTIONAL_FIELDS.get(table, ()))
                 sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})"  # nosec B608
-                connections[store].executemany(sql, [tuple(row[column] for column in columns) for row in document["tables"].get(table, [])])
+                connections[store].executemany(sql, [tuple(row.get(column) for column in columns) for row in document["tables"].get(table, [])])
             if getattr(connections["limits"], "dialect", "sqlite") == "postgresql":
                 connections["limits"].execute("SELECT setval(pg_get_serial_sequence('request_usage', 'id'), COALESCE(MAX(id), 0) + 1, false) FROM request_usage")
             for connection in unique:

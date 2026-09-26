@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
-import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
+import { handleControlUsersRequest, keyControlsPermit } from "../worker/control-users-d1.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
 import { authStorageBackend, collectContainerEnv } from "../worker/container-env.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
@@ -11,13 +11,14 @@ const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);
 const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "knowledge:read", is_admin: 0,
   created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
-  created_by: "admin", rotated_at: null, revoked_at: null, ...changes,
+  created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
+  allowed_models: null, allowed_ips: null, expires_at: null, ...changes,
 });
 
-async function database() {
+async function database(options) {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: "export default {fetch(){return new Response('ok')}}", d1Databases: ["INTELLIGENCE_DB"] }));
   const db = await mf.getD1Database("INTELLIGENCE_DB");
-  await applyMigrations(db);
+  await applyMigrations(db, options);
   const call = async body => {
     const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }) }), { INTELLIGENCE_DB: db });
@@ -144,4 +145,49 @@ test("a transient D1 error on an account read is retried once", async () => {
     assert.equal(response.status, 200);
     assert.equal((await response.json()).user.username, "alice");
   } finally { await mf.dispose(); }
+});
+
+test("per-key budgets, allowlists, expiry and address ranges persist and are validated", async () => {
+  const { mf, call } = await database();
+  try {
+    const limited = user("limited", { daily_budget_usd: 5, monthly_budget_usd: 50.5, allowed_models: "auto:*,free:*,openai:gpt-4.1",
+      allowed_ips: "203.0.113.0/24,2001:db8::/32", expires_at: "2026-12-31T00:00:00+00:00" });
+    assert.equal((await call({ operation: "upsert", user: limited })).status, 200);
+    assert.deepEqual((await call({ operation: "get", username: "limited" })).body.user, limited);
+    assert.equal((await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users[0].allowed_models,
+      "auto:*,free:*,openai:gpt-4.1");
+    for (const changes of [{ daily_budget_usd: -1 }, { daily_budget_usd: "5" }, { monthly_budget_usd: 2e9 },
+      { allowed_models: "openai:gpt 4" }, { allowed_models: "" }, { allowed_ips: "10.0.0.1" }, { allowed_ips: "10.0.0.0/8;x" },
+      { expires_at: "soon" }]) {
+      assert.equal((await call({ operation: "upsert", user: user("limited", changes) })).status, 400, JSON.stringify(changes));
+    }
+    const { daily_budget_usd: _, ...missing } = user("x");
+    assert.equal((await call({ operation: "upsert", user: missing })).status, 400, "every column is required");
+  } finally { await mf.dispose(); }
+});
+
+test("accounts keep working when code is deployed before the key-control migration", async () => {
+  const { mf, call } = await database({ skip: ["0007_usage_ledger.sql"] });
+  try {
+    assert.equal((await call({ operation: "upsert", user: user("alice") })).status, 200);
+    assert.deepEqual((await call({ operation: "get", username: "alice" })).body.user, user("alice"));
+    assert.deepEqual((await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users, [user("alice")]);
+    assert.deepEqual((await call({ operation: "list", after: null, limit: 5 })).body.users, [user("alice")]);
+    const refused = await call({ operation: "upsert", user: user("alice", { daily_budget_usd: 1 }) });
+    assert.equal(refused.status, 503, "controls cannot be stored before the migration");
+    assert.equal((await call({ operation: "get", username: "alice" })).body.user.daily_budget_usd, null);
+  } finally { await mf.dispose(); }
+});
+
+test("the edge applies key expiry and address ranges the same way as the Container", () => {
+  const now = Date.parse("2026-09-26T12:00:00Z");
+  const account = changes => ({ expires_at: null, allowed_ips: null, ...changes });
+  assert.equal(keyControlsPermit(account(), null, now), true);
+  assert.equal(keyControlsPermit(account({ expires_at: "2026-09-26T12:00:00+00:00" }), null, now), false);
+  assert.equal(keyControlsPermit(account({ expires_at: "2026-09-26T12:00:01Z" }), null, now), true);
+  const ranged = account({ allowed_ips: "203.0.113.0/24,2001:db8::/32,198.51.100.7/32" });
+  for (const [address, allowed] of [["203.0.113.9", true], ["203.0.114.1", false], ["::ffff:203.0.113.5", true],
+    ["2001:db8::1", true], ["2001:db9::1", false], ["198.51.100.7", true], ["198.51.100.8", false], [null, false], ["x", false]]) {
+    assert.equal(keyControlsPermit(ranged, address, now), allowed, String(address));
+  }
 });

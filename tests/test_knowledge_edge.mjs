@@ -230,7 +230,8 @@ test("dashboard accounts stored in D1 are verified at the edge with their Knowle
     const key = "Dash" + username.padEnd(28, "k").slice(0, 28);
     return { key, row: { username, api_key_hash: await hashIntegrationKey(key, "saltsaltsalt1234"), api_key_prefix: `mllm_${key.slice(0, 8)}`,
       scopes, is_admin: 0, created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
-      created_by: "admin", rotated_at: null, revoked_at: null, ...changes } };
+      created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
+      allowed_models: null, allowed_ips: null, expires_at: null, ...changes } };
   };
   const reader = await account("reader", "knowledge:read");
   const chat = await account("chatter", "chat,models");
@@ -238,8 +239,17 @@ test("dashboard accounts stored in D1 are verified at the edge with their Knowle
   const planted = await account("mallory", "admin,knowledge:read", { is_admin: 1 });
   const revoked = await account("revoked", "knowledge:read", { revoked_at: "2026-09-24T01:00:00+00:00" });
   const legacy = await account("legacy", "knowledge:read", { api_key_hash: "pbkdf2:sha256:600000$salt$" + "b".repeat(64) });
+  const expired = await account("expired", "knowledge:read", { expires_at: "2020-01-01T00:00:00+00:00" });
+  const office = await account("office", "knowledge:read", { allowed_ips: "203.0.113.0/24" });
   const { env, dispatched } = environment();
-  env.INTELLIGENCE_DB = database(new Map(), { lookups: 0 }, [reader.row, chat.row, admin.row, revoked.row, legacy.row, planted.row]);
+  env.INTELLIGENCE_DB = database(new Map(), { lookups: 0 }, [reader.row, chat.row, admin.row, revoked.row, legacy.row, planted.row,
+    expired.row, office.row]);
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(expired.key, "ping"), env), null,
+    "an expired key is not served at the edge; the Container answers key_expired");
+  assert.equal(await handleKnowledgeEdgeRequest(mcpRequest(office.key, "ping"), env), null,
+    "a key outside its address ranges is not served at the edge");
+  assert.equal((await call(env, mcpRequest(office.key, "ping", undefined, { "cf-connecting-ip": "203.0.113.4" }))).status, 200);
+  assert.equal(dispatched.length, 0);
   env.ADMIN_USERNAMES = "owner";
   const tools = (await (await call(env, mcpRequest(reader.key, "tools/list"))).json()).result.tools;
   assert.equal(tools.length, catalogue.tools.filter(entry => entry.scope === "knowledge:read").length);

@@ -38,6 +38,7 @@ from services.auth_primitives import (
     serialize_datetime,
     serialize_scopes,
 )
+from services import key_controls
 from services.nanogpt_key_pool import configured_nanogpt_keys
 from services import user_store
 from services.sqlite_store import connect, storage_path
@@ -134,6 +135,12 @@ class AuthService:
             "created_by": "TEXT",
             "rotated_at": "TEXT",
             "revoked_at": "TEXT",
+            # Per-key controls; DOUBLE PRECISION keeps PostgreSQL budgets exact enough.
+            "daily_budget_usd": "DOUBLE PRECISION",
+            "monthly_budget_usd": "DOUBLE PRECISION",
+            "allowed_models": "TEXT",
+            "allowed_ips": "TEXT",
+            "expires_at": "TEXT",
         }
         for column_name, column_definition in required_columns.items():
             if column_name not in columns:
@@ -166,7 +173,12 @@ class AuthService:
                 last_used_ip TEXT,
                 created_by TEXT,
                 rotated_at TEXT,
-                revoked_at TEXT
+                revoked_at TEXT,
+                daily_budget_usd DOUBLE PRECISION,
+                monthly_budget_usd DOUBLE PRECISION,
+                allowed_models TEXT,
+                allowed_ips TEXT,
+                expires_at TEXT
             )
             """
         )
@@ -265,6 +277,9 @@ class AuthService:
             "created_by": row["created_by"],
             "rotated_at": deserialize_datetime(row["rotated_at"]),
             "revoked_at": deserialize_datetime(row["revoked_at"]),
+            **key_controls.from_storage(
+                {name: key_controls.row_value(row, name) for name in key_controls.CONTROL_FIELDS}
+            ),
         }
 
     @classmethod
@@ -279,7 +294,8 @@ class AuthService:
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
-                            created_by, rotated_at, revoked_at
+                            created_by, rotated_at, revoked_at, daily_budget_usd,
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
                         FROM users
                         ORDER BY username
                         """
@@ -303,7 +319,8 @@ class AuthService:
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
-                            created_by, rotated_at, revoked_at
+                            created_by, rotated_at, revoked_at, daily_budget_usd,
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
                         FROM users
                         WHERE username = ?
                         """,
@@ -332,7 +349,8 @@ class AuthService:
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
-                            created_by, rotated_at, revoked_at
+                            created_by, rotated_at, revoked_at, daily_budget_usd,
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
                         FROM users
                         WHERE api_key_prefix = ? AND revoked_at IS NULL
                         ORDER BY username
@@ -371,8 +389,10 @@ class AuthService:
         created_by: Optional[str] = None,
         rotated_at: Optional[datetime] = None,
         revoked_at: Optional[datetime] = None,
+        controls: Optional[Dict[str, Any]] = None,
     ) -> None:
         cls._forget_verified_keys()
+        stored_controls = {**key_controls.empty(), **(controls or {})}
         if user_store.using_d1():
             user_store.upsert_user({
                 "username": username,
@@ -387,6 +407,7 @@ class AuthService:
                 "created_by": created_by,
                 "rotated_at": serialize_datetime(rotated_at),
                 "revoked_at": serialize_datetime(revoked_at),
+                **{name: stored_controls[name] for name in key_controls.CONTROL_FIELDS},
             })
             cls._reload_user_cache()
             return
@@ -398,9 +419,10 @@ class AuthService:
                     INSERT INTO users (
                         username, api_key_hash, api_key_prefix, scopes, is_admin,
                         created_at, last_login, last_used_at, last_used_ip,
-                        created_by, rotated_at, revoked_at
+                        created_by, rotated_at, revoked_at, daily_budget_usd,
+                        monthly_budget_usd, allowed_models, allowed_ips, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(username) DO UPDATE SET
                         api_key_hash = excluded.api_key_hash,
                         api_key_prefix = excluded.api_key_prefix,
@@ -412,7 +434,12 @@ class AuthService:
                         last_used_ip = excluded.last_used_ip,
                         created_by = excluded.created_by,
                         rotated_at = excluded.rotated_at,
-                        revoked_at = excluded.revoked_at
+                        revoked_at = excluded.revoked_at,
+                        daily_budget_usd = excluded.daily_budget_usd,
+                        monthly_budget_usd = excluded.monthly_budget_usd,
+                        allowed_models = excluded.allowed_models,
+                        allowed_ips = excluded.allowed_ips,
+                        expires_at = excluded.expires_at
                     """,
                     (
                         username,
@@ -427,6 +454,7 @@ class AuthService:
                         created_by,
                         serialize_datetime(rotated_at),
                         serialize_datetime(revoked_at),
+                        *(stored_controls[name] for name in key_controls.CONTROL_FIELDS),
                     ),
                 )
                 connection.commit()
@@ -472,6 +500,7 @@ class AuthService:
         created_by: Optional[str] = None,
         rotated_at: Optional[datetime] = None,
         revoked_at: Optional[datetime] = None,
+        controls: Optional[Dict[str, Any]] = None,
     ) -> None:
         cls._persist_user(
             username=username,
@@ -486,6 +515,7 @@ class AuthService:
             created_by=created_by,
             rotated_at=rotated_at,
             revoked_at=revoked_at,
+            controls=controls,
         )
 
     @classmethod
@@ -538,6 +568,7 @@ class AuthService:
             created_by=existing_user.get("created_by") if existing_user else "system",
             rotated_at=existing_user.get("rotated_at") if existing_user else None,
             revoked_at=None,
+            controls=cls._stored_controls(existing_user) if existing_user else None,
         )
         logger.info("Initialized default admin user")
 
@@ -800,6 +831,7 @@ class AuthService:
         if (
             not user
             or user.get("revoked_at")
+            or key_controls.expired(user)
             or not hmac.compare_digest(
                 session_prefix,
                 str(user.get("api_key_prefix") or ""),
@@ -841,7 +873,12 @@ class AuthService:
             "created_by": user.get("created_by"),
             "rotated_at": serialize_datetime(user["rotated_at"]),
             "revoked_at": serialize_datetime(user["revoked_at"]),
+            **key_controls.public(user),
         }
+
+    @staticmethod
+    def _stored_controls(user: Dict[str, Any]) -> Dict[str, Any]:
+        return {name: user.get(name) for name in key_controls.CONTROL_FIELDS}
 
     @classmethod
     def _update_login(cls, username: str, last_login: datetime) -> None:
@@ -859,6 +896,7 @@ class AuthService:
             created_by=user.get("created_by"),
             rotated_at=user.get("rotated_at"),
             revoked_at=user.get("revoked_at"),
+            controls=cls._stored_controls(user),
         )
 
     @classmethod
@@ -982,7 +1020,7 @@ class AuthService:
         return {"username": username, "api_key_hash": "", "api_key_prefix": build_api_key_prefix(api_key),
                 "scopes": list(DEFAULT_ADMIN_SCOPES), "is_admin": True, "created_at": _utcnow(),
                 "last_login": None, "last_used_at": None, "last_used_ip": None, "created_by": "system",
-                "rotated_at": None, "revoked_at": None}
+                "rotated_at": None, "revoked_at": None, **key_controls.empty()}
 
     @classmethod
     def authenticate_user(cls, username: str, api_key: str) -> bool:
@@ -997,7 +1035,7 @@ class AuthService:
             return False
 
         user = cls._load_user_by_username(username)
-        if not user or user.get("revoked_at"):
+        if not user or user.get("revoked_at") or key_controls.expired(user):
             return False
 
         if not check_password_hash(user["api_key_hash"], api_key):
@@ -1093,6 +1131,7 @@ class AuthService:
             created_by=user.get("created_by"),
             rotated_at=rotated_at,
             revoked_at=user.get("revoked_at"),
+            controls=cls._stored_controls(user),
         )
 
         return {
@@ -1102,3 +1141,51 @@ class AuthService:
             "api_key_prefix": build_api_key_prefix(new_api_key),
             "rotated_at": serialize_datetime(rotated_at),
         }
+
+    @classmethod
+    def set_key_controls(cls, username: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace an account's budgets, model allowlist, expiry and address ranges."""
+        cls._require_admin()
+        username = require_valid_username(username)
+        reject_local_integration_management(username)
+        user = cls._load_user_by_username(username)
+        if not user:
+            raise APIError("User not found", status_code=404)
+        controls = key_controls.validate(payload)
+        if (
+            username == normalized_username(os.environ.get("ADMIN_USERNAME", "admin"))
+            and (controls["expires_at"] or controls["allowed_ips"])
+        ):
+            # ADMIN_API_KEY is the break-glass credential; it must keep working everywhere.
+            raise APIError(
+                "The environment-managed default admin cannot expire or be limited to addresses",
+                status_code=400,
+            )
+        cls._persist_user(
+            username=username,
+            api_key_hash=user["api_key_hash"],
+            api_key_prefix=user["api_key_prefix"],
+            scopes=user["scopes"],
+            is_admin=user.get("is_admin", False),
+            created_at=user["created_at"] or _utcnow(),
+            last_login=user.get("last_login"),
+            last_used_at=user.get("last_used_at"),
+            last_used_ip=user.get("last_used_ip"),
+            created_by=user.get("created_by"),
+            rotated_at=user.get("rotated_at"),
+            revoked_at=user.get("revoked_at"),
+            controls=controls,
+        )
+        return cls._public_user(username, cls._users[username])
+
+    @classmethod
+    def get_user_record(cls, username: str) -> Optional[Dict[str, Any]]:
+        """An account's public record with its key controls, or None."""
+        name = normalized_username(username)
+        if name is None:
+            return None
+        try:
+            user = cls._load_user_by_username(name)
+        except APIError:
+            return None
+        return cls._public_user(name, user) if user else None

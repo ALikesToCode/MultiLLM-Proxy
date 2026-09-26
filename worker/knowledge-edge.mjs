@@ -9,7 +9,7 @@ import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import catalogue from "./knowledge-mcp-catalogue.json" with { type: "json" };
 import { authStorageBackend } from "./container-env.mjs";
-import { activeUsersByPrefix, adminUsernames, grantsAdmin, validUser } from "./control-users-d1.mjs";
+import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { logFailure } from "./log.mjs";
 
@@ -154,7 +154,7 @@ function accountScopes(user, env) {
 }
 
 // Dashboard accounts in D1 use the Container's key prefix and Werkzeug hashes.
-async function accountPrincipal(env, key) {
+async function accountPrincipal(env, key, clientAddress) {
   if (key.length > MAX_KEY_LENGTH) return { denied: true };
   const prefix = `mllm_${key.slice(0, 8)}`;
   let users;
@@ -166,6 +166,9 @@ async function accountPrincipal(env, key) {
   if (!users.every(validUser)) return null;
   const verifiable = users.filter(user => HASH_PATTERN.test(user.api_key_hash));
   const index = verifiable.length ? await matchingHash(key, verifiable.map(user => user.api_key_hash), prefix) : -1;
+  // An expired key, or one used outside its address ranges, is never served here; the
+  // Container refuses it with key_expired or ip_not_allowed.
+  if (index >= 0 && !keyControlsPermit(verifiable[index], clientAddress)) return null;
   if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env) } };
   // A hash format the edge cannot check is left to the Container.
   return verifiable.length < users.length ? null : { denied: true };
@@ -183,7 +186,9 @@ async function resolvePrincipal(request, env) {
     return id ? { principal: { id, scopes: [...KNOWLEDGE_SCOPES] } } : null;
   }
   if (!env.INTELLIGENCE_DB) return null;
-  if (!key.startsWith(KEY_NAMESPACE)) return authStorageBackend(env) === "d1" ? accountPrincipal(env, key) : null;
+  if (!key.startsWith(KEY_NAMESPACE)) {
+    return authStorageBackend(env) === "d1" ? accountPrincipal(env, key, request.headers.get("cf-connecting-ip")) : null;
+  }
   if (!KEY_PATTERN.test(key)) return { denied: true };
   const prefix = key.slice(0, KEY_NAMESPACE.length + 16);
   let record;

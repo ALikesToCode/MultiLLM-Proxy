@@ -11,7 +11,7 @@ from flask import g, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from error_handlers import APIError
-from route_helpers import api_authenticate_only
+from route_helpers import api_authenticate_only, request_body_limit
 from routes.unified import (
     dispatch_unified_chat_completion,
     serialize_unified_chat_payload,
@@ -213,6 +213,7 @@ def register_optimized_routes(
     @app.route("/optimize/v1/chat/completions", methods=["POST", "OPTIONS"])
     @csrf.exempt
     @api_authenticate_only
+    @request_body_limit(_optimizer_request_byte_limit)
     def optimized_chat_completions():
         request.max_content_length = _optimizer_request_byte_limit()
         try:

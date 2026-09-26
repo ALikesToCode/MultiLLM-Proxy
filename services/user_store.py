@@ -18,9 +18,13 @@ logger = logging.getLogger(__name__)
 USER_FIELDS = (
     "username", "api_key_hash", "api_key_prefix", "scopes", "is_admin", "created_at",
     "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
+    # Per-key controls (migration 0007); NULL means no budget, every model, no expiry, any address.
+    "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at",
 )
 _REQUIRED_TEXT = ("username", "api_key_hash", "api_key_prefix", "scopes", "created_at")
-_OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at")
+_OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
+                  "allowed_models", "allowed_ips", "expires_at")
+_OPTIONAL_NUMBER = ("daily_budget_usd", "monthly_budget_usd")
 PAGE_SIZE = 200
 READ_OPERATIONS = frozenset({"list", "get", "by_prefix"})
 READ_RETRY_DELAY_SECONDS = 0.25
@@ -77,6 +81,8 @@ def _row(value):
         or set(value) != set(USER_FIELDS)
         or any(not isinstance(value[name], str) for name in _REQUIRED_TEXT)
         or any(value[name] is not None and not isinstance(value[name], str) for name in _OPTIONAL_TEXT)
+        or any(value[name] is not None and (isinstance(value[name], bool) or not isinstance(value[name], (int, float)))
+               for name in _OPTIONAL_NUMBER)
         or type(value["is_admin"]) is not int
         or value["is_admin"] not in (0, 1)
     ):

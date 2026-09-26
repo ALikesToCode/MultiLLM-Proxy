@@ -46,23 +46,30 @@ class CostService:
         for model_id, raw_entry in payload.items():
             if not isinstance(model_id, str) or not isinstance(raw_entry, dict):
                 continue
-            input_price = cls._decimal(
+            # An optional flat price per request (per generated image on image routes)
+            # prices media models that report no tokens. It may stand alone.
+            request_price = cls._decimal(raw_entry["request"]) if "request" in raw_entry else Decimal(0)
+            per_request_only = "request" in raw_entry and not any(
+                key in raw_entry for key in ("input", "output", "input_cost_per_million", "output_cost_per_million")
+            )
+            input_price = Decimal(0) if per_request_only else cls._decimal(
                 raw_entry.get(
                     "input",
                     raw_entry.get("input_cost_per_million"),
                 )
             )
-            output_price = cls._decimal(
+            output_price = Decimal(0) if per_request_only else cls._decimal(
                 raw_entry.get(
                     "output",
                     raw_entry.get("output_cost_per_million"),
                 )
             )
-            if input_price is None or output_price is None:
+            if input_price is None or output_price is None or request_price is None:
                 continue
             pricing[model_id.strip().lower()] = {
                 "input": input_price,
                 "output": output_price,
+                "request": request_price,
             }
         return pricing
 
@@ -105,6 +112,7 @@ class CostService:
         output_tokens: int | None,
         *,
         provider: str | None = None,
+        requests: int = 1,
     ) -> float | None:
         prices = cls.pricing_for(model_id, provider=provider)
         if prices is None:
@@ -115,5 +123,5 @@ class CostService:
         total = (
             Decimal(safe_input_tokens) * prices["input"]
             + Decimal(safe_output_tokens) * prices["output"]
-        ) / Decimal(1_000_000)
+        ) / Decimal(1_000_000) + Decimal(cls._token_count(requests)) * prices.get("request", Decimal(0))
         return float(total.quantize(Decimal("0.0000000001")))

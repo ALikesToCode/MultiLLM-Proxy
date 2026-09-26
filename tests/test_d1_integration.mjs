@@ -54,6 +54,21 @@ test("accounts, the admin allowlist, audit rows and auto routes persist through 
   assert.ok(audit.some(row => row.outcome === "stored" && row.username === "agent"));
 });
 
+test("key controls and the usage ledger persist through the Worker in D1", async t => {
+  const { db, url } = await privateStore(t);
+  const result = await drive(url, "usage");
+  assert.deepEqual(result.controls, { daily_budget_usd: 2.5, allowed_models: ["auto:*"], allowed_ips: ["203.0.113.0/24"],
+    expires_at: "2099-01-01T00:00:00+00:00" });
+  assert.equal(result.backend, "d1");
+  assert.equal(result.flushed, true);
+  assert.equal(result.replayed, 1, "a replayed batch ID is stored once");
+  assert.deepEqual(result.totals, { day_usd: 0.75, month_usd: 0.75, day_requests: 4, month_requests: 4 });
+  assert.deepEqual(result.models, [["openai:gpt-4.1", 4, 1]]);
+  assert.equal(result.recent, 4);
+  const stored = await db.prepare("SELECT daily_budget_usd, allowed_models FROM control_users WHERE username = 'budgeted'").first();
+  assert.deepEqual(stored, { daily_budget_usd: 2.5, allowed_models: "auto:*" });
+});
+
 test("a D1 without the account migration fails closed for dashboard keys but not for the environment admin", async t => {
   // 0007 alters control_users, so it is skipped with the migration that creates the table.
   const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql",

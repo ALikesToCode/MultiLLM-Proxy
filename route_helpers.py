@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from flask import Response, g, has_request_context, jsonify, redirect, request, url_for
 
 from config import Config
+from services import key_controls, request_accounting
 from services.auth_service import AuthService
 from services.intelligence_route_policy import authorize_integration_route
 from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES
@@ -467,7 +468,7 @@ def _authenticate_api_request():
         ), 401
 
     logger.debug("Proxy API credential extracted")
-    authenticated_user = AuthService.verify_api_key(api_key, request.remote_addr)
+    authenticated_user = AuthService.verify_api_key(api_key, key_controls.client_ip(request))
     if not authenticated_user:
         logger.error("Invalid proxy API credential")
         return jsonify(
@@ -477,12 +478,43 @@ def _authenticate_api_request():
             }
         ), 401
 
+    refused = request_accounting.check_key_controls(authenticated_user)
+    if refused is not None:
+        logger.warning("Proxy API credential refused by its key controls")
+        return refused
+
     logger.info(
         "Request authenticated for %s",
         authenticated_user.get("username"),
     )
     g.authenticated_user = authenticated_user
     return None
+
+
+def request_body_limit(limit: Callable[[], int]) -> Callable:
+    """Declare a view's own request body limit, applied before anything reads the body."""
+
+    def decorator(target: Callable) -> Callable:
+        target.request_body_limit = limit  # type: ignore[attr-defined]
+        return target
+
+    return decorator
+
+
+def _call_accounted(target: Callable, args, kwargs):
+    """Run a view under the key's model allowlist and budget, recording its usage."""
+    limit = getattr(target, "request_body_limit", None)
+    if callable(limit):
+        request.max_content_length = limit()
+    refused = request_accounting.begin()
+    if refused is not None:
+        return refused
+    try:
+        result = target(*args, **kwargs)
+    except Exception as error:
+        request_accounting.fail(error)
+        raise
+    return request_accounting.finish(result)
 
 
 def _authorize_api_scope(required_scope: str):
@@ -553,7 +585,7 @@ def api_authenticate_only(
             )
             if authorization_error is not None:
                 return authorization_error
-            return target(*args, **kwargs)
+            return _call_accounted(target, args, kwargs)
 
         return wrapper
 
@@ -606,7 +638,7 @@ def api_auth_required(
                 if limit_decision.retry_after:
                     response.headers["Retry-After"] = str(limit_decision.retry_after)
                 return response, limit_decision.status_code
-            return target(*args, **kwargs)
+            return _call_accounted(target, args, kwargs)
 
         return wrapper
 

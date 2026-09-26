@@ -93,4 +93,36 @@ def route_health():
     return {"stored": stored, "loaded": loaded, "last_status": entry and entry["last_status"]}
 
 
-print(json.dumps({"migrated": migrated, "unmigrated": unmigrated, "route_health": route_health}[sys.argv[1]]()))
+def usage():
+    """Key controls on D1 accounts, and ledger rows and totals written through the Worker."""
+    from services import usage_ledger
+
+    os.environ.update({"USAGE_LEDGER_ENABLED": "true", "USAGE_LEDGER_FLUSH_SECONDS": "300"})
+    restart()
+    with patch.object(AuthService, "get_current_user", return_value=ADMIN):
+        key = AuthService.create_user("budgeted", scopes=["chat", "models"])["api_key"]
+        AuthService.set_key_controls("budgeted", {"daily_budget_usd": 2.5, "allowed_models": ["auto:*"],
+                                                  "allowed_ips": ["203.0.113.0/24"], "expires_at": "2099-01-01T00:00:00Z"})
+    restart()
+    user = AuthService.verify_api_key(key, "203.0.113.5")
+    at = usage_ledger.utc_timestamp()
+    row = {"at": at, "principal": "budgeted", "key_prefix": user["api_key_prefix"], "kind": "chat",
+           "endpoint": "/v1/chat/completions", "requested_model": "auto:chat", "selected_model": "openai:gpt-4.1",
+           "status": 200, "latency_ms": 420, "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.25,
+           "cost_basis": "usage", "request_id": "req_integration"}
+    for status in (200, 200, 500):
+        usage_ledger.LEDGER.record({**row, "status": status, "cost_usd": 0.25 if status == 200 else None})
+    flushed = usage_ledger.LEDGER.flush(timeout=20)
+    store = usage_ledger.LEDGER.store()
+    day = at[:10]
+    replayed = store.record("f" * 32, [row]) + store.record("f" * 32, [row])
+    models = store.summary("model", day, day, "budgeted", 10)
+    return {"controls": {name: user[name] for name in ("daily_budget_usd", "allowed_models", "allowed_ips", "expires_at")},
+            "backend": store.backend, "flushed": flushed, "replayed": replayed,
+            "totals": store.totals("budgeted", day, day[:8] + "01"),
+            "models": [(item["model"], item["requests"], item["errors"]) for item in models],
+            "recent": len(store.recent(day + "T00:00:00.000Z", "budgeted", None, 10))}
+
+
+print(json.dumps({"migrated": migrated, "unmigrated": unmigrated, "route_health": route_health,
+                  "usage": usage}[sys.argv[1]]()))

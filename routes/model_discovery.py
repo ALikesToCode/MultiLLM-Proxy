@@ -1,6 +1,6 @@
 """Public model discovery for explicit models and server-owned routing aliases."""
 
-from flask import jsonify
+from flask import g, jsonify
 
 from error_handlers import APIError
 from route_helpers import api_auth_required, login_required
@@ -12,6 +12,7 @@ from services.model_catalog_service import build_model_catalog, unified_model_pa
 from services.model_registry import ModelRegistry
 from services.intelligence_policy import DEFAULT_POLICY, model_advertisement
 from services.intelligence_store import IntelligenceStore
+from services.key_controls import model_allowed
 
 
 def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls):
@@ -40,6 +41,9 @@ def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cl
             intelligence = model_advertisement(DEFAULT_POLICY)
             intelligence["status"] = "storage_unavailable"
         models.append(intelligence)
+        # A key with a model allowlist sees only the models it may call.
+        user = getattr(g, "authenticated_user", None) or {}
+        models = [model for model in models if model_allowed(user, model.get("id"))]
         return jsonify({"object": "list", "data": models})
 
     @app.route("/admin/models", methods=["GET"])
