@@ -76,3 +76,13 @@ test("before migration 0006 requests and sign-in keep working and admin saves fa
   assert.deepEqual(await driveState(url, "unmigrated"), { usage: ["allowed", "allowed", "daily_budget_exceeded"],
     login: [true, false], status: "available", disable: 503, profile: 503, cooldown: true, catalog: false, catalog_models: 1 });
 });
+
+test("route health written by one Container is read back by the next, with the public snapshot", async t => {
+  const { db, url } = await privateStore(t);
+  assert.deepEqual(await drive(url, "route_health"), { stored: true, loaded: true, last_status: 503 });
+  const targets = (await db.prepare("SELECT target FROM route_health ORDER BY target").all()).results.map(row => row.target);
+  assert.deepEqual(targets, ["opencode:glm-5.2", "provider:opencode"]);
+  const snapshot = JSON.parse((await db.prepare("SELECT body FROM route_health_snapshot WHERE id = 'public'").first()).body);
+  const glm = snapshot.routes.find(route => route.id === "auto:glm-5.2");
+  assert.equal(glm.candidates.find(candidate => candidate.model === "opencode:glm-5.2").status, "down");
+});

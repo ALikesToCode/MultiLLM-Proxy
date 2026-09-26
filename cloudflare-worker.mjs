@@ -6,6 +6,8 @@ import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
+import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
+import { STATUS_PATHS, handleStatusRequest } from "./worker/status-page.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
@@ -38,7 +40,7 @@ const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
   "Authorization, X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, X-Roleplay-Session-ID, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, Accept, Origin, X-Requested-With, OpenAI-Beta, OpenAI-Organization, OpenAI-Project, Idempotency-Key, Moderation, Moderation-Model, Redaction, X-Client-Request-ID, X-App-Name, X-Billing-Mode, X-BYOK-Provider, X-Encryption-Key, X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, X-Prompt-Caching-Cut-After, X-Provider, X-Team-ID, X-Use-BYOK, x-x402";
 const CORS_EXPOSE_HEADERS =
-  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-MultiLLM-Reasoning-Normalized, X-Roleplay-Session-ID, X-Roleplay-Trace-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
+  "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, X-MultiLLM-Summary, X-MultiLLM-Optimization-Cache-Hits, X-MultiLLM-Optimization-Cache-Misses, X-MultiLLM-Prompt-Cache, X-MultiLLM-Prompt-Cache-Mode, X-MultiLLM-Prompt-Cache-Estimated-Tokens, X-MultiLLM-Provider, X-MultiLLM-Model, X-MultiLLM-Credential-Attempts, X-MultiLLM-Route-Decision, X-MultiLLM-Circuit-State, X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, X-MultiLLM-Cache, X-MultiLLM-Transport-Failure, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, X-MultiLLM-Cost-Basis, X-MultiLLM-Reasoning-Normalized, X-Roleplay-Session-ID, X-Roleplay-Trace-ID, X-Roleplay-Session-Source, X-Roleplay-Provider, X-Roleplay-Model, X-Roleplay-Selection, X-Roleplay-Memory, X-Roleplay-Estimated-Input-Tokens, X-Roleplay-Max-Output-Tokens, X-Roleplay-Fallback-Count, X-Roleplay-State-Cache, X-Roleplay-Credential-Check, Server-Timing, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, X-NanoGPT-Inline-Moderation-Flagged, X-NanoGPT-Inline-Moderation-Model";
 const LINKAPI_DEFAULT_BASE_URL = "https://api.linkapi.ai";
 const CODEX_EASY_BASE_URL = "https://codex-easy.ai";
 const CODEX_EASY_ROUTE_PREFIX = "/codex-easy";
@@ -1783,6 +1785,12 @@ export class MultiLLMProxyContainer extends Container {
   onError(error) {
     logStructuredError("container_start_failed", error);
   }
+
+  // Scheduled checks and the status fallback reach a running Container without starting it
+  // or renewing sleepAfter, so they never keep an idle Container awake.
+  fetchIfRunning(path, init) {
+    return fetchIfRunning(this, path, init);
+  }
 }
 
 MultiLLMProxyContainer.outboundByHost = {
@@ -1792,7 +1800,14 @@ MultiLLMProxyContainer.outboundByHost = {
 };
 
 export default {
-  async fetch(request, env) {
+  async scheduled(controller, env, ctx) {
+    const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+    ctx.waitUntil(runScheduledHealth(controller, env, container).catch((error) => {
+      logStructuredError("scheduled_health_failed", error);
+    }));
+  },
+
+  async fetch(request, env, ctx) {
     const requestStartedAt = performance.now();
     const requestUrl = new URL(request.url);
     if (requestUrl.protocol === "http:") {
@@ -1830,6 +1845,14 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (STATUS_PATHS.has(requestUrl.pathname)) {
+      // Served from the D1 snapshot: a status visit never wakes the Container.
+      const container = env.MULTILLM_PROXY_CONTAINER
+        ? getContainer(env.MULTILLM_PROXY_CONTAINER, "primary")
+        : null;
+      return handleStatusRequest(request, env, ctx, { container });
     }
 
     if (readyPath) {

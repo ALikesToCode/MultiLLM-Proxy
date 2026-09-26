@@ -13,6 +13,7 @@
   ],
   "services": [{ "binding": "KNOWLEDGE_SERVICE", "service": "multillm-knowledge" }],
   "ai": { "binding": "AI" },
+  "triggers": { "crons": ["*/5 * * * *"] },
   "containers": [
     {
       "class_name": "MultiLLMProxyContainer",
@@ -125,6 +126,10 @@
     "ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT": "20",
     "ROLEPLAY_QUALITY_MIN_SAMPLES": "3",
     "ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS": "1024",
-    "ROLEPLAY_SESSION_TTL_SECONDS": "2592000"
+    "ROLEPLAY_SESSION_TTL_SECONDS": "2592000",
+    "KEEP_WARM": "false",
+    "HEALTH_CHECKS_WAKE": "false",
+    "HEALTH_CHECK_INTERVAL_MINUTES": "30",
+    "AUTO_ROUTE_ORDERING": "priority"
   }
 }

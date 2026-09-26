@@ -16,6 +16,7 @@ from request_validation import json_object_body
 from routes.csrf_errors import handle_csrf_error
 from routes.knowledge_onboarding import PUBLIC_ENDPOINTS as KNOWLEDGE_PUBLIC_ENDPOINTS
 from routes.public_pages import PUBLIC_ENDPOINTS as PRODUCT_PUBLIC_ENDPOINTS, register_public_routes
+from routes.status_page import PUBLIC_ENDPOINTS as STATUS_PUBLIC_ENDPOINTS
 from route_helpers import (
     apply_cors_headers,
     apply_operational_headers,
@@ -435,7 +436,7 @@ def register_core_routes(app) -> None:
         if request.headers.get("Authorization") or request_api_key():
             return None
 
-        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS or request.endpoint in [
+        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS | STATUS_PUBLIC_ENDPOINTS or request.endpoint in [
             "login",
             "login_access",
             "static_files",

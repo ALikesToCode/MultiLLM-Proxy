@@ -76,4 +76,21 @@ def unmigrated():
             "save_route": status(lambda: AutoRouteService.save_route("auto:x", ["gguu:gpt-image-2.5"], {"gguu": "https://gguu.example"}))}
 
 
-print(json.dumps({"migrated": migrated, "unmigrated": unmigrated}[sys.argv[1]]()))
+def route_health():
+    """Figures one Container writes in a batch are where the next one starts."""
+    from services import route_health_sync
+    from services.route_health import RouteHealth
+
+    restart()
+    route_health_sync.reset()
+    route_health_sync.load()
+    RouteHealth.record("opencode:glm-5.2", ok=False, outcome="http_503", status=503)
+    stored = route_health_sync.flush()
+    RouteHealth.reset()
+    route_health_sync.reset()
+    loaded = route_health_sync.load()
+    entry = RouteHealth.snapshot("opencode:glm-5.2")
+    return {"stored": stored, "loaded": loaded, "last_status": entry and entry["last_status"]}
+
+
+print(json.dumps({"migrated": migrated, "unmigrated": unmigrated, "route_health": route_health}[sys.argv[1]]()))

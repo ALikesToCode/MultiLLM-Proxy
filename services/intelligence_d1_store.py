@@ -29,6 +29,7 @@ _ENDPOINTS = {
     "free_quotas": "http://intelligence.internal/v1/state/quotas",
     "workbench": "http://intelligence.internal/v1/state/workbench",
     "provider_catalog": "http://intelligence.internal/v1/state/catalog",
+    "route_health": "http://intelligence.internal/v1/route-health",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
@@ -54,6 +55,7 @@ _ENDPOINT_SLOTS.update({
     "model_overrides": threading.BoundedSemaphore(2),
     "workbench": _ADMIN_STATE_SLOTS,
     "provider_catalog": _ADMIN_STATE_SLOTS,
+    "route_health": threading.BoundedSemaphore(2),
 })
 _SLOW_CALL_SECONDS = 2.0
 _STATS_LOCK = threading.Lock()

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>MultiLLM Proxy status</title>
+{# Standalone page: no session, cookies or scripts, so the edge may cache it. The markup and
+   styles match worker/status-page.mjs, which renders the same page from the D1 snapshot. #}
+<style>
+body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#10202e;background:#f6f8fa}
+main{max-width:60rem;margin:0 auto;padding:2rem 1rem}
+h1{font-size:1.75rem;margin:0 0 .5rem}
+h2{font-size:1.25rem;margin:2rem 0 .75rem}
+h3{font-size:1rem;margin:0 0 .5rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.overall{font-size:1.125rem;font-weight:600;margin:0}
+.meta{color:#4a5a68;margin:.25rem 0 0}
+.route{background:#fff;border:1px solid #d5dde5;border-radius:.5rem;padding:1rem;margin:0 0 1rem;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9375rem}
+th,td{text-align:left;padding:.375rem .5rem;border-top:1px solid #e3e9ef;white-space:nowrap}
+thead th{border-top:0;color:#4a5a68;font-weight:600}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+.badge{display:inline-block;border-radius:1rem;padding:0 .625rem;font-size:.8125rem;font-weight:600;border:1px solid}
+.badge--up{color:#0b5d2a;background:#e3f6ea;border-color:#9fd8b3}
+.badge--degraded{color:#7a4a00;background:#fff3d6;border-color:#f0cf7c}
+.badge--down{color:#8f1d1d;background:#fde7e7;border-color:#f1a9a9}
+.badge--unknown{color:#3d4b57;background:#eef2f5;border-color:#c9d3dc}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+footer{margin-top:2rem;color:#4a5a68;font-size:.875rem}
+@media (prefers-color-scheme:dark){body{color:#e4ebf1;background:#0d1720}.route{background:#13212d;border-color:#26394a}th,td{border-color:#26394a}.meta,thead th,footer{color:#a7b6c3}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>MultiLLM Proxy status</h1>
+<p class="overall"><span class="badge badge--{{ view.overall.status }}">{{ view.overall.label }}</span> {{ view.overall.text }}</p>
+<p class="meta">Updated <time datetime="{{ view.generated_at }}">{{ view.generated_text }}</time>. {% if source == "live" %}Live figures from the gateway.{% else %}Last figures the gateway stored; they refresh while it is awake.{% endif %} Success rate and median time to response cover the last hour of routed requests.</p>
+</header>
+<section aria-labelledby="routes-title">
+<h2 id="routes-title">Automatic routes</h2>
+{% for route in view.routes %}
+<article class="route" aria-labelledby="route-{{ loop.index }}">
+<h3 id="route-{{ loop.index }}"><code>{{ route.id }}</code> <span class="badge badge--{{ route.status }}">{{ route.label }}</span></h3>
+<table>
+<caption class="visually-hidden">Candidates for {{ route.id }} in configured order</caption>
+<thead><tr><th scope="col">Priority</th><th scope="col">Model</th><th scope="col">Status</th><th scope="col">Success rate</th><th scope="col">Median response</th><th scope="col">Last check</th></tr></thead>
+<tbody>
+{% for candidate in route.candidates %}
+<tr><td>{{ candidate.priority }}</td><td><code>{{ candidate.model }}</code></td><td><span class="badge badge--{{ candidate.status }}">{{ candidate.label }}</span></td><td>{{ candidate.success_rate }}</td><td>{{ candidate.p50 }}</td><td>{{ candidate.last_check }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</article>
+{% else %}
+<p>No automatic routes are configured.</p>
+{% endfor %}
+</section>
+<section aria-labelledby="providers-title">
+<h2 id="providers-title">Providers</h2>
+<div class="route">
+<table>
+<caption class="visually-hidden">Provider health</caption>
+<thead><tr><th scope="col">Provider</th><th scope="col">Status</th><th scope="col">Success rate</th><th scope="col">Median response</th><th scope="col">Last check</th></tr></thead>
+<tbody>
+{% for provider in view.providers %}
+<tr><td>{{ provider.id }}</td><td><span class="badge badge--{{ provider.status }}">{{ provider.label }}</span></td><td>{{ provider.success_rate }}</td><td>{{ provider.p50 }}</td><td>{{ provider.last_check }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+<footer><p>Machine-readable: <a href="/status.json">/status.json</a>. Checks list each provider's models and never generate anything.</p></footer>
+</main>
+</body>
+</html>
