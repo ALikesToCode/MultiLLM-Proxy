@@ -24,6 +24,7 @@ from routes.intelligence_media import register_intelligence_media_routes
 from routes.knowledge import register_knowledge_routes
 from routes.documentation import register_documentation_routes
 from routes.free_routes import register_free_routes
+from routes.gateway_mcp import register_gateway_mcp_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.status_page import register_status_routes
@@ -127,6 +128,7 @@ def create_app() -> Flask:
     register_dashboard_security_routes(app)
     register_workbench_routes(app)
     register_knowledge_routes(app, csrf)
+    register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
 
     return app
