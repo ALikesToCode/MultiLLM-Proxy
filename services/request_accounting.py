@@ -35,12 +35,25 @@ BILLABLE_PATHS = {
     "/v1/responses": "responses",
     "/v1/messages": "chat",
     "/v1/images/generations": "images",
+    "/v1/images/edits": "images",
     "/v1/images/batch": "images",
+    "/v1/images/batches": "images",
     "/v1/videos": "videos",
     "/v1/embeddings": "embeddings",
     "/v1/audio/transcriptions": "audio",
     "/v1/audio/speech": "audio",
 }
+# Default models when a request omits one; they must match the routes' own defaults.
+DEFAULT_MODELS = {
+    "/v1/images/edits": "auto:image-edit",
+    "/v1/embeddings": "auto:embed",
+    "/v1/audio/speech": "auto:tts",
+    "/v1/audio/transcriptions": "auto:stt",
+}
+# An asynchronous batch is admitted here, but its items are recorded when the Workflow
+# runs them (see `admit_item` and `record_item`), so the submission itself is not.
+DEFERRED_PATHS = frozenset({"/v1/images/batches"})
+BATCH_PATHS = frozenset({"/v1/images/batch", "/v1/images/batches"})
 FREE_MODE_PATH = re.compile(r"/v1/free/([A-Za-z0-9_-]{1,32})/chat/completions\Z")
 PROXY_ENDPOINTS = frozenset({"proxy", "google_chat_completions"})
 BILLABLE_METHODS = frozenset({"POST", "PUT", "PATCH"})
@@ -73,6 +86,8 @@ class UsageContext:
     request_id: Optional[str] = None
     selected: Optional[str] = None
     finished: bool = False
+    # Served from the response cache: no provider was called, so nothing is charged.
+    cached: bool = False
 
 
 def classify() -> Optional[str]:
@@ -108,10 +123,10 @@ def _requested_models(kind: str, payload: Optional[dict]) -> tuple[list[str], Op
         provider = str((request.view_args or {}).get("api_provider") or request.path.strip("/").split("/", 1)[0])
         model = body.get("model")
         return ([f"{provider}:{model}"] if isinstance(model, str) and model.strip() else []), provider.lower()
-    if request.path == "/v1/audio/transcriptions":
-        model = request.form.get("model")
-        return ([model] if model else []), None
-    if request.path == "/v1/images/batch":
+    if request.path in ("/v1/audio/transcriptions", "/v1/images/edits") and not request.is_json:
+        model = request.form.get("model") or DEFAULT_MODELS[request.path]
+        return [model], None
+    if request.path in BATCH_PATHS:
         items, defaults = _batch_parts(body)
         models = [item.get("model") or defaults.get("model") or "auto:image" for item in items if isinstance(item, dict)]
         return [model for model in dict.fromkeys(models) if isinstance(model, str)], None
@@ -122,6 +137,8 @@ def _requested_models(kind: str, payload: Optional[dict]) -> tuple[list[str], Op
     if free:
         return [f"free:{free.group(1)}"], None
     model = body.get("model")
+    if model is None and request.path in DEFAULT_MODELS:
+        model = DEFAULT_MODELS[request.path]
     if model is None and request.path == "/v1/free/chat/completions":
         model = "free:text"
     elif model is None and (request.path.startswith("/intelligence/") or "routing" in body):
@@ -131,13 +148,19 @@ def _requested_models(kind: str, payload: Optional[dict]) -> tuple[list[str], Op
 
 def _image_units(kind: str, payload: Optional[dict]) -> int:
     body = payload or {}
-    if request.path == "/v1/images/batch":
+    if request.path in BATCH_PATHS:
         items, defaults = _batch_parts(body)
         count = 0
         for item in items:
             n = (item.get("n") if isinstance(item, dict) else None) or defaults.get("n") or 1
             count += n if isinstance(n, int) and n > 0 else 1
         return max(1, count)
+    if request.path == "/v1/images/edits" and not request.is_json:
+        try:
+            n = int(request.form.get("n") or 1)
+        except ValueError:
+            n = 1
+        return n if 0 < n <= 100 else 1
     if kind == "images":
         n = body.get("n", 1)
         return n if isinstance(n, int) and 0 < n <= 100 else 1
@@ -324,6 +347,9 @@ def _record(context: UsageContext, status: int, usage: Optional[tuple[int, int]]
     if context.finished:
         return
     context.finished = True
+    if context.path in DEFERRED_PATHS:
+        BudgetService.settle(context.reservation)
+        return
     try:
         row = _row(context, status, usage, units)
         BudgetService.record_cost(row)
@@ -346,7 +372,9 @@ def _row(context: UsageContext, status: int, usage: Optional[tuple[int, int]], u
     if units is not None:
         context.units = units
     cost, basis = None, None
-    if status < 400 or usage:
+    if context.cached and status < 400:
+        cost, basis = 0.0, "cache"
+    elif status < 400 or usage:
         if usage:
             input_tokens, output_tokens, basis = usage[0], usage[1], "usage"
         else:
@@ -422,6 +450,7 @@ def finish(result: Any) -> Any:
     except Exception:
         _record(context, 500, None, None)
         return result
+    context.cached = response.headers.get("X-MultiLLM-Cache") == "hit"
     if response.is_streamed:
         event_stream = (response.mimetype or "") == "text/event-stream"
         json_stream = (response.mimetype or "").endswith("json")
@@ -452,3 +481,37 @@ def fail(error: BaseException) -> None:
     else:
         status = 500
     _record(context, status, None, None)
+
+
+def admit_item(user: dict, model: str, units: int) -> tuple[Optional[dict], Optional[str]]:
+    """Allowlist and budget for work run later for an account, such as an asynchronous
+    batch item. Returns an error for the item, or the budget reservation to settle."""
+    if not key_controls.model_allowed(user, model):
+        return {"status": 403, "code": "model_not_allowed",
+                "message": f"This API key is not allowed to use {str(model)[:128]}."}, None
+    if not budgeted(user):
+        return None, None
+    decision = BudgetService.check_and_reserve(user, estimate_cost([model], 0, 0, max(1, units)))
+    if not decision.allowed:
+        return {"status": decision.status_code, "code": decision.error, "message": decision.message}, None
+    return None, decision.reservation
+
+
+def record_item(user: dict, *, endpoint: str, requested: str, selected: Optional[str], status: int,
+                units: int, started: float, reservation: Optional[str]) -> None:
+    """Record one item of background work in the ledger and settle its reservation."""
+    context = UsageContext(kind="images", models=[requested], provider=None, user=user, started=started,
+                           start_ns=time.time_ns(), units=max(1, units), reservation=reservation)
+    context.path, context.selected = endpoint, selected
+    _record_row(context, status, units)
+
+
+def _record_row(context: UsageContext, status: int, units: int) -> None:
+    try:
+        row = _row(context, status, None, units)
+        BudgetService.record_cost(row)
+        usage_ledger.LEDGER.record(row)
+    except Exception as error:  # Accounting must never fail the work it describes.
+        logger.warning("Usage could not be recorded (%s)", type(error).__name__)
+    finally:
+        BudgetService.settle(context.reservation)

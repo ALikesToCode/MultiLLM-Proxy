@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 import secrets
+import time
 from functools import partial
 
 from flask import g, jsonify, request, url_for
@@ -24,7 +25,7 @@ from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.media_files import unavailable
 from routes.media_images import _error, _image_count, run_image_tasks
-from services import media_jobs, media_storage
+from services import media_jobs, media_storage, request_accounting
 from services.auto_route_service import AutoRouteService
 from services.media_signing import issue_principal, read_principal, webhook_secret
 from services.media_urls import public_https_url
@@ -105,6 +106,11 @@ def _item_images(files: list) -> list:
         elif isinstance(file, dict) and isinstance(file.get("url"), str):
             images.append({"url": file["url"]})
     return images
+
+
+def _requested_images(item_request: dict) -> int:
+    count = item_request.get("n", 1)
+    return count if type(count) is int and count > 0 else 1
 
 
 def principal_user(auth_service_cls, owner: str) -> dict | None:
@@ -282,10 +288,37 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
             raise APIError("The batch owner's account no longer exists", status_code=403,
                            payload={"error": "principal_rejected"})
         g.authenticated_user = user
-        results = run_image_tasks([partial(generate_image, item["request"]) for item in items])
+        # Key controls apply when an item runs, not only at submission: an allowlist or
+        # budget changed since then is honoured, and each item is recorded in the ledger.
+        started = time.perf_counter()
+        admitted, refused, reservations = [], {}, {}
+        for item in items:
+            model = item["request"].get("model") or DEFAULT_MODEL
+            error, reservation = request_accounting.admit_item(user, model, _requested_images(item["request"]))
+            if error is None:
+                admitted.append(item)
+                reservations[item["index"]] = reservation
+            else:
+                refused[item["index"]] = error
+        outcomes = dict(zip((item["index"] for item in admitted),
+                            run_image_tasks([partial(generate_image, item["request"]) for item in admitted])))
         replies = []
-        for item, result in zip(items, results):
+        for item in items:
             entry = {"index": item["index"]}
+            if item["index"] in refused:
+                error = refused[item["index"]]
+                entry.update(status="failed", error={"status": error["status"], "code": error["code"],
+                                                     "message": error["message"][:500]})
+                replies.append(entry)
+                continue
+            result = outcomes[item["index"]]
+            requested = item["request"].get("model") or DEFAULT_MODEL
+            selected = result["headers"].get("X-MultiLLM-Auto-Selected-Model") if result["status"] < 400 else None
+            request_accounting.record_item(
+                user, endpoint="/v1/images/batches", requested=requested,
+                selected=selected or (requested if ":" in requested and not requested.startswith("auto:") else None),
+                status=result["status"], started=started, reservation=reservations[item["index"]],
+                units=len((result["body"] or {}).get("data") or []) if result["status"] < 400 else 1)
             if result["status"] < 400 and result["body"]:
                 model = result["headers"].get("X-MultiLLM-Auto-Selected-Model") or item["request"].get("model")
                 images = result["body"].get("data") or []

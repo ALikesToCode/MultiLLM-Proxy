@@ -61,6 +61,15 @@ class ChatCacheTest(UnifiedApiTestCase):
         self.assertEqual(second.headers["X-MultiLLM-Route-Decision"], "cache-hit")
         self.assertIn("Age", second.headers)
 
+    def test_a_cache_hit_is_recorded_without_a_charge(self):
+        rows = []
+        with patch("services.request_accounting.usage_ledger.LEDGER.record", side_effect=rows.append):
+            self._post([completion("4")])
+            self._post([completion("never used")])
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0]["cost_basis"], "cache")
+        self.assertEqual((rows[1]["cost_usd"], rows[1]["cost_basis"]), (0.0, "cache"))
+
     def test_key_order_does_not_matter_but_any_body_change_does(self):
         self._post([completion("4")])
         reordered = {"temperature": 0, "messages": BODY["messages"], "model": BODY["model"]}

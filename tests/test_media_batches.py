@@ -171,6 +171,37 @@ class MediaBatchTest(UnifiedApiTestCase):
                                                                                "model": "gguu:gpt-image-2"}))
         self.assertEqual((bad["index"], bad["status"], bad["error"]["status"]), (7, "failed", 400))
 
+    def test_key_controls_apply_to_submissions_and_to_each_item_when_it_runs(self):
+        blocked = lambda user, model: model not in ("gguu:gpt-image-2", "auto:embed")
+        with patch("services.key_controls.model_allowed", side_effect=blocked), self.jobs({}) as call:
+            refused = self.client.post("/v1/images/batches", headers=ADMIN,
+                                       json={"items": [{"prompt": "x", "model": "gguu:gpt-image-2"}]})
+            edit = self.client.post("/v1/images/edits", headers=ADMIN, data={"prompt": "x", "model": "gguu:gpt-image-2"},
+                                    content_type="multipart/form-data")
+            embedding = self.client.post("/v1/embeddings", headers=ADMIN, json={"input": "x"})
+        self.assertEqual((refused.status_code, refused.get_json()["error"]), (403, "model_not_allowed"))
+        self.assertEqual((edit.status_code, edit.get_json()["error"]), (403, "model_not_allowed"))
+        self.assertEqual(embedding.status_code, 403, "an omitted model is checked as its default route")
+        call.assert_not_called()
+
+        rows = []
+        image = upstream(200, {"created": 1, "data": [{"url": "https://provider.example/a.png"}]})
+        with patch("services.key_controls.model_allowed", side_effect=blocked), \
+                patch("services.request_accounting.usage_ledger.LEDGER.record", side_effect=rows.append), \
+                patch.object(self.app_module.ProxyService, "make_request", return_value=image) as make_request, \
+                patch("services.media_storage.import_url", side_effect=lambda file_id, url, **kwargs:
+                      {"id": file_id, "size": 5, "content_type": "image/png"}):
+            response = self.internal("/internal/media/batch-items", {"job_id": "imgbatch_" + "e" * 32, "items": [
+                {"index": 0, "request": {"model": "auto:image-test", "prompt": "allowed"}},
+                {"index": 1, "request": {"model": "gguu:gpt-image-2", "prompt": "blocked"}}]})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        allowed, blocked_item = response.get_json()["results"]
+        self.assertEqual(allowed["status"], "succeeded")
+        self.assertEqual((blocked_item["status"], blocked_item["error"]["code"]), ("failed", "model_not_allowed"))
+        make_request.assert_called_once()
+        self.assertEqual([(row["endpoint"], row["requested_model"], row["selected_model"], row["status"]) for row in rows],
+                         [("/v1/images/batches", "auto:image-test", "gguu:gpt-image-2", 200)])
+
     def test_the_item_endpoint_refuses_forged_or_orphaned_principals(self):
         body = {"job_id": "imgbatch_" + "d" * 32, "items": [{"index": 0, "request": {"prompt": "x"}}]}
         with patch.object(self.app_module.ProxyService, "make_request") as make_request:
