@@ -169,13 +169,18 @@ def _is_linkapi_request_path(path: str) -> bool:
 
 
 def _accepts_native_api_key(path: str) -> bool:
-    return _provider_prefix(path) in {
-        "aihubmix",
-        "linkapi",
-        "nanogpt",
-        "navyai",
-        "opencode",
-    }
+    # Anthropic SDKs and Claude Code (including its /v1/models discovery) send
+    # the proxy key as X-Api-Key.
+    return path.rstrip("/") in {"/v1/messages", "/v1/messages/count_tokens", "/v1/models"} or (
+        _provider_prefix(path)
+        in {
+            "aihubmix",
+            "linkapi",
+            "nanogpt",
+            "navyai",
+            "opencode",
+        }
+    )
 
 
 def request_api_key() -> Optional[str]:

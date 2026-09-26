@@ -110,12 +110,9 @@ def _model_capabilities(
             supports_tools=False,
             supports_json_schema=False,
         )
-    elif provider == "opencode" and opencode_model_endpoint(model_id) not in (
-        None,
-        "v1/chat/completions",
-    ):
-        # Responses and Messages models reject Chat Completions bodies.
-        capabilities["supports_chat"] = False
+    # Responses- and Messages-only models stay chat-capable: unified chat
+    # translates for them (docs/protocol-translation.md); api_endpoint names
+    # the native protocol.
     return capabilities
 
 

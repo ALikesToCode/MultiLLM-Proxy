@@ -3,7 +3,6 @@ import logging
 import time
 from collections.abc import Mapping
 
-import requests
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
@@ -18,9 +17,12 @@ from providers.nanogpt import (
     sanitize_nanogpt_subscription_headers,
     sanitize_nanogpt_subscription_payload,
 )
-from providers.opencode_go import (
-    build_opencode_model_url,
-    opencode_model_endpoint,
+from providers.opencode_go import build_opencode_model_url
+from providers.protocols import (
+    MESSAGES as MESSAGES_ENDPOINT,
+    RESPONSES as RESPONSES_ENDPOINT,
+    chat_bridge_endpoint,
+    speaks,
 )
 from providers.registry import get_adapter
 from request_validation import json_object_body
@@ -40,10 +42,13 @@ from routes.chat_cache import cached_chat_completion
 from routes.free_routes import dispatch_free_chat
 from routes.model_discovery import register_model_discovery_route
 from routes.intelligence import dispatch_intelligence_chat, register_intelligence_routes
-from routes.responses_compat import (
-    chat_response_to_responses_payload,
-    responses_input_to_messages,
+from routes.protocol_bridge import (
+    ENDPOINT_PROTOCOLS,
+    translate_downstream_response,
+    translation_api_error,
+    translation_request_headers,
 )
+from routes.unified_messages import register_unified_messages_routes
 from routes.media_images import dispatch_auto_image_generation
 from routes.unified_transport import (
     normalized_aihubmix_image_response,
@@ -53,7 +58,11 @@ from routes.unified_transport import (
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services import cloudflare_ai
-from services.media_catalog import TRANSPORT_FAILURE_HEADER
+from services.media_catalog import (
+    TRANSPORT_FAILURE_HEADER,
+    image_profile,
+    is_video_model,
+)
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
@@ -64,6 +73,12 @@ from routes.provider_credentials import (
     _is_nanogpt_routing_refusal,
     _request_with_provider_token_rotation,
     _add_credential_attempt_headers,
+)
+from services.protocol_translation import (
+    CHAT,
+    TranslationError,
+    strip_unsigned_thinking,
+    translate_request,
 )
 from services.provider_prompt_cache import (
     PromptCacheDecision,
@@ -77,9 +92,6 @@ logger = logging.getLogger(__name__)
 
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
-NATIVE_RESPONSES_PROVIDERS = frozenset(
-    {"codex-easy", "linkapi", "nanogpt", "navyai", "opencode"}
-)
 
 
 def _resolve_enabled_model(app, model_id: str):
@@ -91,17 +103,6 @@ def _resolve_enabled_model(app, model_id: str):
     if ModelRegistry.get_model_status(model_id) == "disabled":
         raise APIError(f"Model is disabled: {model_id}", status_code=400)
     return provider, provider_model, adapter
-
-
-def _decode_upstream_json(response: requests.Response) -> dict:
-    try:
-        payload = response.json()
-    except ValueError as error:
-        raise APIError("Upstream provider returned a non-JSON response", status_code=502) from error
-
-    if not isinstance(payload, dict):
-        raise APIError("Upstream provider returned an unsupported JSON response", status_code=502)
-    return payload
 
 
 def _copy_request_payload(payload: dict, provider_model: str) -> dict:
@@ -283,12 +284,125 @@ def validate_unified_chat_target(
     )
 
 
-def _pass_through_response(response: requests.Response) -> Response:
-    return Response(
-        response.content,
-        status=response.status_code,
-        content_type=response.headers.get("content-type", "application/json"),
-        headers=copy_raw_provider_response_headers(response.headers),
+def _send_native_request(
+    app,
+    auth_service_cls,
+    proxy_service_cls,
+    *,
+    provider: str,
+    provider_model: str,
+    endpoint: str,
+    body: dict,
+    headers_source,
+    args_source,
+    cache_headers: Mapping[str, str],
+    request_timeout=None,
+):
+    """Send one body to a provider's native Responses or Messages endpoint."""
+    raw_body = json.dumps(body).encode("utf-8")
+
+    def send_request(token: str):
+        headers = proxy_service_cls.prepare_headers(
+            headers_source,
+            provider,
+            token,
+            upstream_path=endpoint,
+        )
+        _merge_request_headers(headers, cache_headers)
+        default_url = f"{app.config['API_BASE_URLS'][provider].rstrip('/')}/{endpoint}"
+        request_kwargs = {
+            "method": "POST",
+            "url": _provider_model_url(app, provider, provider_model, endpoint, default_url),
+            "headers": headers,
+            "params": proxy_service_cls.prepare_params(
+                args_source,
+                provider,
+                token,
+                upstream_path=endpoint,
+            ),
+            "data": raw_body,
+            "api_provider": provider,
+            "use_cache": False,
+        }
+        if body.get("stream"):
+            # The managed transport rewrites streams as Chat Completions chunks;
+            # only the raw transport keeps a native event stream intact.
+            request_kwargs["force_raw_passthrough"] = True
+        if request_timeout is not None:
+            request_kwargs["timeout_override"] = request_timeout
+        return proxy_service_cls.make_request(**request_kwargs)
+
+    return _request_with_provider_token_rotation(
+        app,
+        auth_service_cls,
+        proxy_service_cls,
+        provider,
+        send_request,
+    )
+
+
+def _dispatch_bridged_chat(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    *,
+    provider: str,
+    provider_model: str,
+    endpoint: str,
+    headers_source,
+    args_source,
+    request_timeout,
+    start_time: float,
+    metrics_model,
+    route_decision,
+):
+    """Serve Chat Completions from a model that speaks only Responses or Messages."""
+    target = ENDPOINT_PROTOCOLS[endpoint]
+    try:
+        body = translate_request(_copy_request_payload(payload, provider_model), CHAT, target)
+    except TranslationError as error:
+        raise translation_api_error(error) from error
+    cache_decision = apply_prompt_cache_policy(
+        body,
+        provider=provider,
+        model=provider_model,
+        endpoint=target,
+        request_headers=headers_source,
+        enabled=app.config["PROMPT_CACHE_ENABLED"],
+        minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+    )
+    response, credential_attempts = _send_native_request(
+        app,
+        auth_service_cls,
+        proxy_service_cls,
+        provider=provider,
+        provider_model=provider_model,
+        endpoint=endpoint,
+        body=cache_decision.payload,
+        headers_source=headers_source,
+        args_source=args_source,
+        cache_headers=cache_decision.request_headers,
+        request_timeout=request_timeout,
+    )
+    metrics_service_cls.get_instance().track_request(
+        provider=provider,
+        status_code=response.status_code,
+        response_time=(time.time() - start_time) * 1000,
+        model=metrics_model,
+        route_decision=route_decision,
+    )
+    downstream = translate_downstream_response(
+        response,
+        source=target,
+        target=CHAT,
+        stream=bool(payload.get("stream")),
+    )
+    return _add_credential_attempt_headers(
+        _add_prompt_cache_headers(downstream, cache_decision),
+        provider,
+        credential_attempts,
     )
 
 
@@ -316,6 +430,24 @@ def _dispatch_unified_chat_candidate(
             app,
             payload.get("model"),
         )
+        bridge_endpoint = chat_bridge_endpoint(provider, provider_model)
+        if bridge_endpoint is not None:
+            return _dispatch_bridged_chat(
+                app,
+                auth_service_cls,
+                metrics_service_cls,
+                proxy_service_cls,
+                payload,
+                provider=provider,
+                provider_model=provider_model,
+                endpoint=bridge_endpoint,
+                headers_source=headers_source,
+                args_source=args_source,
+                request_timeout=request_timeout,
+                start_time=start_time,
+                metrics_model=metrics_model,
+                route_decision=route_decision,
+            )
         candidate_payload = _copy_request_payload(payload, provider_model)
         subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
             app.config
@@ -559,6 +691,180 @@ def dispatch_unified_chat_completion(
     )
 
 
+def _is_routed_chat_model(payload: dict) -> bool:
+    """Server-owned aliases always run through the Chat Completions dispatcher."""
+    model = payload.get("model")
+    return (
+        model == "auto:intelligence"
+        or "routing" in payload
+        or (isinstance(model, str) and model.startswith("free:"))
+        or AutoRouteService.is_auto_route(model)
+    )
+
+
+def _reject_media_only_route(model) -> None:
+    route = AutoRouteService.get_route(model) if AutoRouteService.is_auto_route(model) else None
+    if route is None or not route.candidates:
+        return
+    for candidate in route.candidates:
+        provider, provider_model = ModelRegistry.parse_model_id(candidate)
+        if image_profile(provider, provider_model) is None and not is_video_model(provider_model):
+            return
+    raise APIError(
+        f"{route.id} generates images or video; use /v1/images/generations",
+        status_code=400,
+    )
+
+
+def _dispatch_native_protocol(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    *,
+    provider: str,
+    provider_model: str,
+    endpoint: str,
+):
+    """Pass a Responses or Messages body to a provider that speaks it natively."""
+    start_time = time.time()
+    headers_source = request.headers
+    upstream_payload = _copy_request_payload(payload, provider_model)
+    if endpoint == RESPONSES_ENDPOINT:
+        upstream_payload = apply_glm_5_reasoning_policy(
+            upstream_payload,
+            provider,
+            provider_model,
+        )
+    else:
+        upstream_payload = strip_unsigned_thinking(upstream_payload)
+    upstream_payload = _apply_nanogpt_speed_routing(
+        app, provider, upstream_payload, headers_source
+    )
+    cache_decision = apply_prompt_cache_policy(
+        upstream_payload,
+        provider=provider,
+        model=provider_model,
+        endpoint=ENDPOINT_PROTOCOLS[endpoint],
+        request_headers=headers_source,
+        enabled=app.config["PROMPT_CACHE_ENABLED"],
+        minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
+    )
+    response, credential_attempts = _send_native_request(
+        app,
+        auth_service_cls,
+        proxy_service_cls,
+        provider=provider,
+        provider_model=provider_model,
+        endpoint=endpoint,
+        body=cache_decision.payload,
+        headers_source=headers_source,
+        args_source=request.args,
+        cache_headers=cache_decision.request_headers,
+    )
+    metrics_service_cls.get_instance().track_request(
+        provider=provider,
+        status_code=response.status_code,
+        response_time=(time.time() - start_time) * 1000,
+    )
+    downstream_response = (
+        response if isinstance(response, Response) else stream_upstream_response(response)
+    )
+    return _add_credential_attempt_headers(
+        _add_prompt_cache_headers(downstream_response, cache_decision),
+        provider,
+        credential_attempts,
+    )
+
+
+def _dispatch_translated_protocol(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    protocol: str,
+):
+    """Serve a Responses or Messages request through the Chat Completions dispatcher."""
+    try:
+        chat_payload = translate_request(payload, protocol, CHAT)
+    except TranslationError as error:
+        raise translation_api_error(error) from error
+    if "routing" in payload:
+        chat_payload["routing"] = payload["routing"]
+    response = dispatch_unified_chat_completion(
+        app,
+        auth_service_cls,
+        metrics_service_cls,
+        proxy_service_cls,
+        chat_payload,
+        request_headers=translation_request_headers(request.headers),
+    )
+    return translate_downstream_response(
+        response,
+        source=CHAT,
+        target=protocol,
+        stream=bool(chat_payload.get("stream")),
+        model=payload.get("model"),
+        request_payload=payload,
+    )
+
+
+def dispatch_protocol_request(
+    app,
+    auth_service_cls,
+    metrics_service_cls,
+    proxy_service_cls,
+    payload: dict,
+    endpoint: str,
+):
+    """Dispatch a Responses or Messages request: native when the model speaks it,
+    translated through Chat Completions otherwise (automatic routes included)."""
+    protocol = ENDPOINT_PROTOCOLS[endpoint]
+    if _is_routed_chat_model(payload):
+        _reject_media_only_route(payload.get("model"))
+        return _dispatch_translated_protocol(
+            app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, protocol
+        )
+    start_time = time.time()
+    provider = "unknown"
+    try:
+        provider, provider_model, _ = _resolve_enabled_model(app, payload.get("model"))
+        if endpoint == RESPONSES_ENDPOINT and provider == "kimi-code":
+            raise APIError(
+                "Kimi Code does not support the Responses API; use /v1/chat/completions",
+                status_code=400,
+            )
+        subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
+            app.config
+        )
+        if speaks(provider, provider_model, endpoint) and not subscription_only:
+            return _dispatch_native_protocol(
+                app,
+                auth_service_cls,
+                metrics_service_cls,
+                proxy_service_cls,
+                payload,
+                provider=provider,
+                provider_model=provider_model,
+                endpoint=endpoint,
+            )
+    except ValueError as error:
+        raise APIError(str(error), status_code=400) from error
+    except Exception as error:
+        status_code = error.status_code if isinstance(error, APIError) else 502
+        metrics_service_cls.get_instance().track_request(
+            provider=provider,
+            status_code=status_code,
+            response_time=(time.time() - start_time) * 1000,
+        )
+        raise
+    return _dispatch_translated_protocol(
+        app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, protocol
+    )
+
+
 def _validate_image_candidate(app, auth_service_cls, proxy_service_cls, model_id: str) -> None:
     provider, _ = ModelRegistry.parse_model_id(model_id)
     if provider == "cloudflare":
@@ -757,248 +1063,24 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     def unified_responses():
-        start_time = time.time()
-        provider = "unknown"
-        try:
-            payload = json_object_body()
-            requested_model = payload.get("model")
-            if AutoRouteService.is_auto_route(requested_model):
-                raise APIError(
-                    "Auto routes currently support /v1/chat/completions, "
-                    "/optimize/v1/chat/completions and /v1/images/generations only",
-                    status_code=400,
-                )
-            provider, provider_model, adapter = _resolve_enabled_model(app, requested_model)
-            subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
-                app.config
-            )
-            headers_source = (
-                sanitize_nanogpt_subscription_headers(request.headers)
-                if subscription_only
-                else request.headers
-            )
+        return dispatch_protocol_request(
+            app,
+            auth_service_cls,
+            metrics_service_cls,
+            proxy_service_cls,
+            json_object_body(),
+            RESPONSES_ENDPOINT,
+        )
 
-            if provider == "kimi-code":
-                raise APIError(
-                    "Kimi Code does not support the Responses API; use /v1/chat/completions",
-                    status_code=400,
-                )
-
-            native_responses = provider in NATIVE_RESPONSES_PROVIDERS and (
-                provider != "opencode"
-                or opencode_model_endpoint(provider_model) == "v1/responses"
-            )
-            if native_responses and not subscription_only:
-                upstream_path = "v1/responses"
-                upstream_payload = _copy_request_payload(payload, provider_model)
-                upstream_payload = apply_glm_5_reasoning_policy(
-                    upstream_payload,
-                    provider,
-                    provider_model,
-                )
-                upstream_payload = _apply_nanogpt_speed_routing(
-                    app, provider, upstream_payload, headers_source
-                )
-                cache_decision = apply_prompt_cache_policy(
-                    upstream_payload,
-                    provider=provider,
-                    model=provider_model,
-                    endpoint="responses",
-                    request_headers=headers_source,
-                    enabled=app.config["PROMPT_CACHE_ENABLED"],
-                    minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
-                )
-                upstream_payload = cache_decision.payload
-                raw_body = json.dumps(upstream_payload).encode("utf-8")
-
-                def send_request(token: str):
-                    headers = proxy_service_cls.prepare_headers(
-                        headers_source,
-                        provider,
-                        token,
-                        upstream_path=upstream_path,
-                    )
-                    _merge_request_headers(headers, cache_decision.request_headers)
-                    default_url = (
-                        f"{app.config['API_BASE_URLS'][provider].rstrip('/')}"
-                        f"/{upstream_path}"
-                    )
-                    upstream_url = _provider_model_url(
-                        app,
-                        provider,
-                        provider_model,
-                        upstream_path,
-                        default_url,
-                    )
-                    return proxy_service_cls.make_request(
-                        method="POST",
-                        url=upstream_url,
-                        headers=headers,
-                        params=proxy_service_cls.prepare_params(
-                            request.args,
-                            provider,
-                            token,
-                            upstream_path=upstream_path,
-                        ),
-                        data=raw_body,
-                        api_provider=provider,
-                        use_cache=False,
-                    )
-
-                response, credential_attempts = _request_with_provider_token_rotation(
-                    app,
-                    auth_service_cls,
-                    proxy_service_cls,
-                    provider,
-                    send_request,
-                )
-
-                metrics_service_cls.get_instance().track_request(
-                    provider=provider,
-                    status_code=response.status_code,
-                    response_time=(time.time() - start_time) * 1000,
-                )
-
-                if isinstance(response, Response):
-                    downstream_response = response
-                else:
-                    downstream_response = stream_upstream_response(response)
-                return _add_credential_attempt_headers(
-                    _add_prompt_cache_headers(
-                        downstream_response,
-                        cache_decision,
-                    ),
-                    provider,
-                    credential_attempts,
-                )
-
-            if payload.get("stream"):
-                raise APIError("Responses streaming is not supported by the compatibility bridge yet", status_code=400)
-
-            chat_payload = {
-                "model": provider_model,
-                "messages": responses_input_to_messages(payload),
-            }
-            for source_key, target_key in {
-                "max_output_tokens": "max_tokens",
-                "temperature": "temperature",
-                "top_p": "top_p",
-                "tools": "tools",
-                "tool_choice": "tool_choice",
-                "reasoning": "reasoning",
-                "reasoning_effort": "reasoning_effort",
-            }.items():
-                if source_key in payload:
-                    chat_payload[target_key] = payload[source_key]
-
-            chat_payload = apply_glm_5_reasoning_policy(
-                chat_payload,
-                provider,
-                provider_model,
-            )
-            chat_payload = _apply_nanogpt_speed_routing(
-                app, provider, chat_payload, headers_source
-            )
-            cache_decision = apply_prompt_cache_policy(
-                chat_payload,
-                provider=provider,
-                model=provider_model,
-                endpoint="chat",
-                request_headers=headers_source,
-                enabled=app.config["PROMPT_CACHE_ENABLED"],
-                minimum_tokens=app.config["PROMPT_CACHE_MIN_TOKENS"],
-                nanogpt_subscription_only=subscription_only,
-            )
-            chat_payload = cache_decision.payload
-            raw_body = serialize_unified_chat_payload(chat_payload)
-            upstream_path = "v1/chat/completions"
-
-            def send_request(token: str):
-                headers = proxy_service_cls.prepare_headers(
-                    headers_source,
-                    provider,
-                    token,
-                    upstream_path=upstream_path,
-                )
-                _merge_request_headers(headers, cache_decision.request_headers)
-                request_kwargs = {
-                    "method": "POST",
-                    "url": _provider_model_url(
-                        app,
-                        provider,
-                        provider_model,
-                        upstream_path,
-                        adapter.chat_completions_url(),
-                    ),
-                    "headers": headers,
-                    "params": request.args,
-                    "data": proxy_service_cls.filter_request_data(provider, raw_body),
-                    "api_provider": provider,
-                    "use_cache": False,
-                }
-                return send_configured_unified_provider_request(
-                    proxy_service_cls,
-                    request_kwargs,
-                    provider=provider,
-                    runtime_config=app.config,
-                    upstream_path=upstream_path,
-                    request_headers=headers_source,
-                )
-
-            response, credential_attempts = _request_with_provider_token_rotation(
-                app,
-                auth_service_cls,
-                proxy_service_cls,
-                provider,
-                send_request,
-            )
-
-            metrics_service_cls.get_instance().track_request(
-                provider=provider,
-                status_code=response.status_code,
-                response_time=(time.time() - start_time) * 1000,
-            )
-
-            if isinstance(response, Response):
-                return _add_credential_attempt_headers(
-                    _add_prompt_cache_headers(response, cache_decision),
-                    provider,
-                    credential_attempts,
-                )
-            if not isinstance(response, requests.Response):
-                raise APIError("Unsupported upstream response type", status_code=502)
-            if response.status_code >= 400:
-                return _add_credential_attempt_headers(
-                    _add_prompt_cache_headers(
-                        _pass_through_response(response),
-                        cache_decision,
-                    ),
-                    provider,
-                    credential_attempts,
-                )
-
-            chat_response = _decode_upstream_json(response)
-            responses_payload = chat_response_to_responses_payload(
-                chat_response,
-                requested_model,
-            )
-            downstream_response = jsonify(responses_payload)
-            downstream_response.status_code = response.status_code
-            return _add_credential_attempt_headers(
-                _add_prompt_cache_headers(
-                    downstream_response,
-                    cache_decision,
-                ),
-                provider,
-                credential_attempts,
-            )
-        except ValueError as error:
-            raise APIError(str(error), status_code=400) from error
-        except Exception as error:
-            status_code = error.status_code if isinstance(error, APIError) else 502
-            metrics_service_cls.get_instance().track_request(
-                provider=provider,
-                status_code=status_code,
-                response_time=(time.time() - start_time) * 1000,
-            )
-            raise
+    register_unified_messages_routes(
+        app,
+        csrf,
+        lambda payload: dispatch_protocol_request(
+            app,
+            auth_service_cls,
+            metrics_service_cls,
+            proxy_service_cls,
+            payload,
+            MESSAGES_ENDPOINT,
+        ),
+    )

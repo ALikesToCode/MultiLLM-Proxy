@@ -195,7 +195,8 @@ Add /chat/completions=Disabled</code></pre>
                     <tr><th scope="row">Unified chat</th><td><code>POST /v1/chat/completions</code></td><td><code>provider:model</code></td><td>One explicit provider; OpenAI-compatible request and stream.</td></tr>
                     <tr><th scope="row">Automatic chat</th><td><code>POST /v1/chat/completions</code></td><td><code>auto:name</code></td><td>Ordered provider candidates; only definite pre-generation rejections advance.</td></tr>
                     <tr><th scope="row">Unified images</th><td><code>POST /v1/images/generations</code></td><td><code>provider:image-model</code></td><td>One explicit image provider; upstream bytes and JSON shape are preserved.</td></tr>
-                    <tr><th scope="row">Responses</th><td><code>POST /v1/responses</code></td><td><code>provider:model</code></td><td>Native Responses where supported, otherwise a compatible chat bridge.</td></tr>
+                    <tr><th scope="row">Responses</th><td><code>POST /v1/responses</code></td><td><code>provider:model</code> or <code>auto:name</code></td><td>Native Responses where the model speaks it, otherwise translated through chat, streams included.</td></tr>
+                    <tr><th scope="row">Anthropic Messages</th><td><code>POST /v1/messages</code></td><td><code>provider:model</code> or <code>auto:name</code></td><td>Claude Code and Anthropic SDKs with <code>x-api-key</code>; native Messages where supported, otherwise translated.</td></tr>
                     <tr><th scope="row">Provider native</th><td><code>/{provider}/...</code></td><td>Provider model ID</td><td>Protocol-specific path with no cross-provider substitution.</td></tr>
                 </tbody>
             </table>

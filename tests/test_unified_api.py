@@ -50,8 +50,11 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
             self.assertIsInstance(model["capabilities"], dict, model["id"])
             self.assertIsInstance(model["capabilities"]["supports_chat"], bool, model["id"])
         self.assertTrue(models["opencode:glm-5.2"]["capabilities"]["supports_chat"])
-        self.assertFalse(models["opencode:minimax-m3"]["capabilities"]["supports_chat"])
-        self.assertFalse(models["opencode:grok-4.6"]["capabilities"]["supports_chat"])
+        # Unified chat translates for Messages- and Responses-only models.
+        self.assertTrue(models["opencode:minimax-m3"]["capabilities"]["supports_chat"])
+        self.assertEqual(models["opencode:minimax-m3"]["api_protocol"], "anthropic_messages")
+        self.assertTrue(models["opencode:grok-4.6"]["capabilities"]["supports_chat"])
+        self.assertEqual(models["opencode:grok-4.6"]["api_protocol"], "openai_responses")
         self.assertTrue(models["free:vision"]["capabilities"]["supports_vision"])
         self.assertIsInstance(models["auto:intelligence"]["capability_tags"], list)
 
