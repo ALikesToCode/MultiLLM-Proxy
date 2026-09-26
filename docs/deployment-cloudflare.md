@@ -239,6 +239,8 @@ subscription base URL to both the Worker roleplay path and the Container.
 
 ## Deploy Steps
 
+Local checks before a change reaches `main`:
+
 ```bash
 npm ci
 python scripts/validate_sqlite_schema.py
@@ -246,28 +248,146 @@ python scripts/check_static_secrets.py
 python -m pytest -q
 npm run test:worker
 npm run test:integration
+npm run cf:migrations:check
 npx wrangler deploy --dry-run
 ```
 
-Deploy with the ordered script, never with a bare `wrangler deploy`:
+Pushing to `main` deploys; see [How deploys work](#how-deploys-work). Never deploy
+with a bare `wrangler deploy`, which skips the migrations.
+
+## How deploys work
+
+A push to `main` runs the `ci` workflow. When it passes, the `deploy` workflow
+(`.github/workflows/deploy.yml`) deploys the commit that ci tested:
+
+1. **Select the commit.** The `gate` job skips the commit if `main` has moved on,
+   because the newer commit's run deploys both; an older commit never overwrites a
+   newer one. Deploy runs never overlap (`concurrency: deploy-production`), and a newer
+   queued run replaces an older queued one. **Run workflow** on the `deploy` workflow
+   redeploys the head of `main` once ci has passed for it.
+2. **Apply migrations.** `scripts/verify_d1_migrations.mjs --check` checks the files,
+   the job lists the pending ones, `wrangler d1 migrations apply multillm-intelligence
+   --remote` applies them, and the remote check fails unless every file is recorded as
+   applied. Any failure stops the run before new code ships.
+3. **Deploy the Knowledge Worker, then the main Worker.** The Knowledge Worker goes
+   first because the main Worker binds it (`KNOWLEDGE_SERVICE`) and may call what the
+   new version adds. The main Worker and its Container go last, and only when the
+   repository variable `DEPLOY_MAIN_WORKER` is `true` (see [Workers Builds](#workers-builds)).
+   Each version is tagged with the full commit SHA, and its message links to the run.
+4. **Verify.** `scripts/deploy_status.mjs --verify` retries for up to ten minutes
+   until no migration is pending, `GET /ready` answers 200 (every D1 table exists and
+   the Container is healthy), the Knowledge Worker's live version carries the commit,
+   and the main Worker's live version carries the commit with a bundle release
+   fingerprint (`BUILD_ID` from `scripts/build_release_metadata.py`) equal to the one
+   computed from the checkout. When Workers Builds deploys the main Worker, the check
+   waits for it to publish the same commit or fingerprint and only warns if it has not.
+5. **Summarize.** The job summary lists the pending migrations, each step's outcome,
+   the deployed state and every check.
+
+The job installs dependencies from the frozen lockfile exactly as the `cloudflare-build`
+ci job does, so Wrangler is the locked version, and every action is pinned to a commit
+SHA.
+
+## Migrations
+
+Migrations are applied before the code that uses them, and with Workers Builds the new
+code can briefly run before them, so the schema must work for the old and the new code:
+
+- Make only additive changes: new tables, new nullable or defaulted columns, new
+  indexes, using `IF NOT EXISTS`. Add each new table to `REQUIRED_D1_TABLES` in
+  `worker/d1-schema.mjs` so `/ready` reports it until it exists.
+- Name files `NNNN_lowercase_words.sql`, numbered from `0001` without gaps or
+  duplicates. When two branches add the same number, the one merged second renumbers
+  its file to the next free number; ci fails until it does. Never rename an applied
+  migration: Wrangler tracks them by file name and would apply it again.
+- To drop or rename a table or column, first ship code that no longer uses it, then add
+  a migration containing a line `-- destructive-migration: <reason>`. Without that line
+  `npm run cf:migrations:check` fails in ci.
+
+## Workers Builds
+
+Workers Builds is connected to `multillm-proxy` and runs `npx wrangler deploy` on every
+push to `main`, without migrations and without waiting for ci. If it and the deploy
+workflow both deploy the main Worker, they race. Choose one option.
+
+**(a) GitHub Actions deploys everything (recommended).** Migrations always land before
+the code, and nothing ships unless ci passed.
+
+1. In the Cloudflare dashboard, open **Workers & Pages → multillm-proxy → Settings →
+   Builds** and select **Disconnect**. To keep builds (and preview builds of other
+   branches) as versions that are never promoted, set the deploy command to
+   `npx wrangler versions upload` instead; those versions do not update the Container
+   image.
+2. Then, in GitHub **Settings → Secrets and variables → Actions → Variables**, add the
+   repository variable `DEPLOY_MAIN_WORKER` with the value `true`. Doing it after step 1
+   means no push is deployed by both.
+3. Add *Containers Edit* to the API token, and run the `deploy` workflow once from the
+   **Actions** tab to deploy the current head of `main`.
+
+**(b) Workers Builds keeps deploying the main Worker.** Leave `DEPLOY_MAIN_WORKER` unset
+(the default) or `false`, and keep the Workers Builds deploy command as
+`npx wrangler deploy`; do not change it to `npm run deploy`, which would apply the
+migrations and deploy the Knowledge Worker a second time. Actions applies migrations and
+deploys the Knowledge Worker after ci passes. Workers Builds starts at push time, so after
+a push that adds a migration the new main Worker usually runs for a few minutes before
+its tables exist, and `/ready` answers 503 `d1_schema_missing` until they do. Code must
+tolerate a missing new table, and a push whose ci fails still ships the main Worker.
+
+## One-time setup
+
+1. **Create the API token.** In the Cloudflare dashboard, go to **Manage Account →
+   Account API Tokens → Create Token**, create a custom token, and limit it to this
+   account:
+
+   | Permission | Needed for |
+   | --- | --- |
+   | Workers **Editor**, scoped to the Workers `multillm-proxy` and `multillm-knowledge` (legacy name *Workers Scripts Edit*) | Deploying both Workers with their Durable Objects, Workflow and cron trigger; reading deployments, versions and the deployed bundle |
+   | **D1 Edit** | Applying migrations and reading the migration table |
+   | **Containers Edit** | Option (a) only: pushing the Container image and rolling it out |
+
+   The main Worker runs on `workers.dev` and the Knowledge Worker has no public URL,
+   so no zone permission is needed; add *Zone → Workers Routes → Edit* for a zone only if you
+   attach a route there. If a deploy is refused for the Knowledge Worker's Workflow or
+   the account's `workers.dev` subdomain, widen the Workers scope to all Workers, still
+   as Editor. `deploy_status.mjs` also asks the Workers Builds API which commit it
+   deployed; if the token cannot read builds, it compares the bundle fingerprint
+   instead. Set an expiry date and rotate the token.
+2. **Create the environment.** In GitHub **Settings → Environments**, create
+   `production`. Optionally add **Required reviewers** to approve each deploy, and
+   limit **Deployment branches and tags** to `main`.
+3. **Add the secrets** `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` to the
+   `production` environment ([find the account ID](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/)).
+   Only the deploy job uses that environment, the workflow passes the secrets only to
+   the steps that call Cloudflare, and nothing prints them. Until they exist, every
+   deploy run stops at its first step with a message pointing here.
+4. **Choose** option (a) or (b) under [Workers Builds](#workers-builds).
+5. Optionally set the repository variable `DEPLOY_STATUS_URL` to check `/ready` on
+   another origin than `WORKBENCH_WORKER_URL` in `wrangler.jsonc`.
+
+## Checking what is deployed
 
 ```bash
-npm run deploy            # scripts/deploy.sh
+npm run cf:status               # for people
+npm run cf:status -- --json     # for agents
 ```
 
-It applies `intelligence-migrations/` to the `multillm-intelligence` D1 database,
-stops unless every migration file is recorded as applied, then deploys the
-Knowledge Worker (`wrangler.knowledge.jsonc`) and finally this Worker and its
-Container. Extra arguments go to the final deploy, for example
-`npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a
-changed Container image. `/ready` answers 503 with `d1_schema_missing` and the
-missing tables until the schema is migrated, so check it after every deploy.
+`scripts/deploy_status.mjs` prints each Worker's live version, where it came from and
+the commit it was built from (its version tag, or the Workers Builds record), the local
+checkout's commit and fingerprint, pending migrations and `/ready`. It needs
+`wrangler login` or `CLOUDFLARE_API_TOKEN`; with `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` set it also reads the deployed bundle fingerprint and Workers
+Builds commits. It prints no secrets. `wrangler secret put` creates a new live version,
+which can show no commit until the next deploy.
 
-**Workers Builds.** The connected build currently runs the default
-`npx wrangler deploy`, which applies no migrations. In the Worker's
-**Settings → Builds**, set the deploy command to `npm run deploy` and give the build
-token *D1 Edit* permission and access to deploy `multillm-knowledge`; until then
-every push can deploy code whose tables do not exist yet.
+## Manual deploys
+
+`npm run deploy` (`scripts/deploy.sh`) runs the same order from your machine: the
+migration checks, `wrangler d1 migrations apply`, the remote check, the Knowledge
+Worker and the main Worker. From a clean checkout it tags both versions with the commit.
+Extra arguments go to the final deploy, for example
+`npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a changed
+Container image. Use it only when the workflow cannot run, and never while a deploy run
+is in progress; with option (a) the next push to `main` replaces it.
 
 **Alerts.** Worker logs are sampled at 100% (`head_sampling_rate: 1`): the Worker
 writes little besides structured failure lines such as `account_storage_failed`,
@@ -292,7 +412,7 @@ Increase workers or container instances only after replacing process-local auth/
 
 ## Rollback
 
-Use Cloudflare Workers rollback or redeploy a previous Git revision. Because the SQLite files are ephemeral, there is no durable SQLite rollback unless you later add an external database or D1 migration workflow.
+Revert the commit on `main` so the deploy workflow ships the previous code, or use `npx wrangler rollback` for an immediate rollback that lasts until the next deploy. D1 migrations are not rolled back; because they are additive, the previous code keeps working with the newer schema. Because the Container's SQLite files are ephemeral, there is no durable SQLite rollback.
 
 ## Sources
 
@@ -301,3 +421,9 @@ Use Cloudflare Workers rollback or redeploy a previous Git revision. Because the
 - Cloudflare Containers environment variables: https://developers.cloudflare.com/containers/platform-details/environment-variables/
 - Cloudflare Workers secrets: https://developers.cloudflare.com/workers/configuration/secrets/
 - Cloudflare database connectivity: https://developers.cloudflare.com/workers/databases/connecting-to-databases/
+- Deploying Workers from GitHub Actions: https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+- Workers roles and API token permissions: https://developers.cloudflare.com/workers/authorization/workers/
+- API token permission names: https://developers.cloudflare.com/fundamentals/api/reference/permissions/
+- Workers Builds, including disconnecting it: https://developers.cloudflare.com/workers/ci-cd/builds/
+- Deploying Containers: https://developers.cloudflare.com/containers/guides/deploy/
+- D1 migrations: https://developers.cloudflare.com/d1/reference/migrations/

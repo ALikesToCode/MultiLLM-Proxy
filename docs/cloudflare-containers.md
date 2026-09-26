@@ -218,7 +218,12 @@ npx wrangler secret put GOOGLE_ENDPOINT
 
 ## Deploy
 
-Deploy with the ordered script, never with a bare `wrangler deploy`:
+Pushes to `main` deploy through GitHub Actions once ci passes: D1 migrations first,
+then the Knowledge Worker, then this Worker and its Container. See
+[How deploys work](deployment-cloudflare.md#how-deploys-work) for the pipeline, the
+one-time token and secret setup, and the choice between it and Workers Builds.
+
+For a manual deploy, use the ordered script, never a bare `wrangler deploy`:
 
 ```bash
 npm run deploy            # scripts/deploy.sh
@@ -230,13 +235,8 @@ Knowledge Worker (`wrangler.knowledge.jsonc`) and finally this Worker and its
 Container. Extra arguments go to the final deploy, for example
 `npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a
 changed Container image. `/ready` answers 503 with `d1_schema_missing` and the
-missing tables until the schema is migrated, so check it after every deploy.
-
-**Workers Builds.** The connected build currently runs the default
-`npx wrangler deploy`, which applies no migrations. In the Worker's
-**Settings → Builds**, set the deploy command to `npm run deploy` and give the build
-token *D1 Edit* permission and access to deploy `multillm-knowledge`; until then
-every push can deploy code whose tables do not exist yet.
+missing tables until the schema is migrated; `npm run cf:status` shows it with the
+deployed versions and pending migrations.
 
 **Alerts.** Worker logs are sampled at 100% (`head_sampling_rate: 1`): the Worker
 writes little besides structured failure lines such as `account_storage_failed`,
