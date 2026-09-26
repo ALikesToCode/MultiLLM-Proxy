@@ -237,6 +237,15 @@ available. See [free model pools](docs/free-model-pools.md) for setup, quota
 cooldowns, image input, and a local test request. These routes never select a
 paid model; Groq/Gemini require an explicit free-tier account assertion.
 
+The unified API speaks OpenAI Chat Completions (`/v1/chat/completions`), OpenAI
+Responses (`/v1/responses`) and Anthropic Messages (`/v1/messages`, with
+`x-api-key` auth). Any `provider:model`, `auto:*` route or `free:*` pool works
+on each; requests are passed through when the model speaks that protocol and
+translated otherwise, streams included. Point Claude Code or an Anthropic SDK at
+the proxy with `ANTHROPIC_BASE_URL`. See
+[protocol translation](docs/protocol-translation.md) for the coverage and
+limits.
+
 ```bash
 # OpenAI-compatible endpoint
 curl -X POST "http://localhost:1400/openai/v1/chat/completions" \

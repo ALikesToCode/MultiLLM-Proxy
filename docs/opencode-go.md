@@ -195,10 +195,17 @@ but it is not part of the current Go catalog. Prefer a current catalog ID for
 new clients.
 
 `GET /v1/models` includes `provider_metadata.api_endpoint` and
-`provider_metadata.api_protocol` for built-in and live OpenCode models. A
-model on `/v1/messages` must be called with the Anthropic Messages contract; a
-model on `/v1/responses` must be called with the OpenAI Responses contract.
-Listing a model in the unified catalog does not change its upstream protocol.
+`provider_metadata.api_protocol` for built-in and live OpenCode models. The
+direct `/opencode/v1/...` routes are raw passthrough: a model on `/v1/messages`
+must be called there with the Anthropic Messages contract, and a model on
+`/v1/responses` with the OpenAI Responses contract.
+
+The unified routes translate instead. `POST /v1/chat/completions` with
+`opencode:grok-4.6` or `opencode:minimax-m3` sends a Responses or Messages body
+to the model's native endpoint and returns Chat Completions, streams included,
+so these models report `supports_chat: true`. Unified `/v1/responses` and
+`/v1/messages` pass a model through natively when it speaks that protocol and
+translate otherwise. See [protocol translation](protocol-translation.md).
 
 ## GLM thinking
 

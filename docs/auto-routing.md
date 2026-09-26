@@ -27,9 +27,12 @@ curl "$PROXY_BASE_URL/v1/chat/completions" \
 `GET /v1/models` includes every saved virtual model with
 `owned_by: multillm-auto`, built-in provider models, and IDs retained from the
 last successful live provider-catalog refresh. Automatic models also work through
-`POST /optimize/v1/chat/completions`. The Responses API still requires an
-explicit `provider:model` because its request and stream contracts differ
-across providers.
+`POST /optimize/v1/chat/completions`, `POST /v1/responses` and the Anthropic
+`POST /v1/messages`: those requests are translated to Chat Completions, run
+through the same candidates and failover rules, and translated back, streams
+included ([protocol translation](protocol-translation.md)). Features that need
+server-side state, such as `previous_response_id` or built-in `web_search`,
+return `400` on automatic routes.
 
 ## Image generation
 
@@ -70,9 +73,11 @@ even on providers that also serve chat.
 
 Every `/v1/models` entry carries `capabilities` as an object of flags, including
 `free:*` pools and `auto:intelligence` (whose reviewed tags are in `capability_tags`).
-`supports_chat` is per model: it is `false` for image and video generation models
-and for OpenCode models served only through the Responses or Messages protocol
-(their `api_endpoint` names that protocol). `context_window` and
+`supports_chat` is per model: it is `false` for image and video generation models.
+OpenCode models served only through the Responses or Messages protocol report
+`supports_chat: true`, because unified chat translates for them; their
+`api_endpoint` still names the native protocol, so an automatic route may mix
+them with Chat Completions candidates. `context_window` and
 `max_output_tokens` appear only when known; they are never `null`.
 
 Live entries retain safe provider metadata rather than reducing every model to
