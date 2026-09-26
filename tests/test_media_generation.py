@@ -12,8 +12,8 @@ from services.auto_route_service import AutoRouteService
 from services.media_catalog import prepare_image_payload
 from tests.unified_api_test_case import UnifiedApiTestCase
 
-KEYS = {"gguu": "gguu-test-key", "latix": "latix-test-key", "xai": "xai-test-key", "openai": "openai-test-key",
-        "gemini": "gemini-test-key"}
+KEYS = {"gguu": "gguu-test-key", "gguu-grok": "gguu-grok-test-key", "latix": "latix-test-key", "xai": "xai-test-key",
+        "openai": "openai-test-key", "gemini": "gemini-test-key"}
 IMAGE = {"created": 1, "data": [{"url": "https://images.example/one.png"}]}
 ADMIN = {"Authorization": "Bearer admin-test-key"}
 
@@ -79,6 +79,19 @@ class MediaRouteTest(UnifiedApiTestCase):
                                   "aspect_ratio": "3:2", "resolution": "2k"})
         self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "xai:grok-imagine-image-2.0")
 
+    def test_grok_on_gguu_uses_the_grok_group_key(self):
+        self.save("auto:image-test", ["gguu:gpt-image-2", "gguu-grok:grok-imagine-image-2.0"])
+        response, make_request = self.post("/v1/images/generations",
+                                           {"model": "auto:image-test", "prompt": "A red fox", "size": "1024x1024"},
+                                           [upstream(503, {"error": {"message": "no channel"}}), upstream(200, IMAGE)])
+        self.assertEqual(response.status_code, 200)
+        gpt, grok = make_request.call_args_list
+        self.assertIn("gguu-test-key", gpt.kwargs["headers"]["Authorization"])
+        self.assertEqual(grok.kwargs["url"], "https://gguuai.com/v1/images/generations")
+        self.assertIn("gguu-grok-test-key", grok.kwargs["headers"]["Authorization"])
+        self.assertEqual(json.loads(grok.kwargs["data"])["aspect_ratio"], "1:1")
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gguu-grok:grok-imagine-image-2.0")
+
     def test_several_images_fan_out_one_request_each_and_merge(self):
         self.save("auto:image-test", ["gguu:gpt-image-2.5-sunburst", "latix:gpt-image-2"])
         replies = [upstream(200, IMAGE), upstream(429, {"error": {"message": "busy"}}), upstream(200, IMAGE), upstream(200, IMAGE)]
@@ -140,10 +153,19 @@ class MediaRouteTest(UnifiedApiTestCase):
     def test_seeded_media_routes_put_gguu_first_and_never_use_openrouter(self):
         routes = {route.id: route.candidates for route in AutoRouteService.list_routes()}
         self.assertEqual(routes["auto:image"][:4], ("gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5-flare",
-                                                    "gguu:gpt-image-2", "gguu:grok-imagine-image-2.0"))
-        self.assertEqual(routes["auto:image-fast"][0], "gguu:gpt-image-2.5-flare")
+                                                    "gguu:gpt-image-2", "gguu-grok:grok-imagine-image-2.0"))
+        self.assertEqual(routes["auto:image-fast"][:3], ("gguu:gpt-image-2.5-flare", "gguu:gpt-image-2",
+                                                         "gguu-grok:grok-imagine-image-2.0"))
         self.assertFalse([candidate for route in routes.values() for candidate in route if candidate.startswith("openrouter:")])
         self.assertIn("cloudflare:google/veo-3.1", routes["auto:video"])
+
+    def test_stored_copy_of_the_previous_image_default_follows_the_current_one(self):
+        from services.auto_route_service import DEFAULT_AUTO_ROUTES, LEGACY_DEFAULT_AUTO_ROUTES
+        previous = LEGACY_DEFAULT_AUTO_ROUTES["auto:image"][0]
+        self.assertIn("gguu:grok-imagine-image-2.0", previous)
+        with patch("services.auto_route_d1.stored_routes", return_value={"auto:image": (previous, "t")}):
+            routes = {route.id: route.candidates for route in AutoRouteService._durable_routes()}
+        self.assertEqual(routes["auto:image"], DEFAULT_AUTO_ROUTES["auto:image"])
 
     def test_provider_status_and_admin_probe_report_which_candidates_work(self):
         status = self.client.get("/v1/media/providers", headers=ADMIN).get_json()

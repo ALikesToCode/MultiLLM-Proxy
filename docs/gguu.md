@@ -2,9 +2,10 @@
 
 MultiLLM exposes GGUU AI as a credential-isolated OpenAI Images provider. The
 normalized IDs use `gguu:<provider-model>`; built in are `gguu:gpt-image-2`,
-`gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`,
-`gguu:grok-imagine-image-2.0` and `gguu:grok-imagine-image-quality`, all priced at a
-flat ¥0.04 per image from 1K to 4K on GGUU's public model plaza. GGUU is the first
+`gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-sunburst` and `gguu:gpt-image-2.5-flare`.
+GGUU keys belong to one group, so Grok Imagine is a second provider, `gguu-grok`, with
+`gguu-grok:grok-imagine-image-2.0` and `gguu-grok:grok-imagine-image-quality`. All are
+priced at a flat ¥0.04 per image from 1K to 4K on GGUU's public model plaza. GGUU is the first
 provider of every automatic image route ([media generation](media-generation.md)).
 Native requests use the `/gguu/*` namespace. Chat and Responses routes are not advertised because GGUU's
 GPT Image 2 guide documents the Images API only.
@@ -16,10 +17,14 @@ Set the provider credential without committing it:
 ```dotenv
 GGUU_API_KEY=your-gguu-api-key
 # Optional compatibility alias: GGUUAI_API_KEY=your-gguu-api-key
+GGUU_GROK_API_KEY=your-gguu-grok-image-group-key
+# Optional compatibility alias: GGUUAI_API_KEY_GROK=your-gguu-grok-image-group-key
 ```
 
 `GGUU_API_KEY` is preferred. Existing installations that use
-`GGUUAI_API_KEY` remain supported.
+`GGUUAI_API_KEY` remain supported. `GGUU_API_KEY` needs a `gpt-image` group key and
+`GGUU_GROK_API_KEY` a `Grok-image` group key; either provider can be configured alone.
+The Grok provider's native namespace is `/gguu-grok/*`.
 
 The global `/v1/models` list, admin model list, Operations catalog, and setup
 guide automatically refresh configured image-relay catalogs on first read and
@@ -49,6 +54,7 @@ and deploys a Worker version:
 
 ```bash
 npx wrangler secret put GGUU_API_KEY
+npx wrangler secret put GGUU_GROK_API_KEY
 ```
 
 ## Unified image generation
@@ -74,8 +80,9 @@ OpenAI Images request and response fields. `auto:image` and `auto:gpt-image-2.5`
 start with GPT Image 2.5 Sunburst on GGUU at `max` quality and fall back to other
 GGUU models, Cloudflare AI and OpenAI ([media generation](media-generation.md)). GPT
 Image models, including the 2.5 family, receive the automatic `moderation: "low"`
-default. GGUU keys belong to a group: the `gpt-image` group serves GPT Image and the
-`Grok-image` group serves Grok Imagine.
+default. `auto:image` and `auto:image-fast` also try
+`gguu-grok:grok-imagine-image-2.0` after the GPT Image models, which receives
+`aspect_ratio`, `resolution` and a `low` or `medium` quality instead of `size`.
 
 ## Native endpoints
 

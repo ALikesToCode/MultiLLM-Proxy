@@ -101,8 +101,19 @@ BUILTIN_IMAGE_RELAY_SPECS = (
         credential_env="GGUU_API_KEY",
         credential_env_aliases=("GGUUAI_API_KEY",),
         # GGUU's public model plaza (Sep 2026): each image costs ¥0.04 at 1K, 2K and 4K.
-        models=("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare",
-                "grok-imagine-image-2.0", "grok-imagine-image-quality"),
+        # A GGUU key belongs to one group; this key serves the gpt-image group.
+        models=("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"),
+        supports_chat=False,
+    ),
+    ImageRelaySpec(
+        provider="gguu-grok",
+        display_name="GGUU AI (Grok Imagine)",
+        base_url="https://gguuai.com",
+        backup_base_url="https://api.aiaimax.com",
+        credential_env="GGUU_GROK_API_KEY",
+        credential_env_aliases=("GGUUAI_API_KEY_GROK", "GGUU_API_KEY_GROK"),
+        # The Grok-image group needs its own key; GGUU forwards it to xAI's image API.
+        models=("grok-imagine-image-2.0", "grok-imagine-image-quality"),
         supports_chat=False,
     ),
     ImageRelaySpec(

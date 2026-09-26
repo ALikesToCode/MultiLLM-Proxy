@@ -14,8 +14,8 @@ OpenRouter is not used.
 
 | Route | Candidates in order |
 | --- | --- |
-| `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu:grok-imagine-image-2.0`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `together:openai/gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
-| `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `cloudflare:openai/gpt-image-2.5-flare`, `openai:gpt-image-2.5-flare`, `xai:grok-imagine-image-2.0`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
+| `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `together:openai/gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
+| `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `cloudflare:openai/gpt-image-2.5-flare`, `openai:gpt-image-2.5-flare`, `xai:grok-imagine-image-2.0`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
 | `auto:gpt-image-2.5` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-flare`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-flare` |
 | `auto:video` | `gemini:veo-3.1-generate-preview`, `xai:grok-imagine-video-1.5`, `cloudflare:google/veo-3.1`, `openai:sora-2-pro`, `openai:sora-2` |
 
@@ -24,9 +24,11 @@ any request. Operators reorder or extend routes in **Operations**; the order is 
 D1 ([control-plane storage](control-plane-storage.md#automatic-routes-in-d1)). A stored route
 that still holds an earlier seeded default follows the current default.
 
-GGUU API keys belong to a group. The `gpt-image` group serves the GPT Image models and the
-`Grok-image` group serves Grok Imagine; a key outside a model's group is refused and the
-route moves on. Batch image generation through GGUU's own `/v1/images/batches` API needs a
+GGUU API keys belong to a group, so GGUU appears as two providers. `gguu` uses a
+`gpt-image` group key (`GGUU_API_KEY`) for the GPT Image models; `gguu-grok` uses a
+`Grok-image` group key (`GGUU_GROK_API_KEY`, alias `GGUUAI_API_KEY_GROK`) for
+`grok-imagine-image-2.0` and `grok-imagine-image-quality`. A provider without its key is
+skipped. Batch image generation through GGUU's own `/v1/images/batches` API needs a
 group with batch generation enabled.
 
 ## Images

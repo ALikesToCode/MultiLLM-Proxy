@@ -56,6 +56,13 @@ class ImageRelayConfigurationTest(unittest.TestCase):
                 "GGUU_API_KEY",
                 False,
             ),
+            "gguu-grok": (
+                "https://gguuai.com",
+                "https://api.aiaimax.com",
+                "grok-imagine-image-2.0",
+                "GGUU_GROK_API_KEY",
+                False,
+            ),
             "latix": (
                 "https://api.latix.ai",
                 None,

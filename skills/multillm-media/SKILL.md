@@ -17,12 +17,13 @@ scope; the provider probe needs `admin`.
 | Model | Use it for | Order tried |
 | --- | --- | --- |
 | `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI, OpenAI, Grok Imagine via xAI, GPT Image 2 via Together, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
-| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first |
+| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU |
 | `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Cloudflare AI, then OpenAI |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
 
-Use `provider:model` (for example `gguu:gpt-image-2.5-flare`) only when the user names a
-provider. Operators can reorder routes in Operations.
+Use `provider:model` (for example `gguu:gpt-image-2.5-flare` or
+`gguu-grok:grok-imagine-image-quality`) only when the user names a provider or model.
+Operators can reorder routes in Operations.
 
 ## Generate an image
 

@@ -16,6 +16,7 @@ MAX_AUTO_ROUTE_CANDIDATES = 16
 # Media routes follow the Artificial Analysis image arena (Sep 2026): GPT Image 2.5
 # Sunburst and Flare lead, then GPT Image 2 and Grok Imagine Image 2.0. GGUU serves
 # them first at a flat ¥0.04 per image (1K to 4K); OpenAI charges about $0.21 at max.
+# GGUU keys belong to one group, so Grok Imagine uses the separate gguu-grok relay.
 # Cloudflare AI (AI Gateway billing, zero data retention), xAI, Together and AIHubMix
 # follow, and a Workers AI model is the last resort. Operations edits persist in D1
 # when the Worker provides it; on Container-local SQLite until the Container restarts.
@@ -29,7 +30,7 @@ DEFAULT_AUTO_ROUTES = {
         "gguu:gpt-image-2.5-sunburst",
         "gguu:gpt-image-2.5-flare",
         "gguu:gpt-image-2",
-        "gguu:grok-imagine-image-2.0",
+        "gguu-grok:grok-imagine-image-2.0",
         "cloudflare:openai/gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-sunburst",
         "xai:grok-imagine-image-2.0",
@@ -40,6 +41,7 @@ DEFAULT_AUTO_ROUTES = {
     "auto:image-fast": (
         "gguu:gpt-image-2.5-flare",
         "gguu:gpt-image-2",
+        "gguu-grok:grok-imagine-image-2.0",
         "cloudflare:openai/gpt-image-2.5-flare",
         "openai:gpt-image-2.5-flare",
         "xai:grok-imagine-image-2.0",
@@ -72,6 +74,30 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
         ),
     ),
     "auto:gpt-image-2.5": (("gguu:gpt-image-2.5",),),
+    "auto:image": (
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu:grok-imagine-image-2.0",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "xai:grok-imagine-image-2.0",
+            "together:openai/gpt-image-2",
+            "aihubmix:gpt-image-2-free",
+            "cloudflare:@cf/leonardo/lucid-origin",
+        ),
+    ),
+    "auto:image-fast": (
+        (
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "cloudflare:openai/gpt-image-2.5-flare",
+            "openai:gpt-image-2.5-flare",
+            "xai:grok-imagine-image-2.0",
+            "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+        ),
+    ),
 }
 # Providers served by the Worker rather than a credentialed OpenAI-compatible adapter.
 MEDIA_ONLY_PROVIDERS = frozenset({"cloudflare"})
