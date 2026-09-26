@@ -30,6 +30,7 @@ _ENDPOINTS = {
     "workbench": "http://intelligence.internal/v1/state/workbench",
     "provider_catalog": "http://intelligence.internal/v1/state/catalog",
     "route_health": "http://intelligence.internal/v1/route-health",
+    "usage": "http://intelligence.internal/v1/usage",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
@@ -56,6 +57,7 @@ _ENDPOINT_SLOTS.update({
     "workbench": _ADMIN_STATE_SLOTS,
     "provider_catalog": _ADMIN_STATE_SLOTS,
     "route_health": threading.BoundedSemaphore(2),
+    "usage": threading.BoundedSemaphore(4),
 })
 _SLOW_CALL_SECONDS = 2.0
 _STATS_LOCK = threading.Lock()

@@ -4,6 +4,7 @@ import { handleControlUsersRequest } from "./control-users-d1.mjs";
 import { handleAutoRoutesRequest } from "./auto-routes-d1.mjs";
 import { handleControlStateRequest } from "./control-state-d1.mjs";
 import { handleRouteHealthRequest } from "./route-health-d1.mjs";
+import { handleUsageLedgerRequest } from "./usage-ledger-d1.mjs";
 
 /** Domain operations reachable only through the container's private outbound handler. */
 export function handleIntelligenceOutbound(request, env) {
@@ -21,5 +22,6 @@ export function handleIntelligenceOutbound(request, env) {
   if (url.pathname === "/v1/auto-routes") return handleAutoRoutesRequest(request, env);
   if (url.pathname.startsWith("/v1/state/")) return handleControlStateRequest(request, env);
   if (url.pathname === "/v1/route-health") return handleRouteHealthRequest(request, env);
+  if (url.pathname === "/v1/usage") return handleUsageLedgerRequest(request, env);
   return Response.json({ error: { code: "not_found", message: "Storage operation not found." } }, { status: 404 });
 }

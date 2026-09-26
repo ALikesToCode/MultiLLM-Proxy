@@ -205,6 +205,49 @@ class MetricsService:
             'route_decision': route_decision or context_metadata.get("route_decision"),
         })
     
+    def hydrate(self, ledger_rows):
+        """Prepend usage-ledger rows written before this process started.
+
+        The in-memory window is lost when the Container restarts; the durable ledger
+        restores its billable part. Only free capacity is filled, oldest rows first,
+        so rows tracked by this process are never displaced.
+        """
+        records = []
+        for row in ledger_rows:
+            try:
+                timestamp = datetime.fromisoformat(str(row["at"]).replace("Z", "+00:00")).timestamp()
+            except (KeyError, TypeError, ValueError):
+                continue
+            model = row.get("selected_model") or row.get("requested_model")
+            provider = model.split(":", 1)[0] if isinstance(model, str) and ":" in model else row.get("kind")
+            cost = row.get("cost_usd")
+            records.append({
+                'timestamp': timestamp,
+                'provider': provider or "unknown",
+                'status_code': int(row.get("status") or 0),
+                'response_time': float(row.get("latency_ms") or 0),
+                'request_id': row.get("request_id"),
+                'user_id': row.get("principal"),
+                'api_key_prefix': row.get("key_prefix"),
+                'model': model,
+                'endpoint': row.get("endpoint"),
+                'input_tokens': row.get("input_tokens"),
+                'output_tokens': row.get("output_tokens"),
+                'estimated_tokens': None,
+                'estimated_cost': cost,
+                'actual_cost': None,
+                'cost_basis': "reservation" if cost is not None else None,
+                'ttft_ms': None,
+                'circuit_state': None,
+                'route_decision': "ledger",
+            })
+        records.sort(key=lambda record: record['timestamp'])
+        with self._lock:
+            room = (self.requests.maxlen or 0) - len(self.requests)
+            restored = records[-room:] if room > 0 else []
+            self.requests.extendleft(reversed(restored))
+        return len(restored)
+
     def get_stats(self, hours=24, now=None):
         """Get request statistics for the last N hours"""
         current_time = now if now is not None else time.time()

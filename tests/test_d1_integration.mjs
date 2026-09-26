@@ -55,7 +55,9 @@ test("accounts, the admin allowlist, audit rows and auto routes persist through 
 });
 
 test("a D1 without the account migration fails closed for dashboard keys but not for the environment admin", async t => {
-  const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql"]);
+  // 0007 alters control_users, so it is skipped with the migration that creates the table.
+  const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql",
+    "0007_usage_ledger.sql"]);
   assert.deepEqual(await drive(url, "unmigrated"), { dashboard_key: 503, admin: "admin",
     route: ["gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5"], save_route: 503 });
 });

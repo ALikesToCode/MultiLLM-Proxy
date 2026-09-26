@@ -5,6 +5,10 @@ import os
 # model ids. Pin it off before `config` is first imported so the suite asserts
 # the repository default; tests that need it override app.config directly.
 os.environ["NANOGPT_SPEED_ROUTING"] = ""
+# The usage ledger writes behind requests from a background thread. Tests that exercise
+# it enable it with their own storage; everywhere else it stays off so no test writes
+# to the repository's instance directory or waits on a flush.
+os.environ.setdefault("USAGE_LEDGER_ENABLED", "false")
 
 import pytest
 

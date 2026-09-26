@@ -29,11 +29,12 @@ test("/ready reports a D1 schema that was never migrated instead of forwarding",
   const worker = (await loadWorkerModule()).default;
   let forwarded = 0;
   const container = { getByName: () => ({ fetch: async () => { forwarded += 1; return Response.json({ status: "healthy" }); } }) };
-  const partial = await database(t, { skip: ["0003_control_users.sql", "0005_auto_routes.sql"] });
-  assert.deepEqual(await d1Readiness(partial), { ready: false, checked: true, missing: ["control_users", "auto_routes"] });
+  // 0007 alters control_users, so skipping 0003 skips it too.
+  const partial = await database(t, { skip: ["0003_control_users.sql", "0005_auto_routes.sql", "0007_usage_ledger.sql"] });
+  assert.deepEqual(await d1Readiness(partial), { ready: false, checked: true, missing: ["control_users", "auto_routes", "usage_events", "usage_daily", "usage_batches"] });
   const blocked = await worker.fetch(new Request("https://gateway.example/ready"), { INTELLIGENCE_DB: partial, MULTILLM_PROXY_CONTAINER: container });
   assert.equal(blocked.status, 503);
-  assert.deepEqual(await blocked.json(), { status: "not_ready", reason: "d1_schema_missing", missing_tables: ["control_users", "auto_routes"] });
+  assert.deepEqual(await blocked.json(), { status: "not_ready", reason: "d1_schema_missing", missing_tables: ["control_users", "auto_routes", "usage_events", "usage_daily", "usage_batches"] });
   assert.equal(forwarded, 0);
   const complete = await database(t);
   const ready = await worker.fetch(new Request("https://gateway.example/ready"), { INTELLIGENCE_DB: complete, MULTILLM_PROXY_CONTAINER: container });

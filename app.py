@@ -37,6 +37,7 @@ from services.cache_service import CacheService
 from services.image_relay_catalog import ImageRelayCatalogRefresh
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
+from services import usage_ledger
 
 _LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(name)s] %(message)s"
 _LOG_LEVELS = {
@@ -130,6 +131,8 @@ def create_app() -> Flask:
     register_knowledge_routes(app, csrf)
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
+    # Restore the dashboard's recent requests from the durable ledger in the background.
+    usage_ledger.start(MetricsService.get_instance())
 
     return app
 
