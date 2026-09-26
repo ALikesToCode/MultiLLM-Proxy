@@ -8,7 +8,7 @@ from providers.registry import get_registry
 from services import cloudflare_ai
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.image_relay_catalog import refresh_image_relay_catalog
-from services.media_catalog import image_profile, is_video_model
+from services.media_catalog import TRANSPORT_FAILURE_HEADER, image_profile, is_video_model
 from services.model_catalog_service import build_model_catalog
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
@@ -20,6 +20,11 @@ from services.provider_catalog_service import (
 # its current credentials. Explicit auto routes may safely try the next
 # provider because the rejected candidate did not perform a generation.
 AUTO_ROUTE_FALLBACK_STATUS_CODES = frozenset({401, 402, 403, 404, 429})
+# Chat also moves on after these upstream statuses: they arrive before any output is
+# forwarded, so the caller has received nothing. 504 is left out because a gateway
+# timeout may hide a generation that is still running and billed.
+CHAT_FAILOVER_SERVER_STATUS_CODES = frozenset({500, 502, 503})
+_MAX_REASONS_HEADER_LENGTH = 1024
 logger = logging.getLogger(__name__)
 
 
@@ -30,12 +35,55 @@ class AutoRouteCandidateUnavailable(APIError):
         super().__init__(message, status_code=503)
 
 
-def _is_fallback_response(response: Response) -> bool:
-    if response.status_code in AUTO_ROUTE_FALLBACK_STATUS_CODES:
-        return True
+def _circuit_is_open(response: Response) -> bool:
     return response.status_code == 503 and response.headers.get(
         "X-MultiLLM-Circuit-State"
     ) in {"open", "half_open"}
+
+
+def _is_fallback_response(response: Response) -> bool:
+    if response.status_code in AUTO_ROUTE_FALLBACK_STATUS_CODES:
+        return True
+    return _circuit_is_open(response)
+
+
+def chat_fail_over(response: Response) -> bool:
+    """Whether the next chat candidate may run without repeating a generation.
+
+    A definite refusal, a 500, 502 or 503 from the upstream, or a connection that was
+    never established. A timeout, a dropped connection, a 504 and anything after a
+    successful status (including a started stream) stay with the caller.
+    """
+    if _is_fallback_response(response):
+        return True
+    kind = response.headers.get(TRANSPORT_FAILURE_HEADER)
+    if kind:
+        return kind == "connect"
+    return response.status_code in CHAT_FAILOVER_SERVER_STATUS_CODES
+
+
+def mark_transport_failure(downstream: Response, upstream) -> Response:
+    """Carry a local transport failure (connect, timeout, interrupted) onto the response."""
+    kind = getattr(upstream, "multillm_transport_failure", None)
+    if kind:
+        downstream.headers[TRANSPORT_FAILURE_HEADER] = kind
+    return downstream
+
+
+def attempt_outcome(response: Response) -> tuple[bool | None, str]:
+    """(success, reason) of one attempt; None when the request itself was at fault."""
+    kind = response.headers.get(TRANSPORT_FAILURE_HEADER)
+    if kind:
+        return False, kind
+    status = response.status_code
+    if status < 400:
+        return True, "ok"
+    if _circuit_is_open(response):
+        # Answered locally; the open circuit already demotes the candidate.
+        return None, "circuit_open"
+    if status in AUTO_ROUTE_FALLBACK_STATUS_CODES or status >= 500:
+        return False, f"http_{status}"
+    return None, f"http_{status}"
 
 
 def _buffer_failure(response: Response) -> Response:
@@ -52,13 +100,22 @@ def _decorate_response(
     selected_model: str,
     selected_priority: int,
     attempts: int,
+    *,
+    route_decision: str | None = None,
+    failures: list[tuple[str, str]] | None = None,
 ) -> Response:
     selected_provider, _ = ModelRegistry.parse_model_id(selected_model)
-    route_decision = "auto-primary" if selected_priority == 0 else "auto-failover"
+    if route_decision is None:
+        route_decision = "auto-primary" if selected_priority == 0 else "auto-failover"
     response.headers["X-MultiLLM-Auto-Route"] = route.id
     response.headers["X-MultiLLM-Auto-Selected-Model"] = selected_model
     response.headers["X-MultiLLM-Auto-Attempts"] = str(attempts)
     response.headers["X-MultiLLM-Auto-Selected-Priority"] = str(selected_priority + 1)
+    if failures:
+        reasons = ", ".join(f"{candidate}={reason}" for candidate, reason in failures)
+        if len(reasons) > _MAX_REASONS_HEADER_LENGTH:
+            reasons = reasons[:_MAX_REASONS_HEADER_LENGTH].rsplit(", ", 1)[0]
+        response.headers["X-MultiLLM-Auto-Failover-Reasons"] = reasons
     if has_request_context():
         g.multillm_provider = selected_provider
         g.multillm_model = selected_model
@@ -75,9 +132,8 @@ def dispatch_auto_route(
 ) -> Response:
     """Run an explicit priority list through injected validation and transport.
 
-    By default only a refusal that proves the candidate generated nothing moves on,
-    so a paid chat request is never repeated after an uncertain outcome. Image routes
-    pass their own rule (routes.media_images.image_fail_over).
+    By default only a refusal that proves the candidate generated nothing moves on.
+    Chat routes pass chat_fail_over and image routes routes.media_images.image_fail_over.
     """
     route = AutoRouteService.get_route(payload.get("model"))
     if route is None:
@@ -87,9 +143,11 @@ def dispatch_auto_route(
         )
 
     attempts = 0
+    failures: list[tuple[str, str]] = []
     last_failure: Response | None = None
     last_model = ""
     last_priority = 0
+    last_decision = "auto-failover"
     for priority, candidate in enumerate(route.candidates):
         try:
             validate_candidate(candidate)
@@ -99,6 +157,7 @@ def dispatch_auto_route(
                 candidate,
                 type(error).__name__,
             )
+            failures.append((candidate, "skipped"))
             continue
 
         attempts += 1
@@ -117,7 +176,9 @@ def dispatch_auto_route(
                 candidate,
                 type(error).__name__,
             )
+            failures.append((candidate, "unavailable"))
             continue
+        _, reason = attempt_outcome(response)
         if not fail_over(response):
             if last_failure is not None:
                 last_failure.close()
@@ -127,13 +188,18 @@ def dispatch_auto_route(
                 candidate,
                 priority,
                 attempts,
+                route_decision=route_decision,
+                failures=failures,
             )
 
+        logger.info("Auto route %s moves past %s (%s)", route.id, candidate, reason)
+        failures.append((candidate, reason))
         if last_failure is not None:
             last_failure.close()
         last_failure = _buffer_failure(response)
         last_model = candidate
         last_priority = priority
+        last_decision = route_decision
 
     if last_failure is not None:
         return _decorate_response(
@@ -142,6 +208,8 @@ def dispatch_auto_route(
             last_model,
             last_priority,
             attempts,
+            route_decision=last_decision,
+            failures=[failure for failure in failures if failure[0] != last_model],
         )
     raise APIError(
         f"No configured provider is available for auto route: {route.id}",
@@ -149,7 +217,19 @@ def dispatch_auto_route(
     )
 
 
-dispatch_auto_route_chat_completion = dispatch_auto_route
+def dispatch_auto_route_chat_completion(
+    payload: dict,
+    *,
+    validate_candidate: Callable[[str], None],
+    dispatch_candidate: Callable[[dict, str, str], Response],
+) -> Response:
+    """Chat routes: fail over on refusals and on 5xx or connect failures before any output."""
+    return dispatch_auto_route(
+        payload,
+        validate_candidate=validate_candidate,
+        dispatch_candidate=dispatch_candidate,
+        fail_over=chat_fail_over,
+    )
 
 
 def _candidate_capabilities(candidate: str, catalog_capabilities: dict) -> dict:
@@ -279,6 +359,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
         "providers": providers,
         "model_catalog": model_catalog,
         "fallback_statuses": sorted(AUTO_ROUTE_FALLBACK_STATUS_CODES),
+        "chat_fallback_server_statuses": sorted(CHAT_FAILOVER_SERVER_STATUS_CODES),
     }
 
 

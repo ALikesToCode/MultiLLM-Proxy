@@ -1465,6 +1465,8 @@ class ProxyService:
             }
             error_response._content = json.dumps(error_json).encode('utf-8')
             error_response.headers = {'Content-Type': 'application/json'}
+            # As on the raw path: automatic routes fail over only when nothing was sent.
+            error_response.multillm_transport_failure = cls._transport_failure_kind(e)
             return error_response
 
     @classmethod
@@ -3456,8 +3458,13 @@ class ProxyService:
                 is_streaming=is_streaming,
             )
             
-            # If the response should be streamed, wrap it in a streaming response
-            if is_streaming and response.headers.get('content-type', '').startswith(('text/event-stream', 'application/json')):
+            # If the response should be streamed, wrap it in a streaming response. An error
+            # status keeps its own status and body instead of becoming a 200 event stream.
+            if (
+                is_streaming
+                and response.status_code < 400
+                and response.headers.get('content-type', '').startswith(('text/event-stream', 'application/json'))
+            ):
                 # Create a Flask response that yields from our generator
                 return Response(
                     cls._create_streaming_response(response, api_provider),

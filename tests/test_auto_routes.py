@@ -380,13 +380,18 @@ class AutoRouteTest(UnifiedApiTestCase):
         )
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
 
-    def test_auto_chat_does_not_replay_ambiguous_server_failure(self):
-        os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
-        server_failure = requests.Response()
-        server_failure.status_code = 503
-        server_failure._content = b'{"error":{"message":"upstream unavailable"}}'
-        server_failure.headers["Content-Type"] = "application/json"
+    @staticmethod
+    def _failure(status, transport_failure=None):
+        failure = requests.Response()
+        failure.status_code = status
+        failure._content = b'{"error":{"message":"upstream unavailable"}}'
+        failure.headers["Content-Type"] = "application/json"
+        if transport_failure:
+            failure.multillm_transport_failure = transport_failure
+        return failure
 
+    def _auto_chat(self, *responses, stream=False):
+        os.environ["NANOGPT_API_KEY"] = "nano-provider-key"
         with (
             patch(
                 "routes.unified.NanoGPTKeyPool.select_key",
@@ -394,7 +399,7 @@ class AutoRouteTest(UnifiedApiTestCase):
             ),
             patch(
                 "app.ProxyService.make_request",
-                return_value=server_failure,
+                side_effect=list(responses),
             ) as make_request,
         ):
             response = self.client.post(
@@ -403,13 +408,85 @@ class AutoRouteTest(UnifiedApiTestCase):
                 json={
                     "model": "auto:glm-5.2",
                     "messages": [{"role": "user", "content": "hi"}],
+                    "stream": stream,
                 },
             )
+        return response, [call.kwargs["api_provider"] for call in make_request.call_args_list]
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(make_request.call_count, 1)
-        self.assertEqual(make_request.call_args.kwargs["api_provider"], "nanogpt")
+    def test_auto_chat_advances_after_server_error_before_any_output(self):
+        for status in (500, 502, 503):
+            with self.subTest(status=status):
+                response, providers = self._auto_chat(
+                    self._failure(status),
+                    self._chat_response("open code after a server error"),
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(providers, ["nanogpt", "opencode"])
+                self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
+                self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "opencode:glm-5.2")
+                self.assertEqual(
+                    response.headers["X-MultiLLM-Auto-Failover-Reasons"],
+                    f"nanogpt:zai-org/glm-5.2:thinking=http_{status}",
+                )
+                self.assertEqual(response.headers["X-MultiLLM-Route-Decision"], "auto-failover")
+                self.assertEqual(
+                    response.get_json()["choices"][0]["message"]["content"],
+                    "open code after a server error",
+                )
+
+    def test_auto_chat_advances_after_a_connection_that_never_opened(self):
+        response, providers = self._auto_chat(
+            self._failure(502, transport_failure="connect"),
+            self._chat_response("open code after a connect failure"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(providers, ["nanogpt", "opencode"])
+        self.assertEqual(
+            response.headers["X-MultiLLM-Auto-Failover-Reasons"],
+            "nanogpt:zai-org/glm-5.2:thinking=connect",
+        )
+
+    def test_auto_chat_does_not_replay_a_timeout_or_gateway_timeout(self):
+        for label, failure, transport in (
+            ("gateway timeout", self._failure(504), None),
+            ("read timeout", self._failure(502, transport_failure="timeout"), "timeout"),
+            ("dropped connection", self._failure(502, transport_failure="interrupted"), "interrupted"),
+        ):
+            with self.subTest(label):
+                response, providers = self._auto_chat(failure, self._chat_response("never used"))
+
+                self.assertEqual(response.status_code, failure.status_code)
+                self.assertEqual(providers, ["nanogpt"])
+                self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
+                self.assertEqual(response.headers.get("X-MultiLLM-Transport-Failure"), transport)
+
+    def test_auto_chat_keeps_a_started_stream_with_its_provider(self):
+        stream = requests.Response()
+        stream.status_code = 200
+        stream._content = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
+        stream.headers["Content-Type"] = "text/event-stream"
+
+        response, providers = self._auto_chat(stream, self._chat_response("never used"), stream=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(providers, ["nanogpt"])
+        self.assertIn(b"data: [DONE]", response.data)
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
+
+    def test_auto_chat_returns_the_last_server_error_when_every_candidate_fails(self):
+        os.environ["NAVYAI_API_KEY"] = "navy-provider-key"
+        response, providers = self._auto_chat(self._failure(503), self._failure(500), self._failure(502))
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(providers, ["nanogpt", "opencode", "navyai"])
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "3")
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "navyai:glm-5.2")
+        self.assertEqual(
+            response.headers["X-MultiLLM-Auto-Failover-Reasons"],
+            "nanogpt:zai-org/glm-5.2:thinking=http_503, opencode:glm-5.2=http_500",
+        )
 
     def test_unified_nanogpt_rotates_after_insufficient_balance(self):
         insufficient_balance = requests.Response()

@@ -33,6 +33,7 @@ from route_helpers import (
 from routes.auto_routes import (
     dispatch_auto_route,
     dispatch_auto_route_chat_completion,
+    mark_transport_failure,
     register_auto_route_admin_routes,
 )
 from routes.free_routes import dispatch_free_chat
@@ -463,6 +464,7 @@ def _dispatch_unified_chat_candidate(
                 content_type=response.headers.get("content-type", "application/json"),
                 headers=copy_raw_provider_response_headers(response.headers),
             )
+        mark_transport_failure(downstream_response, response)
         return _add_credential_attempt_headers(
             _add_prompt_cache_headers(
                 _add_adaptive_context_headers(
