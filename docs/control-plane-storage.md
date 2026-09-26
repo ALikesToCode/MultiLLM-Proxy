@@ -174,6 +174,13 @@ PostgreSQL. Requests never wait on a ledger write; see
 [usage, budgets and key controls](usage-and-budgets.md) for batching, retention and
 the choice of D1 over Workers Analytics Engine.
 
+## Media jobs in D1
+
+Asynchronous image batches and video webhook watches live in the `media_jobs` and
+`media_job_items` tables (migration `0008_media_jobs.sql`). The Container reaches them
+only through the private `intelligence.internal/v1/media-jobs` operations; a Workflow
+in the Worker drives each job. See [media storage](media-storage.md).
+
 ## Encrypted backups and an empty-destination migration
 
 These are operator-only commands, not dashboard downloads. Backups include key

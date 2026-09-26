@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 from flask import g, jsonify, request, url_for
@@ -11,18 +12,22 @@ from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
 from routes.media_edits import dispatch_image_edit, parse_json_edit, parse_multipart_edit
-from routes.media_files import register_media_file_routes, stream_stored_file
+from routes.media_batches import principal_user, read_request_principal, register_media_batch_routes
+from routes.media_files import register_media_file_routes, stream_stored_file, unavailable
 from routes.media_images import image_fail_over, run_image_batch
 from routes.unified import _validate_image_candidate, dispatch_unified_image_generation
-from services import cloudflare_ai, media_storage, video_generation
+from services import cloudflare_ai, media_jobs, media_storage, video_generation
 from services.auto_route_service import AutoRouteService
 from services.media_catalog import prepare_image_payload
+from services.media_signing import issue_principal, webhook_secret
+from services.media_urls import public_https_url
 from services.model_registry import ModelRegistry
 from services.resilience_service import ResilienceService
 
 DEFAULT_VIDEO_ROUTE = "auto:video"
 PROBE_PROMPT = "A small red circle centered on a plain white background"
 _PRE_GENERATION_STATUSES = frozenset({400, 401, 402, 403, 404, 409, 422, 429, 503})
+VIDEO_WATCH_TTL_SECONDS = 7 * 86400
 
 
 def _owner() -> str:
@@ -71,7 +76,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     def validate_image_candidate(candidate: str) -> None:
         _validate_image_candidate(app, auth_service_cls, proxy_service_cls, candidate)
 
-    def stored_video(job: dict, job_id: str) -> str | None:
+    def stored_video(job: dict, job_id: str, owner: str) -> str | None:
         """With R2 bound, copy a finished video there once; its file ID, or None."""
         if not media_storage.enabled():
             return None
@@ -81,14 +86,37 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 key, base_url = video_credentials(job["p"])
                 url, headers = video_generation.content_source(job, key, base_url)
                 if not url.startswith("https://") or media_storage.store_video(
-                        file_id, url, headers, owner=_owner(), model=f"{job['p']}:{job['m']}") is None:
+                        file_id, url, headers, owner=owner, model=f"{job['p']}:{job['m']}") is None:
                     return None
             return file_id
         except (APIError, media_storage.StorageError):
             # The provider's copy still serves /content; storing is retried on the next poll.
             return None
 
+    def watch_video(response, webhook_url: str, owner: str):
+        """Register a created job with the Workflow that posts its webhook when it ends."""
+        job = response.get_json(silent=True) if response.status_code == 200 else None
+        if not isinstance(job, dict) or not isinstance(job.get("id"), str):
+            return response
+        digest = hashlib.sha256(job["id"].encode("utf-8")).hexdigest()
+        watch_id = f"vwatch_{digest[:32]}"
+        try:
+            media_jobs.call("watch_video", id=watch_id, owner=owner, webhook_url=webhook_url, request_digest=digest,
+                            principal=issue_principal("video", watch_id, owner, VIDEO_WATCH_TTL_SECONDS),
+                            metadata={"job_id": job["id"], "model": job.get("model")})
+            job["webhook"] = {"url": webhook_url, "status": "pending", "secret": webhook_secret(owner)}
+        except media_jobs.MediaJobError:
+            # The job exists and may be billed; only the notification is missing.
+            job["webhook"] = {"url": webhook_url, "status": "unavailable"}
+        rewritten = jsonify(job)
+        for name, value in response.headers.items():
+            if name.lower() not in ("content-length", "content-type"):
+                rewritten.headers[name] = value
+        response.close()
+        return rewritten
+
     register_media_file_routes(app, csrf)
+    register_media_batch_routes(app, csrf, auth_service_cls, validate_image_candidate, generate_image)
 
     @app.route("/v1/images/batch", methods=["POST", "OPTIONS"])
     @csrf.exempt
@@ -122,6 +150,12 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         video_request = video_generation.parse_video_request(body)
         model = body.get("model") or DEFAULT_VIDEO_ROUTE
         owner = _owner()
+        webhook_url = body.get("webhook_url")
+        if webhook_url is not None:
+            webhook_url = public_https_url(webhook_url, "webhook_url")
+            if not media_jobs.enabled():
+                return unavailable("webhooks_not_configured", "Video webhooks need the MEDIA_JOBS Workflow and D1 "
+                                   "on the Worker; see docs/media-storage.md.")
 
         def create(candidate: str):
             provider, provider_model = ModelRegistry.parse_model_id(candidate)
@@ -136,14 +170,45 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         if AutoRouteService.is_auto_route(model):
             # Like images, any provider refusal means no job exists; a job whose
             # creation outcome is unknown is never started again elsewhere.
-            return dispatch_auto_route({"model": model}, validate_candidate=validate_video_candidate,
-                                       dispatch_candidate=lambda payload, candidate, decision: create(candidate),
-                                       fail_over=image_fail_over)
-        validate_video_candidate(model)
+            response = dispatch_auto_route({"model": model}, validate_candidate=validate_video_candidate,
+                                           dispatch_candidate=lambda payload, candidate, decision: create(candidate),
+                                           fail_over=image_fail_over)
+        else:
+            validate_video_candidate(model)
+            try:
+                response = create(model)
+            except AutoRouteCandidateUnavailable as error:
+                raise APIError(error.message, status_code=400) from error
+        return watch_video(response, webhook_url, owner) if webhook_url else response
+
+    @app.route("/internal/media/video-status", methods=["POST"])
+    @csrf.exempt
+    def media_video_status():
+        """A video job's state for the Workflow that watches it (the Worker never exposes this path)."""
+        claims = read_request_principal("video")
+        body = request.get_json(silent=True)
+        job_id = body.get("job_id") if isinstance(body, dict) else None
+        if (not isinstance(job_id, str) or body.get("watch_id") != claims["s"]
+                or f"vwatch_{hashlib.sha256(job_id.encode('utf-8')).hexdigest()[:32]}" != claims["s"]):
+            raise APIError("Invalid video watch", status_code=400)
         try:
-            return create(model)
-        except AutoRouteCandidateUnavailable as error:
-            raise APIError(error.message, status_code=400) from error
+            user = principal_user(auth_service_cls, claims["o"])
+        except APIError:
+            response = jsonify({"retry": True})
+            response.status_code = 503
+            return response
+        if user is None:
+            raise APIError("The job owner's account no longer exists", status_code=403)
+        g.authenticated_user = user
+        job = video_generation.read_job_id(job_id, claims["o"])
+        key, base_url = video_credentials(job["p"])
+        status = video_generation.job_status(job, job_id, key, base_url)
+        reply = {"status": status["status"], "model": status.get("model")}
+        if status.get("error"):
+            reply["error"] = status["error"]
+        if status["status"] == "completed":
+            reply["file_id"] = stored_video(job, job_id, claims["o"])
+        return jsonify(reply)
 
     @app.route("/v1/videos/<job_id>", methods=["GET", "OPTIONS"])
     @csrf.exempt
@@ -153,7 +218,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         key, base_url = video_credentials(job["p"])
         status = video_generation.job_status(job, job_id, key, base_url)
         if status["status"] == "completed":
-            file_id = stored_video(job, job_id)
+            file_id = stored_video(job, job_id, _owner())
             if file_id:
                 status.update(file_id=file_id, content_url=media_storage.file_url(file_id))
             else:

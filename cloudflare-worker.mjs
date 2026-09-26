@@ -6,6 +6,7 @@ import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleMediaOutbound } from "./worker/media-outbound.mjs";
 import { serveSignedMediaFile, signedMediaFileId } from "./worker/media-files.mjs";
+import { MediaJobWorkflow } from "./worker/media-workflow.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
@@ -37,6 +38,7 @@ import {
 import { withJanitorGlmReasoningNormalization } from "./worker/janitor-reasoning-response.mjs";
 
 export { RoleplaySession };
+export { MediaJobWorkflow };
 
 const CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
 const CORS_DEFAULT_HEADERS =
@@ -1816,6 +1818,10 @@ export default {
     if (requestUrl.protocol === "http:") {
       requestUrl.protocol = "https:";
       return Response.redirect(requestUrl, 308);
+    }
+    if (requestUrl.pathname.startsWith("/internal/")) {
+      // Media job endpoints serve only the Worker's own Workflow, never outside callers.
+      return jsonResponse({ error: "Not found" }, { status: 404 });
     }
     const apiPath = isApiRequestPath(requestUrl.pathname);
     const rootPath = requestUrl.pathname === "/";

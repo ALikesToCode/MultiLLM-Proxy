@@ -192,6 +192,7 @@ export function collectContainerEnv(source = {}) {
     ...(source.KNOWLEDGE_SERVICE ? { KNOWLEDGE_SERVICE_ENABLED: "true" } : {}),
     ...(source.AI ? { CLOUDFLARE_AI_ENABLED: "true" } : {}),
     ...(source.MEDIA_BUCKET ? { MEDIA_STORAGE_ENABLED: "true" } : {}),
+    ...(source.MEDIA_JOBS && source.INTELLIGENCE_DB ? { MEDIA_JOBS_ENABLED: "true" } : {}),
     SERVER_HOST: "0.0.0.0",
     SERVER_PORT: "8080",
     PYTHONUNBUFFERED: "1",

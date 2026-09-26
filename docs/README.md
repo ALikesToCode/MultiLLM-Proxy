@@ -7,7 +7,7 @@
 - [GPT Image moderation defaults](gpt-image-moderation.md)
 - [GGUU AI GPT Image 2 generation and editing](gguu.md)
 - [Image and video generation](media-generation.md)
-- [Durable media storage in R2](media-storage.md)
+- [Media storage in R2, asynchronous batches and webhooks](media-storage.md)
 
 - Live setup guide: sign in to a running proxy and open `/docs` for
   credential status, chat/image examples, provider-native routes, saved

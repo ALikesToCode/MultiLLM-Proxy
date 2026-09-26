@@ -724,6 +724,7 @@ export async function loadWorkerModule() {
     .replace('from "./worker/ai-outbound.mjs";', `from "${new URL("../../worker/ai-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/media-outbound.mjs";', `from "${new URL("../../worker/media-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/media-files.mjs";', `from "${new URL("../../worker/media-files.mjs", import.meta.url)}";`)
+    .replace('import { MediaJobWorkflow } from "./worker/media-workflow.mjs";', "class MediaJobWorkflow {}")
     .replace('from "./worker/knowledge-edge.mjs";', `from "${new URL("../../worker/knowledge-edge.mjs", import.meta.url)}";`)
     .replace('from "./worker/access-sso.mjs";', `from "${new URL("../../worker/access-sso.mjs", import.meta.url)}";`)
     .replace('from "./worker/health-schedule.mjs";', `from "${new URL("../../worker/health-schedule.mjs", import.meta.url)}";`)

@@ -103,7 +103,9 @@ Items inherit `defaults` and default to `auto:image`. A batch takes up to 16 ite
 returns up to 32 images with `response_format: "url"`, or 8 with base64. Up to four
 images generate at a time, each through its route's failover. The reply lists every item
 with `status` (`succeeded` or `failed`), its `images` or `error`, and the model that
-served it, plus a `summary`. A batch counts as one request against rate limits.
+served it, plus a `summary`. A batch counts as one request against rate limits. For up to
+500 items, or to avoid holding the connection open, use the asynchronous
+`POST /v1/images/batches` ([media storage](media-storage.md#asynchronous-image-batches)).
 
 ## Video
 
@@ -112,7 +114,9 @@ Video is asynchronous:
 1. `POST /v1/videos` with `prompt` and optionally `model` (default `auto:video`),
    `seconds` (1 to 20, default 8), `aspect_ratio` (`16:9`, `9:16`, `1:1`), `resolution`
    (`720p` or `1080p`, default `1080p`), `image_url` (https or a PNG, JPEG or WebP data URL)
-   and `generate_audio` (default true). The reply is a job with a `video_…` ID.
+   and `generate_audio` (default true). The reply is a job with a `video_…` ID. An
+   optional `webhook_url` is called when the job ends
+   ([webhooks](media-storage.md#webhooks)).
 2. `GET /v1/videos/{id}` returns `queued`, `in_progress`, `completed` or `failed`, and a
    `content_url` once completed.
 3. `GET /v1/videos/{id}/content` streams the MP4.

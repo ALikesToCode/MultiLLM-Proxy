@@ -5,9 +5,9 @@
  * rule below refuses IP literals, internal names and credentials. With a MEDIA_BUCKET
  * binding it also stores, reads and deletes generated files in R2 under `media/<id>`.
  */
-import { Buffer } from "node:buffer";
 import { publicHost } from "./knowledge/contracts.mjs";
 import { logFailure } from "./log.mjs";
+import { fromBase64Url, toBase64Url } from "./media-signing.mjs";
 
 const ORIGIN = "http://media.internal";
 const MAX_JSON_BYTES = 16 * 1024;
@@ -123,7 +123,7 @@ function metadata(value) {
 }
 
 function headerMetadata(header) {
-  try { return metadata(JSON.parse(Buffer.from(header ?? "", "base64url").toString("utf8"))); } catch { return null; }
+  try { return metadata(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(header ?? "")))); } catch { return null; }
 }
 
 const contentType = headers => headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
@@ -203,7 +203,7 @@ async function readFile(request, env, id) {
   const { status, headers } = rangeHeaders(object, request.headers.has("range"));
   return new Response(object.body, { status, headers: { "content-type": meta.content_type, "content-length": String(object.size),
     etag: object.httpEtag, "accept-ranges": "bytes", ...headers, "cache-control": "no-store",
-    "x-media-metadata": Buffer.from(JSON.stringify(meta)).toString("base64url") } });
+    "x-media-metadata": toBase64Url(new TextEncoder().encode(JSON.stringify(meta))) } });
 }
 
 async function fileOperation(request, env, id, suffix) {

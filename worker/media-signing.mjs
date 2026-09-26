@@ -4,13 +4,16 @@
  * It signs expiring file links (checked here without waking the Container) and derives
  * each owner's webhook secret.
  */
-import { Buffer } from "node:buffer";
-
 export const MAX_LINK_TTL_SECONDS = 30 * 86400;
 export const FILE_ID = /^m[a-z]_[A-Za-z0-9_-]{8,120}$/;
 const SIGNATURE = /^[A-Za-z0-9_-]{43}$/;
 const encoder = new TextEncoder();
 const derivedKeys = new Map();
+
+// Plain base64 helpers: these modules also run where node:buffer is unavailable.
+export const toBase64 = bytes => btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(""));
+export const toBase64Url = bytes => toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export const fromBase64Url = text => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), char => char.charCodeAt(0));
 
 const hmacKey = raw => crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 const sign = async (key, message) => new Uint8Array(await crypto.subtle.sign("HMAC", key,
@@ -49,11 +52,11 @@ export async function verifyFileLink(secret, fileId, expires, signature, now = D
   const expiry = Number(expires);
   if (expiry < now || expiry > now + MAX_LINK_TTL_SECONDS + 60) return false;
   const expected = await mediaMac(secret, "file", `${fileId}:${expires}`);
-  return sameBytes(encoder.encode(Buffer.from(expected).toString("base64url")), encoder.encode(signature));
+  return sameBytes(encoder.encode(toBase64Url(expected)), encoder.encode(signature));
 }
 
 /** Standard Webhooks signature with the owner's secret: `v1,` + base64 HMAC of `id.timestamp.body`. */
 export async function webhookSignature(secret, owner, messageId, timestamp, body) {
   const ownerKey = await hmacKey(await mediaMac(secret, "webhook", owner));
-  return `v1,${Buffer.from(await sign(ownerKey, `${messageId}.${timestamp}.${body}`)).toString("base64")}`;
+  return `v1,${toBase64(await sign(ownerKey, `${messageId}.${timestamp}.${body}`))}`;
 }
