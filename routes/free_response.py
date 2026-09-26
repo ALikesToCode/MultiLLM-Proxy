@@ -14,6 +14,7 @@ from services.free_json_contract import (
     json_output_requested,
 )
 from services.free_route_diagnostics import OUTPUT_REASONS
+from services.free_tool_contract import check_tool_calls
 from streaming.sse import format_sse_data, iter_sse_events
 
 _AIHUBMIX_QUOTA_PREFIX = (
@@ -147,7 +148,9 @@ def _stream_response(response, deadline, on_failure, provider):
                         if not isinstance(delta, dict):
                             raise FreeUpstreamFailure()
                         visible = visible or bool(
-                            delta.get("content") or delta.get("refusal")
+                            delta.get("content")
+                            or delta.get("refusal")
+                            or delta.get("tool_calls")
                         )
                         finished = finished or choice.get("finish_reason") is not None
                     yield format_sse_data(event.data)
@@ -206,6 +209,8 @@ def _checked_json_stream(response, response_format, deadline):
         )
         answers = {}
         refusals = set()
+        # A choice that calls a tool answers with the call, not with JSON text.
+        called = set()
         for event in iter_sse_events([body]):
             if not event.data or event.is_done:
                 continue
@@ -216,6 +221,8 @@ def _checked_json_stream(response, response_format, deadline):
                 delta = choice.get("delta") or {}
                 if delta.get("refusal"):
                     refusals.add(index)
+                if delta.get("tool_calls"):
+                    called.add(index)
                 content = delta.get("content") or ""
                 if not isinstance(content, str):
                     raise FreeUpstreamFailure()
@@ -223,7 +230,7 @@ def _checked_json_stream(response, response_format, deadline):
         if not answers:
             raise FreeUpstreamFailure()
         for index, content in answers.items():
-            if index not in refusals:
+            if index not in refusals and index not in called:
                 check_json_output(content, response_format)
         downstream = Response(
             body, content_type="text/event-stream", headers=response.headers
@@ -246,7 +253,10 @@ def validated_free_response(
     on_failure=None,
     provider="",
     response_format=None,
+    tool_names=None,
+    tool_choice=None,
 ) -> Response:
+    """tool_names is None unless the request defines tools or carries tool calls."""
     response = (
         upstream
         if isinstance(upstream, Response)
@@ -274,13 +284,16 @@ def validated_free_response(
             raise FreeUpstreamFailure()
         for choice in choices:
             message = choice.get("message") if isinstance(choice, dict) else None
+            calls = message.get("tool_calls") if isinstance(message, dict) and tool_names is not None else None
             if not isinstance(message, dict) or not (
-                message.get("content") or message.get("refusal")
+                message.get("content") or message.get("refusal") or calls
             ):
                 raise FreeUpstreamFailure()
             _quota_text(provider, message.get("content") or message.get("refusal"))
-            if json_output_requested(response_format) and not message.get("refusal"):
+            if json_output_requested(response_format) and not (message.get("refusal") or calls):
                 check_json_output(message.get("content"), response_format)
+        if tool_names is not None:
+            check_tool_calls(choices, tool_names, tool_choice)
         return Response(
             body,
             content_type="application/json",

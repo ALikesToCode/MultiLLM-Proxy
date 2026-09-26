@@ -84,6 +84,20 @@ SEED_VISION = {
     for name, spec in FREE_PROVIDERS.items()
     for model, vision in spec.models
 }
+# Reviewed tool calling for seeds without catalog metadata: models.dev lists each of
+# these with tool_call true in its own provider's entry, and OpenRouter's free router
+# chooses only models that support the request's tools. OrcaRouter, BazaarLink and
+# LLM7 publish no such evidence, so their seeds stay out of tool requests.
+SEED_TOOLS = {
+    "groq:qwen/qwen3.8-27b": True,
+    "groq:qwen/qwen3.6-27b": True,
+    "groq:openai/gpt-oss-120b": True,
+    "gemini:gemini-3.1-flash-lite": True,
+    "openrouter:openrouter/free": True,
+    "mistral:mistral-small-latest": True,
+    "workersai:@cf/meta/llama-4-scout-17b-16e-instruct": True,
+    "zai:glm-4.5-flash": True,
+}
 
 
 def configured_names(config, setting: str) -> set[str]:

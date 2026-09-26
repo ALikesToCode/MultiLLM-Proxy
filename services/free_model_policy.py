@@ -13,14 +13,24 @@ from services.free_provider_catalog import (
     FREE_PROVIDERS,
     FREE_TIER_MODELS,
     PROVIDER_ORDER,
+    SEED_TOOLS,
     SEED_VISION,
     provider_enabled,
     provider_tier_confirmed,
 )
 from services.model_catalog_service import build_model_catalog
 from services.free_json_contract import validate_response_format
+from services.free_tool_contract import (
+    TOOL_FIELDS,
+    is_tool_message,
+    validate_tool_message,
+    validate_tools,
+)
 from services.model_registry import ModelRegistry
-from services.provider_catalog_metadata import model_supports_vision
+from services.provider_catalog_metadata import (
+    model_supports_tools,
+    model_supports_vision,
+)
 
 FREE_MODELS = {"free:text": False, "free:vision": True}
 REQUEST_FIELDS = frozenset(
@@ -39,8 +49,10 @@ REQUEST_FIELDS = frozenset(
         "presence_penalty",
         "response_format",
         "reasoning_effort",
+        *TOOL_FIELDS,
     }
 )
+_LIST_PRICE_FIELDS = ("input_cost_per_million", "output_cost_per_million")
 
 
 @dataclass(frozen=True)
@@ -50,6 +62,7 @@ class FreeCandidate:
     model: str
     vision: bool | None
     billing_basis: str
+    tools: bool | None = None
 
 
 def free_model_aliases() -> list[dict]:
@@ -64,6 +77,8 @@ def free_model_aliases() -> list[dict]:
             "capabilities": {
                 "supports_chat": True,
                 "supports_streaming": True,
+                # Tool requests use only candidates with confirmed tool support.
+                "supports_tools": True,
                 "supports_vision": vision,
                 "supports_images": False,
                 "supports_video": False,
@@ -101,8 +116,12 @@ def _free_label(provider: str, model: str) -> bool:
     return False
 
 
-def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
-    """Use cached discovery only; never spend a generation to discover capability."""
+def free_candidates(config, *, vision: bool, tools: bool = False) -> list[FreeCandidate]:
+    """Use cached discovery only; never spend a generation to discover capability.
+
+    A tool request admits only candidates whose catalog or reviewed seed confirms
+    tool calling; unknown support is excluded.
+    """
     catalog = {row["id"]: row for row in build_model_catalog(config["API_BASE_URLS"])}
     seeds = [
         f"{provider}:{model}"
@@ -136,9 +155,15 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
         if spec.extra and not seeded:
             continue
         tier = spec.requires_free_tier and seeded
+        list_prices = {
+            field: metadata[field]
+            for field in _LIST_PRICE_FIELDS
+            if metadata.get(field) is not None
+        }
         if not tier and (
             not (seeded or _free_label(provider, model))
             or _has_price(metadata.get("pricing"))
+            or _has_price(list_prices)
         ):
             continue
         if metadata.get("supports_image_output") is True:
@@ -156,6 +181,12 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
             image_support = SEED_VISION.get(row["id"])
         if vision and image_support is not True:
             continue
+        # An explicit catalog flag wins; a reviewed seed covers models without one.
+        tool_support = model_supports_tools(metadata)
+        if tool_support is None:
+            tool_support = SEED_TOOLS.get(row["id"])
+        if tools and tool_support is not True:
+            continue
         candidates.append(
             FreeCandidate(
                 row["id"],
@@ -169,6 +200,7 @@ def free_candidates(config, *, vision: bool) -> list[FreeCandidate]:
                     if provider == "bazaarlink"
                     else "free-labelled"
                 ),
+                tool_support,
             )
         )
     preferred = list(
@@ -222,18 +254,35 @@ def _validate_part(part, *, vision: bool) -> None:
     )
 
 
+def declared_tools(payload: dict) -> frozenset[str]:
+    """Function names a validated free request declares."""
+    return frozenset(tool["function"]["name"] for tool in payload.get("tools") or ())
+
+
+def tool_request(payload: dict) -> bool:
+    """Tool definitions or tool-call history need a model that supports tools."""
+    return "tools" in payload or any(
+        isinstance(message, dict) and is_tool_message(message)
+        for message in payload.get("messages") or ()
+    )
+
+
 def validate_free_payload(payload: dict, fixed_model: str | None = None) -> dict:
     unknown = set(payload) - REQUEST_FIELDS
     if unknown:
         raise APIError(
             "Unsupported free-route parameters; routing overrides, plugins, "
-            "tools and paid add-ons are not allowed",
+            "server-side tools and paid add-ons are not allowed",
             status_code=400,
         )
     try:
         validate_response_format(payload.get("response_format"))
     except (ValueError, RecursionError) as error:
         raise APIError("Invalid or unsupported response_format schema", status_code=400) from error
+    try:
+        validate_tools(payload)
+    except (ValueError, RecursionError) as error:
+        raise APIError(f"Invalid tools: {error}", status_code=400) from error
     model = payload.get("model", fixed_model or "free:text")
     if (
         not isinstance(model, str)
@@ -247,6 +296,12 @@ def validate_free_payload(payload: dict, fixed_model: str | None = None) -> dict
     if not isinstance(messages, list) or not messages:
         raise APIError("messages must be a non-empty list", status_code=400)
     for message in messages:
+        if isinstance(message, dict) and is_tool_message(message):
+            try:
+                validate_tool_message(message)
+            except ValueError as error:
+                raise APIError(str(error), status_code=400) from error
+            continue
         if not isinstance(message, dict) or set(message) - {"role", "content", "name"}:
             raise APIError("Unsupported free-route message fields", status_code=400)
         role = message.get("role")

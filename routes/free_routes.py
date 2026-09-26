@@ -15,8 +15,10 @@ from services.client_headers import client_context_headers, with_client_defaults
 from services.free_json_contract import json_output_requested
 from services.free_model_policy import (
     FREE_MODELS,
+    declared_tools,
     free_candidates,
     free_model_aliases,
+    tool_request,
     validate_free_payload,
 )
 from services.free_provider_catalog import FREE_PROVIDERS, free_chat_url, provider_setup
@@ -75,10 +77,10 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
     if not token or not url:
         raise FreeUpstreamFailure(503, reason="credentials_unavailable")
     upstream_payload = {**payload, "model": candidate.model}
-    if candidate.provider == "openrouter" and json_output_requested(
-        payload.get("response_format")
+    if candidate.provider == "openrouter" and (
+        json_output_requested(payload.get("response_format")) or tool_request(payload)
     ):
-        # Unsupported formatting must fail instead of silently becoming plain text.
+        # Unsupported formatting or tools must fail instead of being silently dropped.
         upstream_payload["provider"] = {"require_parameters": True}
     return proxy.make_request(
         method="POST",
@@ -106,11 +108,11 @@ def _record_attempt_failure(candidate, payload, error, status, upstream_status, 
     unsupported = (isinstance(error, FreeUpstreamFailure) and error.reason == "unsupported_parameters") or (
         status == 404
         and candidate.provider == "openrouter"
-        and json_output_requested(payload.get("response_format"))
+        and (json_output_requested(payload.get("response_format")) or tool_request(payload))
     )
     output_failure = isinstance(error, FreeUpstreamFailure) and error.reason in {
         "invalid_response", "invalid_json", "schema_mismatch", "response_too_large",
-        "stream_interrupted", "upstream_error",
+        "stream_interrupted", "upstream_error", "invalid_tool_call",
     }
     if output_failure and not unsupported:
         # Invalid output is model-specific, not evidence of exhausted account quota.
@@ -166,6 +168,8 @@ def _try_candidate(
             deadline=deadline,
             response_format=payload.get("response_format"),
             on_failure=lambda status: _record_failure(candidate, status, headers),
+            tool_names=declared_tools(payload) if tool_request(payload) else None,
+            tool_choice=payload.get("tool_choice"),
         )
     except (requests.RequestException, FreeUpstreamFailure, APIError) as error:
         status = (
@@ -212,7 +216,8 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
     if request.args:
         raise APIError("Free routes do not accept query parameters", status_code=400)
     model = payload["model"]
-    candidates = free_candidates(app.config, vision=FREE_MODELS[model])
+    tools = tool_request(payload)
+    candidates = free_candidates(app.config, vision=FREE_MODELS[model], tools=tools)
     # Look up credentials only through the existing server-side store. Caller
     # headers are never forwarded, and keys are never included in pool status.
     configured = [
@@ -226,7 +231,8 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
                 "error": {
                     "code": "free_models_unavailable",
                     "message": "No configured eligible free models. Configure a provider and refresh the live catalog; "
-                    "vision requires confirmed image-input metadata.",
+                    "vision requires confirmed image-input metadata"
+                    + (" and tools require confirmed tool-calling metadata." if tools else "."),
                     "reason": "no_eligible_models",
                     "retryable": False,
                     "retry_after": None,
@@ -292,6 +298,7 @@ def register_free_routes(app, csrf, auth, metrics, proxy):
                             "id": c.id,
                             "provider": c.provider,
                             "supports_vision": c.vision,
+                            "supports_tools": c.tools,
                             "billing_basis": c.billing_basis,
                             "configured": bool(
                                 auth.get_api_key(c.provider)

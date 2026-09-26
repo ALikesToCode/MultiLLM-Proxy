@@ -20,6 +20,7 @@ OUTPUT_REASONS = {
     "timeout",
     "connection_error",
     "credentials_unavailable",
+    "invalid_tool_call",
 }
 
 
@@ -34,7 +35,7 @@ def failure_detail(candidate, status, upstream_status, reason=None, retry_after=
         "upstream_status": upstream_status,
         "retry_after": retry_after,
     }
-    if compatibility in {"input_too_large", "image_limit", "output_format", "vision_input"}:
+    if compatibility in {"input_too_large", "image_limit", "output_format", "vision_input", "tool_use"}:
         detail["compatibility"] = compatibility
     return detail
 

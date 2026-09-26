@@ -30,7 +30,8 @@ scope; discovery requires `models` scope. Admin keys have both.
 
 The default pools accept only AIHubMix `-free` models, OpenCode free Zen models
 with a Chat Completions endpoint, and OpenRouter `:free` variants or
-`openrouter/free`. A nonzero or unparseable catalog price disqualifies a
+`openrouter/free`. A nonzero or unparseable catalog price, including a nonzero
+models.dev list price from [catalog enrichment](auto-routing.md), disqualifies a
 free-labelled model. Paid aliases, subscription models, tool-only protocols and
 image-output-only models do not enter these pools. Calls go to fixed official
 provider origins, not custom relay URLs.
@@ -69,6 +70,44 @@ ranking. The first eligible provider wins; within a provider, the optional
 free-tier seed order is used, otherwise model IDs are sorted, with
 `openrouter/free` first on OpenRouter. Unconfigured and disabled models are
 skipped. Reordering cannot admit a paid candidate.
+
+## Tool calling
+
+`free:text` and `free:vision` accept OpenAI function tools: `tools`,
+`tool_choice` (`none`, `auto`, `required` or `{"type": "function", "function":
+{"name": ...}}`) and `parallel_tool_calls`, plus the conversation that follows
+(assistant messages with `tool_calls` and `role: "tool"` results with their
+`tool_call_id`). There is no separate pool: a request that defines tools, or carries
+tool-call history, uses only candidates with confirmed tool support, in the usual
+order. Support is confirmed by the model's live catalog entry (`supports_tools`, or
+OpenRouter's `supported_parameters`), by its models.dev entry after **Refresh live
+models**, or by a reviewed seed: the Groq, Gemini, Mistral, Workers AI and Z.ai seeds
+(each listed with tool calling by models.dev) and OpenRouter's `openrouter/free`,
+which picks only free models that support the request's tools. Unknown support is
+excluded, so OrcaRouter, BazaarLink and LLM7 never receive tools. When no confirmed
+candidate is configured the pool returns `503 free_models_unavailable`; it never
+substitutes a paid model. `/v1/free/models` lists `supports_tools` per candidate
+(`true`, `false` or `null` for unknown).
+
+Only caller-defined `function` tools are accepted. Built-in, server-side and provider
+tools (web search, code execution, retrieval, MCP) are rejected with `400`, as are
+plugins and routing overrides. Limits: at most 128 tools and 64 KiB of definitions,
+unique names of 1 to 64 letters, digits, `_` or `-`, descriptions up to 8,192
+characters, and `parameters` that are an object JSON Schema within the
+`response_format` schema bounds (local `$ref` only, never fetched). `tool_choice`
+must name a declared function; `tool_choice` and `parallel_tool_calls` require
+`tools`. Up to 128 calls per assistant message, with string arguments up to 64 KiB.
+
+The proxy never runs tools; it returns the model's calls to the client. On
+OpenRouter the request requires endpoints that support tools. A complete
+(non-streaming) answer is checked before it is returned: every call must name a
+declared function and carry JSON-object arguments, `tool_choice: "required"` or a
+named function must produce a matching call, and `none` must produce none. A failed
+check (`invalid_tool_call`) cools only that model and moves on, like invalid JSON. A
+provider that answers "tools not supported" moves on without cooling the account
+(`compatibility: "tool_use"`). Streamed tool calls are delivered as they arrive and
+cannot be checked or replaced once streaming starts. A tool call answers instead of
+`response_format` text, so JSON validation applies only to choices without calls.
 
 ## Quota and failure behavior
 
@@ -113,7 +152,7 @@ errors. Cooldown rows are capped at 16 with `cooldowns_truncated` indicating
 omitted rows. No per-request body is retained for these diagnostics.
 
 Compatibility failures also identify `input_too_large`, `image_limit`,
-`output_format`, or `vision_input` in the `compatibility` field. A large
+`output_format`, `tool_use` or `vision_input` in the `compatibility` field. A large
 multi-image request can exceed a provider's input-token limit even when a
 single-image request succeeds. Reduce batch size before repeating that request;
 this is not evidence of daily quota exhaustion.
@@ -165,6 +204,22 @@ image URL with a synthetic/public image, or an inline PNG/JPEG/WebP/GIF data URL
 }
 ```
 
+For tool calling, send function definitions; the reply's
+`choices[0].message.tool_calls` holds the calls to run, and the next request appends
+the assistant message and one `role: "tool"` result per call:
+
+```json
+{
+  "model": "free:text",
+  "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+  "tools": [{"type": "function", "function": {
+    "name": "get_weather", "description": "Current weather for a city.",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}},
+                   "required": ["city"]}}}],
+  "tool_choice": "auto"
+}
+```
+
 The proxy preserves image content during fallback and does not fetch image URLs
 itself. Each provider's size, image-count, context and data-retention rules still
 apply. Use synthetic material when testing free tiers; do not send confidential
@@ -173,7 +228,7 @@ documents without checking the provider's terms.
 Add `"stream": true` and `curl -N` for SSE. The default output budget is 1,024
 tokens unless `max_tokens` or `max_completion_tokens` is provided. Messages must
 contain nonempty text or supported content parts. Query parameters, custom
-model/provider fallback lists, plugins, tools, audio/file inputs and other
+model/provider fallback lists, plugins, server-side tools, audio/file inputs and other
 unrecognized parameters are rejected; caller billing/routing headers are not
 forwarded. Common sampling, reasoning-effort and response-format parameters are
 passed through, and must be supported by the selected upstream model.
@@ -207,6 +262,6 @@ Regression tests simulate quota exhaustion; they do not deliberately consume
 live daily quotas or send private prompts to providers:
 
 ```bash
-python -m pytest -q tests/test_free_routes.py tests/test_free_quota_service.py
+python -m pytest -q tests/test_free_routes.py tests/test_free_quota_service.py tests/test_free_tool_calling.py
 node --test tests/test_free_routes_worker.mjs
 ```

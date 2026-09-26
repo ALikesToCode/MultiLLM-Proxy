@@ -16,6 +16,8 @@ _MISMATCH = re.compile(
     r"(?:image|vision) (?:input )?(?:is |are )?not supported|"
     r"(?:unsupported|not supported|not support|invalid)[^\n]{0,100}(?:response_format|json_schema)|"
     r"(?:response_format|json_schema)[^\n]{0,100}(?:unsupported|not supported|not support)|"
+    r"\b(?:tools?|tool[ _]choice|function[ _]call(?:ing|s)?)\b[^\n]{0,60}(?:unsupported|not supported|not support)|"
+    r"(?:unsupported|not supported|not support|does not support)[^\n]{0,40}\b(?:tools?|tool use|function[ _]call(?:ing|s)?)\b|"
     r"no endpoints found that support",
     re.IGNORECASE,
 )
@@ -52,6 +54,8 @@ def inspect_compatibility_detail(upstream):
         return response, "input_too_large"
     if re.search(r"too many images|number of images|\d+ images", text, re.I):
         return response, "image_limit"
+    if re.search(r"\btools?\b|tool[ _]choice|tool use|function[ _]call", text, re.I):
+        return response, "tool_use"
     if re.search(r"response_format|json_schema|no endpoints found that support", text, re.I):
         return response, "output_format"
     return response, "vision_input"

@@ -94,6 +94,11 @@ def _schema_validator(response_format):
         raise ValueError("json_schema.schema must be an object or boolean")
     if "strict" in wrapper and not isinstance(wrapper["strict"], bool):
         raise ValueError("json_schema.strict must be a boolean")
+    return schema_validator(schema)
+
+
+def schema_validator(schema):
+    """A validator for a bounded schema with local references only; ValueError otherwise."""
     if (
         isinstance(schema, dict)
         and "$schema" in schema
@@ -111,7 +116,10 @@ def _schema_validator(response_format):
     )
     if cls is None:
         raise ValueError("Unsupported JSON Schema dialect")
-    cls.check_schema(schema)
+    try:
+        cls.check_schema(schema)
+    except (SchemaError, RecursionError) as error:
+        raise ValueError("Invalid JSON Schema") from error
     # An explicit empty registry disables jsonschema's legacy remote retrieval.
     return cls(schema, registry=Registry())
 
