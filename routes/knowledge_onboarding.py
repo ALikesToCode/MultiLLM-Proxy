@@ -6,12 +6,12 @@ from pathlib import Path
 
 from flask import Response, jsonify, render_template, request, url_for
 
-from routes import knowledge_mcp
+from routes import gateway_mcp, knowledge_mcp
 
 PUBLIC_ENDPOINTS = frozenset({
     "knowledge_agent_setup", "knowledge_llms", "knowledge_llms_full",
     "knowledge_agent_skill", "knowledge_agent_prompt", "knowledge_agent_config", "media_agent_skill",
-    "chat_agent_skill",
+    "chat_agent_skill", "mcp_agent_skill", "mcp_agent_config",
 })
 _SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "multillm-knowledge" / "SKILL.md"
 _SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
@@ -22,6 +22,8 @@ _RESOURCES = [
     ("/agent-onboarding/SKILL.md", "Installable skill for Codex and Claude Code."),
     ("/agent-onboarding/chat/SKILL.md", "Installable skill for chat models from code: SDK setup, routes and retries."),
     ("/agent-onboarding/media/SKILL.md", "Installable skill for image, image batch and video generation."),
+    ("/agent-onboarding/mcp/SKILL.md", "Installable skill for the MultiLLM MCP server: model, chat and media tools."),
+    ("/agent-onboarding/mcp/config.json", "MultiLLM MCP endpoint, protocol versions, scopes and tools."),
     ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
     ("/agent-onboarding/config.json", "Endpoint, protocol versions, scopes and tool catalogue."),
 ]
@@ -136,6 +138,7 @@ def register_knowledge_onboarding_routes(app):
 Install these in Claude Code, Codex or another agent, or read them before writing code.
 - [Chat skill]({origin}/agent-onboarding/chat/SKILL.md): Call chat models from code: SDK setup, model discovery, automatic routes, free pools, headers and retries.
 - [Media skill]({origin}/agent-onboarding/media/SKILL.md): Generate images, image batches and videos from code.
+- [MCP skill]({origin}/agent-onboarding/mcp/SKILL.md): Connect the MultiLLM MCP server for model, chat and media tools.
 - [Knowledge skill]({origin}/agent-onboarding/SKILL.md): Cited evidence, documentation indexing and Firecrawl Alexandria.
 
 ## Chat
@@ -144,7 +147,8 @@ Install these in Claude Code, Codex or another agent, or read them before writin
 - `GET {origin}/v1/models`: exact model IDs (`provider:model`, `auto:<name>`, `free:text`,
   `free:vision`) and their chat, image and video capabilities.
 - `POST {origin}/v1/chat/completions`: Chat Completions with optional `stream: true`.
-  `auto:` routes fall back between providers; `free:` pools use only free models.
+  `auto:` routes fall back between providers; `free:` pools use only free models and
+  accept function `tools`, sending them only to models with confirmed tool support.
 - `POST {origin}/v1/responses`: the Responses API for an explicit `provider:model`.
 - `POST {origin}/optimize/v1/chat/completions`: compacts long histories before sending.
 
@@ -162,12 +166,21 @@ Set SDK retries to 0: a retried generation can be billed twice.
 Media requests use a proxy key with the `chat` scope. Videos and large batches cost money;
 confirm with the user first.
 
+## MCP for coding agents
+- [MultiLLM MCP]({origin}/v1/mcp): Streamable HTTP POST with `Authorization: Bearer $MULTILLM_API_KEY`.
+  Tools: `list_models` (scope `models`), `chat`, `generate_image`, `generate_images_batch`,
+  `create_video`, `get_video` and `media_providers` (scope `chat`).
+- [MCP configuration]({origin}/agent-onboarding/mcp/config.json): Endpoint, protocol versions, scopes and tools.
+
+`chat` defaults to `free:text`; other models and every image and video tool may cost money.
+Each call makes one gateway request and is never retried. The Knowledge MCP is `/mcp`.
+
 ## Knowledge
 - [Agent setup]({origin}/agent-onboarding): Copyable setup prompt and client configuration.
 - [Setup prompt]({origin}/agent-onboarding/prompt.txt): Configure this service as the default knowledge entry point.
 - [Machine configuration]({origin}/agent-onboarding/config.json): Endpoint, scopes and tool catalogue.
 - [Full instructions]({origin}/llms-full.txt): Evidence, management, cost and retry contracts.
-- [MCP]({origin}/mcp): Streamable HTTP POST with a scoped Bearer proxy key.
+- [Knowledge MCP]({origin}/mcp): Streamable HTTP POST with a scoped Bearer proxy key.
 - [Administrator dashboard]({origin}/knowledge): Sources, jobs, connections and allowances; login required.
 
 Use knowledge:read for retrieval and retained artifacts; knowledge:manage for status,
@@ -198,6 +211,20 @@ Public setup material contains no credentials, source inventory, or account stat
     @app.get("/agent-onboarding/chat/SKILL.md")
     def chat_agent_skill():
         return _download(_gateway_skill("multillm-chat", "MultiLLM Chat"))
+
+    @app.get("/agent-onboarding/mcp/SKILL.md")
+    def mcp_agent_skill():
+        # Configuration examples name this gateway instead of a placeholder origin.
+        return _download(_gateway_skill("multillm-mcp", "MultiLLM MCP").replace("https://<gateway-origin>", _origin()))
+
+    @app.get("/agent-onboarding/mcp/config.json")
+    def mcp_agent_config():
+        return jsonify({"name": "multillm", "transport": "streamable-http",
+            "url": _origin() + gateway_mcp.ENDPOINT, "protocol_versions": list(gateway_mcp.PROTOCOL_VERSIONS),
+            "accept": "application/json, text/event-stream",
+            "authentication": {"type": "bearer", "env": "MULTILLM_API_KEY"},
+            "skill_url": url_for("mcp_agent_skill", _external=True),
+            "tools": gateway_mcp.tool_catalogue()})
 
     @app.get("/agent-onboarding/prompt.txt")
     def knowledge_agent_prompt():

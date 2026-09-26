@@ -8,8 +8,10 @@ Gateway origin: {base_url}
 OpenAI-compatible SDK base URL: {base_url}/v1
 Credential environment variable: MULTILLM_API_KEY
 Agent skills: {base_url}/agent-onboarding/chat/SKILL.md (chat from code),
-{base_url}/agent-onboarding/media/SKILL.md (images, image batches, video) and
-{base_url}/agent-onboarding/SKILL.md (Knowledge). Discovery index: {base_url}/llms.txt
+{base_url}/agent-onboarding/media/SKILL.md (images, image batches, video),
+{base_url}/agent-onboarding/mcp/SKILL.md (models, chat and media as MCP tools at
+{base_url}/v1/mcp) and {base_url}/agent-onboarding/SKILL.md (Knowledge).
+Discovery index: {base_url}/llms.txt
 
 1. Inspect the application's existing client and configuration before editing.
    Reuse its conventions and preserve unrelated work.

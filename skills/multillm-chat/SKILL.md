@@ -35,9 +35,12 @@ Each `data[].id` is one of:
 
 `capabilities` shows `supports_chat`, `supports_images` and `supports_video`; offer only
 models with `supports_chat: true` for chat (image, video and Responses-only models are
-`false`). `context_window` is present only when known. Use a model's exact ID, keep the
-`provider:` prefix, and prefer an `auto:` route when the user wants resilience across
-providers.
+`false`). `context_window`, `max_output_tokens`, `supports_tools`, `supports_vision` and
+list prices (`input_cost_per_million`, `output_cost_per_million` in USD) appear only when
+the provider's catalog or models.dev publishes them; `metadata_provenance` names the source
+of each filled value. Missing or `null` means unknown, not unsupported. Use a model's exact
+ID, keep the `provider:` prefix, and prefer an `auto:` route when the user wants resilience
+across providers.
 
 ## Chat Completions
 
@@ -97,6 +100,38 @@ Tools, `response_format`, images in `messages` and reasoning settings pass throu
 the selected model; check `capabilities` first. `free:vision` accepts image input;
 `/v1/free/text` and `/v1/free/vision` are fixed-purpose bases for the free pools.
 
+## Tool calling on free pools
+
+`free:text` and `free:vision` accept function `tools`, `tool_choice` and
+`parallel_tool_calls`. The pool sends them only to free models with confirmed tool support
+and answers `503 free_models_unavailable` when none is configured; it never switches to a
+paid model. Only `{"type": "function"}` tools are accepted (at most 128, 64 KiB in total),
+not server-side tools such as web search. The gateway never runs tools: read
+`message.tool_calls`, run them yourself, and send the results back.
+
+```python
+tools = [{"type": "function", "function": {
+    "name": "get_weather", "description": "Current weather for a city.",
+    "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]
+messages = [{"role": "user", "content": "What is the weather in Paris?"}]
+reply = client.chat.completions.create(model="free:text", messages=messages, tools=tools)
+message = reply.choices[0].message
+calls = [{"id": call.id, "type": "function",
+          "function": {"name": call.function.name, "arguments": call.function.arguments}}
+         for call in message.tool_calls or []]
+messages.append({"role": "assistant", "content": message.content, "tool_calls": calls})
+messages += [{"role": "tool", "tool_call_id": call["id"], "content": "18 C and sunny"} for call in calls]
+final = client.chat.completions.create(model="free:text", messages=messages, tools=tools)
+```
+
+Send earlier turns back with only these fields (`role`, `content`, `tool_calls` with `id`,
+`type` and `function`; `tool_call_id` on results): free pools reject extra message fields
+such as `reasoning_content`.
+
+A complete answer is checked before it is returned: calls must name a declared function
+with JSON-object arguments and match `tool_choice`, otherwise the next free model runs.
+Streamed tool calls are passed through unchecked.
+
 ## Other endpoints
 
 - `POST /v1/responses`: the OpenAI Responses API for an explicit `provider:model`
@@ -129,6 +164,13 @@ answered; automatic routes add `X-MultiLLM-Auto-Selected-Model` and
   application's policy accepts the cost. Automatic routes already try their other
   candidates after definite refusals.
 - Streams can end early: treat a stream without a final `finish_reason` as incomplete.
+
+## From an agent, without code
+
+Coding agents can use the same gateway as MCP tools at `$MULTILLM_BASE_URL/v1/mcp`:
+`list_models`, `chat` (defaults to `free:text`), `generate_image`, `generate_images_batch`,
+`create_video`, `get_video` and `media_providers`. See the `multillm-mcp` skill for client
+setup and rules.
 
 ## When writing application code
 

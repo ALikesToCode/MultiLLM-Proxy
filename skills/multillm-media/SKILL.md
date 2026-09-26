@@ -137,6 +137,15 @@ console.log(data[0].url, response.headers.get("X-MultiLLM-Auto-Selected-Model"))
 Keep generation on the server (the key must not reach a browser), keep SDK retries at 0,
 and allow long timeouts: `max` quality at 4K can take several minutes.
 
+## Use as MCP tools
+
+Coding agents connected to the MultiLLM MCP server (`$MULTILLM_BASE_URL/v1/mcp`, see the
+`multillm-mcp` skill) get the same routes as tools: `generate_image` (1 to 4 images),
+`generate_images_batch`, `create_video`, `get_video` and `media_providers`. They default to
+`auto:image` or `auto:video` and `response_format: "url"`, make exactly one request per call
+and never retry or poll. Inline images are limited to 5 MiB each and 10 MiB per call;
+`get_video` returns `content_url`, never the MP4, so download it over HTTP with the same key.
+
 ## Check providers
 
 - `GET /v1/media/providers` lists each route's candidates, whether they can run now and

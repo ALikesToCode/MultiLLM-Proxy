@@ -97,6 +97,9 @@ characters, and `parameters` that are an object JSON Schema within the
 `response_format` schema bounds (local `$ref` only, never fetched). `tool_choice`
 must name a declared function; `tool_choice` and `parallel_tool_calls` require
 `tools`. Up to 128 calls per assistant message, with string arguments up to 64 KiB.
+History messages carry only `role`, `content`, `name` and `tool_calls` (each with `id`,
+`type` and `function`), or `tool_call_id` on tool results; provider extras such as
+`reasoning_content` are rejected, so rebuild earlier turns instead of echoing replies.
 
 The proxy never runs tools; it returns the model's calls to the client. On
 OpenRouter the request requires endpoints that support tools. A complete

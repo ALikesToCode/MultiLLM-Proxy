@@ -448,10 +448,13 @@ runs many prompts and sizes in one call; and `/v1/videos` creates asynchronous V
 Grok Imagine Video and Sora jobs. See [Image and video generation](docs/media-generation.md);
 agents can install `/agent-onboarding/media/SKILL.md`.
 
-LLMs and coding agents can learn the gateway from `/llms.txt` and three installable
+LLMs and coding agents can learn the gateway from `/llms.txt` and four installable
 skills: `/agent-onboarding/chat/SKILL.md` (chat models from code),
-`/agent-onboarding/media/SKILL.md` (images, batches and video) and
-`/agent-onboarding/SKILL.md` (Knowledge).
+`/agent-onboarding/media/SKILL.md` (images, batches and video),
+`/agent-onboarding/mcp/SKILL.md` (the MultiLLM MCP server) and
+`/agent-onboarding/SKILL.md` (Knowledge). Coding agents can call models, free pools,
+images and video as MCP tools at `/v1/mcp`; see [MultiLLM MCP server](docs/mcp.md).
+Free pools also accept function tools, routed only to free models that support them.
 
 ### Provider-Specific Features
 

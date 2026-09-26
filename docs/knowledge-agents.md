@@ -52,7 +52,8 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 | `knowledge_policy_update` | Save a complete policy with revision protection (manage) |
 
 The same operations are available through REST. `/knowledge` provides the
-administrator UI. The private Knowledge Worker has no public client URL.
+administrator UI. The private Knowledge Worker has no public client URL. Chat, model
+and media tools are a separate server at `/v1/mcp`; see [MultiLLM MCP server](mcp.md).
 
 ## Install the operating skill
 

@@ -92,6 +92,32 @@ def test_chat_skill_and_llms_txt_teach_agents_to_call_chat_models_from_code(clie
         assert link in llms, link
 
 
+def test_mcp_skill_and_config_teach_agents_to_connect_the_gateway_mcp(client):
+    with patch("routes.knowledge.dispatch") as dispatch:
+        skill = client.get("/agent-onboarding/mcp/SKILL.md?download=1", base_url="https://gateway.example")
+        config = client.get("/agent-onboarding/mcp/config.json", base_url="https://gateway.example").json
+        llms = client.get("/llms.txt", base_url="https://gateway.example").get_data(as_text=True)
+    dispatch.assert_not_called()
+    assert skill.status_code == 200 and skill.content_type.startswith("text/markdown")
+    assert 'attachment; filename="SKILL.md"' == skill.headers["Content-Disposition"]
+    text = skill.get_data(as_text=True)
+    assert text.startswith("---\nname: multillm-mcp\n")
+    assert "<gateway-origin>" not in text
+    for fact in ('url = "https://gateway.example/v1/mcp"', "claude mcp add --transport http",
+                 "'Authorization: Bearer ${MULTILLM_API_KEY}'", 'bearer_token_env_var = "MULTILLM_API_KEY"',
+                 "Bearer ${env:MULTILLM_API_KEY}", "list_models", "create_video", "never retries"):
+        assert fact in text, fact
+    assert config["url"] == "https://gateway.example/v1/mcp"
+    assert config["authentication"] == {"type": "bearer", "env": "MULTILLM_API_KEY"}
+    assert config["protocol_versions"] == ["2025-06-18"]
+    scopes = {tool["name"]: tool["scope"] for tool in config["tools"]}
+    assert scopes == {"list_models": "models", "chat": "chat", "generate_image": "chat", "generate_images_batch": "chat",
+                      "create_video": "chat", "get_video": "chat", "media_providers": "chat"}
+    for fact in ("https://gateway.example/v1/mcp", "https://gateway.example/agent-onboarding/mcp/SKILL.md",
+                 "https://gateway.example/agent-onboarding/mcp/config.json", "accept function `tools`"):
+        assert fact in llms, fact
+
+
 def test_client_configs_reference_environment_credentials(client):
     html = client.get("/agent-onboarding", base_url="https://gateway.example").get_data(as_text=True)
     def snippet(identifier):
