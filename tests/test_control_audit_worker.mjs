@@ -9,7 +9,8 @@ const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);
 const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "chat,models", is_admin: 0,
   created_at: "2026-09-26T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
-  created_by: "admin", rotated_at: null, revoked_at: null, ...changes,
+  created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
+  allowed_models: null, allowed_ips: null, expires_at: null, ...changes,
 });
 const event = (action, outcome, actor, target, detail) => ({ operation: "audit_record", action, outcome, actor, target, detail });
 const list = (changes = {}) => ({ operation: "audit_list", actor: null, target: null, action: null,
