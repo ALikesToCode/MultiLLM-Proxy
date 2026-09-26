@@ -95,22 +95,47 @@ catalog advertises image input, `false` means explicit non-vision support, and
 `null` means unknown. Image output (`supports_images`) does not establish image
 input support. Clients should keep unknown models distinct from text-only ones.
 
-**Refresh live models** also fills missing vision metadata for the official
-AIHubMix and OpenCode origins. AIHubMix uses its public
-[`/api/v1/models` catalog](https://aihubmix.com/api/v1/models); OpenCode uses its
-provider-specific entries in [models.dev](https://models.dev/api.json).
-`vision_metadata_source` identifies enrichment provenance. Comma-separated
-modalities and nested `architecture.input_modalities` / `modalities.input` lists
-are normalized to `input_modalities` arrays. Explicit model-level decisions win.
+**Refresh live models** also fills metadata the provider's own catalog left
+unknown, from [models.dev](https://models.dev/api.json): `context_window`,
+`max_output_tokens`, image input (`input_modalities`, `supports_vision`),
+`output_modalities`, `supports_tools`, `supports_reasoning`, and base-tier USD list
+prices as `input_cost_per_million` and `output_cost_per_million`. Each provider
+reads only the models.dev entry for the same endpoint:
 
-Enrichment matches exact IDs already returned by the primary catalog; it never
-adds models, strips a `-free` suffix, copies pricing, or infers capabilities from
-names. Custom gateway origins are not enriched from another service's catalog.
-The public lookup sends no credentials, ignores environment authentication,
-disallows redirects, and has time and size limits. Failure leaves the primary
-catalog usable with unknown capabilities; a failed primary refresh retains the
-previous cached catalog. Ordinary model-list and generation requests perform no
-additional metadata lookup.
+| Provider | models.dev entry | Prices copied |
+| --- | --- | --- |
+| `openai`, `xai`, `groq`, `cerebras`, `openrouter` | same name | yes |
+| `together` | `togetherai` | yes |
+| `aihubmix` | `aihubmix`, after AIHubMix's own [`/api/v1/models` catalog](https://aihubmix.com/api/v1/models) (image input only) | yes |
+| `opencode` on Zen (`/zen/v1`) | `opencode` | yes |
+| `opencode` on Go (`/zen/go/v1`) | `opencode-go`; free Zen models use `opencode` | Go: no (subscription) |
+| `nanogpt` | `nano-gpt` | no (subscription) |
+
+Other providers (LinkAPI, Codex Easy, Kimi Code, NavyAI, image relays) and custom
+origins are not enriched, because no reviewed entry describes that endpoint.
+OpenRouter's `supported_parameters` list sets `supports_tools` from the upstream
+catalog itself. Comma-separated modalities and nested
+`architecture.input_modalities` / `modalities.input` lists are normalized to
+`input_modalities` arrays.
+
+Explicit provider values always win: an upstream limit, a capability flag (a
+`null` placeholder does not count) or any upstream `pricing` object is kept, and
+enrichment fills only the gaps. `metadata_provenance` maps every filled field to its source (for example
+`"context_window": "https://models.dev/api.json#groq"`); `vision_metadata_source`
+remains for image input. A model marked `supports_tools: false` reports
+`capabilities.supports_tools: false`. Upstream `pricing` keeps the provider's own
+shape (OpenRouter prices per token); the `*_cost_per_million` fields are models.dev
+list prices, which ignore context tiers, caching and account discounts.
+
+Enrichment matches exact, case-sensitive IDs already returned by the primary
+catalog; it never adds models, strips a `-free` suffix, borrows another provider's
+entry, or infers capabilities from names. The public lookup sends no credentials,
+ignores environment authentication, disallows redirects, and has time (30 s) and
+size (16 MiB) limits. Each source is read at most once an hour per process and only
+a compact index is kept; after a failed read the last good copy is used for up to a
+day, and without one the primary catalog stays usable with unknown fields. A failed
+primary refresh retains the previous cached catalog. Ordinary model-list and
+generation requests perform no additional metadata lookup.
 
 These flags describe published metadata, not a successful vision probe or an
 account entitlement. AIHubMix's [official catalog tooling](https://github.com/AIhubmix/skills/tree/main/skills/aihubmixApi)

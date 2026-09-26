@@ -11,7 +11,10 @@ from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.media_catalog import image_profile, is_video_model
 from services.model_registry import ModelRegistry
-from services.provider_catalog_metadata import model_supports_vision
+from services.provider_catalog_metadata import (
+    model_supports_tools,
+    model_supports_vision,
+)
 from services.provider_catalog_service import ProviderCatalogService
 
 KNOWN_IMAGE_MODEL_IDS = {
@@ -85,6 +88,9 @@ def _model_capabilities(
     """Describe what this model serves, not only what its provider can do."""
     capabilities = asdict(adapter.capabilities()) if adapter else {}
     capabilities["supports_vision"] = model_supports_vision(metadata)
+    # A model the catalog marks as unable to call tools overrides the provider default.
+    if "supports_tools" in capabilities and model_supports_tools(metadata) is False:
+        capabilities["supports_tools"] = False
     # Explicit catalog metadata wins over model-family inference.
     image_model = (
         image_profile(provider, model_id) is not None

@@ -149,12 +149,19 @@ class ProviderCapabilityDiscoveryTest(unittest.TestCase):
                 self.assertIs(
                     enrich_model_capabilities("opencode", origin, unknown), unknown
                 )
+            # Vision, tools, limits and (for a priced endpoint) a price are all known.
             known = (
                 ProviderCatalogModel(
                     "opencode",
                     "fixture-free",
                     "now",
-                    metadata={"supports_vision": False},
+                    context_window=8192,
+                    max_output_tokens=1024,
+                    metadata={
+                        "supports_vision": False,
+                        "supports_tools": True,
+                        "pricing": {"prompt": "0"},
+                    },
                 ),
             )
             self.assertIs(

@@ -1,4 +1,6 @@
 import json
+import math
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -31,6 +33,9 @@ CATALOG_METADATA_FIELDS = frozenset(
         "metadata_source",
         "metadata_resolved_from",
         "metadata_status",
+        "input_cost_per_million",
+        "output_cost_per_million",
+        "metadata_provenance",
     }
 )
 _METADATA_MAX_BYTES = 65_536
@@ -67,6 +72,9 @@ _BOOLEAN_FIELDS = frozenset(
     }
 )
 _MODALITY_FIELDS = frozenset({"input_modalities", "output_modalities"})
+# Normalized USD list prices per million tokens; upstream `pricing` keeps its own shape.
+_PRICE_FIELDS = frozenset({"input_cost_per_million", "output_cost_per_million"})
+_PROVENANCE_KEY = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _INVALID = object()
 
 
@@ -111,6 +119,29 @@ def model_supports_vision(metadata: Mapping[str, Any] | None) -> bool | None:
     return None
 
 
+def model_supports_tools(metadata: Mapping[str, Any] | None) -> bool | None:
+    """Resolve model tool calling from explicit catalog flags; unknown stays None."""
+    metadata = metadata or {}
+    for field in ("supports_tools", "supports_function_calling"):
+        if isinstance(metadata.get(field), bool):
+            return metadata[field]
+    return None
+
+
+def _declared_tool_support(item: Mapping[str, Any]) -> dict[str, bool]:
+    """OpenRouter-style catalogs list accepted request parameters per model."""
+    if model_supports_tools(item) is not None:
+        return {}
+    parameters = item.get("supported_parameters")
+    if (
+        not isinstance(parameters, list)
+        or len(parameters) > 128
+        or not all(isinstance(value, str) and len(value) <= 128 for value in parameters)
+    ):
+        return {}
+    return {"supports_tools": "tools" in parameters}
+
+
 def _sanitize_value(key: str, value: Any) -> Any:
     if value is None:
         return None
@@ -128,6 +159,27 @@ def _sanitize_value(key: str, value: Any) -> Any:
         return _INVALID
     if key in _BOOLEAN_FIELDS:
         return value if isinstance(value, bool) else _INVALID
+    if key in _PRICE_FIELDS:
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value >= 0
+        ):
+            return value
+        return _INVALID
+    if key == "metadata_provenance":
+        if not isinstance(value, Mapping) or len(value) > 32:
+            return _INVALID
+        if not all(
+            isinstance(field, str)
+            and _PROVENANCE_KEY.fullmatch(field)
+            and isinstance(source, str)
+            and 0 < len(source) <= 512
+            for field, source in value.items()
+        ):
+            return _INVALID
+        return dict(value)
     if key in _MODALITY_FIELDS:
         if (
             isinstance(value, list)
@@ -164,7 +216,7 @@ def sanitize_provider_metadata(item: Any) -> dict[str, Any] | None:
     if not isinstance(item, Mapping):
         return None
 
-    item = {**item, **_normalized_modalities(item)}
+    item = {**item, **_normalized_modalities(item), **_declared_tool_support(item)}
     metadata: dict[str, Any] = {}
     for key in CATALOG_METADATA_FIELDS:
         if key not in item:

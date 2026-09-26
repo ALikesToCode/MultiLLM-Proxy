@@ -1,6 +1,9 @@
 from unittest.mock import patch
 
-from services.provider_capability_discovery import PUBLIC_CAPABILITY_SOURCES
+from services.provider_capability_discovery import (
+    PUBLIC_CAPABILITY_SOURCES,
+    reset_public_capability_cache,
+)
 from services.provider_catalog_service import (
     ProviderCatalogModel,
     ProviderCatalogService,
@@ -140,7 +143,10 @@ class ModelVisionCatalogTest(UnifiedApiTestCase):
                 },
             ),
         )
+        # AIHubMix reads its own catalog, then models.dev; others read models.dev once.
+        sources = {"aihubmix": ["aihubmix", "models.dev"], "opencode": ["opencode"]}
         for provider, base_url, model_id, public in fixtures:
+            reset_public_capability_cache()
             with (
                 self.subTest(provider=provider),
                 patch.object(
@@ -164,7 +170,9 @@ class ModelVisionCatalogTest(UnifiedApiTestCase):
                 )
                 self.assertEqual(results[0]["status"], "updated")
                 self.assertEqual(results[0]["model_count"], 1)
-                fetch.assert_called_once_with(provider)
+                self.assertEqual(
+                    [call.args[0] for call in fetch.call_args_list], sources[provider]
+                )
                 response = self.client.get(
                     "/v1/models",
                     headers={"Authorization": "Bearer admin-test-key"},
@@ -178,4 +186,4 @@ class ModelVisionCatalogTest(UnifiedApiTestCase):
                     model["vision_metadata_source"], PUBLIC_CAPABILITY_SOURCES[provider]
                 )
                 self.assertNotIn(f"{provider}:not-advertised-free", catalog)
-                fetch.assert_called_once_with(provider)
+                self.assertEqual(fetch.call_count, len(sources[provider]))
