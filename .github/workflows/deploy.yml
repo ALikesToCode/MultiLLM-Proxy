@@ -1,0 +1,190 @@
+name: deploy
+
+# Deploys main to Cloudflare after the ci workflow passes for a push, in dependency order:
+# D1 migrations, the Knowledge Worker, then the main Worker and Container. The main Worker
+# is deployed here only when the repository variable DEPLOY_MAIN_WORKER is "true";
+# otherwise Workers Builds deploys it. A manual run redeploys the head of main once its ci
+# run has passed. See docs/deployment-cloudflare.md#how-deploys-work.
+
+on:
+  workflow_run:
+    workflows:
+      - ci
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, never cancelled midway; a newer queued run replaces an older one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Select commit
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.select.outputs.sha }}
+      deploy: ${{ steps.select.outputs.deploy }}
+    steps:
+      - name: Select the tested head of main
+        id: select
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_REF: ${{ github.ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            if [ "$DISPATCH_REF" != refs/heads/main ]; then
+              echo "::error::Run the deploy workflow from main."
+              exit 1
+            fi
+            sha="$DISPATCH_SHA"
+            passed="$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success&per_page=1" --jq .total_count)"
+            if [ "$passed" = 0 ]; then
+              echo "::error::ci has not passed for $sha on a push to main, so it is not deployed."
+              exit 1
+            fi
+          else
+            sha="$RUN_SHA"
+          fi
+          head="$(gh api "repos/$REPOSITORY/commits/main" --jq .sha)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$sha" = "$head" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Deploying $sha."
+          else
+            # Deploying an older commit after a newer one would roll production back.
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped $sha because main is now at $head; that commit's deploy run ships both."
+            echo "Skipped \`$sha\`: main is now at \`$head\`, whose deploy run ships both." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: Deploy to Cloudflare
+    needs: gate
+    if: needs.gate.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: production
+      url: ${{ steps.verify.outputs.url }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      SHA: ${{ needs.gate.outputs.sha }}
+      D1_DATABASE: multillm-intelligence
+      MAIN_WORKER: ${{ vars.DEPLOY_MAIN_WORKER == 'true' && 'actions' || 'workers-builds' }}
+      DEPLOY_MESSAGE: Deployed by ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check Cloudflare credentials are configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets to the production environment. See docs/deployment-cloudflare.md#one-time-setup."
+            exit 1
+          fi
+      - name: Check out the tested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install deployment package manager
+        run: npm install --global "$(node -p "require('./package.json').packageManager")"
+      - name: Install deployment dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check migration files
+        run: node scripts/verify_d1_migrations.mjs --check
+      - name: List pending D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/verify_d1_migrations.mjs --pending "$D1_DATABASE" | tee "$RUNNER_TEMP/pending-migrations.txt"
+      - name: Apply D1 migrations
+        id: migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm exec wrangler d1 migrations apply "$D1_DATABASE" --remote
+          node scripts/verify_d1_migrations.mjs "$D1_DATABASE"
+      - name: Deploy Knowledge Worker
+        id: knowledge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --config wrangler.knowledge.jsonc --tag "$SHA" --message "$DEPLOY_MESSAGE"
+      - name: Deploy main Worker and Container
+        id: main
+        if: vars.DEPLOY_MAIN_WORKER == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --tag "$SHA" --message "$DEPLOY_MESSAGE"
+      - name: Verify deployment
+        id: verify
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_STATUS_URL: ${{ vars.DEPLOY_STATUS_URL }}
+        run: >
+          node scripts/deploy_status.mjs --verify --commit "$SHA" --main-worker "$MAIN_WORKER"
+          --wait 600 --markdown "$RUNNER_TEMP/deploy-status.md"
+      - name: Write job summary
+        if: always()
+        env:
+          MIGRATIONS: ${{ steps.migrations.outcome }}
+          KNOWLEDGE: ${{ steps.knowledge.outcome }}
+          MAIN: ${{ steps.main.outcome }}
+          VERIFY: ${{ steps.verify.outcome }}
+        run: |
+          pending="none"
+          if [ -s "$RUNNER_TEMP/pending-migrations.txt" ]; then
+            pending="$(paste -sd, "$RUNNER_TEMP/pending-migrations.txt" | sed 's/,/, /g')"
+          fi
+          main="${MAIN:-not run}"
+          if [ "$MAIN_WORKER" != actions ]; then
+            main="not deployed here: Workers Builds deploys it (DEPLOY_MAIN_WORKER is not true)"
+          fi
+          {
+            echo "## Deploy of \`${SHA:0:12}\`"
+            echo
+            echo "| Step | Result |"
+            echo "| --- | --- |"
+            echo "| D1 migrations (pending before: $pending) | ${MIGRATIONS:-not run} |"
+            echo "| Knowledge Worker | ${KNOWLEDGE:-not run} |"
+            echo "| Main Worker and Container | $main |"
+            echo "| Verification | ${VERIFY:-not run} |"
+            echo
+            if [ -f "$RUNNER_TEMP/deploy-status.md" ]; then
+              cat "$RUNNER_TEMP/deploy-status.md"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

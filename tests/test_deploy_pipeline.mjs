@@ -61,6 +61,23 @@ test("a destructive migration needs a marker with a reason", () => {
     [["0004_d.sql", "no deployed code has read a.note since 0002"]]);
 });
 
+test("the deploy workflow keeps its order, gating and secret scoping", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
+  const steps = ["Check migration files", "List pending D1 migrations", "Apply D1 migrations", "Deploy Knowledge Worker",
+    "Deploy main Worker and Container", "Verify deployment", "Write job summary"].map(name => workflow.indexOf(`- name: ${name}\n`));
+  assert.ok(steps.every((index, position) => index > 0 && (position === 0 || index > steps[position - 1])), String(steps));
+  assert.match(workflow, /workflow_run:\n\s+workflows:\n\s+- ci\n/);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(workflow, /ref: \$\{\{ needs\.gate\.outputs\.sha \}\}/);
+  assert.match(workflow, /concurrency:\n\s+group: deploy-production\n\s+cancel-in-progress: false/);
+  assert.match(workflow, /environment:\n\s+name: production/);
+  assert.match(workflow, /- name: Deploy main Worker and Container\n\s+id: main\n\s+if: vars\.DEPLOY_MAIN_WORKER == 'true'\n/);
+  for (const [, action] of workflow.matchAll(/uses: (\S+)/g)) assert.match(action, /@[0-9a-f]{40}$/);
+  const secretLines = workflow.split("\n").filter(line => line.includes("secrets."));
+  assert.ok(secretLines.length > 0);
+  for (const line of secretLines) assert.match(line, /^ {10}CLOUDFLARE_(API_TOKEN|ACCOUNT_ID): \$\{\{ secrets\.CLOUDFLARE_\1 \}\}$/);
+});
+
 test("version details carry the commit from the deploy tag", () => {
   const tagged = describeVersion({ id: "v1", metadata: { created_on: "2026-09-26T00:00:00Z", source: "wrangler" },
     annotations: { "workers/tag": COMMIT, "workers/message": "run 1" } }, 100);
