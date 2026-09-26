@@ -244,15 +244,24 @@ class ResponsesRouteTest(ProtocolRouteTestCase):
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "2")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "opencode:glm-5.2")
 
-        ambiguous = json_upstream({"error": {"message": "upstream exploded"}}, 500)
+        failed = json_upstream({"error": {"message": "upstream exploded"}}, 500)
+        response, make_request = self.post(
+            "/v1/responses",
+            {"model": "auto:chat-test", "input": "hi"},
+            upstream=[failed, json_upstream(CHAT_COMPLETION)],
+        )
+        self.assertEqual(response.status_code, 200, "a 500 before any output moves on")
+        self.assertEqual(make_request.call_count, 2)
+
+        ambiguous = json_upstream({"error": {"message": "upstream timed out"}}, 504)
         response, make_request = self.post(
             "/v1/responses",
             {"model": "auto:chat-test", "input": "hi"},
             upstream=[ambiguous, json_upstream(CHAT_COMPLETION)],
         )
-        self.assertEqual(response.status_code, 500, "a possibly billed failure is never replayed")
+        self.assertEqual(response.status_code, 504, "a possibly billed failure is never replayed")
         self.assertEqual(make_request.call_count, 1)
-        self.assertEqual(response.get_json()["error"]["message"], "upstream exploded")
+        self.assertEqual(response.get_json()["error"]["message"], "upstream timed out")
 
     def test_auto_route_streams_responses_events(self):
         self.save_route("auto:chat-test", ["opencode:kimi-k2.6"])
