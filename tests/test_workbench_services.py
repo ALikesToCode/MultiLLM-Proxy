@@ -86,8 +86,11 @@ def test_lab_requires_confirmation_and_uses_fixed_bounded_synthetic_prompts():
 @pytest.mark.parametrize("origin", ["http://worker.test", "https://user:pass@worker.test", "https://worker.test/path", "https://worker.test?key=synthetic", "https://[invalid", ""])
 def test_gateway_rejects_non_origin_configuration(monkeypatch, origin):
     monkeypatch.setenv("WORKBENCH_WORKER_URL", origin)
-    with pytest.raises(APIError):
+    with pytest.raises(APIError) as error:
         worker_origin()
+    # The 5xx body hides the message, so the code names the missing setting.
+    assert error.value.status_code == 503
+    assert error.value.payload == {"error": "workbench_not_configured"}
 
 
 def test_gateway_does_not_follow_redirects_or_leak_credentials(monkeypatch):

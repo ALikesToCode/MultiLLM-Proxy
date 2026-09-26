@@ -70,6 +70,7 @@
   "vars": {
     "FLASK_ENV": "production",
     "AUTH_STORAGE_BACKEND": "d1",
+    "WORKBENCH_WORKER_URL": "https://multillm-proxy.cserules.workers.dev",
     "SERVER_HOST": "0.0.0.0",
     "SERVER_PORT": "8080",
     "APP_NAME": "MultiLLM Proxy",

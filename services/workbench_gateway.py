@@ -8,15 +8,21 @@ import requests
 from error_handlers import APIError
 
 
+# A 5xx body hides its message; the code tells the dashboard which setting is missing.
+NOT_CONFIGURED = {"error": "workbench_not_configured"}
+
+
 def worker_origin():
     value = os.environ.get("WORKBENCH_WORKER_URL", "").strip().rstrip("/")
     try:
         parsed = urlsplit(value)
     except ValueError:
-        raise APIError("Configure WORKBENCH_WORKER_URL with a valid HTTPS Worker origin", status_code=503) from None
+        raise APIError("Configure WORKBENCH_WORKER_URL with a valid HTTPS Worker origin", status_code=503,
+                       payload=NOT_CONFIGURED) from None
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
             or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
-        raise APIError("Configure WORKBENCH_WORKER_URL with the trusted HTTPS Worker origin", status_code=503)
+        raise APIError("Configure WORKBENCH_WORKER_URL with the trusted HTTPS Worker origin", status_code=503,
+                       payload=NOT_CONFIGURED)
     return value
 
 
@@ -27,7 +33,7 @@ def call_worker(path, *, method="GET", payload=None, params=None, stream=False):
         raise ValueError("Unsupported workbench operation")
     key = os.environ.get("ADMIN_API_KEY", "")
     if not key:
-        raise APIError("Worker administrator credential is not configured", status_code=503)
+        raise APIError("Worker administrator credential is not configured", status_code=503, payload=NOT_CONFIGURED)
     session = requests.Session()
     session.trust_env = False
     try:

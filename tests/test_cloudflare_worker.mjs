@@ -1521,6 +1521,8 @@ test("worker deploy config keeps LinkAPI secrets private and samples observabili
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
   assert.equal(config.vars?.LINKAPI_BASE_URL, "https://hk.linkapi.ai");
+  // The Container reaches the Worker's roleplay controls through this fixed origin.
+  assert.equal(config.vars?.WORKBENCH_WORKER_URL, "https://multillm-proxy.cserules.workers.dev");
   assert.equal(config.vars?.LINKAPI_KEY, undefined);
   assert.equal(config.vars?.LINKAPI_API_KEY, undefined);
   assert.equal(config.compatibility_flags?.includes("nodejs_compat"), true);
