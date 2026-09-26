@@ -14,6 +14,7 @@ from services.provider_catalog_service import (
     ProviderCatalogModel,
     ProviderCatalogService,
 )
+from services.route_health import RouteHealth
 from tests.test_context_optimizer import roleplay_response
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -22,6 +23,11 @@ class AutoRouteTest(UnifiedApiTestCase):
     def setUp(self):
         super().setUp()
         ContextAnalysisCache.clear()
+        RouteHealth.reset()
+
+    def tearDown(self):
+        RouteHealth.reset()
+        super().tearDown()
 
     def _authenticate_admin(self):
         with self.client.session_transaction() as session:

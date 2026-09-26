@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Callable
 
 from flask import Response, g, has_request_context, jsonify, request
@@ -15,6 +16,8 @@ from services.provider_catalog_service import (
     PROVIDER_CATALOG_SPECS,
     ProviderCatalogService,
 )
+from services.resilience_service import ResilienceService
+from services.route_health import RouteHealth, ordering_settings
 
 # Payment-required responses mean this candidate cannot serve the request with
 # its current credentials. Explicit auto routes may safely try the next
@@ -71,7 +74,7 @@ def mark_transport_failure(downstream: Response, upstream) -> Response:
 
 
 def attempt_outcome(response: Response) -> tuple[bool | None, str]:
-    """(success, reason) of one attempt; None when the request itself was at fault."""
+    """(success, reason) of one attempt for route health; None when the request was at fault."""
     kind = response.headers.get(TRANSPORT_FAILURE_HEADER)
     if kind:
         return False, kind
@@ -94,6 +97,17 @@ def _buffer_failure(response: Response) -> Response:
     return Response(body, status=status_code, headers=headers)
 
 
+def _route_decision(priority: int, position: int) -> str:
+    """Primary when the configured first candidate answers first; health when reordering did."""
+    if position == 0:
+        return "auto-primary" if priority == 0 else "auto-health"
+    return "auto-failover"
+
+
+def _circuit_state(provider: str) -> str:
+    return ResilienceService.snapshot(provider)["state"]
+
+
 def _decorate_response(
     response: Response,
     route: AutoRoute,
@@ -102,6 +116,7 @@ def _decorate_response(
     attempts: int,
     *,
     route_decision: str | None = None,
+    ordering: str = "priority",
     failures: list[tuple[str, str]] | None = None,
 ) -> Response:
     selected_provider, _ = ModelRegistry.parse_model_id(selected_model)
@@ -111,6 +126,7 @@ def _decorate_response(
     response.headers["X-MultiLLM-Auto-Selected-Model"] = selected_model
     response.headers["X-MultiLLM-Auto-Attempts"] = str(attempts)
     response.headers["X-MultiLLM-Auto-Selected-Priority"] = str(selected_priority + 1)
+    response.headers["X-MultiLLM-Auto-Ordering"] = ordering
     if failures:
         reasons = ", ".join(f"{candidate}={reason}" for candidate, reason in failures)
         if len(reasons) > _MAX_REASONS_HEADER_LENGTH:
@@ -134,6 +150,8 @@ def dispatch_auto_route(
 
     By default only a refusal that proves the candidate generated nothing moves on.
     Chat routes pass chat_fail_over and image routes routes.media_images.image_fail_over.
+    Each attempt's outcome and time to response feed route health, and a route set to
+    health ordering tries its candidates in the order RouteHealth.order returns.
     """
     route = AutoRouteService.get_route(payload.get("model"))
     if route is None:
@@ -142,13 +160,16 @@ def dispatch_auto_route(
             status_code=404,
         )
 
+    order = RouteHealth.order(route.id, route.candidates, circuit_state=_circuit_state)
+    priorities = {candidate: index for index, candidate in enumerate(route.candidates)}
     attempts = 0
     failures: list[tuple[str, str]] = []
     last_failure: Response | None = None
     last_model = ""
     last_priority = 0
     last_decision = "auto-failover"
-    for priority, candidate in enumerate(route.candidates):
+    for position, candidate in enumerate(order.candidates):
+        priority = priorities[candidate]
         try:
             validate_candidate(candidate)
         except (APIError, ValueError) as error:
@@ -163,7 +184,8 @@ def dispatch_auto_route(
         attempts += 1
         candidate_payload = dict(payload)
         candidate_payload["model"] = candidate
-        route_decision = "auto-primary" if priority == 0 else "auto-failover"
+        route_decision = _route_decision(priority, position)
+        started = time.monotonic()
         try:
             response = dispatch_candidate(
                 candidate_payload,
@@ -176,9 +198,21 @@ def dispatch_auto_route(
                 candidate,
                 type(error).__name__,
             )
+            RouteHealth.record(candidate, ok=False, outcome="unavailable")
             failures.append((candidate, "unavailable"))
             continue
-        _, reason = attempt_outcome(response)
+        except Exception:
+            RouteHealth.record(candidate, ok=False, outcome="error")
+            raise
+        ok, reason = attempt_outcome(response)
+        if ok is not None:
+            RouteHealth.record(
+                candidate,
+                ok=ok,
+                outcome=reason,
+                latency_ms=(time.monotonic() - started) * 1000 if ok else None,
+                status=response.status_code,
+            )
         if not fail_over(response):
             if last_failure is not None:
                 last_failure.close()
@@ -189,6 +223,7 @@ def dispatch_auto_route(
                 priority,
                 attempts,
                 route_decision=route_decision,
+                ordering=order.mode,
                 failures=failures,
             )
 
@@ -209,6 +244,7 @@ def dispatch_auto_route(
             last_priority,
             attempts,
             route_decision=last_decision,
+            ordering=order.mode,
             failures=[failure for failure in failures if failure[0] != last_model],
         )
     raise APIError(
@@ -330,6 +366,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
     model_catalog_by_id = {model["id"]: model for model in model_catalog}
 
     routes = []
+    settings = ordering_settings()
     for route in stored_routes:
         candidates = []
         for priority, model_id in enumerate(route.candidates, start=1):
@@ -345,6 +382,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
                         "status",
                         "unknown",
                     ),
+                    "health": RouteHealth.summary(model_id),
                 }
             )
         routes.append(
@@ -352,6 +390,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
                 "id": route.id,
                 "candidates": candidates,
                 "updated_at": route.updated_at,
+                "ordering": settings.mode_for(route.id),
             }
         )
     return {
