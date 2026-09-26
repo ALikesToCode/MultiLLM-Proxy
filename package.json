@@ -22,6 +22,7 @@
     "cf:knowledge:dry-run": "wrangler deploy --config wrangler.knowledge.jsonc --dry-run",
     "cf:knowledge:deploy": "wrangler deploy --config wrangler.knowledge.jsonc",
     "cf:migrations:check": "node scripts/verify_d1_migrations.mjs --check",
+    "cf:status": "node scripts/deploy_status.mjs",
     "test:deploy": "node --test tests/test_deploy_pipeline.mjs"
   },
   "keywords": [],
