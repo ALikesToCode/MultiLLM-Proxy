@@ -2,7 +2,8 @@ import { logFailure } from "./log.mjs";
 
 // Every table the intelligence-migrations directory creates; a test keeps the two in step.
 export const REQUIRED_D1_TABLES = Object.freeze(["intelligence_policy", "intelligence_reservations",
-  "intelligence_principals", "intelligence_credentials", "control_users", "control_user_audit", "auto_routes"]);
+  "intelligence_principals", "intelligence_credentials", "control_users", "control_user_audit", "auto_routes",
+  "control_audit_events"]);
 
 /**
  * Readiness for the D1 schema. A deploy that skipped `wrangler d1 migrations apply` reports

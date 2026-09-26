@@ -3,6 +3,7 @@
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
 import { logFailure } from "./log.mjs";
+import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at"]);
@@ -98,6 +99,10 @@ export async function handleControlUsersRequest(request, env) {
   } catch { return reply({ error: "invalid_request" }, 400); }
   const db = env.INTELLIGENCE_DB;
   try {
+    if (AUDIT_OPERATIONS.has(body.operation)) {
+      const result = await handleAuditOperation(db, body);
+      return result ? reply(result) : reply({ error: "invalid_request" }, 400);
+    }
     switch (body.operation) {
       case "list": {
         if (!fields(body, ["version", "operation", "after", "limit"]) || !optionalText(body.after, 128)
