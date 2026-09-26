@@ -33,6 +33,7 @@ BILLABLE_PATHS = {
     "/intelligence/v1/chat/completions": "chat",
     "/v1/free/chat/completions": "chat",
     "/v1/responses": "responses",
+    "/v1/messages": "chat",
     "/v1/images/generations": "images",
     "/v1/images/batch": "images",
     "/v1/videos": "videos",

@@ -86,6 +86,14 @@ class UsageRoutesTest(UnifiedApiTestCase):
             response = self.client.post(path, headers={"Authorization": f"Bearer {key}"}, json=body)
             self.assertEqual(response.status_code, 403, path)
             self.assertEqual(response.get_json()["error"], "model_not_allowed")
+        with patch("app.ProxyService.make_request") as make_request:
+            for path, body in (("/v1/messages", {"model": "mimo:mimo-v2.5-pro", "max_tokens": 5,
+                                                 "messages": [{"role": "user", "content": "hi"}]}),
+                               ("/v1/responses", {"model": "mimo:mimo-v2.5-pro", "input": "hi"})):
+                response = self.client.post(path, headers={"x-api-key": key} if path == "/v1/messages"
+                                            else {"Authorization": f"Bearer {key}"}, json=body)
+                self.assertEqual(response.status_code, 403, path)
+            make_request.assert_not_called()
         batch = self.client.post("/v1/images/batch", headers={"Authorization": f"Bearer {key}"},
                                  json={"items": [{"prompt": "a"}, {"prompt": "b", "model": "free:text"}]})
         self.assertEqual(batch.status_code, 403, "the default auto:image route is not on the list")
