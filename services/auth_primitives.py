@@ -1,5 +1,7 @@
 """Validation and serialization primitives for authentication records."""
 
+import logging
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -19,6 +21,29 @@ PROVIDER_API_KEY_ENV_NAMES = {
     "kimi-code": ("KIMI_CODE_API_KEY",),
     "nanogpt": ("NANOGPT_API_KEY", "NANO_GPT_KEY"),
 }
+
+# Values copied from .env.example ("your-openai-api-key") or left as template markers are
+# not credentials. Treating them as unset skips the provider instead of sending a request
+# that can only fail with 401.
+_PLACEHOLDER_CREDENTIAL = re.compile(r"your[-_][A-Za-z0-9_.-]*|<[^<>]*>|changeme|replace[-_]?me", re.IGNORECASE)
+_placeholder_warned: set[str] = set()
+logger = logging.getLogger(__name__)
+
+
+def is_placeholder_credential(value: Optional[str]) -> bool:
+    return value is not None and bool(_PLACEHOLDER_CREDENTIAL.fullmatch(value.strip()))
+
+
+def usable_credential(value: Optional[str], name: str = "") -> Optional[str]:
+    """The credential, or None when it is empty or a template placeholder."""
+    if not value or not value.strip():
+        return None
+    if is_placeholder_credential(value):
+        if name and name not in _placeholder_warned:
+            _placeholder_warned.add(name)
+            logger.warning("%s holds a placeholder value; treating it as not configured", name)
+        return None
+    return value
 
 
 def provider_api_key_env_names(provider: str) -> tuple[str, ...]:

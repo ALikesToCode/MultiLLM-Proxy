@@ -9,6 +9,8 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import ClassVar
 
+from services.auth_primitives import is_placeholder_credential
+
 _DIRECT_KEY_NAMES = ("NANOGPT_API_KEY", "NANO_GPT_KEY")
 _LIST_KEY_NAMES = ("NANOGPT_API_KEYS", "NANO_GPT_KEYS")
 _NUMBERED_KEY_PATTERN = re.compile(
@@ -85,7 +87,7 @@ def configured_nanogpt_keys(
     keys: list[str] = []
     seen: set[str] = set()
     for _, candidate in candidates:
-        if candidate in seen:
+        if candidate in seen or is_placeholder_credential(candidate):
             continue
         seen.add(candidate)
         keys.append(candidate)

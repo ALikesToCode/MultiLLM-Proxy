@@ -37,6 +37,7 @@ from services.auth_primitives import (
     require_valid_username,
     serialize_datetime,
     serialize_scopes,
+    usable_credential,
 )
 from services import key_controls
 from services.nanogpt_key_pool import configured_nanogpt_keys
@@ -662,13 +663,13 @@ class AuthService:
     def get_api_key(cls, provider: str) -> Optional[str]:
         """Get API key for a provider."""
         for env_key in provider_api_key_env_names(provider):
-            api_key = os.environ.get(env_key)
+            api_key = usable_credential(os.environ.get(env_key), env_key)
             if api_key:
                 return api_key
-        relay_key = image_relay_api_key(provider)
+        relay_key = usable_credential(image_relay_api_key(provider), "IMAGE_RELAY_API_KEYS_JSON")
         if relay_key:
             return relay_key
-        return cls._api_keys.get(provider)
+        return usable_credential(cls._api_keys.get(provider))
 
     @classmethod
     def provider_credential_env_names(cls, provider: str) -> tuple[str, ...]:
