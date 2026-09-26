@@ -136,8 +136,8 @@ def register_knowledge_onboarding_routes(app):
 
 ## Skills for LLMs and coding agents
 Install these in Claude Code, Codex or another agent, or read them before writing code.
-- [Chat skill]({origin}/agent-onboarding/chat/SKILL.md): Call chat models from code: SDK setup, model discovery, automatic routes, free pools, headers and retries.
-- [Media skill]({origin}/agent-onboarding/media/SKILL.md): Generate images, image batches and videos from code.
+- [Chat skill]({origin}/agent-onboarding/chat/SKILL.md): Call chat models from code: SDK setup, model discovery, automatic routes, free pools, the Messages API, caching, headers and retries.
+- [Media skill]({origin}/agent-onboarding/media/SKILL.md): Generate and edit images, run background batches, make videos, and create embeddings, speech and transcriptions from code.
 - [MCP skill]({origin}/agent-onboarding/mcp/SKILL.md): Connect the MultiLLM MCP server for model, chat and media tools.
 - [Knowledge skill]({origin}/agent-onboarding/SKILL.md): Cited evidence, documentation indexing and Firecrawl Alexandria.
 
@@ -149,22 +149,38 @@ Install these in Claude Code, Codex or another agent, or read them before writin
 - `POST {origin}/v1/chat/completions`: Chat Completions with optional `stream: true`.
   `auto:` routes fall back between providers; `free:` pools use only free models and
   accept function `tools`, sending them only to models with confirmed tool support.
-- `POST {origin}/v1/responses`: the Responses API for an explicit `provider:model`.
+- `POST {origin}/v1/responses`: the Responses API for any chat model, including `auto:`
+  routes and `free:` pools.
+- `POST {origin}/v1/messages`: the Anthropic Messages API for any chat model (`x-api-key`
+  or Bearer). Messages-compatible SDKs use base URL `{origin}` with a MultiLLM model ID.
 - `POST {origin}/optimize/v1/chat/completions`: compacts long histories before sending.
+- `GET {origin}/v1/usage`: the key's own spend, remaining budget and recent history.
+- `GET {origin}/status.json`: public health of each automatic route and provider.
 
-Set SDK retries to 0: a retried generation can be billed twice.
+Set SDK retries to 0: a retried generation can be billed twice. `auto:` routes move on
+after a definite refusal or a `500`, `502` or `503` before any output, never after a
+timeout. Send `X-MultiLLM-Cache: on` to reuse answers to identical deterministic requests.
+A key may carry a dollar budget or model allowlist: `429 budget_exceeded` and
+`403 model_not_allowed` mean stop and tell the user.
 
 ## Media generation
 - `POST {origin}/v1/images/generations` with `model: "auto:image"`: the best current model
   (GPT Image 2.5 Sunburst) at `max` quality, falling back across GGUU, Cloudflare AI,
   OpenAI, xAI, Together, AIHubMix and Workers AI.
-- `POST {origin}/v1/images/batch`: different prompts, sizes and models in one call.
+- `POST {origin}/v1/images/edits` (default `auto:image-edit`): edit or combine images from
+  a multipart upload or image URLs.
+- `POST {origin}/v1/images/batch`: different prompts, sizes and models in one call (16 items).
+- `POST {origin}/v1/images/batches`: up to 500 items in the background, with
+  `Idempotency-Key`, polling or a signed webhook, and stored results.
 - `POST {origin}/v1/videos`, then `GET /v1/videos/{{id}}` and `/content`: asynchronous video
-  (Veo 3.1, Grok Imagine Video, Sora 2).
+  (Veo 3.1, Grok Imagine Video, Sora 2), with an optional `webhook_url`.
+- `POST {origin}/v1/embeddings`, `/v1/audio/speech` and `/v1/audio/transcriptions`:
+  `auto:embed`, `auto:tts` and `auto:stt` by default (scopes `embeddings` and `audio`).
 - `GET {origin}/v1/media/providers`: which providers can run now, without cost.
 
-Media requests use a proxy key with the `chat` scope. Videos and large batches cost money;
-confirm with the user first.
+Image and video requests use a proxy key with the `chat` scope. Stored media come back as
+signed `/v1/media/files/...` links. Videos and large batches cost money; confirm with the
+user first.
 
 ## MCP for coding agents
 - [MultiLLM MCP]({origin}/v1/mcp): Streamable HTTP POST with `Authorization: Bearer $MULTILLM_API_KEY`.

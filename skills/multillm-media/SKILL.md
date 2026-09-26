@@ -1,6 +1,6 @@
 ---
 name: multillm-media
-description: Generate images, image batches and videos through MultiLLM-Proxy's media gateway, which picks the best current model and falls back to another provider when one fails. Use when a task needs a generated picture, several pictures or a video clip.
+description: Generate and edit images, run image batches, make videos, and create embeddings, speech and transcriptions through MultiLLM-Proxy's media gateway, which picks the best current model and falls back to another provider when one fails. Use when a task needs a generated or edited picture, many pictures, a video clip, embeddings or audio.
 ---
 
 # MultiLLM Media
@@ -10,7 +10,8 @@ gateway chooses the provider, falls back automatically, and keeps provider keys 
 
 Send `Authorization: Bearer $MULTILLM_API_KEY` from the user's private environment. Never
 ask for the key in chat, print it, or save it in a repository. A key needs the `chat`
-scope; the provider probe needs `admin`.
+scope for images and video, `embeddings` or `audio` for those endpoints, and `admin` for
+the provider probe.
 
 ## Choose a route
 
@@ -19,7 +20,11 @@ scope; the provider probe needs `admin`.
 | `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI, OpenAI, Grok Imagine via xAI, GPT Image 2 via Together, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
 | `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU |
 | `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Cloudflare AI, then OpenAI |
+| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI and OpenAI, Grok Imagine Image 2.0 via xAI, AIHubMix's free GPT Image 2 |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
+| `auto:embed` | Embeddings | `text-embedding-3-small` from OpenAI, then NanoGPT (one model, so vectors stay comparable) |
+| `auto:tts` | Speech | OpenAI `gpt-4o-mini-tts`, then Workers AI Aura |
+| `auto:stt` | Transcription | OpenAI `gpt-4o-mini-transcribe`, NanoGPT, Together Whisper, Workers AI Whisper |
 
 Use `provider:model` (for example `gguu:gpt-image-2.5-flare` or
 `gguu-grok:grok-imagine-image-quality`) only when the user names a provider or model.
@@ -66,6 +71,44 @@ At most 16 items. With `response_format: "url"` a batch returns up to 32 images,
 otherwise 8 (base64 is large). Read `data[].status` (`succeeded` or `failed`),
 `data[].images` and `data[].error`, and retry only the failed items.
 
+### Large batches in the background
+
+`POST /v1/images/batches` takes the same `items` and `defaults` but up to 500 items and
+1,000 images, returns at once, and keeps running while you wait. Send an
+`Idempotency-Key` header so a retried submission returns the same batch instead of a
+second one, and an optional `webhook_url` (public HTTPS) to be notified when it ends.
+
+```bash
+curl -sS "$MULTILLM_BASE_URL/v1/images/batches" \
+  -H "Authorization: Bearer $MULTILLM_API_KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: launch-images-1" \
+  -d '{"defaults": {"model": "auto:image", "size": "1536x1024"},
+       "items": [{"id": "hero", "prompt": "Mountain lake at dawn"},
+                 {"id": "icon", "prompt": "Flat lake icon", "n": 2}]}'
+```
+
+Poll `GET /v1/images/batches/{id}` every 30 to 60 seconds until `status` is `completed`,
+`cancelled` or `failed`, then page through `GET /v1/images/batches/{id}/results?limit=100`
+(follow `next_after`); each item has `status`, `model` and `images` (signed links) or
+`error`. `POST /v1/images/batches/{id}/cancel` stops queued items. `503
+batches_not_configured` means this gateway has no background storage; use
+`/v1/images/batch` instead.
+
+## Edit an image
+
+`POST /v1/images/edits` takes OpenAI's multipart form: `image` (or several `image[]`, PNG,
+JPEG or WebP), an optional PNG `mask`, `prompt`, and optional `model` (default
+`auto:image-edit`), `size`, `quality`, `n`, `background`, `output_format` and
+`response_format`.
+
+```bash
+curl -sS "$MULTILLM_BASE_URL/v1/images/edits" -H "Authorization: Bearer $MULTILLM_API_KEY" \
+  -F image=@cat.png -F prompt="Put the cat in a spacesuit" -F response_format=url
+```
+
+JSON works too, with `images` as HTTPS or data URLs. To use pictures as references for a
+new image instead, send `images` with `POST /v1/images/generations`.
+
 ## Generate a video
 
 ```bash
@@ -83,6 +126,33 @@ curl -sS "$MULTILLM_BASE_URL/v1/videos" \
   `aspect_ratio` `16:9`, `9:16` or `1:1`, `resolution` `720p` or `1080p` (default),
   `image_url` (https or a PNG, JPEG or WebP data URL) to animate a still image, and
   `generate_audio` (default true where supported).
+
+## Embeddings, speech and transcription
+
+OpenAI-compatible bodies on `POST /v1/embeddings`, `POST /v1/audio/speech` and
+`POST /v1/audio/transcriptions` (multipart `file`, up to 25 MiB). Omit `model` to use
+`auto:embed`, `auto:tts` or `auto:stt`, or name a `provider:model`. For embeddings you
+store, pin one model; vectors from different models cannot be compared. Python, with the
+`client` from [Use from code](#use-from-code):
+
+```python
+vectors = client.embeddings.create(model="auto:embed", input=["first text", "second text"])
+speech = client.audio.speech.create(model="auto:tts", voice="alloy", input="Build finished.")
+pathlib.Path("done.mp3").write_bytes(speech.content)
+text = client.audio.transcriptions.create(model="auto:stt", file=open("meeting.m4a", "rb")).text
+```
+
+These routes move to the next provider only after a refusal that proves no work was done;
+a `5xx` or timeout is returned to you.
+
+## Links to stored media
+
+When the gateway stores media, image replies carry a gateway `url` of the form
+`/v1/media/files/{file_id}?expires=…&signature=…` plus a `file_id`, and videos gain a
+`file_id` and `content_url`. Signed links work without a key until they expire (seven
+days by default). With the key, `GET /v1/media/files/{file_id}?format=json` returns a fresh
+link and `DELETE /v1/media/files/{file_id}` removes the file. Without storage, replies
+keep the provider's URLs, which expire sooner: download them promptly.
 
 ## Use from code
 
@@ -145,6 +215,7 @@ Coding agents connected to the MultiLLM MCP server (`$MULTILLM_BASE_URL/v1/mcp`,
 `auto:image` or `auto:video` and `response_format: "url"`, make exactly one request per call
 and never retry or poll. Inline images are limited to 5 MiB each and 10 MiB per call;
 `get_video` returns `content_url`, never the MP4, so download it over HTTP with the same key.
+Edits, background batches, embeddings and audio are HTTP-only: call them directly.
 
 ## Check providers
 
@@ -164,5 +235,8 @@ and never retry or poll. Inline images are limited to 5 MiB each and 10 MiB per 
   accepted and billed; it is not retried elsewhere. Tell the user, and retry only with
   their agreement.
 - For a content-policy refusal, rephrase the prompt; do not cycle providers yourself.
+- A key may have a dollar budget or a model allowlist: `429 budget_exceeded` or
+  `403 model_not_allowed` means stop and tell the user. `GET /v1/usage` shows the key's
+  spend and remaining budget; check it before a large batch.
 - Prompts and reference images go to third-party providers. Keep secrets and personal
   data out of them.
