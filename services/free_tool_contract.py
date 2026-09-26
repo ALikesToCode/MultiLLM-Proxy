@@ -161,7 +161,8 @@ def check_tool_calls(choices: list, names: frozenset[str], tool_choice) -> None:
     called = False
     for choice in choices:
         calls = choice["message"].get("tool_calls")
-        if calls is None:
+        # Some providers send an empty list alongside an ordinary answer.
+        if calls is None or calls == []:
             continue
         if not isinstance(calls, list) or len(calls) > MAX_TOOL_CALLS or tool_choice == "none":
             raise JsonOutputError("invalid_tool_call")

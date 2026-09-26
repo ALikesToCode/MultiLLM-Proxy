@@ -1,13 +1,16 @@
 """Tool calling on free pools: validation, tool-capable routing and output checks."""
 
 import json
+import unittest
 from contextlib import closing
 from unittest.mock import patch
 
 import requests
 from flask import Response
 
+from services.free_json_contract import JsonOutputError
 from services.free_quota_service import FreeQuotaService
+from services.free_tool_contract import check_tool_calls, validate_tools
 from tests.test_free_routes import catalog_row
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -255,3 +258,49 @@ class FreeToolCallingTest(UnifiedApiTestCase):
                 with self.subTest(payload=json.dumps(payload)[:120]):
                     self.assertEqual(self.post(payload).status_code, 400)
         send.assert_not_called()
+
+
+class ToolContractTest(unittest.TestCase):
+    NAMES = frozenset({"get_weather"})
+
+    @staticmethod
+    def choices(*calls, content=None, omit=False):
+        message = {"role": "assistant", "content": content}
+        if not omit:
+            message["tool_calls"] = list(calls)
+        return [{"message": message}]
+
+    @staticmethod
+    def call(name="get_weather", arguments='{"city": "Paris"}', **extra):
+        return {"id": "call_1", "type": "function", "function": {"name": name, "arguments": arguments}, **extra}
+
+    def test_valid_calls_and_provider_extras_pass(self):
+        check_tool_calls(self.choices(self.call(index=0)), self.NAMES, "auto")
+        check_tool_calls(self.choices(self.call()), self.NAMES, {"type": "function", "function": {"name": "get_weather"}})
+        check_tool_calls(self.choices(content="Sunny.", omit=True), self.NAMES, "none")
+        # An empty list beside an ordinary answer is no call.
+        check_tool_calls(self.choices(content="Sunny."), self.NAMES, "none")
+
+    def test_invalid_calls_are_rejected(self):
+        for choices, tool_choice in (
+            (self.choices(self.call(name="other")), "auto"),
+            (self.choices(self.call(arguments="{")), "auto"),
+            (self.choices(self.call(arguments='{"x": NaN}')), "auto"),
+            (self.choices({"type": "function", "function": {"name": "get_weather", "arguments": "{}"}}), "auto"),
+            (self.choices(self.call(type="retrieval")), "auto"),
+            (self.choices(self.call()), "none"),
+            (self.choices(content="Sunny.", omit=True), "required"),
+            ([{"message": {"role": "assistant", "content": None, "tool_calls": {"id": "x"}}}], "auto"),
+        ):
+            with self.subTest(choices=choices, tool_choice=tool_choice), self.assertRaises(JsonOutputError) as error:
+                check_tool_calls(choices, self.NAMES, tool_choice)
+            self.assertEqual(error.exception.reason, "invalid_tool_call")
+
+    def test_definitions_are_bounded(self):
+        self.assertEqual(validate_tools({"tools": [WEATHER]}), self.NAMES)
+        self.assertIsNone(validate_tools({}))
+        big = {"type": "function", "function": {"name": "big", "parameters": {
+            "type": "object", "properties": {f"p{index}": {"type": "string", "description": "x" * 200}
+                                             for index in range(400)}}}}
+        with self.assertRaises(ValueError):
+            validate_tools({"tools": [big]})
