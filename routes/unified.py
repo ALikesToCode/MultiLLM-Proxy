@@ -64,6 +64,7 @@ from services.media_catalog import (
     image_profile,
     is_video_model,
 )
+from services.media_storage import persist_image_response
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.context_optimizer import ContextOptimizationResult
@@ -1053,16 +1054,19 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     def unified_image_generations():
         payload = json_object_body()
         if has_reference_images(payload):
-            return dispatch_reference_generation(
+            response = dispatch_reference_generation(
                 app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
             )
-        return dispatch_unified_image_generation(
-            app,
-            auth_service_cls,
-            metrics_service_cls,
-            proxy_service_cls,
-            payload,
-        )
+        else:
+            response = dispatch_unified_image_generation(
+                app,
+                auth_service_cls,
+                metrics_service_cls,
+                proxy_service_cls,
+                payload,
+            )
+        # With an R2 bucket bound, images are returned as durable gateway links.
+        return persist_image_response(response, payload)
 
     @app.route("/v1/responses", methods=["POST", "OPTIONS"])
     @csrf.exempt

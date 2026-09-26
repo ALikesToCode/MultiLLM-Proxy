@@ -1,4 +1,4 @@
-"""Image batches, asynchronous video jobs and media provider status."""
+"""Image batches and edits, asynchronous video jobs, stored media and provider status."""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
 from routes.media_edits import dispatch_image_edit, parse_json_edit, parse_multipart_edit
+from routes.media_files import register_media_file_routes, stream_stored_file
 from routes.media_images import image_fail_over, run_image_batch
 from routes.unified import _validate_image_candidate, dispatch_unified_image_generation
-from services import cloudflare_ai, video_generation
+from services import cloudflare_ai, media_storage, video_generation
 from services.auto_route_service import AutoRouteService
 from services.media_catalog import prepare_image_payload
 from services.model_registry import ModelRegistry
@@ -70,11 +71,37 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     def validate_image_candidate(candidate: str) -> None:
         _validate_image_candidate(app, auth_service_cls, proxy_service_cls, candidate)
 
+    def stored_video(job: dict, job_id: str) -> str | None:
+        """With R2 bound, copy a finished video there once; its file ID, or None."""
+        if not media_storage.enabled():
+            return None
+        file_id = media_storage.video_file_id(job_id)
+        try:
+            if media_storage.stat(file_id) is None:
+                key, base_url = video_credentials(job["p"])
+                url, headers = video_generation.content_source(job, key, base_url)
+                if not url.startswith("https://") or media_storage.store_video(
+                        file_id, url, headers, owner=_owner(), model=f"{job['p']}:{job['m']}") is None:
+                    return None
+            return file_id
+        except (APIError, media_storage.StorageError):
+            # The provider's copy still serves /content; storing is retried on the next poll.
+            return None
+
+    register_media_file_routes(app, csrf)
+
     @app.route("/v1/images/batch", methods=["POST", "OPTIONS"])
     @csrf.exempt
     @api_auth_required
     def image_batch():
-        return jsonify(run_image_batch(json_object_body(), generate_image))
+        def persist(images: list, item: dict, model: str) -> list:
+            if not media_storage.enabled():
+                return images
+            stored, _ = media_storage.store_image_entries(images, owner=_owner(), model=model,
+                                                          want_url=item.get("response_format") == "url")
+            return stored
+
+        return jsonify(run_image_batch(json_object_body(), generate_image, persist))
 
     @app.route("/v1/images/edits", methods=["POST", "OPTIONS"])
     @csrf.exempt
@@ -84,7 +111,8 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             payload, inputs = parse_multipart_edit()
         else:
             payload, inputs = parse_json_edit(json_object_body())
-        return dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, inputs)
+        return media_storage.persist_image_response(
+            dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, inputs), payload)
 
     @app.route("/v1/videos", methods=["POST", "OPTIONS"])
     @csrf.exempt
@@ -125,7 +153,11 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         key, base_url = video_credentials(job["p"])
         status = video_generation.job_status(job, job_id, key, base_url)
         if status["status"] == "completed":
-            status["content_url"] = url_for("video_content", job_id=job_id, _external=True)
+            file_id = stored_video(job, job_id)
+            if file_id:
+                status.update(file_id=file_id, content_url=media_storage.file_url(file_id))
+            else:
+                status["content_url"] = url_for("video_content", job_id=job_id, _external=True)
         return jsonify(status)
 
     @app.route("/v1/videos/<job_id>/content", methods=["GET", "OPTIONS"])
@@ -133,6 +165,13 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     @api_authenticate_only
     def video_content(job_id: str):
         job = video_generation.read_job_id(job_id, _owner())
+        if media_storage.enabled():
+            file_id = media_storage.video_file_id(job_id)
+            try:
+                if media_storage.stat(file_id) is not None:
+                    return stream_stored_file(file_id, "private, no-store")
+            except media_storage.StorageError:
+                pass
         key, base_url = video_credentials(job["p"])
         url, headers = video_generation.content_source(job, key, base_url)
         return video_generation.stream_content(url, headers)

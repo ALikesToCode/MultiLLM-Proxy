@@ -138,8 +138,12 @@ def dispatch_auto_image_generation(payload: dict, *, validate_candidate: Callabl
     return response
 
 
-def run_image_batch(body: dict, dispatch: Callable[[dict], Response]) -> dict:
-    """Different prompts, sizes and models in one call; each item reports its own outcome."""
+def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
+                    persist: Callable[[list, dict, str], list] | None = None) -> dict:
+    """Different prompts, sizes and models in one call; each item reports its own outcome.
+
+    `persist` may replace an item's images (for example with stored gateway links).
+    """
     items, defaults = body.get("items"), body.get("defaults", {})
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_BATCH_ITEMS or not isinstance(defaults, dict):
         raise APIError(f"items must be a list of 1 to {MAX_BATCH_ITEMS} objects; defaults must be an object", status_code=400)
@@ -164,8 +168,10 @@ def run_image_batch(body: dict, dispatch: Callable[[dict], Response]) -> dict:
     for index, (item, result) in enumerate(zip(items, results)):
         entry = {"index": index, "id": item.get("id", str(index))}
         if result["status"] < 400 and result["body"]:
-            entry.update(status="succeeded", images=result["body"].get("data") or [],
-                         model=result["headers"].get("X-MultiLLM-Auto-Selected-Model") or requests_by_item[index]["model"])
+            model = result["headers"].get("X-MultiLLM-Auto-Selected-Model") or requests_by_item[index]["model"]
+            images = result["body"].get("data") or []
+            entry.update(status="succeeded", model=model,
+                         images=persist(images, requests_by_item[index], model) if persist else images)
         else:
             entry.update(status="failed", error=_error(result))
         data.append(entry)

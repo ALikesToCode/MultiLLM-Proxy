@@ -5,6 +5,7 @@ import { handleIntelligenceOutbound } from "./worker/intelligence-outbound.mjs";
 import { handleKnowledgeOutbound } from "./worker/knowledge-outbound.mjs";
 import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleMediaOutbound } from "./worker/media-outbound.mjs";
+import { serveSignedMediaFile, signedMediaFileId } from "./worker/media-files.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
@@ -1855,6 +1856,18 @@ export default {
         ? getContainer(env.MULTILLM_PROXY_CONTAINER, "primary")
         : null;
       return handleStatusRequest(request, env, ctx, { container });
+    }
+
+    const signedMediaFile = signedMediaFileId(request, requestUrl);
+    if (signedMediaFile) {
+      // Signed media links are served from R2 without waking the Container.
+      try {
+        return applyCorsHeaders(request, await serveSignedMediaFile(request, env, signedMediaFile), env);
+      } catch (error) {
+        logStructuredError("media_file_failed", error);
+        return applyCorsHeaders(request, jsonResponse({ error: "Media unavailable",
+          message: "The media file could not be read." }, { status: 502 }), env);
+      }
     }
 
     if (readyPath) {

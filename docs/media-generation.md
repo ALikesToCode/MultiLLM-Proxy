@@ -2,7 +2,9 @@
 
 MultiLLM serves the leading image and video models behind automatic routes that try
 providers in order and fall back when one fails. Agents can learn the API from
-`/agent-onboarding/media/SKILL.md` (linked from `/llms.txt`).
+`/agent-onboarding/media/SKILL.md` (linked from `/llms.txt`). With an R2 bucket bound,
+generated media is kept and returned as durable gateway links; see
+[media storage](media-storage.md).
 
 ## Routes
 
