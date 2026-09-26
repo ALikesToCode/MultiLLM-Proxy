@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 
 import requests
-from flask import Response, has_request_context, request
+from flask import Response, g, has_request_context, request
 
 from error_handlers import APIError
 from route_helpers import stream_upstream_response
@@ -30,6 +30,7 @@ from routes.unified_transport import send_unified_image_request
 from services import cloudflare_ai, media_storage
 from services.auto_route_service import AutoRouteService
 from services.media_catalog import TRANSPORT_FAILURE_HEADER, image_edit_support, prepare_image_edit_payload
+from services.media_signing import FILE_ID
 from services.model_registry import ModelRegistry
 
 DEFAULT_EDIT_ROUTE = "auto:image-edit"
@@ -89,6 +90,29 @@ def _source(data: bytes, field: str, limit: int, *, png_only: bool = False) -> S
     return SourceImage(data, content_type)
 
 
+def _stored_source(file_id: object, field: str, limit: int, *, png_only: bool = False) -> SourceImage:
+    """An image the caller uploaded (`mu_`) or generated (`mf_`), read back from R2."""
+    if not isinstance(file_id, str) or not FILE_ID.fullmatch(file_id):
+        raise APIError(f"{field} must be a media file ID such as mu_...", status_code=400)
+    if not media_storage.enabled():
+        raise APIError("Media storage is not configured on this deployment", status_code=503,
+                       payload={"error": "media_storage_not_configured"})
+    user = g.authenticated_user
+    admin = bool(user.get("is_admin")) or "admin" in (user.get("scopes") or [])
+    try:
+        meta = media_storage.stat(file_id)
+        if meta is None or meta.get("kind") != "image" or (meta.get("owner") != user.get("username") and not admin):
+            raise APIError(f"{field}: file not found", status_code=404, payload={"error": "file_not_found"})
+        if media_storage.upload_expired(file_id, meta):
+            raise APIError(f"{field}: the upload expired; upload the image again", status_code=410,
+                           payload={"error": "upload_expired"})
+        data = media_storage.read_file(file_id, limit)
+    except media_storage.StorageError:
+        raise APIError("Media storage could not be reached", status_code=503,
+                       payload={"error": "media_storage_unavailable"}) from None
+    return _source(data, field, limit, png_only=png_only)
+
+
 def _inputs(images: list[SourceImage], mask: SourceImage | None) -> EditInputs:
     if not images:
         raise APIError("At least one image is required", status_code=400)
@@ -104,18 +128,26 @@ def _check_count(count: int) -> None:
 
 
 def parse_multipart_edit() -> tuple[dict, EditInputs]:
-    """OpenAI's edit form: `image` or `image[]` files, an optional `mask` and text fields."""
+    """OpenAI's edit form: `image` or `image[]` files, an optional `mask` and text fields.
+    `image_file_id` and `mask_file_id` name images already stored with /v1/media/uploads."""
     if set(request.files) - {"image", "image[]", "mask"}:
         raise APIError("Upload images as image or image[] and the mask as mask", status_code=400)
     uploads = request.files.getlist("image") + request.files.getlist("image[]")
-    _check_count(len(uploads))
+    file_ids = request.form.getlist("image_file_id") + request.form.getlist("image_file_id[]")
+    _check_count(len(uploads) + len(file_ids))
     masks = request.files.getlist("mask")
-    if len(masks) > 1:
+    mask_file_id = request.form.get("mask_file_id")
+    if len(masks) + bool(mask_file_id) > 1:
         raise APIError("Send at most one mask", status_code=400)
     images = [_source(upload.read(MAX_IMAGE_BYTES + 1), "image", MAX_IMAGE_BYTES) for upload in uploads]
+    images += [_stored_source(file_id, f"image_file_id[{index}]", MAX_IMAGE_BYTES) for index, file_id in enumerate(file_ids)]
     mask = _source(masks[0].read(MAX_MASK_BYTES + 1), "mask", MAX_MASK_BYTES, png_only=True) if masks else None
+    if mask_file_id:
+        mask = _stored_source(mask_file_id, "mask_file_id", MAX_MASK_BYTES, png_only=True)
     payload: dict[str, object] = {}
     for name, value in request.form.items():
+        if name in ("image_file_id", "image_file_id[]", "mask_file_id"):
+            continue
         if name in _INTEGER_FIELDS:
             try:
                 payload[name] = int(value)
@@ -134,12 +166,14 @@ def reference_values(body: dict) -> list | None:
 
 
 def _reference(value: object, field: str, limit: int, *, png_only: bool = False) -> SourceImage:
+    if isinstance(value, dict) and "file_id" in value:
+        return _stored_source(value["file_id"], field, limit, png_only=png_only)
     if isinstance(value, dict):
         value = value.get("image_url", value.get("url"))
         if isinstance(value, dict):
             value = value.get("url")
     if not isinstance(value, str):
-        raise APIError(f"{field} must be an https URL or an image data URL", status_code=400)
+        raise APIError(f"{field} must be an https URL, an image data URL or {{\"file_id\": ...}}", status_code=400)
     match = _DATA_URL.match(value)
     if match:
         try:
@@ -157,7 +191,7 @@ def parse_json_edit(body: dict) -> tuple[dict, EditInputs]:
     """JSON edits: `images` (or `image`) and `mask` as HTTPS or data URLs."""
     references = reference_values(body)
     if not references:
-        raise APIError("images must list at least one https or data URL", status_code=400)
+        raise APIError("images must list at least one https URL, data URL or {\"file_id\": ...}", status_code=400)
     _check_count(len(references))
     images, total = [], 0
     for index, value in enumerate(references):

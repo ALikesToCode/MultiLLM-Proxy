@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { serveSignedMediaFile, signedMediaFileId } from "../worker/media-files.mjs";
-import { handleMediaOutbound } from "../worker/media-outbound.mjs";
+import { handleMediaOutbound, mediaObjectKey } from "../worker/media-outbound.mjs";
 import { mediaMac, verifyFileLink, webhookSignature } from "../worker/media-signing.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
@@ -60,6 +60,12 @@ test("signatures match services/media_signing.py", async () => {
     "v1,v/mRpTaO+aKRBHnYz195WvhGuyasIR8b/ckkVa9FMu8=");
   assert.equal(`whsec_${Buffer.from(await mediaMac("parity-secret", "webhook", "alice")).toString("base64")}`,
     "whsec_mDjj2kRZZ7WCap4F63/rTQtrBvux7PsfG03IYoCycQ0=");
+});
+
+test("uploaded source images live under their own prefix for a shorter lifecycle rule", () => {
+  assert.equal(mediaObjectKey("mu_" + "a".repeat(32)), "uploads/mu_" + "a".repeat(32));
+  assert.equal(mediaObjectKey("mf_" + "a".repeat(32)), "media/mf_" + "a".repeat(32));
+  assert.equal(collectContainerEnv({ MEDIA_UPLOAD_TTL_SECONDS: "3600" }).MEDIA_UPLOAD_TTL_SECONDS, "3600");
 });
 
 test("the Container stores, describes, reads and deletes files through media.internal", async () => {

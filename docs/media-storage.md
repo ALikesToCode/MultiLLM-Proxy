@@ -40,6 +40,34 @@ With an API key, the owner (the key's user) or an administrator can:
 
 Other keys get `404`.
 
+## Uploading large source images
+
+A detailed source image can be several MiB. Upload it once and reference it by ID in
+edits, instead of sending the same bytes with every request:
+
+```bash
+curl -sS "$MULTILLM_BASE_URL/v1/media/uploads" -H "Authorization: Bearer $MULTILLM_API_KEY" \
+  -F file=@reference.png
+# {"id": "mu_…", "object": "media.upload", "bytes": 4718592, "content_type": "image/png",
+#  "created_at": 1790000000, "expires_at": 1790086400, "url": "https://…/v1/media/files/mu_…?…"}
+```
+
+`POST /v1/media/uploads` takes one PNG, JPEG or WebP image of at most 20 MiB, as the
+multipart field `file` or as the raw body with its image `Content-Type`, and needs the
+`chat` scope. Then send `{"file_id": "mu_…"}` in the `images` list (or as `mask`) of a
+JSON `POST /v1/images/edits` or reference-image `POST /v1/images/generations`, or the form
+field `image_file_id` (repeatable) and `mask_file_id` in a multipart edit. The Container
+reads the image back from R2 and sends it to the provider as usual. Images the gateway
+generated (`mf_…`) can be referenced the same way, so a result can be edited again
+without downloading it.
+
+Only the owner (or an administrator) can reference a file; others get `404
+file_not_found`. Uploads can be referenced for `MEDIA_UPLOAD_TTL_SECONDS` (default one
+day, 5 minutes to 7 days), after which edits answer `410 upload_expired`. They live under
+their own `uploads/` prefix, so a short lifecycle rule removes them (see Setup). Without
+the bucket, uploads answer `503 media_storage_not_configured`; sending the image in the
+request still works.
+
 ## Asynchronous image batches
 
 `POST /v1/images/batches` takes the same `items` and `defaults` as the synchronous
@@ -124,7 +152,8 @@ with `webhook_url` returns `503 webhooks_not_configured` before creating a job.
 2. Expire old files with a lifecycle rule, for example after 30 days:
    `npx wrangler r2 bucket lifecycle add multillm-media expire-media media/ --expire-days 30`.
    R2 removes expired objects within about a day. Links outlive neither the rule nor a
-   deletion.
+   deletion. Remove uploaded source images sooner:
+   `npx wrangler r2 bucket lifecycle add multillm-media expire-uploads uploads/ --expire-days 1`.
 3. Apply the D1 migrations, including `0008_media_jobs.sql`:
    `npx wrangler d1 migrations apply multillm-intelligence --remote`. `/ready` reports
    `d1_schema_missing` until it is applied.
@@ -143,4 +172,5 @@ webhooks need `MEDIA_JOBS` and D1; batches need all three. The Worker tells the
 Container which are bound (`MEDIA_STORAGE_ENABLED`, `MEDIA_JOBS_ENABLED`), so nothing
 else needs configuring.
 
-Objects live under `media/{file_id}` with the owner, kind and model as custom metadata.
+Objects live under `media/{file_id}` (uploads under `uploads/{file_id}`) with the owner,
+kind and model as custom metadata.

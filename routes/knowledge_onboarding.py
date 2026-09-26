@@ -168,7 +168,8 @@ A key may carry a dollar budget or model allowlist: `429 budget_exceeded` and
   (GPT Image 2.5 Sunburst) at `max` quality, falling back across GGUU, Cloudflare AI,
   OpenAI, xAI, Together, AIHubMix and Workers AI.
 - `POST {origin}/v1/images/edits` (default `auto:image-edit`): edit or combine images from
-  a multipart upload or image URLs.
+  a multipart upload, image URLs or `{{"file_id": ...}}` of an image stored with
+  `POST {origin}/v1/media/uploads` (reuse one large source image across requests).
 - `POST {origin}/v1/images/batch`: different prompts, sizes and models in one call (16 items).
 - `POST {origin}/v1/images/batches`: up to 500 items in the background, with
   `Idempotency-Key`, polling or a signed webhook, and stored results.

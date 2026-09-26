@@ -299,6 +299,26 @@ def is_api_request_path(path: str) -> bool:
     )
 
 
+# Routes that carry images or audio, unified or provider-native (`/gguu/v1/images/edits`).
+# They take the media upload limit instead of the provider's 1 MiB chat default.
+MEDIA_UPLOAD_PATH = re.compile(
+    r"(?:/[a-z0-9_-]+)?/v1/(?:images/(?:edits|variations|generations)|audio/(?:transcriptions|translations)"
+    r"|media/uploads)"
+)
+DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 48 * 1024 * 1024
+
+
+def media_upload_limit(path: str) -> Optional[int]:
+    """The body limit for an image or audio upload route, or None for other routes."""
+    if not MEDIA_UPLOAD_PATH.fullmatch(path):
+        return None
+    try:
+        configured = int(os.environ.get("MEDIA_UPLOAD_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    return configured if configured > 0 else DEFAULT_MEDIA_UPLOAD_MAX_BYTES
+
+
 def provider_from_request_path(path: str, payload_json: Optional[Dict[str, Any]] = None) -> str:
     if path.startswith("/v1/free/"):
         return "free"
@@ -618,6 +638,9 @@ def api_auth_required(
             if authorization_error is not None:
                 return authorization_error
 
+            upload_limit = media_upload_limit(request.path)
+            if upload_limit is not None:
+                request.max_content_length = upload_limit
             payload_bytes = request.get_data(cache=True) or b""
             payload_json = request.get_json(silent=True) if request.is_json else None
             provider = provider_from_request_path(request.path, payload_json)
@@ -628,6 +651,7 @@ def api_auth_required(
                 payload_bytes=payload_bytes,
                 payload_json=payload_json,
                 remote_addr=request.remote_addr,
+                max_request_bytes=upload_limit,
             )
             g.rate_limit = limit_decision.metadata
             if not limit_decision.allowed:

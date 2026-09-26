@@ -109,7 +109,9 @@ async function fetchImage(request) {
   return new Response(bytes, { headers: { "content-type": type, "cache-control": "no-store" } });
 }
 
-export const mediaObjectKey = fileId => `media/${fileId}`;
+// Uploaded source images (`mu_`) live under their own prefix so a short lifecycle rule
+// removes them without touching generated media.
+export const mediaObjectKey = fileId => `${fileId.startsWith("mu_") ? "uploads" : "media"}/${fileId}`;
 const FILE_PATH = /^\/v1\/files\/(m[a-z]_[A-Za-z0-9_-]{8,120})(\/meta|\/import)?$/;
 const FILE_TYPES = { image: /^image\/(?:png|jpeg|webp|gif)$/, video: /^video\/(?:mp4|webm|quicktime)$/ };
 const MAX_FILE_BYTES = { image: 50 * 1024 * 1024, video: 512 * 1024 * 1024 };

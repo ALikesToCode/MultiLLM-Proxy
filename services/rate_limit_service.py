@@ -348,13 +348,16 @@ class RateLimitService:
         return None
 
     @classmethod
-    def check_request_size(cls, provider: str, payload_bytes: bytes) -> LimitDecision:
-        """Apply the provider body-size safety limit without reserving usage."""
-        max_request_bytes = cls._provider_limit(
-            provider,
-            "MAX_REQUEST_BYTES",
-            1024 * 1024,
-        )
+    def check_request_size(cls, provider: str, payload_bytes: bytes,
+                           max_request_bytes: Optional[int] = None) -> LimitDecision:
+        """Apply the body-size safety limit without reserving usage. Media uploads pass
+        their route's larger limit; everything else uses the provider's."""
+        if max_request_bytes is None:
+            max_request_bytes = cls._provider_limit(
+                provider,
+                "MAX_REQUEST_BYTES",
+                1024 * 1024,
+            )
         if len(payload_bytes or b"") > max_request_bytes:
             return LimitDecision(
                 False,
@@ -720,6 +723,7 @@ class RateLimitService:
         payload_bytes: bytes,
         payload_json: Optional[Dict[str, Any]],
         remote_addr: Optional[str],
+        max_request_bytes: Optional[int] = None,
     ) -> LimitDecision:
         """
         Reserve a request budget slot before dispatch.
@@ -728,7 +732,7 @@ class RateLimitService:
         probes cannot bypass RPM/TPM gates. Failed upstream requests currently
         remain counted until request usage reconciliation is added.
         """
-        size_decision = cls.check_request_size(provider, payload_bytes)
+        size_decision = cls.check_request_size(provider, payload_bytes, max_request_bytes)
         if not size_decision.allowed:
             return size_decision
 

@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import secrets
+import time
+from datetime import datetime
 
 import requests
 from flask import Response, g, has_request_context, url_for
@@ -223,6 +225,41 @@ def delete(file_id: str) -> bool:
         return response.json().get("deleted") is True
     except (ValueError, AttributeError):
         raise StorageError("invalid_reply") from None
+
+
+UPLOAD_PREFIX = "mu"
+DEFAULT_UPLOAD_TTL_SECONDS = 24 * 60 * 60
+
+
+def upload_ttl_seconds() -> int:
+    """How long an uploaded source image can be referenced (5 minutes to 7 days)."""
+    try:
+        configured = int(os.environ.get("MEDIA_UPLOAD_TTL_SECONDS", ""))
+    except ValueError:
+        return DEFAULT_UPLOAD_TTL_SECONDS
+    return min(max(configured, 300), 7 * 24 * 60 * 60)
+
+
+def upload_expired(file_id: str, meta: dict, now: float | None = None) -> bool:
+    """Uploads are temporary; generated files follow the bucket's own retention."""
+    if not file_id.startswith(UPLOAD_PREFIX + "_"):
+        return False
+    try:
+        uploaded = datetime.fromisoformat(str(meta.get("uploaded")).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return True
+    return (time.time() if now is None else now) - uploaded > upload_ttl_seconds()
+
+
+def read_file(file_id: str, limit: int) -> bytes:
+    """A stored file's bytes, refused with 413 when it is larger than `limit`."""
+    response = open_file(file_id)
+    try:
+        if response.status_code != 200:
+            raise StorageError(_error_code(response))
+        return _read(response, limit)
+    finally:
+        response.close()
 
 
 def file_url(file_id: str, ttl: int | None = None) -> str:

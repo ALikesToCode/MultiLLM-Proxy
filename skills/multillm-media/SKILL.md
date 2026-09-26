@@ -107,7 +107,18 @@ curl -sS "$MULTILLM_BASE_URL/v1/images/edits" -H "Authorization: Bearer $MULTILL
 ```
 
 JSON works too, with `images` as HTTPS or data URLs. To use pictures as references for a
-new image instead, send `images` with `POST /v1/images/generations`.
+new image instead, send `images` with `POST /v1/images/generations`. Send detailed PNGs as
+they are; upload routes accept bodies up to 48 MiB.
+
+To reuse a large source image across several requests, upload it once and pass its ID:
+
+```bash
+curl -sS "$MULTILLM_BASE_URL/v1/media/uploads" -H "Authorization: Bearer $MULTILLM_API_KEY" -F file=@reference.png
+# then: -F image_file_id=mu_… in the multipart edit, or {"images": [{"file_id": "mu_…"}]} in JSON
+```
+
+Uploads last a day and only your key can use them. `503 media_storage_not_configured`
+means this gateway has no storage; send the image in the request instead.
 
 ## Generate a video
 
