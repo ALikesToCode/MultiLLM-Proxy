@@ -33,9 +33,11 @@ Each `data[].id` is one of:
 | `free:text`, `free:vision` | Free-tier pools that move to another free provider after quota exhaustion; never a paid model |
 | `auto:intelligence` | Task-aware routing with a `routing` object, when an operator has enabled it |
 
-`capabilities` shows `supports_chat`, `supports_images` and `supports_video`. Use a
-model's exact ID, keep the `provider:` prefix, and prefer an `auto:` route when the
-user wants resilience across providers.
+`capabilities` shows `supports_chat`, `supports_images` and `supports_video`; offer only
+models with `supports_chat: true` for chat (image, video and Responses-only models are
+`false`). `context_window` is present only when known. Use a model's exact ID, keep the
+`provider:` prefix, and prefer an `auto:` route when the user wants resilience across
+providers.
 
 ## Chat Completions
 

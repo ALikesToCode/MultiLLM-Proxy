@@ -60,6 +60,14 @@ def free_model_aliases() -> list[dict]:
             "object": "model",
             "created": 0,
             "owned_by": "multillm",
+            "status": "available",
+            "capabilities": {
+                "supports_chat": True,
+                "supports_streaming": True,
+                "supports_vision": vision,
+                "supports_images": False,
+                "supports_video": False,
+            },
             "supports_vision": vision,
         }
         for model, vision in FREE_MODELS.items()

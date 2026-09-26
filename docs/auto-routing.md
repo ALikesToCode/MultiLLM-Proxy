@@ -70,6 +70,13 @@ open circuit move on). Responses carry `X-MultiLLM-Auto-Route`,
 candidate can serve that endpoint. Image and video models count only for media,
 even on providers that also serve chat.
 
+Every `/v1/models` entry carries `capabilities` as an object of flags, including
+`free:*` pools and `auto:intelligence` (whose reviewed tags are in `capability_tags`).
+`supports_chat` is per model: it is `false` for image and video generation models
+and for OpenCode models served only through the Responses or Messages protocol
+(their `api_endpoint` names that protocol). `context_window` and
+`max_output_tokens` appear only when known; they are never `null`.
+
 Live entries retain safe provider metadata rather than reducing every model to
 an ID and token limits. NavyAI entries, for example, expose endpoint,
 modalities, plan requirements, token multiplier, model capability flags,

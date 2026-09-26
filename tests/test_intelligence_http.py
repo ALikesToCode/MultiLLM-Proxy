@@ -250,5 +250,7 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
         models = self.client.get("/v1/models", headers=self.headers).json["data"]
         model = next(m for m in models if m["id"] == "auto:intelligence")
         assert (
-            model["availability"] == "unverified" and "tools" in model["capabilities"]
+            model["availability"] == "unverified"
+            and "tools" in model["capability_tags"]
+            and model["capabilities"]["supports_tools"] is True
         )

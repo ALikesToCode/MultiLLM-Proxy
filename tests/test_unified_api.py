@@ -34,6 +34,59 @@ class UnifiedApiRouteTest(UnifiedApiTestCase):
         self.assertIn("mimo:mimo-v2.5-pro", model_ids)
         self.assertIn("gemini:gemini-test-model", model_ids)
 
+    def test_v1_models_suits_strict_clients(self):
+        response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        models = {model["id"]: model for model in response.get_json()["data"]}
+        for model in models.values():
+            # Unknown limits are omitted, and every entry carries boolean flags.
+            for field in ("context_window", "max_output_tokens"):
+                if field in model:
+                    self.assertIsNotNone(model[field], model["id"])
+            self.assertIsInstance(model["capabilities"], dict, model["id"])
+            self.assertIsInstance(model["capabilities"]["supports_chat"], bool, model["id"])
+        self.assertTrue(models["opencode:glm-5.2"]["capabilities"]["supports_chat"])
+        self.assertFalse(models["opencode:minimax-m3"]["capabilities"]["supports_chat"])
+        self.assertFalse(models["opencode:grok-4.6"]["capabilities"]["supports_chat"])
+        self.assertTrue(models["free:vision"]["capabilities"]["supports_vision"])
+        self.assertIsInstance(models["auto:intelligence"]["capability_tags"], list)
+
+    def test_media_models_are_not_offered_for_chat(self):
+        ProviderCatalogService.replace_provider_models(
+            "openai",
+            tuple(
+                ProviderCatalogModel(
+                    provider="openai",
+                    model_id=model_id,
+                    discovered_at="ignored-on-write",
+                    metadata=metadata,
+                )
+                for model_id, metadata in (
+                    ("gpt-image-2.5", None),
+                    ("sora-2-pro", None),
+                    ("image-only-model", {"output_modalities": ["image"]}),
+                    ("gpt-4.1", {"output_modalities": ["text", "image"]}),
+                )
+            ),
+        )
+
+        response = self.client.get(
+            "/v1/models",
+            headers={"Authorization": "Bearer admin-test-key"},
+        )
+
+        models = {model["id"]: model for model in response.get_json()["data"]}
+        image = models["openai:gpt-image-2.5"]["capabilities"]
+        self.assertEqual((image["supports_chat"], image["supports_images"]), (False, True))
+        video = models["openai:sora-2-pro"]["capabilities"]
+        self.assertEqual((video["supports_chat"], video["supports_video"]), (False, True))
+        self.assertFalse(models["openai:image-only-model"]["capabilities"]["supports_chat"])
+        self.assertTrue(models["openai:gpt-4.1"]["capabilities"]["supports_chat"])
+
     def test_long_opencode_chat_reports_implicit_prefix_caching_without_new_fields(self):
         upstream_response = self._chat_response("cached upstream")
 

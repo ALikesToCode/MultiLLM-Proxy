@@ -230,13 +230,24 @@ def model_advertisement(policy, config=None):
             )
         }
     )
+    tags = supported if policy["enabled"] else []
     return {
         "id": "auto:intelligence",
         "object": "model",
         "created": 0,
         "owned_by": "multillm",
         "status": "configured" if policy["enabled"] and reviewed else "unconfigured",
-        "capabilities": supported if policy["enabled"] else [],
+        # Flags match every other /v1/models entry; the reviewed tags stay separate.
+        "capabilities": {
+            "supports_chat": bool(policy["enabled"] and reviewed),
+            "supports_streaming": "streaming" in tags,
+            "supports_tools": "tools" in tags,
+            "supports_vision": "vision" in tags,
+            "supports_images": False,
+            "supports_video": False,
+        },
+        "capability_tags": tags,
+        "supports_vision": "vision" in tags,
         "routing_version": 1,
         "availability": "unverified",
     }

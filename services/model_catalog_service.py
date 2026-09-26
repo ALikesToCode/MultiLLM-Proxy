@@ -9,6 +9,7 @@ from providers.image_relays import is_image_relay_model
 from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
+from services.media_catalog import image_profile, is_video_model
 from services.model_registry import ModelRegistry
 from services.provider_catalog_metadata import model_supports_vision
 from services.provider_catalog_service import ProviderCatalogService
@@ -41,6 +42,25 @@ def _model_provider_metadata(
     return normalized or None
 
 
+def _declared_output(
+    metadata: Mapping[str, Any] | None,
+    modalities: frozenset[str],
+) -> bool | None:
+    output_modalities = (metadata or {}).get("output_modalities")
+    if not isinstance(output_modalities, list):
+        return None
+    return any(
+        str(modality).strip().lower() in modalities for modality in output_modalities
+    )
+
+
+def _declared_image_output(metadata: Mapping[str, Any] | None) -> bool | None:
+    explicit_support = (metadata or {}).get("supports_image_output")
+    if isinstance(explicit_support, bool):
+        return explicit_support
+    return _declared_output(metadata, frozenset({"image", "images"}))
+
+
 def _model_supports_image_output(
     provider: str,
     model_id: str,
@@ -48,19 +68,55 @@ def _model_supports_image_output(
 ) -> bool:
     if provider == "aihubmix":
         return is_aihubmix_image_model(model_id)
-    provider_metadata = metadata or {}
-    explicit_support = provider_metadata.get("supports_image_output")
-    if isinstance(explicit_support, bool):
-        return explicit_support
-    output_modalities = provider_metadata.get("output_modalities")
-    if isinstance(output_modalities, list):
-        return any(
-            str(modality).strip().lower() in {"image", "images"}
-            for modality in output_modalities
-        )
+    declared = _declared_image_output(metadata)
+    if declared is not None:
+        return declared
     return is_image_relay_model(provider, model_id) or (
         model_id in KNOWN_IMAGE_MODEL_IDS.get(provider, frozenset())
     )
+
+
+def _model_capabilities(
+    adapter: Any,
+    provider: str,
+    model_id: str,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe what this model serves, not only what its provider can do."""
+    capabilities = asdict(adapter.capabilities()) if adapter else {}
+    capabilities["supports_vision"] = model_supports_vision(metadata)
+    # Explicit catalog metadata wins over model-family inference.
+    image_model = (
+        image_profile(provider, model_id) is not None
+        and _declared_image_output(metadata) is not False
+    )
+    if "supports_images" in capabilities:
+        capabilities["supports_images"] = _model_supports_image_output(
+            provider, model_id, metadata
+        ) or (image_model and capabilities["supports_images"])
+    capabilities["supports_video"] = is_video_model(model_id)
+    text_output = (
+        _declared_output(metadata, frozenset({"text"}))
+        if (metadata or {}).get("output_modalities")
+        else None
+    )
+    media_only = text_output is False or (
+        text_output is None and (image_model or capabilities["supports_video"])
+    )
+    if media_only:
+        capabilities.update(
+            supports_chat=False,
+            supports_streaming=False,
+            supports_tools=False,
+            supports_json_schema=False,
+        )
+    elif provider == "opencode" and opencode_model_endpoint(model_id) not in (
+        None,
+        "v1/chat/completions",
+    ):
+        # Responses and Messages models reject Chat Completions bodies.
+        capabilities["supports_chat"] = False
+    return capabilities
 
 
 def _add_source(
@@ -145,17 +201,12 @@ def build_model_catalog(
     catalog = []
     for model_id in sorted(entries):
         entry = entries[model_id]
-        adapter = adapters.get(entry["provider"])
-        capabilities = asdict(adapter.capabilities()) if adapter else {}
-        capabilities["supports_vision"] = model_supports_vision(
-            entry["provider_metadata"]
+        capabilities = _model_capabilities(
+            adapters.get(entry["provider"]),
+            entry["provider"],
+            entry["model"],
+            entry["provider_metadata"],
         )
-        if "supports_images" in capabilities:
-            capabilities["supports_images"] = _model_supports_image_output(
-                entry["provider"],
-                entry["model"],
-                entry["provider_metadata"],
-            )
         catalog.append(
             {
                 **entry,
@@ -185,11 +236,13 @@ def unified_model_payload(model: Mapping[str, Any]) -> dict[str, Any]:
         "provider_model": model["model"],
         "sources": list(model["sources"]),
         "status": model["status"],
-        "context_window": model["context_window"],
-        "max_output_tokens": model["max_output_tokens"],
         "capabilities": dict(model.get("capabilities") or {}),
         "supports_vision": model_supports_vision(provider_metadata),
     }
+    # Unknown limits are omitted: strict OpenAI-style clients reject null numbers.
+    for field in ("context_window", "max_output_tokens"):
+        if model.get(field) is not None:
+            payload[field] = model[field]
     if not provider_metadata:
         return payload
 
@@ -208,6 +261,6 @@ def unified_model_payload(model: Mapping[str, Any]) -> dict[str, Any]:
         "supports_vision",
     }
     for field, value in provider_metadata.items():
-        if field not in reserved_fields:
+        if field not in reserved_fields and value is not None:
             payload[field] = value
     return payload

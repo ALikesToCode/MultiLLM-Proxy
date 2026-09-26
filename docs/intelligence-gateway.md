@@ -9,9 +9,9 @@ other `auto:*` aliases and roleplay retain their existing policies.
 
 The gateway is disabled until an operator supplies reviewed eligibility and
 allowance settings. Source and synthetic HTTP tests do not establish deployed
-provider availability. `/v1/models` advertises the alias, its reviewed capabilities,
-and `availability: "unverified"`; it never reports credential presence as a live
-probe. Native Gemini/Gemma/Vertex conversion paths are not eligible in version one
+provider availability. `/v1/models` advertises the alias, its reviewed capabilities
+(tags in `capability_tags`, flags in `capabilities`), and `availability: "unverified"`;
+it never reports credential presence as a live probe. Native Gemini/Gemma/Vertex conversion paths are not eligible in version one
 because their internal attempts do not yet share this accounting contract.
 
 ## Chat contract

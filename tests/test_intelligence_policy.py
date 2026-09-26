@@ -54,8 +54,9 @@ def test_catalog_only_advertises_media_with_a_reviewed_input_ceiling(capability)
             ]
         )
         advertised = model_advertisement(configured)
-        assert (capability in advertised["capabilities"]) == bool(ceiling)
-        assert "streaming" in advertised["capabilities"]
+        assert (capability in advertised["capability_tags"]) == bool(ceiling)
+        assert "streaming" in advertised["capability_tags"]
+        assert advertised["capabilities"]["supports_streaming"] is True
         assert advertised["availability"] == "unverified"
 
 
