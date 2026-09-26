@@ -171,6 +171,15 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 
 
+// The Container would decode `/%69nternal/` or merge `//internal/`, so check the decoded path.
+function isInternalPath(pathname) {
+  try {
+    return /^\/+internal(?:\/|$)/i.test(decodeURIComponent(pathname));
+  } catch {
+    return true;
+  }
+}
+
 function isDirectHealthPath(pathname) {
   return pathname === "/health";
 }
@@ -1819,7 +1828,7 @@ export default {
       requestUrl.protocol = "https:";
       return Response.redirect(requestUrl, 308);
     }
-    if (requestUrl.pathname.startsWith("/internal/")) {
+    if (isInternalPath(requestUrl.pathname)) {
       // Media job endpoints serve only the Worker's own Workflow, never outside callers.
       return jsonResponse({ error: "Not found" }, { status: 404 });
     }

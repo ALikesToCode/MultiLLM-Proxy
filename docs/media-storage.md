@@ -13,8 +13,9 @@ bindings, every media response is exactly as before.
   when the request asked for `response_format: "url"`. Each image in the reply then has
   `url` (a gateway link) and `file_id`, and `X-MultiLLM-Media-Stored` counts the
   stored images. If a copy fails, that image keeps the provider's result.
-- Videos: the first `GET /v1/videos/{id}` that reports `completed` copies the file, and
-  the reply gains `file_id` with `content_url` pointing at the stored copy.
+- Videos: the first `GET /v1/videos/{id}` that reports `completed` copies the file (so
+  that poll takes as long as the download), and the reply gains `file_id` with
+  `content_url` pointing at the stored copy. A failed copy is retried on the next poll.
   `GET /v1/videos/{id}/content` then streams from R2. Videos up to 512 MiB with a known
   size are stored; others stay with the provider.
 
@@ -62,7 +63,7 @@ request repeatable: the same key and body return the same batch, and the same ke
 a different body is refused with `409 idempotency_conflict`.
 
 - `GET /v1/images/batches/{id}`: `status` (`queued`, `in_progress`, `cancelling`,
-  `completed`, `cancelled` or `failed`) and `request_counts`.
+  `completed`, `cancelled`, or `failed` when no item succeeded) and `request_counts`.
 - `GET /v1/images/batches/{id}/results?after=&limit=`: up to 100 items per page, each
   with `status`, `model`, `images` (fresh signed links) or `error`; `next_after` pages on.
 - `GET /v1/images/batches`: your recent batches, newest first (`limit`, `before`).

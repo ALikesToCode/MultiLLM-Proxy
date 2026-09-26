@@ -25,19 +25,19 @@ export async function serveSignedMediaFile(request, env, fileId, now = Date.now(
     return mediaFailure(expired ? "link_expired" : "invalid_link",
       expired ? "This media link has expired; request a new one with your API key." : "This media link is not valid.", 403);
   }
-  const ranged = request.headers.has("range");
-  const object = await env.MEDIA_BUCKET.get(mediaObjectKey(fileId), {
-    ...(ranged ? { range: request.headers } : {}), onlyIf: request.headers });
+  const ranged = request.headers.has("range") && request.method === "GET";
+  const object = request.method === "HEAD" ? await env.MEDIA_BUCKET.head(mediaObjectKey(fileId))
+    : await env.MEDIA_BUCKET.get(mediaObjectKey(fileId), { ...(ranged ? { range: request.headers } : {}), onlyIf: request.headers });
   if (!object) return mediaFailure("not_found", "The file does not exist or has expired.", 404);
   const meta = objectMetadata(fileId, object);
   const headers = { "content-type": meta.content_type, etag: object.httpEtag, "accept-ranges": "bytes",
     "cache-control": `private, max-age=${Math.max(0, Math.min(3600, Math.floor(Number(expires) - now)))}`,
     "x-content-type-options": "nosniff", "content-disposition": "inline" };
+  if (request.method === "HEAD") return new Response(null, { headers: { ...headers, "content-length": String(object.size) } });
   if (!("body" in object)) {
     const conditional = request.headers.has("if-none-match") || request.headers.has("if-modified-since");
     return new Response(null, { status: conditional ? 304 : 412, headers });
   }
   const { status, headers: range } = rangeHeaders(object, ranged);
-  return new Response(request.method === "HEAD" ? null : object.body,
-    { status, headers: { ...headers, "content-length": String(object.size), ...range } });
+  return new Response(object.body, { status, headers: { ...headers, "content-length": String(object.size), ...range } });
 }

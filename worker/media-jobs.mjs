@@ -286,10 +286,15 @@ async function recoverItem(env, jobId, index, now) {
   await recordItem(env.INTELLIGENCE_DB, jobId, index, null, result, now);
 }
 
+const FAILURE_MESSAGES = {
+  principal_rejected: "The batch owner's account is no longer valid.",
+  batch_interrupted: "The batch stopped after repeated storage or Container errors; the item was not retried.",
+};
+
 async function failRemaining(db, jobId, code, now) {
   await db.prepare(`UPDATE media_job_items SET status = 'failed', error = ?, lease_until = NULL, updated_at = ?
     WHERE job_id = ? AND status IN ('queued', 'running')`)
-    .bind(JSON.stringify({ code, message: "The batch owner's key is no longer valid." }), now, jobId).run();
+    .bind(JSON.stringify({ code, message: FAILURE_MESSAGES[code] }), now, jobId).run();
 }
 
 async function runChunk(env, id, deps) {
@@ -424,10 +429,17 @@ async function runImageBatch(env, step, id, deps) {
     await step.sleep(`slot wait ${attempt}`, `${Math.min(300, 15 * 2 ** Math.min(attempt, 4))} seconds`);
   }
   if (state === "running") {
-    for (let chunk = 0; chunk < MAX_CHUNKS; chunk += 1) {
-      const outcome = await stepJson(step, `chunk ${chunk}`, CHUNK_STEP, () => runChunk(env, id, deps));
-      if (outcome.done) break;
-      if (outcome.wait) await step.sleep(`chunk wait ${chunk}`, `${outcome.wait} seconds`);
+    try {
+      for (let chunk = 0; chunk < MAX_CHUNKS; chunk += 1) {
+        const outcome = await stepJson(step, `chunk ${chunk}`, CHUNK_STEP, () => runChunk(env, id, deps));
+        if (outcome.done) break;
+        if (outcome.wait) await step.sleep(`chunk wait ${chunk}`, `${outcome.wait} seconds`);
+      }
+    } catch (error) {
+      // A step that exhausted its retries: end the batch instead of leaving it running.
+      logFailure("media_batch_interrupted", error, { job: id.slice(0, 9) });
+      await stepJson(step, "interrupted", SHORT_STEP, () => failRemaining(env.INTELLIGENCE_DB, id, "batch_interrupted", deps.now())
+        .then(() => true));
     }
   } else if (state === "wait") {
     await stepJson(step, "queue timeout", SHORT_STEP, () => env.INTELLIGENCE_DB.prepare(`UPDATE media_job_items
@@ -469,9 +481,14 @@ async function pollVideo(env, id, deps) {
 }
 
 async function runVideoWatch(env, step, id, deps) {
-  for (let poll = 0; poll < MAX_VIDEO_POLLS; poll += 1) {
-    if (poll) await step.sleep(`poll wait ${poll}`, `${pollDelay(poll)} seconds`);
-    if ((await stepJson(step, `poll ${poll}`, POLL_STEP, () => pollVideo(env, id, deps))).done) break;
+  try {
+    for (let poll = 0; poll < MAX_VIDEO_POLLS; poll += 1) {
+      if (poll) await step.sleep(`poll wait ${poll}`, `${pollDelay(poll)} seconds`);
+      if ((await stepJson(step, `poll ${poll}`, POLL_STEP, () => pollVideo(env, id, deps))).done) break;
+    }
+  } catch (error) {
+    // Storage kept failing: report the watch as expired rather than never ending it.
+    logFailure("media_video_watch_interrupted", error, { job: id.slice(0, 7) });
   }
   const job = await stepJson(step, "finalize", SHORT_STEP, () => finalize(env, id, deps.now()));
   await sendWebhook(env, step, job, deps);

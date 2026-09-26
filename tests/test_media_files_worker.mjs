@@ -120,6 +120,9 @@ test("signed links are served from R2 at the edge with ranges and expiry", async
   assert.equal(full.headers.get("content-type"), "video/mp4");
   assert.equal(full.headers.get("cache-control"), "private, max-age=600");
   assert.deepEqual(new Uint8Array(await full.arrayBuffer()), new Uint8Array([1, 2, 3, 4, 5]));
+  const head = await serveSignedMediaFile(request(link, { method: "HEAD" }), env, FILE, now);
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get("content-length"), "5");
   const partial = await serveSignedMediaFile(request(link, { headers: { range: "bytes=2-3" } }), env, FILE, now);
   assert.equal(partial.status, 206);
   assert.equal(partial.headers.get("content-range"), "bytes 2-3/5");

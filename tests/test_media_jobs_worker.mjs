@@ -170,6 +170,23 @@ test("items return to the queue when the Container cannot start, and stop when t
   assert.equal((await db.prepare("SELECT status FROM media_jobs WHERE id = ?").bind(BATCH).first()).status, "failed");
 });
 
+test("a batch whose steps keep failing ends instead of running forever", async t => {
+  const db = await database(t);
+  const env = { INTELLIGENCE_DB: db, MEDIA_JOBS: workflows() };
+  await call(env, batchBody({ webhook_url: null }));
+  const step = fakeStep();
+  const original = step.do;
+  step.do = async (name, config, callback) => {
+    if (name.startsWith("chunk ")) throw new Error("step exhausted its retries");
+    return original(name, config, callback);
+  };
+  await runMediaJob(env, BATCH, step, { container: async () => new Response("ok") });
+  const row = await db.prepare("SELECT status FROM media_jobs WHERE id = ?").bind(BATCH).first();
+  assert.equal(row.status, "failed");
+  const { results } = await db.prepare("SELECT error FROM media_job_items WHERE job_id = ?").bind(BATCH).all();
+  assert.ok(results.every(item => JSON.parse(item.error).code === "batch_interrupted"));
+});
+
 test("only a bounded number of batches run at once", async t => {
   const db = await database(t);
   const env = { INTELLIGENCE_DB: db, MEDIA_JOBS: workflows(), MEDIA_BATCH_MAX_RUNNING: "1" };
@@ -237,9 +254,11 @@ test("media jobs are reachable only privately, and the Container learns about th
   const worker = (await loadWorkerModule()).default;
   let forwarded = 0;
   const env = { MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch: async () => { forwarded += 1; return new Response("ok"); } }) } };
-  const blocked = await worker.fetch(new Request("https://gateway.example/internal/media/batch-items", { method: "POST",
-    headers: { authorization: "MultiLLM-Principal x" } }), env);
-  assert.equal(blocked.status, 404);
+  for (const path of ["/internal/media/batch-items", "/%69nternal/media/batch-items", "//internal/media/video-status", "/internal"]) {
+    const blocked = await worker.fetch(new Request(`https://gateway.example${path}`, { method: "POST",
+      headers: { authorization: "MultiLLM-Principal x" } }), env);
+    assert.equal(blocked.status, 404, path);
+  }
   assert.equal(forwarded, 0);
   assert.equal(collectContainerEnv({ MEDIA_JOBS: {}, INTELLIGENCE_DB: {} }).MEDIA_JOBS_ENABLED, "true");
   assert.equal(collectContainerEnv({ MEDIA_JOBS: {} }).MEDIA_JOBS_ENABLED, undefined);

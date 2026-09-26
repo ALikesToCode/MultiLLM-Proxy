@@ -258,6 +258,9 @@ to Cloudflare, and deploys the Worker, Durable Objects and container binding.
 - Direct Worker route: `/v1/roleplay`
 - Durable Object class: `RoleplaySession`
 - Durable Object / Container class: `MultiLLMProxyContainer`
+- Direct Worker route: signed `/v1/media/files/*` links, served from R2
+- Workflow class: `MediaJobWorkflow`, and the optional `MEDIA_BUCKET` and `MEDIA_JOBS`
+  bindings ([media storage](media-storage.md#setup))
 - Container port: `8080`
 - Gunicorn entrypoint: `app:create_app()`
 - Gunicorn default: `GUNICORN_WORKERS=1`, `GUNICORN_THREADS=8`
