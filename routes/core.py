@@ -26,6 +26,7 @@ from route_helpers import (
     request_api_key,
     stream_upstream_response,
 )
+from services import audit_log, dashboard_sso
 from services.auth_service import AuthService
 from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
@@ -40,7 +41,9 @@ TRUE_JSON_VALUES = {"1", "true", "yes", "on"}
 FALSE_JSON_VALUES = {"", "0", "false", "no", "off"}
 PRIVATE_CACHE_ENDPOINTS = {
     "login",
+    "login_access",
     "logout",
+    "audit_log",
     "manage_users",
     "delete_user",
     "rotate_api_key",
@@ -207,6 +210,14 @@ def register_core_routes(app) -> None:
         On GET, render the login template.
         """
         if request.method == "POST":
+            if dashboard_sso.sso_only():
+                return make_response(
+                    render_template(
+                        "login.html",
+                        error="Password sign-in is disabled. Continue with Cloudflare Access.",
+                    ),
+                    403,
+                )
             username = (request.form.get("username") or "").strip()
             api_key = request.form.get("api_key") or ""
             decision = LoginAttemptService.check(request.remote_addr, username)
@@ -223,6 +234,7 @@ def register_core_routes(app) -> None:
 
             if username and api_key and AuthService.authenticate_user(username, api_key):
                 LoginAttemptService.record_success(request.remote_addr, username)
+                audit_log.record("sign_in", "succeeded", actor=username, detail="method=password")
                 # The validator rejects schemes, hosts, protocol-relative paths,
                 # and backslashes before the value reaches redirect().
                 next_page = request.args.get("next")  # nosemgrep
@@ -266,7 +278,14 @@ def register_core_routes(app) -> None:
         """
         if request.method != "POST":
             return Response(status=405, headers={"Allow": "POST"})
+        current_user = AuthService.get_current_user()
+        method = session.get("auth_method") or "password"
         AuthService.logout()
+        if current_user:
+            audit_log.record("sign_out", "succeeded", actor=current_user.get("username"), detail=f"method={method}")
+        if method == dashboard_sso.AUTH_METHOD and dashboard_sso.logout_url():
+            # The Access session outlives the dashboard session; the sign-in page links to its logout.
+            return redirect(url_for("login", signed_out="access"))
         return redirect(url_for("login"))
 
     @app.route("/users", methods=["GET", "POST"])
@@ -418,6 +437,7 @@ def register_core_routes(app) -> None:
 
         if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS or request.endpoint in [
             "login",
+            "login_access",
             "static_files",
             "favicon",
             "health_check",

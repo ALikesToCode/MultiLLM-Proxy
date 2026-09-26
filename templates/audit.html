@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Audit log · MultiLLM Proxy{% endblock %}
+
+{% block styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/surfaces.css', v='2') }}">
+{% endblock %}
+
+{% block content %}
+{% set action_labels = {
+    'upsert': 'Account saved', 'delete': 'Account deleted', 'sign_in': 'Sign-in',
+    'sign_out': 'Sign-out', 'setting_change': 'Setting change',
+} %}
+{% set outcome_tones = {
+    'stored': 'tone-positive', 'deleted': 'tone-warning', 'missing': 'tone-neutral', 'refused': 'tone-danger',
+    'succeeded': 'tone-positive',
+} %}
+{% set query = {'actor': filters.actor, 'target': filters.target, 'action': filters.action, 'limit': filters.limit if filters.limit != 50 else none} %}
+<div id="audit-console">
+    <header class="page-header">
+        <div class="page-header__text">
+            <p class="eyebrow">Identity and keys</p>
+            <h1 class="page-header__title">Audit log</h1>
+            <p class="page-header__lede">Account changes recorded by the Worker, with sign-ins, sign-outs, refused single sign-on and administrator setting changes. Entries are append-only and newest first.</p>
+        </div>
+        <p class="page-header__aside"><a class="button button--secondary" href="{{ url_for('manage_users') }}">Back to Access</a></p>
+    </header>
+
+    {% if not available %}
+    <p class="callout callout--neutral">The audit log is stored in the Worker's D1 database. It is available when accounts use D1 storage (<code>AUTH_STORAGE_BACKEND=d1</code>).</p>
+    {% else %}
+    <section class="panel" aria-labelledby="audit-heading">
+        <header class="panel__header">
+            <div>
+                <h2 id="audit-heading">Entries</h2>
+                <p>Account entries have no actor: the matching setting change names the administrator who made it.</p>
+            </div>
+            <form class="panel__toolbar" method="get" action="{{ url_for('audit_log') }}" role="search" aria-label="Filter the audit log">
+                <label class="sr-only" for="audit-actor">Actor</label>
+                <input id="audit-actor" class="field" name="actor" type="search" maxlength="256" placeholder="Actor…" value="{{ filters.actor or '' }}">
+                <label class="sr-only" for="audit-target">Target</label>
+                <input id="audit-target" class="field" name="target" type="search" maxlength="256" placeholder="Target…" value="{{ filters.target or '' }}">
+                <label class="sr-only" for="audit-action">Action</label>
+                <select id="audit-action" class="field-select" name="action">
+                    <option value="">All actions</option>
+                    {% for action in actions %}
+                    <option value="{{ action }}"{% if filters.action == action %} selected{% endif %}>{{ action_labels.get(action, action) }}</option>
+                    {% endfor %}
+                </select>
+                <button class="button button--secondary button--sm" type="submit">Filter</button>
+            </form>
+        </header>
+
+        <div class="table-scroll">
+            <table class="data-table" role="table">
+                <caption class="sr-only">Audit entries with time, actor, action, target and details</caption>
+                <thead role="rowgroup">
+                    <tr role="row">
+                        <th scope="col" role="columnheader">When</th>
+                        <th scope="col" role="columnheader">Who</th>
+                        <th scope="col" role="columnheader">What</th>
+                        <th scope="col" role="columnheader">Target</th>
+                        <th scope="col" role="columnheader">Details</th>
+                    </tr>
+                </thead>
+                <tbody role="rowgroup">
+                    {% for entry in entries %}
+                    <tr role="row">
+                        <td role="cell" data-label="When" class="cell-nowrap"><time datetime="{{ entry.at }}" title="{{ entry.at }}">{{ entry.at[:19] | replace('T', ' ') }} UTC</time></td>
+                        <td role="cell" data-label="Who">{% if entry.actor %}{{ entry.actor }}{% else %}<span class="cell-secondary">{{ 'Worker' if entry.source == 'account' else 'unknown' }}</span>{% endif %}</td>
+                        <td role="cell" data-label="What">
+                            {{ action_labels.get(entry.action, entry.action) }}
+                            <span class="status-pill {{ outcome_tones.get(entry.outcome, 'tone-neutral') }}">{{ entry.outcome }}</span>
+                        </td>
+                        <td role="cell" data-label="Target">{% if entry.target %}<code>{{ entry.target }}</code>{% else %}<span class="cell-secondary">None</span>{% endif %}</td>
+                        <td role="cell" data-label="Details">
+                            {% if entry.source == 'account' %}
+                            <span class="cell-secondary">{% if entry.is_admin == 1 %}administrator{% elif entry.is_admin == 0 %}operator{% endif %}{% if entry.scopes %} · {{ entry.scopes }}{% endif %}{% if entry.api_key_prefix %} · <code>{{ entry.api_key_prefix }}</code>{% endif %}{% if entry.revoked_at %} · revoked {{ entry.revoked_at }}{% endif %}</span>
+                            {% elif entry.detail %}
+                            <span class="cell-secondary">{{ entry.detail }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if not entries %}
+        <div class="empty-state">
+            <strong>No matching entries</strong>
+            <p>Change or clear the filters.</p>
+        </div>
+        {% endif %}
+
+        <nav class="panel__body button-row" aria-label="Audit log pages">
+            {% if filters.before != (none, none) %}
+            <a class="button button--secondary button--sm" href="{{ url_for('audit_log', **query) }}">Newest entries</a>
+            {% endif %}
+            {% if next_cursor %}
+            <a class="button button--secondary button--sm" href="{{ url_for('audit_log', before=next_cursor, **query) }}" rel="next">Older entries</a>
+            {% endif %}
+        </nav>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

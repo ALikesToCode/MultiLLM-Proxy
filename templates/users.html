@@ -17,7 +17,10 @@
             <h1 class="page-header__title">Access</h1>
             <p class="page-header__lede">Issue scoped proxy keys, rotate exposed ones and keep administrative access visible. A new key is shown once and never displayed again.</p>
         </div>
-        <p class="page-header__aside account-count" aria-live="polite"><strong>{{ users | length }}</strong> {{ 'account' if users | length == 1 else 'accounts' }}</p>
+        <div class="page-header__aside">
+            {% if current_user.is_admin %}<a class="button button--secondary" href="{{ url_for('audit_log') }}">Audit log</a>{% endif %}
+            <p class="page-header__aside account-count" aria-live="polite"><strong>{{ users | length }}</strong> {{ 'account' if users | length == 1 else 'accounts' }}</p>
+        </div>
     </header>
 
     {% if not current_user.is_admin %}

@@ -45,6 +45,7 @@ from services.intelligence_auth import (
     KEY_NAMESPACE, reject_local_integration_management, verify_integration_key,
 )
 from services.user_provisioning import create_user as provision_user
+from services.dashboard_sso import restrict_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -815,6 +816,12 @@ class AuthService:
             "session_id": session_user.get("session_id")
             or secrets.token_urlsafe(16),
         }
+        # Single sign-on sessions expire with their Access token and never hold
+        # administration the admin allowlist does not name.
+        current_user = restrict_session_user(session, current_user)
+        if current_user is None:
+            session.clear()
+            return None
         if session_user != current_user:
             session["user"] = current_user
         return current_user

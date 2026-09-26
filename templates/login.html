@@ -6,12 +6,33 @@
 {% block main_class %}app-main--bare{% endblock %}
 
 {% block content %}
+{% set sso = dashboard_sso if dashboard_sso is defined else {} %}
 <div class="auth-layout">
     <section class="auth-form-side" aria-labelledby="signin-heading">
         <div class="auth-card">
             <p class="eyebrow">Operator console</p>
+            {% if access_confirmation %}
+            <h1 id="signin-heading">Continue as {{ access_confirmation.username }}</h1>
+            <p class="auth-card__lede">Cloudflare Access verified <strong>{{ access_confirmation.email }}</strong>. Continue to open the console as <strong>{{ access_confirmation.username }}</strong>.</p>
+
+            <form method="post" action="{{ url_for('login_access', next=access_confirmation.next) }}" class="auth-form" data-submit-once>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="button button--primary button--block" type="submit">Continue</button>
+            </form>
+
+            {% if not sso.get('only') %}
+            <p class="auth-card__aside">Not you? <a href="{{ url_for('login') }}">Sign in with an API key</a> instead.</p>
+            {% endif %}
+            {% else %}
             <h1 id="signin-heading">Sign in</h1>
-            <p class="auth-card__lede">Use your MultiLLM username and API key. Provider credentials never leave the server.</p>
+            <p class="auth-card__lede">{% if sso.get('only') %}Sign in through your organization's Cloudflare Access.{% elif sso.get('enabled') %}Continue with Cloudflare Access, or use your MultiLLM username and API key.{% else %}Use your MultiLLM username and API key.{% endif %} Provider credentials never leave the server.</p>
+
+            {% if request.args.get('signed_out') == 'access' and sso.get('logout_url') %}
+            <div class="callout callout--neutral" role="status">
+                <strong>You signed out of the console.</strong>
+                <p>Your Cloudflare Access session is still active. <a href="{{ sso.get('logout_url') }}">Sign out of Cloudflare Access</a> too on a shared device.</p>
+            </div>
+            {% endif %}
 
             {% if error %}
             <div class="callout {{ 'callout--warning' if csrf_recovery else 'callout--danger' }}" role="alert">
@@ -20,12 +41,17 @@
             </div>
             {% endif %}
 
+            {% if sso.get('enabled') %}
+            <a class="button button--primary button--block" href="{{ url_for('login_access', next=request.args.get('next')) }}">Continue with Cloudflare Access</a>
+            {% endif %}
+
+            {% if not sso.get('only') %}
             <form method="post" action="{{ url_for('login', next=request.args.get('next')) }}" class="auth-form" data-submit-once>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                 <label class="form-field" for="username">
                     Username
-                    <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+                    <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required{% if not sso.get('enabled') %} autofocus{% endif %}>
                 </label>
 
                 <div class="form-field">
@@ -37,10 +63,14 @@
                     <span class="field-hint" id="api-key-hint">Keys are sent only to this deployment.</span>
                 </div>
 
-                <button class="button button--primary button--block" type="submit">Sign in</button>
+                <button class="button {{ 'button--secondary' if sso.get('enabled') else 'button--primary' }} button--block" type="submit">Sign in{% if sso.get('enabled') %} with API key{% endif %}</button>
             </form>
+            {% elif not sso.get('enabled') %}
+            <p class="callout callout--warning">Password sign-in is disabled and single sign-on is not configured. An operator must finish the Cloudflare Access setup.</p>
+            {% endif %}
 
             <p class="auth-card__aside">Connecting a coding agent? <a href="{{ url_for('knowledge_agent_setup') }}">Agent setup</a> needs no sign-in.</p>
+            {% endif %}
         </div>
     </section>
 
