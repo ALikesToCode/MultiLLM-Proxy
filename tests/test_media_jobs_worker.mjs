@@ -67,7 +67,7 @@ test("the private handler stores a batch once, starts its Workflow and serves it
   const items = await (await call(env, { operation: "list_items", id: BATCH, owner: "alice", after: 1, limit: 2 })).json();
   assert.deepEqual(items.items.map(item => item.custom_id), ["item-2", "item-3"]);
   assert.equal(items.has_more, true);
-  const listed = await (await call(env, { operation: "list_jobs", owner: "alice", kind: "image_batch" })).json();
+  const listed = await (await call(env, { operation: "list_jobs", owner: "alice", kind: "image_batch", limit: 20, before: null })).json();
   assert.deepEqual(listed.jobs.map(job => job.id), [BATCH]);
   for (const bad of [batchBody({ id: "imgbatch_short" }), batchBody({ items: [] }), batchBody({ webhook_url: "https://127.0.0.1/x" }),
     batchBody({ webhook_url: "http://hooks.example.com/x" }), { operation: "drop_table" }]) {

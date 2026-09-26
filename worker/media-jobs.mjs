@@ -35,6 +35,7 @@ const reply = (value, status = 200) => Response.json(status === 200 ? { version:
   : { version: 1, error: { code: value, message: "Media job operation failed" } }, { status, headers: { "cache-control": "no-store" } });
 
 function bounded(value, fallback, minimum, maximum) {
+  if (value === null || value === undefined || value === "") return fallback;
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : fallback;
 }
