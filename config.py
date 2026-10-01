@@ -8,6 +8,7 @@ from providers.aihubmix import (
     AIHUBMIX_SECONDARY_BASE_URL,
     trusted_aihubmix_origin,
 )
+from providers.cline_pass import CLINE_API_BASE_URL
 from providers.image_relays import image_relay_base_urls
 from providers.nanogpt import nanogpt_text_base_url
 
@@ -128,6 +129,15 @@ class Config:
     PROMPT_CACHE_MIN_TOKENS = load_bounded_env_integer(
         'PROMPT_CACHE_MIN_TOKENS', 1024, 1, 1000000
     )
+    # Every provider's live model catalog refreshes in the background, so the global
+    # model list stays current without an operator refresh (services/provider_catalog_refresh.py).
+    PROVIDER_CATALOG_AUTO_REFRESH = load_env_boolean('PROVIDER_CATALOG_AUTO_REFRESH', True)
+    PROVIDER_CATALOG_REFRESH_SECONDS = load_bounded_env_integer(
+        'PROVIDER_CATALOG_REFRESH_SECONDS', 1800, 300, 86400
+    )
+    PROVIDER_CATALOG_COLD_WAIT_SECONDS = load_bounded_env_integer(
+        'PROVIDER_CATALOG_COLD_WAIT_SECONDS', 10, 0, 60
+    )
     PROVIDER_USAGE_CACHE_TTL_SECONDS = load_bounded_env_integer(
         'PROVIDER_USAGE_CACHE_TTL_SECONDS', 60, 5, 3600
     )
@@ -192,6 +202,7 @@ class Config:
         'aihubmix': AIHUBMIX_BASE_URL,
         'codex-easy': 'https://codex-easy.ai',
         'kimi-code': 'https://api.kimi.com/coding/v1',
+        'cline-pass': CLINE_API_BASE_URL,
         'palm': 'https://generativelanguage.googleapis.com/v1beta',
         'nineteen': 'https://api.nineteen.ai',
         'chutes': 'https://llm.chutes.ai',
@@ -221,6 +232,7 @@ class Config:
         'aihubmix': (5, 600),  # Image generation and editing can be long-running
         'codex-easy': (5, 600),  # Codex Easy supports long-running Responses API agent requests
         'kimi-code': (5, 600),  # Kimi Code supports long-running agent and tool requests
+        'cline-pass': (5, 600),  # ClinePass serves long-running coding-agent requests
         'palm': (10, 120),  # PaLM API can be slow to respond
         'nineteen': (5, 120),
         'chutes': (5, 120),  # Chutes API can take longer for larger models
@@ -250,6 +262,7 @@ class Config:
         'mimo': {'max_retries': 3, 'backoff_factor': 1},
         'nanogpt': {'max_retries': 3, 'backoff_factor': 1},
         'navyai': {'max_retries': 3, 'backoff_factor': 1},
+        'cline-pass': {'max_retries': 3, 'backoff_factor': 1},
         'palm': {'max_retries': 5, 'backoff_factor': 2},  # More retries for PaLM API
         'nineteen': {'max_retries': 3, 'backoff_factor': 1},
         'chutes': {'max_retries': 3, 'backoff_factor': 1},

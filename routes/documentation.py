@@ -1,13 +1,13 @@
 from flask import jsonify, render_template, request
 
 from route_helpers import login_required
-from services.image_relay_catalog import refresh_image_relay_catalog
+from services.provider_catalog_refresh import refresh_model_catalogs
 from services.proxy_documentation_service import build_proxy_documentation
 
 
 def register_documentation_routes(app, auth_service_cls, proxy_service_cls) -> None:
     def documentation_payload():
-        refresh_image_relay_catalog(app, auth_service_cls, proxy_service_cls)
+        refresh_model_catalogs(app, auth_service_cls, proxy_service_cls)
         return build_proxy_documentation(
             app.config["API_BASE_URLS"],
             auth_service_cls,

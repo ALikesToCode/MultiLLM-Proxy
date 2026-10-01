@@ -9,6 +9,9 @@ os.environ["NANOGPT_SPEED_ROUTING"] = ""
 # it enable it with their own storage; everywhere else it stays off so no test writes
 # to the repository's instance directory or waits on a flush.
 os.environ.setdefault("USAGE_LEDGER_ENABLED", "false")
+# Provider model catalogs refresh from a background thread against real provider APIs.
+# Tests that exercise it enable it with patched transports.
+os.environ.setdefault("PROVIDER_CATALOG_AUTO_REFRESH", "false")
 
 import pytest
 

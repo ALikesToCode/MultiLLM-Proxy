@@ -18,6 +18,7 @@ const endpoints = [
         '/opencode/v1/models'
     ]],
     ['Xiaomi MiMo', '/mimo/chat/completions'],
+    ['ClinePass', '/cline-pass/chat/completions'],
     ['NanoGPT', [
         '/nanogpt/v1/chat/completions',
         '/nanogpt/v1/messages',

@@ -4,7 +4,8 @@
 hostnames. On Cloudflare the Worker answers both from the D1 snapshot so a visit never
 wakes the Container; these routes serve the live figures elsewhere and as a fallback.
 `POST /v1/health/checks` runs the free model-list checks; the Worker's cron calls it with
-the admin key, and an administrator may call it by hand.
+the admin key, and an administrator may call it by hand. It also starts the background
+refresh of stale provider model catalogs.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from flask import Response, jsonify, render_template
 from route_helpers import api_authenticate_only
 from services import route_health_sync
 from services.health_checks import run_free_checks
+from services.provider_catalog_refresh import start_provider_catalog_refresh
 from services.status_snapshot import build_public_status
 
 PUBLIC_ENDPOINTS = frozenset({"public_status", "public_status_json"})
@@ -98,6 +100,7 @@ def register_status_routes(app, csrf, auth_service_cls, proxy_service_cls) -> No
             route_health_sync.load()
         report = run_free_checks(app.config["API_BASE_URLS"], auth_service_cls, proxy_service_cls)
         report["stored"] = route_health_sync.flush(force_snapshot=True)
+        start_provider_catalog_refresh(app, auth_service_cls, proxy_service_cls)
         response = jsonify(report)
         response.headers["Cache-Control"] = "no-store"
         return response

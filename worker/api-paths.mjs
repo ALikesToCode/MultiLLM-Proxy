@@ -5,6 +5,7 @@ const API_ROUTE_PREFIXES = new Set([
   "azure",
   "cerebras",
   "chutes",
+  "cline-pass",
   "codex-easy",
   "gemini",
   "gemma",

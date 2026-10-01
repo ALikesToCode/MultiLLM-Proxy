@@ -362,6 +362,26 @@ PROVIDER_DETAILS = {
         },
         'default_model': 'k3'
     },
+    'cline-pass': {
+        'description': 'ClinePass subscription over Cline\'s OpenAI-compatible API at https://api.cline.bot/api/v1; models use full cline-pass/ IDs',
+        'endpoints': [
+            {
+                'url': '/ai/cline/recommended-models',
+                'curl': 'curl -X GET "$PROXY_BASE_URL/cline-pass/ai/cline/recommended-models" -H "Authorization: Bearer $ADMIN_API_KEY"'
+            },
+            {
+                'url': '/chat/completions',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/cline-pass/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d "{\\"model\\": \\"cline-pass/glm-5.3\\", \\"messages\\": [{\\"role\\": \\"user\\", \\"content\\": \\"Hello!\\"}]}"'
+            }
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'model_discovery': True,
+            'json_mode': True
+        },
+        'default_model': 'cline-pass/glm-5.3'
+    },
     'aihubmix': {
         'description': 'AIHubMix OpenAI-compatible gateway with a seeded free-model catalog and GPT Image, Gemini image, and Doubao Seedream generation',
         'endpoints': [

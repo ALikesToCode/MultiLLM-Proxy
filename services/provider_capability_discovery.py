@@ -51,6 +51,8 @@ class ModelsDevSection:
 MODELS_DEV_SECTIONS = {
     "aihubmix": ModelsDevSection("aihubmix", AIHUBMIX_ALLOWED_HOSTS, True),
     "cerebras": ModelsDevSection("cerebras", frozenset({"api.cerebras.ai"}), True),
+    # ClinePass is a flat subscription, not its list price.
+    "cline-pass": ModelsDevSection("cline-pass", frozenset({"api.cline.bot"}), False),
     "groq": ModelsDevSection("groq", frozenset({"api.groq.com"}), True),
     # NanoGPT's default text endpoint is a subscription, not its list price.
     "nanogpt": ModelsDevSection("nano-gpt", frozenset({"nano-gpt.com"}), False),

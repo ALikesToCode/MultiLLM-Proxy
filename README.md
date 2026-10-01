@@ -153,6 +153,9 @@ CODEX_EASY_API_KEY=your-codex-everywhere-key
 # Kimi Code
 KIMI_CODE_API_KEY=your-kimi-code-key
 
+# ClinePass (Cline subscription; key from app.cline.bot Settings > API Keys)
+CLINE_API_KEY=your-cline-api-key
+
 # LinkAPI (preferred key name)
 LINKAPI_KEY=your-linkapi-key
 
@@ -234,6 +237,19 @@ It combines runtime credential status, provider capabilities, native endpoint
 paths, saved `auto:` priorities, copyable chat/image requests, and every model
 known from built-in configuration, the last successful provider catalog refresh,
 or a saved route. Use `/docs.json` for the same credential-safe catalog as JSON.
+
+Provider catalogs refresh themselves: `/v1/models`, `/admin/models`, `/docs`,
+Operations and the Worker's health-check cron start a background refresh of every
+catalog older than `PROVIDER_CATALOG_REFRESH_SECONDS` (default `1800`), so the
+global model search lists each provider's current models without an operator
+refresh. Views serve the last good catalog while it runs; only the first view of a
+new process waits, for at most `PROVIDER_CATALOG_COLD_WAIT_SECONDS` (default `10`).
+Set `PROVIDER_CATALOG_AUTO_REFRESH=false` to refresh only from Operations.
+
+ClinePass models use their full Cline IDs, for example `cline-pass:cline-pass/glm-5.3`
+on the unified API or `cline-pass/glm-5.3` on `/cline-pass/chat/completions`. Its
+catalog is Cline's public recommended-models list (the subscription and free
+models), so the models are listed even before `CLINE_API_KEY` is set; calls need it.
 
 Each provider is accessible through their respective endpoints:
 

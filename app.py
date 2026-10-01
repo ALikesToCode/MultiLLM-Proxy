@@ -36,6 +36,7 @@ from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
 from services.image_relay_catalog import ImageRelayCatalogRefresh
+from services.provider_catalog_refresh import ProviderCatalogAutoRefresh
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 from services import usage_ledger
@@ -118,6 +119,10 @@ def create_app() -> Flask:
     init_error_handlers(app)
     AuthService.initialize()
     app.extensions["image_relay_catalog_refresh"] = ImageRelayCatalogRefresh()
+    app.extensions["provider_catalog_refresh"] = ProviderCatalogAutoRefresh(
+        ttl_seconds=app.config["PROVIDER_CATALOG_REFRESH_SECONDS"],
+        cold_wait_seconds=app.config["PROVIDER_CATALOG_COLD_WAIT_SECONDS"],
+    )
 
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)

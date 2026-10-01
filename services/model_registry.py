@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Optional
 from config import Config
 from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
 from providers.base import ModelInfo
+from providers.cline_pass import CLINE_PASS_MODEL_IDS
 from providers.image_relays import image_relay_model_ids
 from providers.opencode_go import (
     OPENCODE_GO_LEGACY_MODEL_IDS,
@@ -55,6 +56,7 @@ DEFAULT_MODEL_IDS = {
     "mimo": ["mimo-v2.5-pro"],
     "together": ["openai/gpt-image-2"],
     "kimi-code": ["k3"],
+    "cline-pass": list(CLINE_PASS_MODEL_IDS),
     "xai": ["grok-4"],
     "cerebras": ["llama3.1-8b"],
     "azure": ["gpt-4o-mini"],

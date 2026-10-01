@@ -19,6 +19,7 @@ PROVIDER_API_KEY_ENV_NAMES = {
     "linkapi": ("LINKAPI_KEY", "LINKAPI_API_KEY"),
     "codex-easy": ("CODEX_EASY_API_KEY", "CODEX_API_KEY"),
     "kimi-code": ("KIMI_CODE_API_KEY",),
+    "cline-pass": ("CLINE_API_KEY", "CLINE_PASS_API_KEY"),
     "nanogpt": ("NANOGPT_API_KEY", "NANO_GPT_KEY"),
 }
 

@@ -597,6 +597,7 @@ class AuthService:
             "linkapi",
             "codex-easy",
             "kimi-code",
+            "cline-pass",
             "palm",
             "together",
             "nineteen",

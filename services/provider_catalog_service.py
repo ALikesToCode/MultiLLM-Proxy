@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.cline_pass import (
+    CLINE_RECOMMENDED_MODELS_PATH,
+    cline_pass_catalog_entries,
+)
 from providers.image_relays import image_relay_specs
 from providers.opencode_go import is_opencode_zen_free_model
 from services import provider_catalog_d1
@@ -23,7 +27,7 @@ from services.sqlite_store import connect, storage_path
 logger = logging.getLogger(__name__)
 MAX_MODELS_PER_PROVIDER = 5000
 _MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$")
-PUBLIC_CATALOG_PROVIDERS = frozenset({"navyai", "openrouter"})
+PUBLIC_CATALOG_PROVIDERS = frozenset({"cline-pass", "navyai", "openrouter"})
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,9 @@ PROVIDER_CATALOG_SPECS = {
     "linkapi": ProviderCatalogSpec("v1/models", "/linkapi/v1/models"),
     "codex-easy": ProviderCatalogSpec("v1/models", "/codex-easy/v1/models"),
     "kimi-code": ProviderCatalogSpec("models", "/kimi-code/v1/models"),
+    "cline-pass": ProviderCatalogSpec(
+        CLINE_RECOMMENDED_MODELS_PATH, f"/cline-pass/{CLINE_RECOMMENDED_MODELS_PATH}"
+    ),
     "groq": ProviderCatalogSpec("openai/v1/models", "/groq/openai/v1/models"),
     "opencode": ProviderCatalogSpec("models", "/opencode/v1/models"),
     "nanogpt": ProviderCatalogSpec("v1/models", "/nanogpt/v1/models"),
@@ -286,7 +293,9 @@ class ProviderCatalogService:
         return True
 
     @staticmethod
-    def _model_collection(payload: Any) -> list[Any]:
+    def _model_collection(payload: Any, provider: str = "") -> list[Any]:
+        if provider == "cline-pass":
+            return cline_pass_catalog_entries(payload)
         if isinstance(payload, list):
             return payload
         if not isinstance(payload, dict):
@@ -370,7 +379,7 @@ class ProviderCatalogService:
     ) -> tuple[ProviderCatalogModel, ...]:
         timestamp = discovered_at or _utcnow_iso()
         normalized: dict[str, ProviderCatalogModel] = {}
-        for item in cls._model_collection(payload):
+        for item in cls._model_collection(payload, provider):
             model_id = cls._normalize_model_id(provider, item)
             if not model_id:
                 continue

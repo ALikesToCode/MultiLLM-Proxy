@@ -56,6 +56,15 @@ PROVIDER_SPECS = (
         ProviderCapabilities(supports_tools=True),
     ),
     (
+        "cline-pass",
+        "chat/completions",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_vision=True,
+            supports_json_schema=True,
+        ),
+    ),
+    (
         "gemini",
         "chat/completions",
         ProviderCapabilities(

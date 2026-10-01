@@ -39,6 +39,7 @@ CHAT_PROVIDERS = frozenset(
         "aihubmix",
         "codex-easy",
         "kimi-code",
+        "cline-pass",
         "groq",
         "opencode",
         "mimo",

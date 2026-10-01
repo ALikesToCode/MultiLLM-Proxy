@@ -20,6 +20,7 @@ PROVIDER_DISPLAY_NAMES = {
     "azure": "Azure AI",
     "cerebras": "Cerebras",
     "chutes": "Chutes",
+    "cline-pass": "ClinePass",
     "codex-easy": "Codex Everywhere",
     "gemini": "Gemini",
     "gemma": "Gemma",

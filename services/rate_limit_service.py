@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_RESERVED_OUTPUT_TOKENS = 1024
 
 PROVIDER_LIMIT_DEFAULTS = {
+    # ClinePass models take 1M-token agent contexts.
+    "cline-pass": {
+        "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
+        "MAX_PROMPT_TOKENS": 1_048_576,
+        "MAX_OUTPUT_TOKENS": 131_072,
+        "RATE_LIMIT_TPM": 1_200_000,
+    },
     "mimo": {
         "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
         "MAX_PROMPT_TOKENS": 1_048_576,
