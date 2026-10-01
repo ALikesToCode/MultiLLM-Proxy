@@ -9,6 +9,12 @@ const FAMILY_LIMITS = {
     maxOutputTokens: 131_072,
     source: "model-family-default",
   },
+  // MiMo-V2.6 on NanoGPT and ClinePass: 1,048,576 context, 131,072 output.
+  mimo: {
+    contextWindow: 1_048_576,
+    maxOutputTokens: 131_072,
+    source: "model-family-default",
+  },
 };
 
 // Provider context limits come from exercised live catalogs. When a catalog
@@ -38,6 +44,13 @@ const PROVIDER_LIMITS = {
       contextWindow: 1_048_576,
       maxOutputTokens: 131_072,
       source: "provider-context-and-model-output",
+    },
+  },
+  "cline-pass": {
+    glm: {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 131_072,
+      source: "provider-catalog",
     },
   },
   openrouter: {

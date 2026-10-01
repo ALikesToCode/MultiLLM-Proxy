@@ -59,6 +59,15 @@ export function maximumReasoningProfile(candidate) {
     };
   }
 
+  if (provider === "cline-pass") {
+    // Cline takes OpenRouter's reasoning object; GLM and MiMo accept xhigh.
+    return {
+      mode: "max",
+      effort: "xhigh",
+      fields: { reasoning: { effort: "xhigh" } },
+    };
+  }
+
   if (provider === "nanogpt") {
     // Model-specific GLM tiers override the generic API's xhigh spelling.
     const modelName = model.split("/").at(-1).split(":", 1)[0];
@@ -99,7 +108,7 @@ function reasoningFields(candidate, effort) {
   const mappedEffort = REASONING_EFFORT_ORDER[
     Math.min(requestedIndex, maximumIndex)
   ];
-  if (provider === "openrouter") {
+  if (provider === "openrouter" || provider === "cline-pass") {
     return { reasoning: { effort: mappedEffort } };
   }
   if (provider === "opencode" && family === "glm") {

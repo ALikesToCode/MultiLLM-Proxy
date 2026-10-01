@@ -5,6 +5,9 @@ Chat goes to https://api.cline.bot/api/v1/chat/completions with CLINE_API_KEY an
 subscription's, so discovery reads the public recommended-models document: its
 `clinePass` list is what the subscription serves, and its `free` list is served on the
 same key at no charge (https://docs.cline.bot/getting-started/clinepass).
+
+Non-streaming completions arrive wrapped as {"data": <completion>, "success": true};
+event streams are plain OpenAI chunks.
 """
 
 from __future__ import annotations
@@ -31,6 +34,18 @@ CLINE_PASS_MODEL_IDS = (
     "cline-pass/mimo-v2.5",
     "cline-pass/muse-spark-1.3-contributor",
 )
+
+
+def cline_completion_payload(payload: Any) -> Any:
+    """Unwrap Cline's non-streaming envelope, {"data": {...}, "success": true}."""
+    if (
+        isinstance(payload, dict)
+        and "choices" not in payload
+        and "success" in payload
+        and isinstance(payload.get("data"), dict)
+    ):
+        return payload["data"]
+    return payload
 
 
 def cline_pass_catalog_entries(payload: Any) -> list[dict[str, Any]]:

@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass, field
 
+from providers.cline_pass import cline_completion_payload
 from services.free_json_contract import check_json_output, json_output_requested
 from services.intelligence_contract import GatewayError
 
@@ -161,6 +162,8 @@ def decode_completion(raw):
         raise GatewayError(
             "invalid_upstream_response", "The provider returned invalid JSON.", 502
         ) from None
+    # Cline wraps non-streaming completions in {"data": ..., "success": true}.
+    payload = cline_completion_payload(payload)
     if not isinstance(payload, dict) or "error" in payload:
         raise GatewayError(
             "upstream_error",

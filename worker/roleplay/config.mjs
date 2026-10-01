@@ -1,4 +1,8 @@
-import { rankFastestEligible, rankQualityEligible } from "./routing-policy.mjs";
+import {
+  rankFastestEligible,
+  rankPriorityChain,
+  rankQualityEligible,
+} from "./routing-policy.mjs";
 import { clientContextHeaders, withClientDefaults, withOpencodeSession } from "../client-headers.mjs";
 import {
   parseRoleplayProviderLimits,
@@ -51,6 +55,14 @@ const PROVIDERS = {
     baseUrlNames: [],
     defaultPath: "/chat/completions",
   },
+  // ClinePass serves only the roleplay:intelligence chain; it is not in the
+  // default provider order.
+  "cline-pass": {
+    defaultBaseUrl: "https://api.cline.bot/api/v1",
+    keyNames: ["CLINE_API_KEY", "CLINE_PASS_API_KEY"],
+    baseUrlNames: [],
+    defaultPath: "/chat/completions",
+  },
 };
 
 // These responses unambiguously reject the current candidate before a usable
@@ -80,6 +92,25 @@ const REASONING_EFFORTS = new Set([
   "max",
 ]);
 const MAX_PROVIDER_MODELS_PER_FAMILY = 8;
+const MAX_INTELLIGENCE_CHAIN_ENTRIES = 32;
+// roleplay:intelligence tries these strictly in order: MiMo-V2.6-Pro on NanoGPT
+// then ClinePass, then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 on every subscription
+// or allowance provider. ROLEPLAY_INTELLIGENCE_MODELS replaces the list.
+const DEFAULT_INTELLIGENCE_CHAIN = [
+  "nanogpt:xiaomi/mimo-v2.6-pro",
+  "cline-pass:cline-pass/mimo-v2.6-pro",
+  "nanogpt:z-ai/glm-5.3-flash",
+  "cline-pass:cline-pass/glm-5.3-flash",
+  "opencode:glm-5.3-flash",
+  "navyai:glm-5.3-flash",
+  "nanogpt:z-ai/glm-5.3",
+  "cline-pass:cline-pass/glm-5.3",
+  "opencode:glm-5.3",
+  "navyai:glm-5.3",
+  "nanogpt:z-ai/glm-5.2",
+  "opencode:glm-5.2",
+  "navyai:glm-5.2",
+];
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",
   glm: "glm-5.3-flash",
@@ -378,6 +409,52 @@ function parseProviderModelOverrides(value) {
   }
 }
 
+function validModelName(model) {
+  return (
+    typeof model === "string" &&
+    model.trim() &&
+    model.length <= 200 &&
+    !/[\u0000-\u001f\u007f]/.test(model)
+  );
+}
+
+// Accepts a JSON array or a comma/newline list of provider:model entries.
+function parseIntelligenceChain(value) {
+  const entries =
+    typeof value === "string" && value.trim()
+      ? listedProviderTokens(value)
+      : DEFAULT_INTELLIGENCE_CHAIN;
+  const seen = new Set();
+  const chain = [];
+  for (const entry of entries) {
+    const separator = entry.indexOf(":");
+    const provider = entry.slice(0, separator).trim().toLowerCase();
+    const model = entry.slice(separator + 1).trim();
+    const key = `${provider}:${model}`;
+    if (
+      separator < 1 ||
+      !PROVIDERS[provider] ||
+      !validModelName(model) ||
+      seen.has(key)
+    ) {
+      continue;
+    }
+    seen.add(key);
+    chain.push({ provider, model });
+    if (chain.length === MAX_INTELLIGENCE_CHAIN_ENTRIES) {
+      break;
+    }
+  }
+  return chain;
+}
+
+export function intelligenceModelFamily(model) {
+  const normalized = String(model ?? "").toLowerCase();
+  if (/(?:^|\/)glm[-_]?[0-9]/.test(normalized)) return "glm";
+  if (normalized.includes("kimi")) return "kimi";
+  return "mimo";
+}
+
 function parseProviderFamilies(value) {
   if (typeof value !== "string" || !value.trim()) {
     return {};
@@ -651,6 +728,44 @@ export function getRoleplaySettings(env) {
     providerLimits: parseRoleplayProviderLimits(
       env.ROLEPLAY_PROVIDER_LIMITS,
     ),
+    intelligenceChain: parseIntelligenceChain(env.ROLEPLAY_INTELLIGENCE_MODELS),
+  };
+}
+
+// Credentials, billing mode and endpoints of one provider, or null without a key.
+function providerRoute(env, provider) {
+  const definition = PROVIDERS[provider];
+  const tokens = configuredProviderTokens(env, definition);
+  if (!tokens.length) {
+    return null;
+  }
+
+  const speedRouting =
+    provider === "nanogpt" && nanogptSpeedRoutingAllowed()
+      ? nanogptSpeedRouting(env.NANOGPT_SPEED_ROUTING)
+      : "";
+  const billingMode =
+    provider === "nanogpt" && !speedRouting
+      ? nanogptBillingMode(env.NANOGPT_BILLING_MODE)
+      : "standard";
+  const subscriptionOnly =
+    provider === "nanogpt" && billingMode === "subscription";
+  const configuredBase = subscriptionOnly
+    ? firstNonEmpty(env, ["NANOGPT_SUBSCRIPTION_BASE_URL"])
+    : firstNonEmpty(env, definition.baseUrlNames);
+  const baseUrl = trustedBaseUrl(
+    configuredBase,
+    subscriptionOnly
+      ? definition.subscriptionBaseUrl
+      : definition.defaultBaseUrl,
+  );
+  return {
+    tokens,
+    speedRouting,
+    billingMode,
+    subscriptionOnly,
+    endpoint: appendEndpointPath(baseUrl, definition.defaultPath).toString(),
+    catalogEndpoint: appendEndpointPath(baseUrl, "/v1/models").toString(),
   };
 }
 
@@ -658,33 +773,11 @@ export function buildConfiguredCandidates(env, settings) {
   const candidates = [];
 
   settings.providerOrder.forEach((provider, providerRank) => {
-    const definition = PROVIDERS[provider];
-    const tokens = configuredProviderTokens(env, definition);
-    if (!tokens.length) {
+    const route = providerRoute(env, provider);
+    if (!route) {
       return;
     }
-
-    const speedRouting =
-      provider === "nanogpt" && nanogptSpeedRoutingAllowed()
-        ? nanogptSpeedRouting(env.NANOGPT_SPEED_ROUTING)
-        : "";
-    const billingMode =
-      provider === "nanogpt" && !speedRouting
-        ? nanogptBillingMode(env.NANOGPT_BILLING_MODE)
-        : "standard";
-    const subscriptionOnly =
-      provider === "nanogpt" && billingMode === "subscription";
-    const configuredBase = subscriptionOnly
-      ? firstNonEmpty(env, ["NANOGPT_SUBSCRIPTION_BASE_URL"])
-      : firstNonEmpty(env, definition.baseUrlNames);
-    const baseUrl = trustedBaseUrl(
-      configuredBase,
-      subscriptionOnly
-        ? definition.subscriptionBaseUrl
-        : definition.defaultBaseUrl,
-    );
-    const endpoint = appendEndpointPath(baseUrl, definition.defaultPath);
-    const catalogEndpoint = appendEndpointPath(baseUrl, "/v1/models");
+    const { tokens, speedRouting, billingMode, subscriptionOnly } = route;
     const enabledFamilies = Object.hasOwn(
       settings.providerFamilies,
       provider,
@@ -718,8 +811,8 @@ export function buildConfiguredCandidates(env, settings) {
             // only the upstream request body carries the speed suffix.
             upstreamModel: withNanogptSpeedSuffix(model, speedRouting),
             modelRank,
-            endpoint: endpoint.toString(),
-            catalogEndpoint: catalogEndpoint.toString(),
+            endpoint: route.endpoint,
+            catalogEndpoint: route.catalogEndpoint,
             token,
             credentialId:
               tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
@@ -733,6 +826,52 @@ export function buildConfiguredCandidates(env, settings) {
     });
   });
 
+  return candidates;
+}
+
+// The roleplay:intelligence chain: one candidate per entry and credential, in list
+// order. Entries whose provider has no key are skipped.
+export function buildIntelligenceCandidates(env, settings) {
+  const candidates = [];
+  const routes = new Map();
+  settings.intelligenceChain.forEach(({ provider, model }, priorityRank) => {
+    if (!routes.has(provider)) {
+      routes.set(provider, providerRoute(env, provider));
+    }
+    const route = routes.get(provider);
+    if (!route) {
+      return;
+    }
+    const family = intelligenceModelFamily(model);
+    const limits = resolveRoleplayCandidateLimits(
+      settings.providerLimits,
+      provider,
+      family,
+      model,
+    );
+    route.tokens.forEach((token, credentialRank) => {
+      candidates.push({
+        route: "intelligence",
+        priorityRank,
+        provider,
+        providerRank: priorityRank,
+        family,
+        familyRank: 0,
+        model,
+        upstreamModel: withNanogptSpeedSuffix(model, route.speedRouting),
+        modelRank: 0,
+        endpoint: route.endpoint,
+        catalogEndpoint: route.catalogEndpoint,
+        token,
+        credentialId:
+          route.tokens.length > 1 ? `key-${credentialRank + 1}` : "primary",
+        credentialRank,
+        billingMode: route.billingMode,
+        subscriptionOnly: route.subscriptionOnly,
+        ...limits,
+      });
+    });
+  });
   return candidates;
 }
 
@@ -782,8 +921,12 @@ export function rankRoleplayCandidates(
 ) {
   const normalizedPreference =
     typeof preference === "string" ? preference.toLowerCase() : "auto";
+  if (normalizedPreference === "intelligence") {
+    return rankPriorityChain(candidates, modelStats, now, activeCredentials);
+  }
   const eligible = candidates.filter((candidate) =>
-    qualityPolicy.exactModel || roleplayCandidateMatchesPreference(candidate, normalizedPreference),
+    candidate.route !== "intelligence" &&
+    (qualityPolicy.exactModel || roleplayCandidateMatchesPreference(candidate, normalizedPreference)),
   );
   if (qualityPolicy.mode === "fastest-eligible") {
     return rankFastestEligible(eligible, modelStats, now, qualityPolicy.referenceOutputTokens);

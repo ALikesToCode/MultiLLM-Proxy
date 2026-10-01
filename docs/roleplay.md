@@ -131,12 +131,12 @@ request-scoped; only entries marked `always` or whose keys match recent text
 are injected, which keeps each request bounded.
 
 `model_preference` accepts `auto`, `speed`, `kimi`, `glm`, `glm-speed`,
-`glm-5.3-flash`, `glm-5.3-flash-uncensored`, `glm-5.3`, `glm-5.2`, or
-`uncensored`. OpenAI-compatible clients can instead
+`glm-5.3-flash`, `glm-5.3-flash-uncensored`, `glm-5.3`, `glm-5.2`,
+`uncensored`, or `intelligence`. OpenAI-compatible clients can instead
 set `model` to `roleplay:auto`, `roleplay:speed`, `roleplay:kimi`,
 `roleplay:glm`, `roleplay:glm-speed`, `roleplay:5.3-flash`,
-`roleplay:5.3-flash-uncensored`, `roleplay:5.3`, `roleplay:5.2`, or
-`roleplay:uncensored`. `roleplay:glm` uses the quality-first subscription-safe
+`roleplay:5.3-flash-uncensored`, `roleplay:5.3`, `roleplay:5.2`,
+`roleplay:uncensored`, or `roleplay:intelligence`. `roleplay:glm` uses the quality-first subscription-safe
 order; `roleplay:glm-speed` learns the fastest observed 1x GLM route. The
 versioned aliases pin their named variant. `roleplay:uncensored` can fall back
 to GLM-5.2 Venice, while `roleplay:5.3-flash-uncensored` pins the NanoGPT
@@ -145,6 +145,18 @@ and `glm-5.2` values are also accepted. NanoGPT's exact
 `z-ai/glm-5.3-flash`, `z-ai/glm-5.3-flash-uncensored`, `z-ai/glm-5.3`,
 `zai-org/glm-5.2`, and `zai-org/glm-5.2:thinking` IDs map to the same pinned
 variants.
+
+`roleplay:intelligence` mirrors the `auto:intelligence` chat route. It tries a
+fixed list strictly in order across providers, without adaptive reordering:
+MiMo-V2.6-Pro on NanoGPT, then on ClinePass; then GLM-5.3-Flash, GLM-5.3 and
+GLM-5.2, each on NanoGPT, ClinePass (no GLM-5.2), OpenCode Go and NavyAI.
+Pay-as-you-go gateways (OpenRouter, LinkAPI) are not in the default list.
+Entries whose provider has no key are skipped, a cooling-down entry moves out
+of the way, and NanoGPT keys rotate within an entry before the next one. The
+usual safe-fallback statuses advance to the next entry. Set
+`ROLEPLAY_INTELLIGENCE_MODELS` to a JSON array or comma list of
+`provider:model` entries to replace the list. ClinePass uses `CLINE_API_KEY`
+and Cline's `reasoning.effort` field, up to `xhigh`.
 
 Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployment
 configuration sets the general default to `high`. OpenCode `glm-5.3-flash`
@@ -552,6 +564,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_GLM_MODEL` | `glm-5.3-flash` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
+| `ROLEPLAY_INTELLIGENCE_MODELS` | MiMo-V2.6-Pro, then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 | Ordered `provider:model` list for `roleplay:intelligence`; providers `nanogpt`, `cline-pass`, `opencode`, `navyai`, `linkapi`, `openrouter` |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT` | `20` | Largest allowed full GLM-5.3 p95 TTFB and total-latency premium over Flash |
 | `ROLEPLAY_QUALITY_MIN_SAMPLES` | `3` | Successful samples required for both full and Flash before promotion |

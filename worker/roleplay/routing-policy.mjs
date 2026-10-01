@@ -3,7 +3,7 @@ import { applyReasoningPolicy, requestedReasoningEffort } from "./reasoning.mjs"
 import { glmModelVariant } from "./model-selection.mjs";
 
 const MODES = ["provider-priority", "fastest-eligible", "quality", "pinned"];
-const PROVIDERS = ["nanogpt", "opencode", "openrouter", "linkapi", "navyai"];
+const PROVIDERS = ["nanogpt", "opencode", "openrouter", "linkapi", "navyai", "cline-pass"];
 
 export function parseRoutingPolicy(value) {
   if (value === undefined) value = {};
@@ -48,6 +48,23 @@ export function rankFastestEligible(candidates, stats, now, referenceTokens = 10
   // Unknown/stale routes do not get a fake speed advantage. The comparison lab
   // informs manual pins; automatic speed selection uses this session's evidence.
   return scored.filter((candidate) => !candidate.cooling).sort((a, b) => a.score - b.score || a.index - b.index);
+}
+
+// roleplay:intelligence keeps its configured order across providers. A cooling
+// candidate moves out of the way; when every one is cooling, the soonest returns first.
+export function rankPriorityChain(candidates, stats, now, activeCredentials = {}) {
+  const chain = candidates.filter((candidate) => candidate.route === "intelligence").map((candidate) => {
+    const key = candidate.credentialId === "primary" ? `${candidate.provider}:${candidate.model}`
+      : `${candidate.provider}:${candidate.model}:${candidate.credentialId}`;
+    return { ...candidate, key, cooldownUntil: stats[key]?.cooldownUntil ?? 0,
+      activeCredential: activeCredentials[candidate.provider] === candidate.credentialId,
+      selectionReason: "configured_priority_chain" };
+  });
+  const order = (a, b) => a.priorityRank - b.priorityRank ||
+    Number(b.activeCredential) - Number(a.activeCredential) || a.credentialRank - b.credentialRank;
+  const available = chain.filter((candidate) => !(candidate.cooldownUntil > now));
+  if (available.length) return available.sort(order);
+  return chain.sort((a, b) => a.cooldownUntil - b.cooldownUntil || order(a, b));
 }
 
 export function rankQualityEligible(candidates, stats, now) {

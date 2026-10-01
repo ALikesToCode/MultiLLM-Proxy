@@ -13,6 +13,7 @@ from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_
 from services.opencode_session import with_opencode_request_session
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from providers.cline_pass import cline_completion_payload
 from providers.image_relays import image_relay_spec
 from services.upstream_errors import (
     STREAM_FAILURE_MESSAGE,
@@ -1378,6 +1379,8 @@ class ProxyService:
                             is_streaming=is_streaming,
                         )
 
+                    if api_provider == "cline-pass" and response.status_code < 400:
+                        normalized_payload = cline_completion_payload(normalized_payload)
                     response._content = json.dumps(normalized_payload).encode('utf-8')
                     response.headers['Content-Type'] = 'application/json'
 

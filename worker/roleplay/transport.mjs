@@ -83,6 +83,39 @@ export function logRoleplayError(event, error, details = {}) {
   console.error(JSON.stringify({ event, errorName, ...details }));
 }
 
+// Cline wraps non-streaming completions as {"data": {...}, "success": true};
+// its event streams are plain OpenAI chunks and pass through unchanged.
+export async function unwrapClineEnvelope(response) {
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!response.ok || !contentType.toLowerCase().includes("application/json")) {
+    return response;
+  }
+  let body = await response.text();
+  try {
+    const payload = JSON.parse(body);
+    if (
+      payload &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      !Object.hasOwn(payload, "choices") &&
+      Object.hasOwn(payload, "success") &&
+      payload.data &&
+      typeof payload.data === "object"
+    ) {
+      body = JSON.stringify(payload.data);
+    }
+  } catch {
+    // Not JSON after all: hand the original body on.
+  }
+  const headers = new Headers(response.headers);
+  headers.delete("Content-Length");
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export async function readBoundedBytes(stream, maximumBytes, signal) {
   if (!stream) {
     return { bytes: new Uint8Array(), firstByteMs: 0 };
@@ -598,11 +631,15 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
         )
       : await fetch(candidate.endpoint, requestInit);
     clearTimeout(timeout);
+    const headerMs = performance.now() - startedAt;
     return {
-      response,
+      response:
+        candidate.provider === "cline-pass"
+          ? await unwrapClineEnvelope(response)
+          : response,
       controller,
       startedAt,
-      headerMs: performance.now() - startedAt,
+      headerMs,
       cleanup() {
         if (cleaned) {
           return;

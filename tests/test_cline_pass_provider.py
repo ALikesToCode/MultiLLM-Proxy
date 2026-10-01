@@ -1,16 +1,22 @@
+import json
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import requests
 
 from config import Config
+from providers.cline_pass import cline_completion_payload
 from providers.registry import get_adapter
 from services.auth_primitives import provider_api_key_env_names
 from services.auth_service import AuthService
+from services.intelligence_output import decode_completion
 from services.model_registry import ModelRegistry
 from services.provider_catalog_service import (
     PROVIDER_CATALOG_SPECS,
     ProviderCatalogService,
 )
+from services.proxy_service import ProxyService
 from services.rate_limit_service import RateLimitService
 
 RECOMMENDED_MODELS = {
@@ -93,6 +99,57 @@ class ClinePassProviderTest(unittest.TestCase):
             RateLimitService._provider_limit("cline-pass", "MAX_REQUEST_BYTES", 1),
             16 * 1024 * 1024,
         )
+
+
+COMPLETION = {
+    "id": "gen-1",
+    "object": "chat.completion",
+    "model": "xiaomi/mimo-v2.6-pro",
+    "choices": [{"index": 0, "message": {"role": "assistant", "content": "Ok."}}],
+}
+
+
+class ClinePassEnvelopeTest(unittest.TestCase):
+    """Cline wraps non-streaming completions as {"data": ..., "success": true}."""
+
+    @staticmethod
+    def _response(payload, status=200):
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps(payload).encode()
+        response._content_consumed = True
+        response.headers["Content-Type"] = "application/json"
+        return response
+
+    def test_the_envelope_is_unwrapped_and_plain_payloads_are_kept(self):
+        self.assertEqual(
+            cline_completion_payload({"data": COMPLETION, "success": True}),
+            COMPLETION,
+        )
+        self.assertIs(cline_completion_payload(COMPLETION), COMPLETION)
+        error = {"success": False, "error": {"message": "nope"}}
+        self.assertIs(cline_completion_payload(error), error)
+
+    def test_unified_chat_returns_the_plain_completion(self):
+        session = MagicMock()
+        session.request.return_value = self._response(
+            {"data": COMPLETION, "success": True}
+        )
+        with patch.object(ProxyService, "_get_provider_session", return_value=session):
+            response = ProxyService.make_request(
+                method="POST",
+                url="https://api.cline.bot/api/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                params={},
+                data=json.dumps({"model": "cline-pass/mimo-v2.6-pro", "messages": []}).encode(),
+                api_provider="cline-pass",
+                use_cache=False,
+            )
+        self.assertEqual(response.json(), COMPLETION)
+
+    def test_intelligence_decodes_the_wrapped_completion(self):
+        raw = json.dumps({"data": COMPLETION, "success": True}).encode()
+        self.assertEqual(decode_completion(raw)["choices"], COMPLETION["choices"])
 
 
 if __name__ == "__main__":

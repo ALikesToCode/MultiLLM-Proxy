@@ -35,6 +35,7 @@ import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
 import {
   buildConfiguredCandidates,
+  buildIntelligenceCandidates,
   getRoleplaySettings,
   rankRoleplayCandidates,
   ROLEPLAY_SAFE_FALLBACK_STATUSES,
@@ -88,10 +89,10 @@ export class RoleplaySession extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.settings = getRoleplaySettings(env);
-    this.configuredCandidates = buildConfiguredCandidates(
-      env,
-      this.settings,
-    );
+    this.configuredCandidates = [
+      ...buildConfiguredCandidates(env, this.settings),
+      ...buildIntelligenceCandidates(env, this.settings),
+    ];
     this.stateRepository = createRoleplayStateRepository(ctx.storage);
     this.refreshSessionAlarm = createSessionAlarmRefresher(
       ctx,

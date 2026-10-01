@@ -11,6 +11,7 @@ const MODEL_PREFERENCES = new Set([
   "glm-5.3-flash-uncensored",
   "glm-5.3",
   "uncensored",
+  "intelligence",
 ]);
 
 const REQUEST_MODEL_ALIASES = Object.freeze({
@@ -33,6 +34,7 @@ const REQUEST_MODEL_ALIASES = Object.freeze({
   "roleplay:5.3": "glm-5.3",
   "roleplay:glm-5.3": "glm-5.3",
   "roleplay:uncensored": "uncensored",
+  "roleplay:intelligence": "intelligence",
   "kimi-k2.6": "kimi",
   "z-ai/glm-5.3-flash": "glm-5.3-flash",
   "z-ai/glm-5.3-flash-uncensored": "glm-5.3-flash-uncensored",
@@ -55,6 +57,7 @@ export const ROLEPLAY_PUBLIC_MODEL_ALIASES = Object.freeze({
   "roleplay:5.3": "full GLM-5.3 only",
   "roleplay:5.2": "GLM-5.2 only",
   "roleplay:uncensored": "uncensored GLM route with GLM-5.2 Venice fallback",
+  "roleplay:intelligence": "fixed order: MiMo-V2.6-Pro (NanoGPT, ClinePass), then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 across providers",
 });
 
 function normalizedPreference(value) {
@@ -71,7 +74,7 @@ export function parseRoleplayModelPreference(payload) {
   if (explicit) {
     if (!MODEL_PREFERENCES.has(explicit)) {
       throw new RoleplayRequestError(
-        "model_preference must be auto, speed, kimi, glm, glm-speed, glm-5.3-flash, glm-5.3-flash-uncensored, glm-5.3, glm-5.2, or uncensored",
+        "model_preference must be auto, speed, kimi, glm, glm-speed, glm-5.3-flash, glm-5.3-flash-uncensored, glm-5.3, glm-5.2, uncensored, or intelligence",
       );
     }
     return explicit;
@@ -83,7 +86,7 @@ export function parseRoleplayModelPreference(payload) {
   }
   if (model.startsWith("roleplay:")) {
     throw new RoleplayRequestError(
-      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, roleplay:glm, roleplay:glm-speed, roleplay:5.3-flash, roleplay:5.3-flash-uncensored, roleplay:5.3, roleplay:5.2, or roleplay:uncensored",
+      "model must be roleplay:auto, roleplay:speed, roleplay:kimi, roleplay:glm, roleplay:glm-speed, roleplay:5.3-flash, roleplay:5.3-flash-uncensored, roleplay:5.3, roleplay:5.2, roleplay:uncensored, or roleplay:intelligence",
     );
   }
   return "auto";
