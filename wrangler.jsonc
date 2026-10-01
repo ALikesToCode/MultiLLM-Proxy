@@ -1,135 +1,157 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "multillm-proxy",
-  "keep_vars": true,
-  "main": "./cloudflare-worker.mjs",
-  "build": { "command": "python scripts/build_release_metadata.py" },
-  "version_metadata": { "binding": "CF_VERSION_METADATA" },
-  "compatibility_date": "2026-07-30",
-  "compatibility_flags": [
-    "nodejs_compat",
-    "enable_request_signal",
-    "request_signal_passthrough"
-  ],
-  "services": [{ "binding": "KNOWLEDGE_SERVICE", "service": "multillm-knowledge" }],
-  "ai": { "binding": "AI" },
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "containers": [
-    {
-      "class_name": "MultiLLMProxyContainer",
-      "image": "./Dockerfile",
-      "max_instances": 1,
-      "instance_type": "basic"
-    }
-  ],
-  "d1_databases": [
-    {
-      "binding": "INTELLIGENCE_DB",
-      "database_name": "multillm-intelligence",
-      "database_id": "0e64ec48-b454-4876-a4aa-3fb2c240fd3d",
-      "migrations_dir": "intelligence-migrations"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "MULTILLM_PROXY_CONTAINER",
-        "class_name": "MultiLLMProxyContainer"
-      },
-      {
-        "name": "ROLEPLAY_SESSION",
-        "class_name": "RoleplaySession"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "MultiLLMProxyContainer"
-      ]
-    },
-    {
-      "tag": "v2",
-      "new_sqlite_classes": [
-        "RoleplaySession"
-      ]
-    }
-  ],
-  "observability": {
-    "enabled": true,
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "invocation_logs": false
-    },
-    "traces": {
-      "enabled": true,
-      "head_sampling_rate": 0.01
-    }
-  },
-  "vars": {
-    "FLASK_ENV": "production",
-    "AUTH_STORAGE_BACKEND": "d1",
-    "WORKBENCH_WORKER_URL": "https://multillm-proxy.cserules.workers.dev",
-    "SERVER_HOST": "0.0.0.0",
-    "SERVER_PORT": "8080",
-    "APP_NAME": "MultiLLM Proxy",
-    "AIHUBMIX_BASE_URL": "https://aihubmix.com",
-    "AIHUBMIX_BACKUP_BASE_URL": "https://api.inferera.com",
-    "LINKAPI_BASE_URL": "https://hk.linkapi.ai",
-    "ROLEPLAY_PROVIDER_ORDER": "nanogpt,linkapi,navyai",
-    "ROLEPLAY_KIMI_MODEL": "kimi-k2.6",
-    "ROLEPLAY_GLM_MODEL": "glm-5.3-flash",
-    "ROLEPLAY_PROVIDER_MODELS": "{\"nanogpt\":{\"glm\":[\"z-ai/glm-5.3-flash\",\"z-ai/glm-5.3-flash-uncensored\",\"zai-org/glm-5.2:thinking\",\"z-ai/glm-5.3\"]},\"navyai\":{\"glm\":\"glm-5.2-venice\"}}",
-    "ROLEPLAY_PROVIDER_FAMILIES": "{\"nanogpt\":[\"glm\"],\"linkapi\":[\"kimi\"],\"navyai\":[\"glm\"]}",
-    "ROLEPLAY_PROVIDER_LIMITS": "{}",
-    "GLM_AUTO_OPTIMIZE": "true",
-    "GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS": "8000",
-    "GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS": "8",
-    "CONTEXT_ANALYSIS_CACHE_ENABLED": "true",
-    "CONTEXT_ANALYSIS_CACHE_TTL_SECONDS": "300",
-    "CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES": "2048",
-    "PROMPT_CACHE_ENABLED": "true",
-    "PROMPT_CACHE_MIN_TOKENS": "1024",
-    "NANOGPT_BILLING_MODE": "subscription",
-    "NANOGPT_SPEED_ROUTING": "fast",
-    "NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS": "900",
-    "NANOGPT_SUBSCRIPTION_BASE_URL": "https://nano-gpt.com/api/subscription",
-    "NANOGPT_KEY_CHECK_TIMEOUT_SECONDS": "5",
-    "NANOGPT_KEY_CHECK_TTL_SECONDS": "300",
-    "NANOGPT_KEY_CHECK_EVERY_REQUESTS": "50",
-    "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS": "60",
-    "NANOGPT_PREFERRED_KEY_INDEX": "0",
-    "ROLEPLAY_COMPACT_TRIGGER_TOKENS": "128000",
-    "ROLEPLAY_COMPACT_TRIGGER_PERCENT": "90",
-    "ROLEPLAY_HARD_INPUT_TOKENS": "0",
-    "ROLEPLAY_MEMORY_TARGET_TOKENS": "1200",
-    "ROLEPLAY_KEEP_RECENT_MESSAGES": "32",
-    "ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS": "2048",
-    "ROLEPLAY_CONTEXT_REPLY_RESERVE_TOKENS": "4096",
-    "ROLEPLAY_CONTEXT_SAFETY_TOKENS": "1024",
-    "ROLEPLAY_MAX_REQUEST_BYTES": "8388608",
-    "ROLEPLAY_MAX_STORED_BYTES": "640000",
-    "ROLEPLAY_COMPACTION_MAX_TOKENS": "16000",
-    "ROLEPLAY_COMPACTION_MODELS": "{\"nanogpt\":\"moonshotai/kimi-k2.6\"}",
-    "ROLEPLAY_COMPACTION_TIMEOUT_MS": "100000",
-    "ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS": "90000",
-    "ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED": "true",
-    "ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED": "true",
-    "ROLEPLAY_REFUSAL_FALLBACK_ENABLED": "true",
-    "ROLEPLAY_DEFAULT_REASONING_EFFORT": "high",
-    "ROLEPLAY_STREAM_HEARTBEAT_MS": "10000",
-    "SSE_STREAM_HEARTBEAT_MS": "10000",
-    "ROLEPLAY_MAX_AUTO_CONTINUATIONS": "8",
-    "ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS": "1",
-    "ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT": "20",
-    "ROLEPLAY_QUALITY_MIN_SAMPLES": "3",
-    "ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS": "1024",
-    "ROLEPLAY_SESSION_TTL_SECONDS": "2592000",
-    "KEEP_WARM": "false",
-    "HEALTH_CHECKS_WAKE": "false",
-    "HEALTH_CHECK_INTERVAL_MINUTES": "30",
-    "AUTO_ROUTE_ORDERING": "priority"
-  }
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "multillm-proxy",
+	"keep_vars": true,
+	"main": "./cloudflare-worker.mjs",
+	"build": {
+		"command": "python scripts/build_release_metadata.py"
+	},
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+	"compatibility_date": "2026-07-30",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"enable_request_signal",
+		"request_signal_passthrough"
+	],
+	"services": [
+		{
+			"binding": "KNOWLEDGE_SERVICE",
+			"service": "multillm-knowledge"
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	},
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
+	},
+	"containers": [
+		{
+			"class_name": "MultiLLMProxyContainer",
+			"image": "./Dockerfile",
+			"max_instances": 1,
+			"instance_type": "basic"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "INTELLIGENCE_DB",
+			"database_name": "multillm-intelligence",
+			"database_id": "0e64ec48-b454-4876-a4aa-3fb2c240fd3d",
+			"migrations_dir": "intelligence-migrations"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "MULTILLM_PROXY_CONTAINER",
+				"class_name": "MultiLLMProxyContainer"
+			},
+			{
+				"name": "ROLEPLAY_SESSION",
+				"class_name": "RoleplaySession"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"MultiLLMProxyContainer"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"RoleplaySession"
+			]
+		}
+	],
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"invocation_logs": false
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 0.01
+		}
+	},
+	"vars": {
+		"FLASK_ENV": "production",
+		"AUTH_STORAGE_BACKEND": "d1",
+		"WORKBENCH_WORKER_URL": "https://multillm-proxy.cserules.workers.dev",
+		"SERVER_HOST": "0.0.0.0",
+		"SERVER_PORT": "8080",
+		"APP_NAME": "MultiLLM Proxy",
+		"AIHUBMIX_BASE_URL": "https://aihubmix.com",
+		"AIHUBMIX_BACKUP_BASE_URL": "https://api.inferera.com",
+		"LINKAPI_BASE_URL": "https://hk.linkapi.ai",
+		"ROLEPLAY_PROVIDER_ORDER": "nanogpt,linkapi,navyai",
+		"ROLEPLAY_KIMI_MODEL": "kimi-k2.6",
+		"ROLEPLAY_GLM_MODEL": "glm-5.3-flash",
+		"ROLEPLAY_PROVIDER_MODELS": "{\"nanogpt\":{\"glm\":[\"z-ai/glm-5.3-flash\",\"z-ai/glm-5.3-flash-uncensored\",\"zai-org/glm-5.2:thinking\",\"z-ai/glm-5.3\"]},\"navyai\":{\"glm\":\"glm-5.2-venice\"}}",
+		"ROLEPLAY_PROVIDER_FAMILIES": "{\"nanogpt\":[\"glm\"],\"linkapi\":[\"kimi\"],\"navyai\":[\"glm\"]}",
+		"ROLEPLAY_PROVIDER_LIMITS": "{}",
+		"GLM_AUTO_OPTIMIZE": "true",
+		"GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS": "8000",
+		"GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS": "8",
+		"CONTEXT_ANALYSIS_CACHE_ENABLED": "true",
+		"CONTEXT_ANALYSIS_CACHE_TTL_SECONDS": "300",
+		"CONTEXT_ANALYSIS_CACHE_MAX_ENTRIES": "2048",
+		"PROMPT_CACHE_ENABLED": "true",
+		"PROMPT_CACHE_MIN_TOKENS": "1024",
+		"NANOGPT_BILLING_MODE": "subscription",
+		"NANOGPT_SPEED_ROUTING": "fast",
+		"NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS": "900",
+		"NANOGPT_SUBSCRIPTION_BASE_URL": "https://nano-gpt.com/api/subscription",
+		"NANOGPT_KEY_CHECK_TIMEOUT_SECONDS": "5",
+		"NANOGPT_KEY_CHECK_TTL_SECONDS": "300",
+		"NANOGPT_KEY_CHECK_EVERY_REQUESTS": "50",
+		"NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS": "60",
+		"NANOGPT_PREFERRED_KEY_INDEX": "0",
+		"ROLEPLAY_COMPACT_TRIGGER_TOKENS": "128000",
+		"ROLEPLAY_COMPACT_TRIGGER_PERCENT": "90",
+		"ROLEPLAY_HARD_INPUT_TOKENS": "0",
+		"ROLEPLAY_MEMORY_TARGET_TOKENS": "1200",
+		"ROLEPLAY_KEEP_RECENT_MESSAGES": "32",
+		"ROLEPLAY_IMAGE_PROMPT_MIN_OUTPUT_TOKENS": "2048",
+		"ROLEPLAY_CONTEXT_REPLY_RESERVE_TOKENS": "4096",
+		"ROLEPLAY_CONTEXT_SAFETY_TOKENS": "1024",
+		"ROLEPLAY_MAX_REQUEST_BYTES": "8388608",
+		"ROLEPLAY_MAX_STORED_BYTES": "640000",
+		"ROLEPLAY_COMPACTION_MAX_TOKENS": "16000",
+		"ROLEPLAY_COMPACTION_MODELS": "{\"nanogpt\":\"moonshotai/kimi-k2.6\"}",
+		"ROLEPLAY_COMPACTION_TIMEOUT_MS": "100000",
+		"ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS": "90000",
+		"ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED": "true",
+		"ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED": "true",
+		"ROLEPLAY_REFUSAL_FALLBACK_ENABLED": "true",
+		"ROLEPLAY_DEFAULT_REASONING_EFFORT": "high",
+		"ROLEPLAY_STREAM_HEARTBEAT_MS": "10000",
+		"SSE_STREAM_HEARTBEAT_MS": "10000",
+		"ROLEPLAY_MAX_AUTO_CONTINUATIONS": "8",
+		"ROLEPLAY_MAX_OUTPUT_CONTRACT_REPAIRS": "1",
+		"ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT": "20",
+		"ROLEPLAY_QUALITY_MIN_SAMPLES": "3",
+		"ROLEPLAY_SPEED_REFERENCE_OUTPUT_TOKENS": "1024",
+		"ROLEPLAY_SESSION_TTL_SECONDS": "2592000",
+		"KEEP_WARM": "false",
+		"HEALTH_CHECKS_WAKE": "false",
+		"HEALTH_CHECK_INTERVAL_MINUTES": "30",
+		"AUTO_ROUTE_ORDERING": "priority"
+	},
+	"r2_buckets": [
+		{
+			"bucket_name": "multillm-media",
+			"binding": "multillm_media",
+			"remote": true
+		}
+	]
 }
