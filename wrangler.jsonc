@@ -99,6 +99,7 @@
 		"ROLEPLAY_PROVIDER_MODELS": "{\"nanogpt\":{\"glm\":[\"z-ai/glm-5.3-flash\",\"z-ai/glm-5.3-flash-uncensored\",\"zai-org/glm-5.2:thinking\",\"z-ai/glm-5.3\"]},\"navyai\":{\"glm\":\"glm-5.2-venice\"}}",
 		"ROLEPLAY_PROVIDER_FAMILIES": "{\"nanogpt\":[\"glm\"],\"linkapi\":[\"kimi\"],\"navyai\":[\"glm\"]}",
 		"ROLEPLAY_PROVIDER_LIMITS": "{}",
+		"ROLEPLAY_AUTO_ROUTE": "intelligence",
 		"GLM_AUTO_OPTIMIZE": "true",
 		"GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS": "8000",
 		"GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS": "8",
