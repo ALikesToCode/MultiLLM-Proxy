@@ -9,6 +9,7 @@ import {
   withGlobalFetch,
 } from "./helpers/roleplay_fixture.mjs";
 import {
+  autoRoutePreference,
   buildConfiguredCandidates,
   buildIntelligenceCandidates,
   getRoleplaySettings,
@@ -248,4 +249,86 @@ test("a roleplay:intelligence turn falls back from NanoGPT MiMo to ClinePass MiM
   assert.equal(calls[1].url, "https://api.cline.bot/api/v1/chat/completions");
   assert.equal(calls[1].authorization, "Bearer cline-key");
   assert.ok(calls[1].reasoning?.effort);
+});
+
+test("ROLEPLAY_AUTO_ROUTE is adaptive unless set to intelligence", () => {
+  assert.equal(getRoleplaySettings({}).autoRoute, "adaptive");
+  assert.equal(getRoleplaySettings({ ROLEPLAY_AUTO_ROUTE: "bogus" }).autoRoute, "adaptive");
+  assert.equal(getRoleplaySettings({ ROLEPLAY_AUTO_ROUTE: " Intelligence " }).autoRoute, "intelligence");
+});
+
+test("only plain roleplay:auto turns follow the intelligence auto route", () => {
+  const settings = getRoleplaySettings({ ROLEPLAY_AUTO_ROUTE: "intelligence" });
+  const turn = (modelPreference, routing = {}) => ({
+    modelPreference,
+    routing: parseRoutingPolicy(routing),
+  });
+
+  assert.equal(autoRoutePreference(turn("auto"), settings), "intelligence");
+  assert.equal(autoRoutePreference(turn("glm"), settings), "glm");
+  assert.equal(autoRoutePreference(turn("speed"), settings), "speed");
+  assert.equal(autoRoutePreference(turn("auto", { mode: "fastest-eligible" }), settings), "auto");
+  assert.equal(
+    autoRoutePreference(turn("auto", { mode: "pinned", provider: "nanogpt", model: "z-ai/glm-5.3" }), settings),
+    "auto",
+  );
+  assert.equal(autoRoutePreference(turn("auto"), getRoleplaySettings({})), "auto");
+});
+
+async function autoTurn(env, sessionId) {
+  const fixture = makeRoleplayEnv(env);
+  const calls = [];
+  const response = await withGlobalFetch(async (input, init) => {
+    const payload = JSON.parse(init.body);
+    calls.push(payload.model);
+    return completionResponse(payload.model, "Hello.");
+  }, () =>
+    handleRoleplayEdgeRequest(
+      roleplayRequest({
+        session_id: sessionId,
+        input: "Say hello.",
+        model: "roleplay:auto",
+        max_tokens: 256,
+        stream: false,
+      }),
+      fixture.env,
+    ),
+  );
+  return { response, calls };
+}
+
+test("roleplay:auto starts with MiMo when ROLEPLAY_AUTO_ROUTE=intelligence", async () => {
+  const { response, calls } = await autoTurn(
+    { NANOGPT_API_KEY: "nano-key", CLINE_API_KEY: "cline-key", ROLEPLAY_AUTO_ROUTE: "intelligence" },
+    "session-auto-intelligence",
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["xiaomi/mimo-v2.6-pro"]);
+  assert.equal(response.headers.get("X-Roleplay-Model"), "xiaomi/mimo-v2.6-pro");
+});
+
+test("roleplay:auto keeps the adaptive pool without the switch", async () => {
+  const { response, calls } = await autoTurn(
+    { NANOGPT_API_KEY: "nano-key", CLINE_API_KEY: "cline-key" },
+    "session-auto-adaptive",
+  );
+
+  assert.equal(response.status, 200);
+  assert.notEqual(calls[0], "xiaomi/mimo-v2.6-pro");
+});
+
+test("roleplay:auto falls back to the adaptive pool when the chain has no key", async () => {
+  const { response, calls } = await autoTurn(
+    {
+      ROLEPLAY_AUTO_ROUTE: "intelligence",
+      ROLEPLAY_INTELLIGENCE_MODELS: "openrouter:z-ai/glm-5.3",
+    },
+    "session-auto-no-chain-key",
+  );
+
+  // The fixture's OpenCode key serves the adaptive pool; OpenRouter has no key.
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(response.headers.get("X-Roleplay-Provider"), "opencode");
 });

@@ -35,6 +35,7 @@ import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
 import {
   buildConfiguredCandidates,
+  autoRoutePreference,
   buildIntelligenceCandidates,
   getRoleplaySettings,
   rankRoleplayCandidates,
@@ -263,10 +264,10 @@ export class RoleplaySession extends DurableObject {
       state = checkedState;
       await this.stateRepository.save(state);
     }
-    const candidates = rankRoleplayCandidates(
+    const rankFor = (preference) => rankRoleplayCandidates(
       configuredCandidates,
       state.stats,
-      parsed.modelPreference,
+      preference,
       Date.now(),
       state.activeCredentials,
       {
@@ -277,6 +278,13 @@ export class RoleplaySession extends DurableObject {
         referenceOutputTokens: settings.speedReferenceOutputTokens,
       },
     );
+    // ROLEPLAY_AUTO_ROUTE=intelligence sends plain roleplay:auto turns through the
+    // roleplay:intelligence chain, and back to the adaptive pool if it has no key.
+    const autoPreference = autoRoutePreference(parsed, settings);
+    let candidates = rankFor(autoPreference);
+    if (!candidates.length && autoPreference !== parsed.modelPreference) {
+      candidates = rankFor(parsed.modelPreference);
+    }
     if (parsed.routing.fallback === "none") candidates.splice(1);
     if (!candidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "no_provider");

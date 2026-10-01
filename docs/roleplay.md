@@ -158,6 +158,11 @@ usual safe-fallback statuses advance to the next entry. Set
 `provider:model` entries to replace the list. ClinePass uses `CLINE_API_KEY`
 and Cline's `reasoning.effort` field, up to `xhigh`.
 
+With `ROLEPLAY_AUTO_ROUTE=intelligence`, plain `roleplay:auto` turns (and requests
+without a roleplay model) use the same chain. Turns that set `routing.mode` or
+`routing.model` keep the adaptive pool, and so does any turn whose chain has no
+configured key. Leave the variable unset for the adaptive behaviour above.
+
 Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployment
 configuration sets the general default to `high`. OpenCode `glm-5.3-flash`
 defaults to `reasoning_effort: max`. Go enables reasoning through that field;
@@ -564,6 +569,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_GLM_MODEL` | `glm-5.3-flash` | Default GLM model ID |
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
+| `ROLEPLAY_AUTO_ROUTE` | `adaptive` | `intelligence` sends plain `roleplay:auto` turns through the `roleplay:intelligence` chain |
 | `ROLEPLAY_INTELLIGENCE_MODELS` | MiMo-V2.6-Pro, then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 | Ordered `provider:model` list for `roleplay:intelligence`; providers `nanogpt`, `cline-pass`, `opencode`, `navyai`, `linkapi`, `openrouter` |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT` | `20` | Largest allowed full GLM-5.3 p95 TTFB and total-latency premium over Flash |

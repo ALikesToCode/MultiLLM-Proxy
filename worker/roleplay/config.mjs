@@ -729,7 +729,22 @@ export function getRoleplaySettings(env) {
       env.ROLEPLAY_PROVIDER_LIMITS,
     ),
     intelligenceChain: parseIntelligenceChain(env.ROLEPLAY_INTELLIGENCE_MODELS),
+    autoRoute:
+      String(env.ROLEPLAY_AUTO_ROUTE ?? "").trim().toLowerCase() === "intelligence"
+        ? "intelligence"
+        : "adaptive",
   };
+}
+
+// The preference a turn ranks with: plain roleplay:auto follows ROLEPLAY_AUTO_ROUTE,
+// while explicit routing options keep the adaptive pool they were written for.
+export function autoRoutePreference(parsed, settings) {
+  return parsed.modelPreference === "auto" &&
+    settings.autoRoute === "intelligence" &&
+    parsed.routing?.mode === "provider-priority" &&
+    !parsed.routing?.model
+    ? "intelligence"
+    : parsed.modelPreference;
 }
 
 // Credentials, billing mode and endpoints of one provider, or null without a key.

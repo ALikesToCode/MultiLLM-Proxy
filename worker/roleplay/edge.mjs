@@ -142,7 +142,13 @@ export async function handleRoleplayEdgeRequest(request, env) {
         speed_reference_output_tokens:
           settings.speedReferenceOutputTokens,
         safe_fallback_statuses: ROLEPLAY_SAFE_FALLBACK_STATUSES,
-        model_aliases: ROLEPLAY_PUBLIC_MODEL_ALIASES,
+        model_aliases:
+          settings.autoRoute === "intelligence"
+            ? {
+                ...ROLEPLAY_PUBLIC_MODEL_ALIASES,
+                "roleplay:auto": "same order as roleplay:intelligence (ROLEPLAY_AUTO_ROUTE)",
+              }
+            : ROLEPLAY_PUBLIC_MODEL_ALIASES,
       },
     });
   }
