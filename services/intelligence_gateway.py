@@ -54,6 +54,15 @@ def rejection(head):
     )
 
 
+def refused_before_output(head):
+    """A client-error status arrives before any output: the provider declined the request
+    and generated nothing, so the attempt is known to have used no tokens and the next
+    candidate may run. A 504 or anything after a successful status is not a refusal; its
+    outcome stays unknown and keeps the whole reservation.
+    """
+    return 400 <= head.status_code < 500
+
+
 class ChatGateway:
     def __init__(
         self,
@@ -170,7 +179,7 @@ class ChatGateway:
                 final_status = 502
                 try:
                     head = self.exchange.head()
-                    if _is_fallback_response(head):
+                    if _is_fallback_response(head) or refused_before_output(head):
                         final_status = head.status_code
                         self.unresolved = False
                         last_error = rejection(head)

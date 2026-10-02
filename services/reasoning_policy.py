@@ -112,6 +112,39 @@ def apply_glm_5_reasoning_policy(
     return normalized
 
 
+MIMO_EFFORT_MODELS = frozenset({"mimo-v2.6-pro"})
+
+
+def is_mimo_effort_model(model: str) -> bool:
+    if not isinstance(model, str):
+        return False
+    model_name = model.strip().lower().rsplit("/", 1)[-1]
+    return model_name.split(":", 1)[0] in MIMO_EFFORT_MODELS
+
+
+def apply_mimo_reasoning_policy(payload: Mapping[str, Any], model: str) -> dict[str, Any]:
+    """Map an explicit effort onto MiMo v2.6 Pro's two values.
+
+    NanoGPT's MiMo v2.6 Pro accepts only `none` or `high` and refuses anything else
+    with a 400 (observed 2026-10-02), so callers' generic efforts would otherwise fail
+    the whole attempt. `none` and `minimal` stay off; every other effort thinks at `high`.
+    An omitted effort keeps the model's own default.
+    """
+    normalized = dict(payload)
+    if not is_mimo_effort_model(model):
+        return normalized
+    specified, requested = _requested_effort(normalized)
+    if not specified or requested is None:
+        return normalized
+    effort = "none" if requested in ("none", "minimal") else "high"
+    if "reasoning_effort" in normalized:
+        normalized["reasoning_effort"] = effort
+    else:
+        nested = normalized.get("reasoning")
+        normalized["reasoning"] = {**(dict(nested) if isinstance(nested, Mapping) else {}), "effort": effort}
+    return normalized
+
+
 def apply_glm_52_reasoning_policy(
     payload: Mapping[str, Any],
     provider: str,

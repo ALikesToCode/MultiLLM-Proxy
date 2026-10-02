@@ -139,6 +139,37 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
         assert response.json["error"]["code"] == "output_validation_failed"
         assert response.json["usage"]["total_tokens"] == 6
 
+    def test_a_refusal_before_output_falls_back_and_charges_only_what_was_used(self):
+        self.seed()
+        refusal = {"error": {"message": "Invalid value for reasoning_effort: synthetic-private-detail"}}
+        with self.requests(
+            side_effect=[upstream(refusal, 400), upstream(completion())]
+        ) as send:
+            response = self.post(reasoning_effort="xhigh")
+        assert response.status_code == 200 and send.call_count == 2
+        assert response.json["multillm"]["reason"] == "availability_fallback"
+        assert response.json["multillm"]["usage_complete"] is True
+        assert b"synthetic-private-detail" not in response.data
+        (row,) = capture()["tables"]["intelligence_reservations"]
+        assert row["state"] == "settled" and row["charged"] == 6
+
+    def test_a_pinned_model_refusal_is_not_retried_and_does_not_hold_the_reservation(self):
+        self.seed()
+        with self.requests(return_value=upstream({}, 422)) as send:
+            response = self.post(model="openai:small", routing={})
+        assert send.call_count == 1 and response.status_code == 502
+        assert response.json["error"]["code"] == "upstream_error"
+        (row,) = capture()["tables"]["intelligence_reservations"]
+        assert row["state"] == "settled" and row["charged"] == 0
+
+    def test_a_504_still_keeps_the_whole_reservation(self):
+        self.seed()
+        with self.requests(return_value=upstream({}, 504)) as send:
+            response = self.post()
+        assert send.call_count == 1 and response.status_code == 502
+        (row,) = capture()["tables"]["intelligence_reservations"]
+        assert row["state"] == "unknown" and row["charged"] == row["reserved"]
+
     def test_timeout_and_http_200_errors_are_uncertain_and_never_replayed(self):
         self.seed()
         for effect in (

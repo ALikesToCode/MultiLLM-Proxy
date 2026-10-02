@@ -75,3 +75,20 @@ class IntelligenceReasoningTests(IntelligenceApiTestCase):
         body = json.loads(send.call_args.kwargs["data"])
         assert body["model"] == "small"
         assert body["reasoning_effort"] == "xhigh"
+
+    def test_mimo_receives_only_the_efforts_it_accepts(self):
+        IntelligenceStore.seed(
+            policy(candidates=[candidate("nanogpt:xiaomi/mimo-v2.6-pro", billing="subscription")])
+        )
+        for requested, sent in (("xhigh", "high"), ("max", "high"), ("medium", "high"),
+                                ("low", "high"), ("minimal", "none"), ("none", "none")):
+            with self.subTest(requested=requested), self.requests(
+                return_value=upstream(completion())
+            ) as send:
+                response = self.post(reasoning_effort=requested)
+                assert response.status_code == 200
+                assert json.loads(send.call_args.kwargs["data"])["reasoning_effort"] == sent
+        with self.requests(return_value=upstream(completion())) as send:
+            assert self.post().status_code == 200
+        assert "reasoning_effort" not in json.loads(send.call_args.kwargs["data"])
+

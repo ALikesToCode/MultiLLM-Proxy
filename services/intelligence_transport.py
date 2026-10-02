@@ -13,7 +13,10 @@ from providers.opencode_go import build_opencode_model_url
 from providers.registry import get_adapter
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
-from services.reasoning_policy import apply_glm_5_reasoning_policy
+from services.reasoning_policy import (
+    apply_glm_5_reasoning_policy,
+    apply_mimo_reasoning_policy,
+)
 from services.upstream_transport import iter_stream_content
 
 _TRANSPORT_SLOTS = threading.BoundedSemaphore(32)
@@ -225,6 +228,7 @@ class IntelligenceTransport:
         body = dict(payload, model=model)
         if path is None:
             body = apply_glm_5_reasoning_policy(body, provider, model)
+            body = apply_mimo_reasoning_policy(body, model)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )
