@@ -176,7 +176,13 @@ def free_candidates(config, *, vision: bool, tools: bool = False) -> list[FreeCa
         outputs = metadata.get("output_modalities")
         if outputs and "text" not in outputs:
             continue
-        image_support = model_supports_vision(metadata)
+        # Cline serves OpenRouter's models under the same IDs but publishes no
+        # capabilities, so OpenRouter's catalog entry for the model fills the gap.
+        capabilities = metadata
+        if provider == "cline-pass":
+            mirror = catalog.get(f"openrouter:{model}") or {}
+            capabilities = {**(mirror.get("provider_metadata") or {}), **metadata}
+        image_support = model_supports_vision(capabilities)
         if image_support is None:
             image_support = SEED_VISION.get(row["id"])
         # Seeds without reviewed vision coverage stay out of image routing.
@@ -185,7 +191,7 @@ def free_candidates(config, *, vision: bool, tools: bool = False) -> list[FreeCa
         if vision and image_support is not True:
             continue
         # An explicit catalog flag wins; a reviewed seed covers models without one.
-        tool_support = model_supports_tools(metadata)
+        tool_support = model_supports_tools(capabilities)
         if tool_support is None:
             tool_support = SEED_TOOLS.get(row["id"])
         if tools and tool_support is not True:

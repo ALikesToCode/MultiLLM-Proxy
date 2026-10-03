@@ -85,8 +85,10 @@ order. Support is confirmed by the model's live catalog entry (`supports_tools`,
 OpenRouter's `supported_parameters`), by its models.dev entry after **Refresh live
 models**, or by a reviewed seed: the Groq, Gemini, Mistral, Workers AI and Z.ai seeds
 (each listed with tool calling by models.dev) and OpenRouter's `openrouter/free`,
-which picks only free models that support the request's tools. Unknown support is
-excluded, so OrcaRouter, BazaarLink and LLM7 never receive tools. When no confirmed
+which picks only free models that support the request's tools. Cline publishes no
+capabilities, so its free models use OpenRouter's catalog entry for the same model ID
+(Cline serves OpenRouter's models under the same IDs); this covers image input too.
+Unknown support is excluded, so OrcaRouter, BazaarLink and LLM7 never receive tools. When no confirmed
 candidate is configured the pool returns `503 free_models_unavailable`; it never
 substitutes a paid model. `/v1/free/models` lists `supports_tools` per candidate
 (`true`, `false` or `null` for unknown).

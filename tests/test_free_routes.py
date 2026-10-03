@@ -218,6 +218,34 @@ class FreeRouteTest(UnifiedApiTestCase):
             response = self.post()
         self.assertNotEqual(response.status_code, 200, "subscription models never serve the free pool")
 
+    def test_cline_free_models_use_openrouter_capabilities_for_vision_and_tools(self):
+        self.keys["cline-pass"] = "test-cline"
+        mirror = catalog_row("openrouter", "stealth/space-bunny-alpha", vision=True,
+                             pricing={"prompt": "0", "completion": "0"})
+        mirror["provider_metadata"]["supports_tools"] = True
+        self.rows = [catalog_row("cline-pass", "stealth/space-bunny-alpha", plan="free"),
+                     catalog_row("cline-pass", "stealth/unlisted-alpha", plan="free"), mirror]
+        image = {"type": "image_url", "image_url": {"url": "https://example.test/cat.png"}}
+        with patch("app.ProxyService.make_request", return_value=self._chat_response("a cat")) as send:
+            response = self.post({"messages": [{"role": "user", "content": [{"type": "text", "text": "What?"}, image]}]},
+                                 mode="vision")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "cline-pass:stealth/space-bunny-alpha")
+        self.assertEqual(json.loads(send.call_args.kwargs["data"])["messages"][0]["content"][1], image)
+        self.assertEqual(send.call_args.kwargs["url"], "https://api.cline.bot/api/v1/chat/completions")
+
+        from services.free_model_policy import free_candidates
+        with self.app.app_context():
+            vision = [c.id for c in free_candidates(self.app.config, vision=True)]
+            tools = [c.id for c in free_candidates(self.app.config, vision=False, tools=True)]
+            text = [c.id for c in free_candidates(self.app.config, vision=False)]
+        self.assertNotIn("openrouter:stealth/space-bunny-alpha", text, "the mirror has no :free label")
+        self.assertIn("cline-pass:stealth/space-bunny-alpha", vision)
+        self.assertIn("cline-pass:stealth/space-bunny-alpha", tools)
+        self.assertNotIn("cline-pass:stealth/unlisted-alpha", vision + tools,
+                         "without published capabilities a model stays text-only")
+        self.assertIn("cline-pass:stealth/unlisted-alpha", text)
+
     def test_paid_and_non_chat_candidates_are_excluded(self):
         self.rows = [
             catalog_row("aihubmix", "gpt-image-2-free"),
