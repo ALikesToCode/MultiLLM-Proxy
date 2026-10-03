@@ -1,7 +1,7 @@
 # Free provider signup links
 
 Account and API-key pages for the services supported by the free pools.
-Create accounts only for providers you want to enable; all eleven are optional.
+Create accounts only for providers you want to enable; all twelve are optional.
 These links are not a guarantee of free access on every account or model.
 
 | Service | Signup / account page | Server secret name |
@@ -17,6 +17,7 @@ These links are not a guarantee of free access on every account or model.
 | BazaarLink | [BazaarLink](https://bazaarlink.ai/) | `BAZAARLINK_API_KEY` |
 | LLM7 | [LLM7 dashboard](https://dash.llm7.io/) | `LLM7_API_KEY` |
 | OpenCode Zen | [Zen account](https://opencode.ai/zen) | `OPENCODE_API_KEY` |
+| Cline | [Cline account](https://app.cline.bot/) | `CLINE_API_KEY` |
 
 OpenCode Zen is already integrated. Keep its existing key if configured;
 `OPENCODE_GO_API_KEY` takes precedence over `OPENCODE_API_KEY` when both exist.

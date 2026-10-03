@@ -81,6 +81,13 @@ class ClinePassProviderTest(unittest.TestCase):
             ),
         )
 
+    def test_catalog_tags_each_model_with_its_section(self):
+        plans = {model.model_id: (model.metadata or {}).get("required_plan")
+                 for model in ProviderCatalogService.extract_models("cline-pass", RECOMMENDED_MODELS)}
+
+        self.assertEqual(plans, {"cline-free/deepseek-v4.1-flash": "free", "cline-pass/glm-5.3": "clinePass",
+                                 "cline-pass/qwen3.8-max": "clinePass"})
+
     def test_catalog_reads_the_public_recommended_models_document_without_a_key(self):
         spec = PROVIDER_CATALOG_SPECS["cline-pass"]
 

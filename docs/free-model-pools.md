@@ -29,8 +29,10 @@ provider key in the client: clients send a MultiLLM proxy key with the `chat`
 scope; discovery requires `models` scope. Admin keys have both.
 
 The default pools accept only AIHubMix `-free` models, OpenCode free Zen models
-with a Chat Completions endpoint, and OpenRouter `:free` variants or
-`openrouter/free`. A nonzero or unparseable catalog price, including a nonzero
+with a Chat Completions endpoint, the `free` section of Cline's recommended-models
+list (served at no charge on any `CLINE_API_KEY`) except `cline-free/*` models, which
+Cline serves only in its own apps, and OpenRouter `:free` variants or
+`openrouter/free`. ClinePass subscription models never enter the pools. A nonzero or unparseable catalog price, including a nonzero
 models.dev list price from [catalog enrichment](auto-routing.md), disqualifies a
 free-labelled model. Paid aliases, subscription models, tool-only protocols and
 image-output-only models do not enter these pools. Calls go to fixed official
@@ -50,7 +52,7 @@ accounts/projects, enable them in server configuration and restart:
 
 ```dotenv
 FREE_ROUTE_FREE_TIER_PROVIDERS=groq,gemini
-FREE_ROUTE_PROVIDER_ORDER=groq,opencode,aihubmix,gemini,openrouter
+FREE_ROUTE_PROVIDER_ORDER=groq,opencode,cline-pass,aihubmix,gemini,openrouter
 ```
 
 This is an operator assertion, not a billing check or a per-request spending

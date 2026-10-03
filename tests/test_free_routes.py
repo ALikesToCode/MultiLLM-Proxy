@@ -9,9 +9,12 @@ from tests.unified_api_test_case import UnifiedApiTestCase
 
 
 def catalog_row(
-    provider, model, *, vision=None, pricing=None, outputs=None, status="available"
+    provider, model, *, vision=None, pricing=None, outputs=None, status="available",
+    plan=None,
 ):
     metadata = {}
+    if plan is not None:
+        metadata["required_plan"] = plan
     if vision is not None:
         metadata["supports_vision"] = vision
     if pricing is not None:
@@ -185,6 +188,35 @@ class FreeRouteTest(UnifiedApiTestCase):
         self.assertEqual(
             json.loads(send.call_args.kwargs["data"])["model"], "openrouter/free"
         )
+
+    def test_cline_free_models_join_the_pool_and_their_envelope_is_unwrapped(self):
+        self.keys["cline-pass"] = "test-cline"
+        self.rows = [
+            catalog_row("cline-pass", "cline-pass/glm-5.3", plan="clinePass"),
+            catalog_row("cline-pass", "cline-free/deepseek-v4.1-flash", plan="free"),
+            catalog_row("cline-pass", "stealth/space-bunny-alpha", plan="free"),
+            catalog_row("cline-pass", "cline-pass/kimi-k3"),
+        ]
+        wrapped = requests.Response()
+        wrapped.status_code = 200
+        wrapped.headers["Content-Type"] = "application/json"
+        wrapped._content = json.dumps({"success": True, "data": json.loads(self._chat_response("free cline")._content)}).encode()
+        with patch("app.ProxyService.make_request", return_value=wrapped) as send:
+            response = self.post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["choices"][0]["message"]["content"], "free cline")
+        args = send.call_args.kwargs
+        self.assertEqual(args["url"], "https://api.cline.bot/api/v1/chat/completions")
+        self.assertEqual(args["headers"]["Authorization"], "Bearer test-cline")
+        self.assertEqual(json.loads(args["data"])["model"], "stealth/space-bunny-alpha",
+                         "cline-free/* models answer API calls with 403 and stay out of the pool")
+        self.assertEqual(send.call_count, 1)
+        self.assertEqual(response.headers["X-MultiLLM-Provider"], "cline-pass")
+
+        with patch("app.ProxyService.make_request", side_effect=AssertionError("no paid model")):
+            self.rows = [catalog_row("cline-pass", "cline-pass/glm-5.3", plan="clinePass")]
+            response = self.post()
+        self.assertNotEqual(response.status_code, 200, "subscription models never serve the free pool")
 
     def test_paid_and_non_chat_candidates_are_excluded(self):
         self.rows = [

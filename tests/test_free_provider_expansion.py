@@ -219,7 +219,8 @@ class FreeProviderExpansionTest(UnifiedApiTestCase):
         self.enable("workersai")
         response = self.client.get("/v1/free/providers", headers=self.headers)
         rows = {r["id"]: r for r in response.get_json()["data"]}
-        self.assertEqual(len(rows), 11)
+        self.assertEqual(len(rows), 12)
+        self.assertEqual(rows["cline-pass"]["api_key_env_names"], ["CLINE_API_KEY", "CLINE_PASS_API_KEY"])
         self.assertTrue(rows["workersai"]["ready"])
         self.assertEqual(rows["workersai"]["api_key_env_names"], ["WORKERSAI_API_KEY"])
         self.assertEqual(

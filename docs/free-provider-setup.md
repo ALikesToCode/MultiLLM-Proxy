@@ -1,8 +1,8 @@
 # Free provider setup checklist
 
-The free pools support **11 services**, including six additional opt-in
+The free pools support **12 services**, including six additional opt-in
 destinations. You do not need all of them. Start with OpenRouter, OpenCode Zen,
-AIHubMix, and a verified Groq Free account; add destinations as needed.
+Cline, AIHubMix, and a verified Groq Free account; add destinations as needed.
 Ordering is a preference, not a measured speed or quality ranking.
 
 For a compact account-opening reference, see [signup links and key names](free-provider-signup-links.md).
@@ -22,6 +22,7 @@ added general-purpose paid routes or dashboard provider adapters.
 | --- | --- | --- | --- | --- |
 | OpenRouter | [API keys](https://openrouter.ai/settings/keys) | `OPENROUTER_API_KEY` | Text + vision | `openrouter/free` and eligible discovered `:free` models |
 | OpenCode Zen | [Zen account](https://opencode.ai/zen) | `OPENCODE_API_KEY` (existing `OPENCODE_GO_API_KEY` takes precedence if both exist) | Text; vision when exact model metadata confirms it | Free Zen Chat Completions models only |
+| Cline | [Cline account](https://app.cline.bot/) → API keys | `CLINE_API_KEY` (or `CLINE_PASS_API_KEY`) | Text (vision and tools only where the catalog confirms them; Cline's list does not) | The `free` section of Cline's public recommended-models list only, without `cline-free/*` models (Cline answers API calls for those with 403 "only available via Cline product surfaces"); ClinePass subscription models are excluded |
 | AIHubMix | [Platform account](https://aihubmix.com/) | `AIHUBMIX_API_KEY` | Text; vision when exact model metadata confirms it | `-free` text-output models only |
 | Groq | [API keys](https://console.groq.com/keys); check organization plan | `GROQ_API_KEY` | Text + vision | Explicit Free-plan assertion |
 | Gemini | [AI Studio API keys](https://aistudio.google.com/apikey); check the key's project | `GEMINI_API_KEY` | Text + vision | Explicit unbilled free-project assertion |
@@ -72,7 +73,7 @@ infrastructure deployment is added.
 Optional server-owned priority, with established providers first:
 
 ```dotenv
-FREE_ROUTE_PROVIDER_ORDER=groq,opencode,aihubmix,gemini,openrouter,mistral,workersai,zai,orcarouter,bazaarlink,llm7
+FREE_ROUTE_PROVIDER_ORDER=groq,opencode,cline-pass,aihubmix,gemini,openrouter,mistral,workersai,zai,orcarouter,bazaarlink,llm7
 ```
 
 Unlisted known providers remain fallbacks; ordering is not an enable switch.
@@ -96,6 +97,7 @@ Unknown vision capability never qualifies for image requests.
 
 ## Public contracts checked
 
+- [ClinePass](https://docs.cline.bot/getting-started/clinepass): the `free` section of `https://api.cline.bot/api/v1/ai/cline/recommended-models` is served at no charge on the same key as the subscription. On 2026-10-03 it listed `cline-free/deepseek-v4.1-flash`, `cline-free/mimo-v2.6-flash`, `cline-free/muse-spark-1.3-contributor` and `stealth/space-bunny-alpha`. The `cline-free/*` models refuse API calls (403, Cline product surfaces only), so the pool admits the others: `stealth/space-bunny-alpha` answered through the API. Stealth models are previews whose prompts the model provider may use; keep sensitive data out of them. The pool follows the live list.
 - [Mistral Free mode / Scale](https://github.com/mistralai/platform-docs-public/blob/main/public/admin/security-access/api-keys.md): Free mode supports evaluation/prototyping; Scale enables billing. Its [vision API](https://github.com/mistralai/platform-docs-public/blob/main/public/studio-api/conversations/vision.md) documents `mistral-small-latest` with Chat Completions.
 - [Cloudflare pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/): Workers Free stops at the daily allowance; Workers Paid can bill overages. Paid-only frontier models are not seeded. [Scout vision](https://developers.cloudflare.com/workers-ai/models/llama-4-scout-17b-16e-instruct/) and [OpenAI compatibility](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/) are documented.
 - [Z.ai GLM-4.5 family](https://docs.z.ai/guides/llm/glm-4.5) identifies Flash as free and documents `https://api.z.ai/api/paas/v4/chat/completions`. Other GLM versions are not inferred to be free or vision-capable.

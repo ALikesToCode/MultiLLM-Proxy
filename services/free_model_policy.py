@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from error_handlers import APIError
 from providers.aihubmix import is_aihubmix_image_model
+from providers.cline_pass import CLINE_FREE_PLAN, CLINE_PRODUCT_ONLY_PREFIX
 from providers.opencode_go import is_opencode_zen_free_model, opencode_model_endpoint
 from services.free_provider_catalog import (
     FREE_PROVIDERS,
@@ -103,7 +104,9 @@ def _has_price(pricing) -> bool:
     return False
 
 
-def _free_label(provider: str, model: str) -> bool:
+def _free_label(provider: str, model: str, metadata: Mapping) -> bool:
+    if provider == "cline-pass":
+        return metadata.get("required_plan") == CLINE_FREE_PLAN and not model.startswith(CLINE_PRODUCT_ONLY_PREFIX)
     if provider == "openrouter":
         return model.endswith(":free") or model == "openrouter/free"
     if provider == "aihubmix":
@@ -161,7 +164,7 @@ def free_candidates(config, *, vision: bool, tools: bool = False) -> list[FreeCa
             if metadata.get(field) is not None
         }
         if not tier and (
-            not (seeded or _free_label(provider, model))
+            not (seeded or _free_label(provider, model, metadata))
             or _has_price(metadata.get("pricing"))
             or _has_price(list_prices)
         ):

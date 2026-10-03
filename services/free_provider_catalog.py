@@ -27,6 +27,9 @@ FREE_PROVIDERS = {
         requires_free_tier=True,
     ),
     "opencode": FreeProvider("https://opencode.ai/zen/v1/chat/completions"),
+    # Cline serves the `free` section of its recommended-models list at no charge on
+    # any CLINE_API_KEY (https://docs.cline.bot/getting-started/clinepass).
+    "cline-pass": FreeProvider("https://api.cline.bot/api/v1/chat/completions"),
     "aihubmix": FreeProvider("https://aihubmix.com/v1/chat/completions"),
     "gemini": FreeProvider(
         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",

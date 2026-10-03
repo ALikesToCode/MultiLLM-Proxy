@@ -7,6 +7,7 @@ from itertools import chain
 import requests
 from flask import Response
 
+from providers.cline_pass import cline_completion_payload
 from route_helpers import copy_raw_provider_response_headers, stream_upstream_response
 from services.free_json_contract import (
     JsonOutputError,
@@ -277,6 +278,10 @@ def validated_free_response(
             for chunk in _checked_chunks(response, deadline)
         )
         payload = json.loads(body)
+        if provider == "cline-pass":
+            unwrapped = cline_completion_payload(payload)
+            if unwrapped is not payload:
+                payload, body = unwrapped, json.dumps(unwrapped, ensure_ascii=False).encode("utf-8")
         if not isinstance(payload, dict) or "error" in payload:
             raise FreeUpstreamFailure()
         choices = payload.get("choices")
