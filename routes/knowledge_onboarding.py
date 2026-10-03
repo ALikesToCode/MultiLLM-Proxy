@@ -21,7 +21,7 @@ _RESOURCES = [
     ("/llms-full.txt", "Complete operating instructions; the same text as the skill."),
     ("/agent-onboarding/SKILL.md", "Installable skill for Codex and Claude Code."),
     ("/agent-onboarding/chat/SKILL.md", "Installable skill for chat models from code: SDK setup, routes and retries."),
-    ("/agent-onboarding/media/SKILL.md", "Installable skill for image, image batch and video generation."),
+    ("/agent-onboarding/media/SKILL.md", "Installable skill for image, image batch, video and voice-over generation."),
     ("/agent-onboarding/mcp/SKILL.md", "Installable skill for the MultiLLM MCP server: model, chat and media tools."),
     ("/agent-onboarding/mcp/config.json", "MultiLLM MCP endpoint, protocol versions, scopes and tools."),
     ("/agent-onboarding/prompt.txt", "The setup prompt as plain text."),
@@ -177,6 +177,9 @@ A key may carry a dollar budget or model allowlist: `429 budget_exceeded` and
   (Veo 3.1, Grok Imagine Video, Sora 2), with an optional `webhook_url`.
 - `POST {origin}/v1/embeddings`, `/v1/audio/speech` and `/v1/audio/transcriptions`:
   `auto:embed`, `auto:tts` and `auto:stt` by default (scopes `embeddings` and `audio`).
+  Speech and transcription run on Gemini first and handle Hindi and 100+ other languages.
+- `POST {origin}/v1/audio/narration`: a storyboard's shots in, one voice-over file per
+  shot out, in one voice, timed and padded to each shot (scope `audio`).
 - `GET {origin}/v1/media/providers`: which providers can run now, without cost.
 
 Image and video requests use a proxy key with the `chat` scope. Stored media come back as

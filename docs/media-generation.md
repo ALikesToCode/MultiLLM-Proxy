@@ -151,23 +151,31 @@ against the normal rate limits.
 | Route | Candidates in order |
 | --- | --- |
 | `auto:embed` | `openai:text-embedding-3-small`, `nanogpt:text-embedding-3-small` |
-| `auto:tts` | `openai:gpt-4o-mini-tts`, `cloudflare:@cf/deepgram/aura-2-en` |
-| `auto:stt` | `openai:gpt-4o-mini-transcribe`, `nanogpt:gpt-4o-mini-transcribe`, `together:openai/whisper-large-v3`, `cloudflare:@cf/openai/whisper-large-v3-turbo` |
+| `auto:tts` | `gemini:gemini-3.8-flash-lite-tts`, `gemini:gemini-3.8-flash-tts`, `openai:gpt-4o-mini-tts`, `cloudflare:@cf/deepgram/aura-2-en` |
+| `auto:tts-narration` | `gemini:gemini-3.8-flash-tts`, `gemini:gemini-3.8-flash-lite-tts`, `openai:gpt-4o-mini-tts` |
+| `auto:stt` | `gemini:gemini-3.5-transcribe`, `openai:gpt-4o-mini-transcribe`, `nanogpt:gpt-4o-mini-transcribe`, `together:openai/whisper-large-v3`, `cloudflare:@cf/openai/whisper-large-v3-turbo` |
+
+Speech and transcription run on Gemini first, so they draw on the Google AI credits of
+the project behind `GEMINI_API_KEY`. Gemini 3.8 Flash-Lite TTS is the fast default,
+Gemini 3.8 Flash TTS (the first `auto:tts-narration` candidate) has the highest fidelity
+for long narration, and both detect the language of the text (Hindi included).
+Gemini 3.5 Transcribe detects 85+ languages and code-switching. Aura speaks English
+only, so `auto:tts` skips it for text in another script.
 
 `auto:embed` serves one model from two providers, because vectors from different
 models cannot be compared; pin a model for anything you store. Explicit models may use
-OpenAI, NanoGPT (pay-as-you-go), NavyAI and Together for all three operations, Gemini's
-OpenAI-compatible embeddings (`gemini:gemini-embedding-001`), and Workers AI through the
-`AI` binding: `@cf/baai/bge-m3`, `@cf/baai/bge-large-en-v1.5` and `@cf/baai/bge-base-en-v1.5`
-for text embeddings (no `dimensions` or base64), `@cf/deepgram/aura-2-en` for speech
-(OpenAI voices become `luna`) and `@cf/openai/whisper-large-v3-turbo` for audio up to
-8 MiB.
+OpenAI, NanoGPT (pay-as-you-go), NavyAI and Together for all three operations, Gemini
+for all three (`gemini:gemini-embedding-001`, any `gemini:…-tts` and `gemini:…-transcribe`
+model), and Workers AI through the `AI` binding: `@cf/baai/bge-m3`,
+`@cf/baai/bge-large-en-v1.5` and `@cf/baai/bge-base-en-v1.5` for text embeddings (no
+`dimensions` or base64), `@cf/deepgram/aura-2-en` for English speech (OpenAI voices
+become `luna`) and `@cf/openai/whisper-large-v3-turbo` for audio up to 8 MiB.
 
 - Embeddings: `input` is a string, up to 2,048 strings or token arrays, with optional
   `dimensions`, `encoding_format` (`float` or `base64`) and `user`.
-- Speech: `input` up to 4,096 characters, `voice` (default `alloy`), `response_format`
-  (`mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`), `speed` and `instructions`. The reply is
-  audio.
+- Speech: `input` up to 4,096 characters, `voice` (default `Kore` on Gemini and `alloy`
+  elsewhere), `response_format` (`mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`), `speed`
+  and `instructions`. The reply is audio.
 - Transcription: multipart with one `file` (up to 25 MiB), optional `language`,
   `prompt`, `temperature` and `response_format` (`json` or `text`).
 
@@ -181,6 +189,69 @@ path: requests from intelligence principals, and requests naming exactly the mod
 enabled policy pins for the operation, use its pinned, accounted handling. When the
 policy cannot be read, an explicit `provider:model` stays on that path and fails closed;
 `auto:` routes never consult the policy.
+
+### Gemini speech and transcription
+
+Gemini runs through its native `generateContent` API with the `x-goog-api-key` header.
+The OpenAI fields are translated:
+
+- `input` is spoken verbatim. `instructions` and `speed` become the turn's delivery
+  style (`speech_metadata.style`); Gemini has no numeric speed, so `speed` 1.08 or more
+  asks for a slightly faster pace, 1.3 or more for a rapid one, and 0.93 or less for a
+  slower one. Inline tags such as `<short pause>` in `input` work as Gemini documents.
+- `voice` takes a Gemini prebuilt voice (`Kore`, `Charon`, `Puck`, `Aoede`, `Sulafat`
+  and the other 25, any case) or a custom `voice_…` ID. OpenAI voice names, which Gemini
+  does not have, use `Kore`.
+- Gemini returns 24 kHz 16-bit PCM. The gateway sends it back as `wav`, `pcm` or `mp3`
+  (encoded with LAME at 96 kbps); `opus`, `aac` and `flac` requests skip Gemini.
+- Transcription sends the audio inline, so files above 14 MiB skip Gemini. `language`
+  (`hi`, `en` or a BCP-47 locale such as `hi-IN`) becomes a language hint, and `prompt`
+  is read as a comma- or line-separated vocabulary list. `temperature` is ignored.
+- A prompt Gemini blocks before generating anything moves the route on; a reply with no
+  audio or text stops it with `502`, because it may be billed.
+
+## Storyboard narration
+
+`POST /v1/audio/narration` turns a storyboard into one speech file per shot, each
+timed to its shot. It needs the `audio` scope and counts as one request against rate
+limits; budgets reserve one unit per shot.
+
+```json
+{
+  "model": "auto:tts-narration",
+  "voice": "Charon",
+  "instructions": "Warm, unhurried documentary narrator",
+  "shots": [
+    {"id": "s01", "input": "हर कहानी एक छोटे से सपने से शुरू होती है।", "seconds": 4.5},
+    {"id": "s02", "input": "और यह सपना था, आसमान को छूने का।", "start": 4.5, "end": 9.0},
+    {"id": "s03", "input": "<short pause> फिर एक दिन, सब बदल गया।", "seconds": 5, "instructions": "Hushed"}
+  ]
+}
+```
+
+- Shots: up to 64, each with `input` (up to 4,096 characters; 60,000 in total), an
+  optional unique `id`, a length as `seconds` or as `start` and `end`, and optional
+  `voice` and `instructions` that override the request's. A shot without `start`
+  begins where the previous one ends. A shot without a length is generated untimed.
+- One voice carries the narration. On an `auto:` route the first shot that succeeds
+  fixes the model, and every other shot uses that model; a shot that model rate-limits
+  waits (up to 20 seconds, twice) and tries it again instead of switching voice. Shots
+  run four at a time.
+- Each take is measured. A take longer than its shot is retaken once, faster, up to
+  `max_speed` (1 to 1.5, default 1.2; `1` turns retakes off). Speech is never cut: a take
+  that still overruns is returned with `fits: false` and `overrun_seconds`, so shorten
+  that line or lengthen the shot. With `pad` (default true) shorter takes get trailing
+  silence up to the shot length, so each file placed at its shot's `start` lines up
+  with the cut.
+- `response_format` is `wav` (default; 24 kHz mono, exact length) or `mp3`. `speed`
+  (0.25 to 4, default 1) sets the starting pace.
+
+The reply lists every shot with `status`, `model`, `start`, `end`, `speech_seconds`
+(the voice alone), `audio_seconds` (the file), `fits`, `speed`, `takes`, and the file:
+a signed `url` and `file_id` when media storage is bound, otherwise `b64_audio`
+(at most 48 MiB of audio per reply). A failed shot has `error` with the provider's
+status; send it again with `model` set to the reply's `model` to keep the same voice.
+`summary` counts shots, failures and overruns and gives the narration's total length.
 
 ## Cloudflare AI
 

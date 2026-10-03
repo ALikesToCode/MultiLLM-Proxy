@@ -2,9 +2,11 @@
 
 `/v1/embeddings`, `/v1/audio/speech` and `/v1/audio/transcriptions` run on `auto:embed`,
 `auto:tts` and `auto:stt` (the defaults when `model` is omitted) or on an explicit
-`provider:model`. These calls are cheap but billable, so a route moves on only after a
-definite refusal: a 4xx the provider sends before doing any work, a locally open
-circuit, or a connection that never opened. A timeout, a dropped connection or a 5xx
+`provider:model`. Gemini speech and transcription use its native API
+(services/gemini_audio.py); everything else is OpenAI-compatible. These calls are
+cheap but billable, so a route moves on only after a definite refusal: a 4xx the
+provider sends before doing any work, a locally open circuit, or a connection that
+never opened. A timeout, a dropped connection or a 5xx
 stops the route. Requests from intelligence principals, or naming the model the
 intelligence policy pins, keep the gateway's accounting (routes/intelligence_media.py).
 """
@@ -24,7 +26,7 @@ from providers.registry import get_adapter
 from route_helpers import stream_upstream_response
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
 from routes.provider_credentials import _add_credential_attempt_headers, _request_with_provider_token_rotation
-from services import cloudflare_ai
+from services import cloudflare_ai, gemini_audio
 from services.auto_route_service import AutoRouteService
 from services.media_catalog import TRANSPORT_FAILURE_HEADER
 from services.model_registry import ModelRegistry
@@ -56,15 +58,23 @@ OPERATIONS = {
                             frozenset({"openai", "nanogpt", "navyai", "together", "gemini", "cloudflare"}),
                             frozenset({"@cf/baai/bge-m3", "@cf/baai/bge-large-en-v1.5", "@cf/baai/bge-base-en-v1.5"}),
                             (5, 120)),
+    # Voicing 4,096 characters can take Gemini several minutes.
     "speech": Operation("speech", "auto:tts", "v1/audio/speech",
-                        frozenset({"openai", "nanogpt", "navyai", "together", "cloudflare"}),
-                        frozenset({"@cf/deepgram/aura-2-en"}), (5, 180)),
+                        frozenset({"openai", "nanogpt", "navyai", "together", "gemini", "cloudflare"}),
+                        frozenset({"@cf/deepgram/aura-2-en"}), (5, 300)),
     "transcriptions": Operation("transcriptions", "auto:stt", "v1/audio/transcriptions",
-                                frozenset({"openai", "nanogpt", "navyai", "together", "cloudflare"}),
+                                frozenset({"openai", "nanogpt", "navyai", "together", "gemini", "cloudflare"}),
                                 frozenset({"@cf/openai/whisper-large-v3-turbo"}), (5, 600)),
 }
 # Gemini serves OpenAI-compatible embeddings under its /openai prefix.
 _UPSTREAM_PATHS = {("gemini", "embeddings"): "openai/embeddings"}
+_GEMINI_MODELS = {"speech": gemini_audio.SPEECH_MODEL, "transcriptions": gemini_audio.TRANSCRIBE_MODEL}
+# Aura speaks English only, so text in another script goes to a multilingual model.
+_ENGLISH_ONLY_SPEECH = frozenset({"@cf/deepgram/aura-2-en"})
+
+
+def _latin_script(text: str) -> bool:
+    return all(character < "\u0250" for character in text if character.isalpha())
 
 
 def media_fail_over(response: Response) -> bool:
@@ -137,14 +147,19 @@ def parse_media_request(operation_name: str) -> MediaRequest:
         if "dimensions" in fields and (type(fields["dimensions"]) is not int or not 1 <= fields["dimensions"] <= 8192):
             raise APIError("dimensions must be an integer from 1 to 8192", status_code=400)
     else:
-        if set(fields) - {"input", "voice", "response_format", "speed", "instructions"}:
-            raise APIError("Speech accepts model, input, voice, response_format, speed and instructions", status_code=400)
-        text = fields.get("input")
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_SPEECH_CHARS:
-            raise APIError(f"input must be 1 to {MAX_SPEECH_CHARS} characters", status_code=400)
-        if fields.setdefault("response_format", "mp3") not in SPEECH_FORMATS:
-            raise APIError(f"response_format must be one of: {', '.join(SPEECH_FORMATS)}", status_code=400)
+        validate_speech_fields(fields)
     return MediaRequest(operation, model, fields)
+
+
+def validate_speech_fields(fields: dict) -> None:
+    """Check an OpenAI speech body (without `model`) and default its format to mp3."""
+    if set(fields) - {"input", "voice", "response_format", "speed", "instructions"}:
+        raise APIError("Speech accepts model, input, voice, response_format, speed and instructions", status_code=400)
+    text = fields.get("input")
+    if not isinstance(text, str) or not text.strip() or len(text) > MAX_SPEECH_CHARS:
+        raise APIError(f"input must be 1 to {MAX_SPEECH_CHARS} characters", status_code=400)
+    if fields.setdefault("response_format", "mp3") not in SPEECH_FORMATS:
+        raise APIError(f"response_format must be one of: {', '.join(SPEECH_FORMATS)}", status_code=400)
 
 
 def validate_media_candidate(app, auth_service_cls, media: MediaRequest, candidate: str) -> None:
@@ -168,7 +183,16 @@ def validate_media_candidate(app, auth_service_cls, media: MediaRequest, candida
             raise APIError(f"{candidate} takes text input only, without dimensions or base64", status_code=400)
         if operation.name == "transcriptions" and len(media.audio) > MAX_CLOUDFLARE_AUDIO_BYTES:
             raise APIError(f"{candidate} accepts at most 8 MiB of audio", status_code=413)
+        if provider_model in _ENGLISH_ONLY_SPEECH and not _latin_script(media.fields["input"]):
+            raise APIError(f"{candidate} speaks English only", status_code=400)
         return
+    if provider == "gemini" and operation.name in _GEMINI_MODELS:
+        if not _GEMINI_MODELS[operation.name].fullmatch(provider_model):
+            raise APIError(f"{candidate} does not serve {operation.name}", status_code=400)
+        if operation.name == "speech" and media.fields["response_format"] not in gemini_audio.speech_formats():
+            raise APIError(f"{candidate} returns only {', '.join(gemini_audio.speech_formats())} audio", status_code=400)
+        if operation.name == "transcriptions" and len(media.audio) > gemini_audio.MAX_INLINE_AUDIO_BYTES:
+            raise APIError(f"{candidate} accepts at most 14 MiB of audio", status_code=413)
     if get_adapter(provider, app.config["API_BASE_URLS"]) is None:
         raise APIError(f"Unsupported provider: {provider}", status_code=400)
     keys = auth_service_cls.get_api_keys(provider) if provider == "nanogpt" else [auth_service_cls.get_api_key(provider)]
@@ -211,23 +235,40 @@ def dispatch_media_candidate(app, auth_service_cls, metrics_service_cls, proxy_s
             response = _cloudflare(media, provider_model)
             status = response.status_code
             return response
-        body, content_type = _body(media, provider_model)
-        path = _UPSTREAM_PATHS.get((provider, media.operation.name), media.operation.path)
+        native_gemini = provider == "gemini" and media.operation.name in _GEMINI_MODELS
+        if native_gemini:
+            path = f"models/{provider_model}:generateContent"
+            payload = (gemini_audio.speech_body(media.fields) if media.operation.name == "speech"
+                       else gemini_audio.transcription_body(media.fields, media.audio, media.filename))
+            body, content_type = json.dumps(payload, separators=(",", ":")).encode("utf-8"), "application/json"
+        else:
+            body, content_type = _body(media, provider_model)
+            path = _UPSTREAM_PATHS.get((provider, media.operation.name), media.operation.path)
         base = app.config["NANOGPT_STANDARD_BASE_URL"] if provider == "nanogpt" else app.config["API_BASE_URLS"][provider]
 
         def send(token: str):
             headers = proxy_service_cls.prepare_headers({"Content-Type": content_type}, provider, token, upstream_path=path)
             headers["Content-Type"] = content_type
+            if native_gemini:
+                # Gemini's native API takes the key in its own header, not as a bearer token.
+                headers.pop("Authorization", None)
+                headers["x-goog-api-key"] = token
             return proxy_service_cls.make_request(method="POST", url=f"{base.rstrip('/')}/{path}", headers=headers,
                                                   params={}, data=body, api_provider=provider, use_cache=False,
                                                   timeout_override=media.operation.timeout, force_raw_passthrough=True)
 
         upstream, attempts = _request_with_provider_token_rotation(app, auth_service_cls, proxy_service_cls, provider, send)
         status = upstream.status_code
-        downstream = upstream if isinstance(upstream, Response) else stream_upstream_response(upstream)
-        failure = getattr(upstream, "multillm_transport_failure", None)
-        if failure:
-            downstream.headers[TRANSPORT_FAILURE_HEADER] = failure
+        if native_gemini and status == 200 and not isinstance(upstream, Response):
+            reply = gemini_audio.read_reply(upstream)
+            response_format = media.fields.get("response_format", "mp3" if media.operation.name == "speech" else "json")
+            downstream = (gemini_audio.speech_response(reply, response_format) if media.operation.name == "speech"
+                          else gemini_audio.transcription_response(reply, response_format))
+        else:
+            downstream = upstream if isinstance(upstream, Response) else stream_upstream_response(upstream)
+            failure = getattr(upstream, "multillm_transport_failure", None)
+            if failure:
+                downstream.headers[TRANSPORT_FAILURE_HEADER] = failure
         return _add_credential_attempt_headers(downstream, provider, attempts)
     except APIError as error:
         status = error.status_code
@@ -239,8 +280,12 @@ def dispatch_media_candidate(app, auth_service_cls, metrics_service_cls, proxy_s
 
 def dispatch_media_route(operation_name: str, app, auth_service_cls, metrics_service_cls, proxy_service_cls) -> Response:
     """One embeddings, speech or transcription request on a route or an explicit model."""
-    media = parse_media_request(operation_name)
+    return run_media_request(parse_media_request(operation_name), app, auth_service_cls, metrics_service_cls,
+                             proxy_service_cls)
 
+
+def run_media_request(media: MediaRequest, app, auth_service_cls, metrics_service_cls, proxy_service_cls) -> Response:
+    """Dispatch a parsed request: through its route's failover, or to its one model."""
     def validate(candidate: str) -> None:
         validate_media_candidate(app, auth_service_cls, media, candidate)
 

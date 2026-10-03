@@ -120,7 +120,8 @@ def prepare_image_edit_payload(provider: str, provider_model: str, payload: dict
 
 
 _SPEECH_OR_EMBEDDING_MODEL = re.compile(
-    r"(?:^|/)(?:text-embedding|gemini-embedding|bge-|whisper|gpt-4o(?:-mini)?-(?:tts|transcribe)|tts-1|aura-)",
+    r"(?:^|/)(?:text-embedding|gemini-embedding|bge-|whisper|gpt-4o(?:-mini)?-(?:tts|transcribe)|tts-1|aura-"
+    r"|gemini-[a-z0-9.-]*-(?:tts|transcribe)(?:$|-))",
     re.IGNORECASE)
 
 

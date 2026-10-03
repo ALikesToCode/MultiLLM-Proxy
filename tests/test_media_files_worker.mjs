@@ -93,6 +93,21 @@ test("the Container stores, describes, reads and deletes files through media.int
   assert.equal((await outbound(`/v1/files/${FILE}`, { method: "GET" }, {})).status, 503);
 });
 
+test("narration audio is stored as WAV or MP3 and nothing else", async () => {
+  const env = { MEDIA_BUCKET: memoryBucket() };
+  for (const [type, status] of [["audio/wav", 200], ["audio/mpeg", 200], ["audio/ogg", 400], ["image/png", 400]]) {
+    const response = await outbound(`/v1/files/${FILE}`, { method: "PUT", body: new Uint8Array([82, 73, 70, 70]),
+      headers: { "content-type": type, "content-length": "4",
+        "x-media-metadata": metadata({ owner: "alice", kind: "audio", model: "gemini:gemini-3.8-flash-tts" }) } }, env);
+    assert.equal(response.status, status, type);
+  }
+  assert.equal(env.MEDIA_BUCKET.objects.get(`media/${FILE}`).httpMetadata.contentType, "audio/mpeg");
+  const large = await outbound(`/v1/files/${FILE}`, { method: "PUT", body: new Uint8Array(4),
+    headers: { "content-type": "audio/wav", "content-length": String(101 * 1024 * 1024),
+      "x-media-metadata": metadata({ owner: "alice", kind: "audio" }) } }, env);
+  assert.equal(large.status, 413);
+});
+
 test("provider URLs are copied into R2 only from public HTTPS hosts", async () => {
   const env = { MEDIA_BUCKET: memoryBucket() };
   const original = globalThis.fetch;

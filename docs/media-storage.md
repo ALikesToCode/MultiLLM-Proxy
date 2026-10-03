@@ -18,6 +18,8 @@ bindings, every media response is exactly as before.
   `content_url` pointing at the stored copy. A failed copy is retried on the next poll.
   `GET /v1/videos/{id}/content` then streams from R2. Videos up to 512 MiB with a known
   size are stored; others stay with the provider.
+- Narration: each shot of `POST /v1/audio/narration` (WAV or MP3, up to 100 MiB) is
+  stored, and the shot gains `url` and `file_id` instead of `b64_audio`.
 
 ## Links and access
 

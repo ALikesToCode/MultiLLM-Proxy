@@ -66,3 +66,18 @@ def test_reads_are_cached_and_an_outage_keeps_the_last_stored_routes(routes):
     assert AutoRouteService.get_route("auto:gpt-image-2.5").candidates == DEFAULT_AUTO_ROUTES["auto:gpt-image-2.5"], \
         "without any stored copy the seeded defaults still route"
     assert AutoRouteService.get_route("auto:image-test") is None
+
+
+def test_stored_audio_routes_holding_the_earlier_defaults_follow_the_gemini_defaults(routes):
+    earlier = {"auto:tts": ["openai:gpt-4o-mini-tts", "cloudflare:@cf/deepgram/aura-2-en"],
+               "auto:stt": ["openai:gpt-4o-mini-transcribe", "nanogpt:gpt-4o-mini-transcribe",
+                            "together:openai/whisper-large-v3", "cloudflare:@cf/openai/whisper-large-v3-turbo"]}
+    for route_id, candidates in earlier.items():
+        routes.rows[route_id] = {"candidates": candidates, "updated_at": "2026-09-30T00:00:00+00:00"}
+    routes.rows["auto:tts-narration"] = {"candidates": ["openai:gpt-4o-mini-tts"], "updated_at": "2026-10-03T00:00:00+00:00"}
+    auto_route_d1.reset_cache()
+    assert AutoRouteService.get_route("auto:tts").candidates[:2] == ("gemini:gemini-3.8-flash-lite-tts",
+                                                                      "gemini:gemini-3.8-flash-tts")
+    assert AutoRouteService.get_route("auto:stt").candidates[0] == "gemini:gemini-3.5-transcribe"
+    assert AutoRouteService.get_route("auto:tts-narration").candidates == ("openai:gpt-4o-mini-tts",), \
+        "an operator's own order is kept"

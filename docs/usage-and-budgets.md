@@ -11,11 +11,12 @@ One ledger row per billable request: a `POST` to `/v1/chat/completions`,
 `/optimize/v1/chat/completions`, `/intelligence/v1/chat/completions`, the free chat
 routes, `/v1/responses`, `/v1/messages`, `/v1/images/generations`, `/v1/images/edits`,
 `/v1/images/batch`, `/v1/videos`, `/v1/embeddings`, `/v1/audio/transcriptions`,
-`/v1/audio/speech`, or a provider pass-through route such as
+`/v1/audio/speech`, `/v1/audio/narration`, or a provider pass-through route such as
 `/openai/v1/chat/completions`. Knowledge requests are excluded; they have their own
 ledger. Reads such as `GET /v1/models` or video status polls are not recorded. A
 request that omits `model` is checked and recorded as its route's default
-(`auto:image-edit`, `auto:embed`, `auto:tts` or `auto:stt`).
+(`auto:image-edit`, `auto:embed`, `auto:tts`, `auto:tts-narration` or `auto:stt`). A
+narration reserves one unit per shot.
 
 An asynchronous batch (`POST /v1/images/batches`) is checked against the allowlist and
 budget when it is submitted, but its items are recorded one row each, with endpoint

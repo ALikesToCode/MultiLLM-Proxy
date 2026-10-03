@@ -1,6 +1,6 @@
 ---
 name: multillm-media
-description: Generate and edit images, run image batches, make videos, and create embeddings, speech and transcriptions through MultiLLM-Proxy's media gateway, which picks the best current model and falls back to another provider when one fails. Use when a task needs a generated or edited picture, many pictures, a video clip, embeddings or audio.
+description: Generate and edit images, run image batches, make videos, and create embeddings, speech, timed storyboard narration (Hindi and 100+ other languages) and transcriptions through MultiLLM-Proxy's media gateway, which picks the best current model and falls back to another provider when one fails. Use when a task needs a generated or edited picture, many pictures, a video clip, embeddings, a voice-over or audio.
 ---
 
 # MultiLLM Media
@@ -23,8 +23,9 @@ the provider probe.
 | `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI and OpenAI, Grok Imagine Image 2.0 via xAI, AIHubMix's free GPT Image 2 |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
 | `auto:embed` | Embeddings | `text-embedding-3-small` from OpenAI, then NanoGPT (one model, so vectors stay comparable) |
-| `auto:tts` | Speech | OpenAI `gpt-4o-mini-tts`, then Workers AI Aura |
-| `auto:stt` | Transcription | OpenAI `gpt-4o-mini-transcribe`, NanoGPT, Together Whisper, Workers AI Whisper |
+| `auto:tts` | Speech | Gemini 3.8 Flash-Lite TTS and 3.8 Flash TTS, OpenAI `gpt-4o-mini-tts`, then Workers AI Aura (English only) |
+| `auto:tts-narration` | Voice-overs (the default on `/v1/audio/narration`) | Gemini 3.8 Flash TTS, 3.8 Flash-Lite TTS, OpenAI `gpt-4o-mini-tts` |
+| `auto:stt` | Transcription | Gemini 3.5 Transcribe, OpenAI `gpt-4o-mini-transcribe`, NanoGPT, Together Whisper, Workers AI Whisper |
 
 Use `provider:model` (for example `gguu:gpt-image-2.5-flare` or
 `gguu-grok:grok-imagine-image-quality`) only when the user names a provider or model.
@@ -156,6 +157,59 @@ text = client.audio.transcriptions.create(model="auto:stt", file=open("meeting.m
 These routes move to the next provider only after a refusal that proves no work was done;
 a `5xx` or timeout is returned to you.
 
+Gemini speaks any language it reads (Hindi included) and takes Gemini voice names
+(`Kore`, `Charon`, `Puck`, `Aoede`, `Sulafat` and 25 more) or a custom `voice_…` ID;
+OpenAI voice names become `Kore`. Put delivery in `instructions` ("warm documentary
+narrator"), never in `input`, which is read aloud word for word; `<short pause>` in
+`input` adds a pause. Gemini returns `wav`, `pcm` or `mp3`; asking for `opus`, `aac` or
+`flac` skips it. For transcription, `language` (`hi`, or a locale such as `hi-IN`) is a
+hint and `prompt` is a comma-separated list of names and terms to recognise.
+
+## Narrate a storyboard
+
+`POST /v1/audio/narration` makes one audio file per shot, each timed to its shot, in one
+voice. Give every shot its text and a length (`seconds`, or `start` and `end`):
+
+```bash
+curl -sS "$MULTILLM_BASE_URL/v1/audio/narration" \
+  -H "Authorization: Bearer $MULTILLM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"voice": "Charon", "instructions": "Warm, unhurried documentary narrator",
+       "shots": [
+         {"id": "s01", "input": "हर कहानी एक छोटे से सपने से शुरू होती है।", "seconds": 4.5},
+         {"id": "s02", "input": "और यह सपना था, आसमान को छूने का।", "seconds": 4.5},
+         {"id": "s03", "input": "फिर एक दिन, सब बदल गया।", "seconds": 5, "instructions": "Hushed"}]}'
+```
+
+- The default route is `auto:tts-narration` (Gemini 3.8 Flash TTS first). The first shot
+  that succeeds fixes the model, so every shot has the same voice.
+- A take longer than its shot is retaken once, faster (up to `max_speed`, default 1.2).
+  Speech is never cut: `fits: false` with `overrun_seconds` means that line is too long
+  for its shot; shorten the text or lengthen the shot and send that shot again.
+- Shorter takes are padded with silence to the shot length (`pad: false` to keep them
+  tight), so each file placed at its shot's `start` lines up with the cut.
+- `response_format` is `wav` (default, exact length) or `mp3`. Up to 64 shots per call;
+  shots run four at a time.
+- Read `data[]`: `status`, `start`, `end`, `speech_seconds`, `audio_seconds`, `fits`, and
+  `url` (signed link; download it) or `b64_audio` (decode it). Save each as
+  `<id>.wav` and report the paths. Resend a failed shot with `model` set to the reply's
+  `model` to keep the voice.
+
+Python, with `base` and `headers` from [Use from code](#use-from-code) and `storyboard` as
+a list of shots with `id`, `text` and `seconds`:
+
+```python
+import base64, pathlib, requests
+reply = requests.post(f"{base}/v1/audio/narration", headers=headers, timeout=900, json={
+    "voice": "Charon", "shots": [{"id": shot["id"], "input": shot["text"], "seconds": shot["seconds"]}
+                                 for shot in storyboard]}).json()
+for shot in reply["data"]:
+    if shot["status"] != "succeeded":
+        print(shot["id"], shot["error"]); continue
+    audio = requests.get(shot["url"], timeout=120).content if "url" in shot else base64.b64decode(shot["b64_audio"])
+    pathlib.Path(f"{shot['id']}.wav").write_bytes(audio)
+    print(shot["id"], shot["start"], shot["end"], "fits" if shot.get("fits", True) else f"overruns {shot['overrun_seconds']}s")
+```
+
 ## Links to stored media
 
 When the gateway stores media, image replies carry a gateway `url` of the form
@@ -226,7 +280,7 @@ Coding agents connected to the MultiLLM MCP server (`$MULTILLM_BASE_URL/v1/mcp`,
 `auto:image` or `auto:video` and `response_format: "url"`, make exactly one request per call
 and never retry or poll. Inline images are limited to 5 MiB each and 10 MiB per call;
 `get_video` returns `content_url`, never the MP4, so download it over HTTP with the same key.
-Edits, background batches, embeddings and audio are HTTP-only: call them directly.
+Edits, background batches, embeddings, audio and narration are HTTP-only: call them directly.
 
 ## Check providers
 

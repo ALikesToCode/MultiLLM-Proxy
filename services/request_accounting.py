@@ -42,12 +42,14 @@ BILLABLE_PATHS = {
     "/v1/embeddings": "embeddings",
     "/v1/audio/transcriptions": "audio",
     "/v1/audio/speech": "audio",
+    "/v1/audio/narration": "audio",
 }
 # Default models when a request omits one; they must match the routes' own defaults.
 DEFAULT_MODELS = {
     "/v1/images/edits": "auto:image-edit",
     "/v1/embeddings": "auto:embed",
     "/v1/audio/speech": "auto:tts",
+    "/v1/audio/narration": "auto:tts-narration",
     "/v1/audio/transcriptions": "auto:stt",
 }
 # An asynchronous batch is admitted here, but its items are recorded when the Workflow
@@ -155,6 +157,9 @@ def _image_units(kind: str, payload: Optional[dict]) -> int:
             n = (item.get("n") if isinstance(item, dict) else None) or defaults.get("n") or 1
             count += n if isinstance(n, int) and n > 0 else 1
         return max(1, count)
+    if request.path == "/v1/audio/narration":
+        shots = body.get("shots")
+        return max(1, len(shots)) if isinstance(shots, list) else 1
     if request.path == "/v1/images/edits" and not request.is_json:
         try:
             n = int(request.form.get("n") or 1)

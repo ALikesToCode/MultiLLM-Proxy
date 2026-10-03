@@ -1,5 +1,6 @@
 """Embeddings, speech and transcription on media routes, and precedence over the intelligence path."""
 
+import base64
 import io
 import json
 import os
@@ -8,6 +9,7 @@ from unittest.mock import patch
 import requests
 from flask import Response
 
+from services import audio_codec
 from services.auto_route_service import AutoRouteService
 from services.intelligence_store import IntelligenceStore
 from tests.test_intelligence_policy import candidate, policy
@@ -18,6 +20,16 @@ KEYS = {"openai": "openai-test-key", "nanogpt": "nanogpt-test-key", "together": 
 ADMIN = {"Authorization": "Bearer admin-test-key"}
 VECTORS = {"object": "list", "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
            "model": "text-embedding-3-small"}
+GEMINI = "https://generativelanguage.googleapis.com/v1beta/models"
+SAMPLES = bytes(range(256)) * 96  # 0.5 s of 24 kHz 16-bit mono PCM
+
+
+def gemini_audio_reply(samples=SAMPLES, wav=True):
+    """A Gemini TTS reply: 3.8 models send WAV, earlier ones headerless PCM."""
+    data = audio_codec.wav_bytes(audio_codec.Pcm(samples, 24000)) if wav else samples
+    mime = "audio/wav" if wav else "audio/L16;codec=pcm;rate=24000"
+    return {"candidates": [{"content": {"role": "model", "parts": [
+        {"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode()}}]}, "finishReason": "STOP"}]}
 
 
 def upstream(status, body, content_type="application/json", **attributes):
@@ -89,15 +101,116 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
             sent.update(path=path, payload=payload)
             return Response(b"aura-audio", status=200, content_type="audio/mpeg")
 
+        refusals = [upstream(429, {"error": {"message": "quota"}}), upstream(429, {"error": {"message": "quota"}}),
+                    upstream(402, {"error": {"message": "no credit"}})]
         with patch("services.cloudflare_ai.post", side_effect=post):
-            response, make_request = self.post("/v1/audio/speech", [upstream(402, {"error": {"message": "no credit"}})],
+            response, make_request = self.post("/v1/audio/speech", refusals,
                                                json={"input": "Hello there", "voice": "coral"})
         self.assertEqual((response.status_code, response.data, response.mimetype), (200, b"aura-audio", "audio/mpeg"))
+        self.assertEqual([call.kwargs["url"].rsplit("/", 1)[-1] for call in make_request.call_args_list],
+                         ["gemini-3.8-flash-lite-tts:generateContent", "gemini-3.8-flash-tts:generateContent", "speech"])
         openai = json.loads(make_request.call_args.kwargs["data"])
         self.assertEqual((openai["model"], openai["voice"], openai["response_format"]), ("gpt-4o-mini-tts", "coral", "mp3"))
         self.assertEqual(sent["path"], "/v1/audio/speech")
         self.assertEqual(sent["payload"]["model"], "@cf/deepgram/aura-2-en")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "cloudflare:@cf/deepgram/aura-2-en")
+
+    def test_speech_runs_on_gemini_tts_with_its_own_auth_voice_and_style(self):
+        hindi = "नमस्ते दोस्तों, आज की कहानी शुरू होती है।"
+        response, make_request = self.post("/v1/audio/speech", [upstream(200, gemini_audio_reply())], json={
+            "input": hindi, "voice": "coral", "instructions": "Warm documentary narrator", "speed": 1.2,
+            "response_format": "wav"})
+        self.assertEqual((response.status_code, response.mimetype), (200, "audio/wav"))
+        self.assertEqual(audio_codec.parse_wav(response.data), audio_codec.Pcm(SAMPLES, 24000))
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gemini:gemini-3.8-flash-lite-tts")
+        forwarded = make_request.call_args.kwargs
+        self.assertEqual(forwarded["url"], f"{GEMINI}/gemini-3.8-flash-lite-tts:generateContent")
+        self.assertEqual(forwarded["headers"]["x-goog-api-key"], "gemini-test-key")
+        self.assertNotIn("Authorization", forwarded["headers"])
+        body = json.loads(forwarded["data"])
+        self.assertEqual(body["contents"][0]["parts"][0], {
+            "text": hindi, "speech_metadata": {"style": "Warm documentary narrator; speaking a little faster than usual"}})
+        self.assertEqual(body["generationConfig"], {"responseModalities": ["AUDIO"], "speechConfig": {
+            "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Kore"}}}})
+
+        for voice, expected in (("charon", {"prebuiltVoiceConfig": {"voiceName": "Charon"}}),
+                                ("voice_abc123", {"voice": "voice_abc123"})):
+            response, make_request = self.post("/v1/audio/speech", [upstream(200, gemini_audio_reply(wav=False))], json={
+                "model": "gemini:gemini-3.8-flash-tts", "input": hindi, "voice": voice, "response_format": "pcm"})
+            self.assertEqual((response.data, response.mimetype), (SAMPLES, "audio/pcm"))
+            body = json.loads(make_request.call_args.kwargs["data"])
+            self.assertEqual(body["generationConfig"]["speechConfig"]["voiceConfig"], expected)
+            self.assertNotIn("speech_metadata", body["contents"][0]["parts"][0])
+
+        response, _ = self.post("/v1/audio/speech", [upstream(200, gemini_audio_reply())], json={"input": hindi})
+        self.assertEqual((response.status_code, response.mimetype), (200, "audio/mpeg"))
+        self.assertIn(response.data[:2], (b"\xff\xf3", b"\xff\xfb", b"\xff\xf2", b"ID"))
+
+    def test_gemini_speech_refusals_move_on_and_unservable_formats_skip_gemini(self):
+        response, make_request = self.post("/v1/audio/speech", [upstream(200, b"opus-audio", "audio/ogg")],
+                                           json={"input": "Hello", "response_format": "opus"})
+        self.assertEqual(response.data, b"opus-audio")
+        self.assertEqual(make_request.call_args.kwargs["url"], "https://api.openai.com/v1/audio/speech")
+        self.assertEqual(make_request.call_count, 1, "Gemini returns no opus, so it is skipped before any request")
+
+        blocked = upstream(200, {"promptFeedback": {"blockReason": "SAFETY"}})
+        response, make_request = self.post("/v1/audio/speech", [blocked, upstream(200, gemini_audio_reply())],
+                                           json={"input": "Hello", "response_format": "wav"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(make_request.call_args.kwargs["url"], f"{GEMINI}/gemini-3.8-flash-tts:generateContent")
+
+        silent = upstream(200, {"candidates": [{"finishReason": "OTHER"}]})
+        response, make_request = self.post("/v1/audio/speech", [silent, upstream(200, gemini_audio_reply())],
+                                           json={"input": "Hello", "response_format": "wav"})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(make_request.call_count, 1, "a reply without audio may be billed, so the route stops")
+        for body in ({"model": "gemini:gemini-3.8-flash", "input": "Hello"},
+                     {"model": "gemini:gemini-3.5-transcribe", "input": "Hello"}):
+            response, make_request = self.post("/v1/audio/speech", [], json=body)
+            self.assertEqual(response.status_code, 400, body)
+            make_request.assert_not_called()
+
+    def test_english_only_aura_is_skipped_for_other_scripts(self):
+        os.environ["CLOUDFLARE_AI_ENABLED"] = "true"
+        AutoRouteService.save_route("auto:tts-test", ["cloudflare:@cf/deepgram/aura-2-en", "openai:gpt-4o-mini-tts"],
+                                    self.app.config["API_BASE_URLS"])
+        with patch("services.cloudflare_ai.post", return_value=Response(b"aura", content_type="audio/mpeg")) as aura:
+            response, make_request = self.post("/v1/audio/speech", [upstream(200, b"openai", "audio/mpeg")],
+                                               json={"model": "auto:tts-test", "input": "भारत की कहानी"})
+            self.assertEqual(response.data, b"openai")
+            aura.assert_not_called()
+            response, make_request = self.post("/v1/audio/speech", [], json={"model": "auto:tts-test",
+                                                                            "input": "Café crème, señor!"})
+            self.assertEqual(response.data, b"aura")
+            make_request.assert_not_called()
+
+    def test_transcription_runs_on_gemini_3_5_transcribe(self):
+        reply = {"candidates": [{"content": {"parts": [{"text": "नमस्ते दुनिया"}]}, "finishReason": "STOP"}]}
+        response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, reply)], data={
+            "language": "hi", "prompt": "Kubernetes, BigQuery\nGemini",
+            "file": (io.BytesIO(b"ID3-audio"), "clip.mp3")}, content_type="multipart/form-data")
+        self.assertEqual(response.get_json(), {"text": "नमस्ते दुनिया"})
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gemini:gemini-3.5-transcribe")
+        forwarded = make_request.call_args.kwargs
+        self.assertEqual(forwarded["url"], f"{GEMINI}/gemini-3.5-transcribe:generateContent")
+        self.assertEqual(forwarded["headers"]["x-goog-api-key"], "gemini-test-key")
+        self.assertEqual(json.loads(forwarded["data"]), {
+            "contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": "audio/mp3",
+                                                                     "data": base64.b64encode(b"ID3-audio").decode()}}]}],
+            "generationConfig": {"audioTranscriptionConfig": {"languageCodes": ["hi-IN"],
+                                                              "customVocabulary": ["Kubernetes", "BigQuery", "Gemini"]}}})
+        response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, reply)], data={
+            "model": "gemini:gemini-3.5-transcribe", "language": "en-IN", "response_format": "text",
+            "file": (io.BytesIO(b"RIFF"), "clip.wav")}, content_type="multipart/form-data")
+        self.assertEqual((response.data.decode(), response.mimetype), ("नमस्ते दुनिया", "text/plain"))
+        self.assertEqual(json.loads(make_request.call_args.kwargs["data"])["generationConfig"],
+                         {"audioTranscriptionConfig": {"languageCodes": ["en-IN"]}})
+
+        response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, {"text": "large"})], data={
+            "file": (io.BytesIO(b"\x00" * (14 * 1024 * 1024 + 1)), "clip.mp3")}, content_type="multipart/form-data")
+        self.assertEqual(response.get_json(), {"text": "large"})
+        self.assertEqual(make_request.call_args.kwargs["url"], "https://api.openai.com/v1/audio/transcriptions",
+                         "audio above Gemini's inline limit goes to the next candidate unsent")
 
     def test_transcription_uploads_the_file_and_skips_workers_ai_for_large_audio(self):
         os.environ["CLOUDFLARE_AI_ENABLED"] = "true"
@@ -154,13 +267,17 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
         status = self.client.get("/v1/media/providers", headers=ADMIN).get_json()
         kinds = {route["id"]: route["kind"] for route in status["routes"]}
         self.assertEqual({route: kinds.get(route) for route in ("auto:image", "auto:image-edit", "auto:video", "auto:embed",
-                                                                "auto:tts", "auto:stt")},
+                                                                "auto:tts", "auto:tts-narration", "auto:stt")},
                          {"auto:image": "image", "auto:image-edit": "image_edit", "auto:video": "video",
-                          "auto:embed": "embeddings", "auto:tts": "speech", "auto:stt": "transcriptions"})
+                          "auto:embed": "embeddings", "auto:tts": "speech", "auto:tts-narration": "speech",
+                          "auto:stt": "transcriptions"})
         self.assertNotIn("auto:glm-5.2", kinds)
         self.assertEqual((status["storage"], status["batches"], status["webhooks"]), (False, False, False))
         embed = {entry["model"]: entry for entry in next(route for route in status["routes"] if route["id"] == "auto:embed")["candidates"]}
         self.assertTrue(embed["openai:text-embedding-3-small"]["available"])
+        speech = {entry["model"]: entry for entry in next(route for route in status["routes"]
+                                                          if route["id"] == "auto:tts")["candidates"]}
+        self.assertTrue(speech["gemini:gemini-3.8-flash-lite-tts"]["available"])
         edit = {entry["model"]: entry for entry in next(route for route in status["routes"]
                                                         if route["id"] == "auto:image-edit")["candidates"]}
         self.assertFalse(edit["cloudflare:openai/gpt-image-2.5-sunburst"]["available"])
@@ -169,12 +286,15 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
         from services.media_catalog import is_speech_or_embedding_model
 
         for model in ("text-embedding-3-small", "gemini-embedding-001", "@cf/baai/bge-m3", "openai/whisper-large-v3",
-                      "gpt-4o-mini-tts", "gpt-4o-mini-transcribe", "@cf/deepgram/aura-2-en", "whisper-1"):
+                      "gpt-4o-mini-tts", "gpt-4o-mini-transcribe", "@cf/deepgram/aura-2-en", "whisper-1",
+                      "gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-3.5-transcribe",
+                      "gemini-3.1-flash-tts-preview"):
             self.assertTrue(is_speech_or_embedding_model(model), model)
-        for model in ("gpt-4o-mini", "glm-5.2", "gpt-image-2", "tts-something-chat"):
+        for model in ("gpt-4o-mini", "glm-5.2", "gpt-image-2", "tts-something-chat", "gemini-3.8-flash",
+                      "gemini-3.5-flash-lite"):
             self.assertFalse(is_speech_or_embedding_model(model), model)
         models = {model["id"]: model for model in self.client.get("/v1/models", headers=ADMIN).get_json()["data"]}
-        for route in ("auto:embed", "auto:tts", "auto:stt"):
+        for route in ("auto:embed", "auto:tts", "auto:tts-narration", "auto:stt"):
             self.assertFalse(any(models[route]["capabilities"].values()), route)
 
     def test_routes_never_read_the_policy_and_an_unreadable_policy_keeps_explicit_models_pinned(self):

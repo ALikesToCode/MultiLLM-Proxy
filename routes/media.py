@@ -1,4 +1,4 @@
-"""Image batches and edits, asynchronous video jobs, stored media and provider status."""
+"""Image batches and edits, asynchronous video jobs, narration, stored media and provider status."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from routes.media_edits import (
 from routes.media_batches import principal_user, read_request_principal, register_media_batch_routes
 from routes.media_files import register_media_file_routes, stream_stored_file, unavailable
 from routes.media_images import image_fail_over, run_image_batch
+from routes.media_narration import register_media_narration_routes
 from routes.unified import _validate_image_candidate, dispatch_unified_image_generation
 from services import cloudflare_ai, media_jobs, media_storage, video_generation
 from services.auto_route_service import AutoRouteService
@@ -139,6 +140,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
 
     register_media_file_routes(app, csrf)
     register_media_batch_routes(app, csrf, auth_service_cls, validate_image_candidate, generate_image)
+    register_media_narration_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls, _owner)
 
     @app.route("/v1/images/batch", methods=["POST", "OPTIONS"])
     @csrf.exempt

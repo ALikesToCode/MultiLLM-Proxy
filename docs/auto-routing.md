@@ -38,10 +38,11 @@ return `400` on automatic routes.
 
 `POST /v1/images/generations` accepts an `auto:<name>` model; `auto:image`,
 `auto:image-fast`, `auto:gpt-image-2.5`, `auto:image-edit` and `auto:video` are seeded
-([media generation](media-generation.md)), as are `auto:embed`, `auto:tts` and
-`auto:stt` for embeddings, speech and transcription. Candidates are tried in order; a
-candidate is skipped before any request when its provider cannot generate images,
-has no configured credential, or the model is disabled in Operations. `quality`
+([media generation](media-generation.md)), as are `auto:embed`, `auto:tts`,
+`auto:tts-narration` and `auto:stt` for embeddings, speech, narration and
+transcription. Candidates are tried in order; a candidate is skipped before any
+request when its provider cannot generate images, has no configured credential, or
+the model is disabled in Operations. `quality`
 defaults to `max`, and each candidate receives the closest settings its model
 supports (quality, size or aspect ratio, and only the fields it accepts).
 

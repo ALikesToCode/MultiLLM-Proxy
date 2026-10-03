@@ -71,11 +71,22 @@ DEFAULT_AUTO_ROUTES = {
         "openai:text-embedding-3-small",
         "nanogpt:text-embedding-3-small",
     ),
+    # Speech and transcription run on Gemini first (Google AI credits): 3.8 Flash-Lite TTS
+    # is the fast default, 3.8 Flash TTS the high-fidelity narrator, and 3.5 Transcribe
+    # detects 85+ languages. Aura speaks English only and is skipped for other scripts.
     "auto:tts": (
+        "gemini:gemini-3.8-flash-lite-tts",
+        "gemini:gemini-3.8-flash-tts",
         "openai:gpt-4o-mini-tts",
         "cloudflare:@cf/deepgram/aura-2-en",
     ),
+    "auto:tts-narration": (
+        "gemini:gemini-3.8-flash-tts",
+        "gemini:gemini-3.8-flash-lite-tts",
+        "openai:gpt-4o-mini-tts",
+    ),
     "auto:stt": (
+        "gemini:gemini-3.5-transcribe",
         "openai:gpt-4o-mini-transcribe",
         "nanogpt:gpt-4o-mini-transcribe",
         "together:openai/whisper-large-v3",
@@ -122,6 +133,20 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "openai:gpt-image-2.5-flare",
             "xai:grok-imagine-image-2.0",
             "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+        ),
+    ),
+    "auto:tts": (
+        (
+            "openai:gpt-4o-mini-tts",
+            "cloudflare:@cf/deepgram/aura-2-en",
+        ),
+    ),
+    "auto:stt": (
+        (
+            "openai:gpt-4o-mini-transcribe",
+            "nanogpt:gpt-4o-mini-transcribe",
+            "together:openai/whisper-large-v3",
+            "cloudflare:@cf/openai/whisper-large-v3-turbo",
         ),
     ),
 }

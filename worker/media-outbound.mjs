@@ -113,8 +113,9 @@ async function fetchImage(request) {
 // removes them without touching generated media.
 export const mediaObjectKey = fileId => `${fileId.startsWith("mu_") ? "uploads" : "media"}/${fileId}`;
 const FILE_PATH = /^\/v1\/files\/(m[a-z]_[A-Za-z0-9_-]{8,120})(\/meta|\/import)?$/;
-const FILE_TYPES = { image: /^image\/(?:png|jpeg|webp|gif)$/, video: /^video\/(?:mp4|webm|quicktime)$/ };
-const MAX_FILE_BYTES = { image: 50 * 1024 * 1024, video: 512 * 1024 * 1024 };
+const FILE_TYPES = { image: /^image\/(?:png|jpeg|webp|gif)$/, video: /^video\/(?:mp4|webm|quicktime)$/,
+  audio: /^audio\/(?:wav|mpeg)$/ };
+const MAX_FILE_BYTES = { image: 50 * 1024 * 1024, video: 512 * 1024 * 1024, audio: 100 * 1024 * 1024 };
 const OWNER = /^[^\x00-\x1f\x7f]{1,256}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
 
