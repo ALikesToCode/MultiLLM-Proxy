@@ -197,8 +197,21 @@ def speech_response(payload: dict, response_format: str) -> Response:
     return Response(audio_codec.wav_bytes(pcm), content_type="audio/wav")
 
 
+def _transcript(parts: list[dict]) -> str:
+    """Transcribe models answer with `audioTranscription` segments (one per speaker turn
+    when diarizing); other models answer with plain text parts."""
+    segments = []
+    for part in parts:
+        transcription = part.get("audioTranscription") or part.get("audio_transcription")
+        if isinstance(transcription, dict) and isinstance(transcription.get("text"), str):
+            segments.append(transcription["text"].strip())
+    if segments:
+        return " ".join(segment for segment in segments if segment)
+    return "".join(part["text"] for part in parts if isinstance(part.get("text"), str)).strip()
+
+
 def transcription_response(payload: dict, response_format: str) -> Response:
-    text = "".join(part["text"] for part in _parts(payload) if isinstance(part.get("text"), str)).strip()
+    text = _transcript(_parts(payload))
     if response_format == "text":
         return Response(text, content_type="text/plain; charset=utf-8")
     return Response(json.dumps({"text": text}, ensure_ascii=False), content_type="application/json")

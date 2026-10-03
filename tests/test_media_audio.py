@@ -185,7 +185,10 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
             make_request.assert_not_called()
 
     def test_transcription_runs_on_gemini_3_5_transcribe(self):
-        reply = {"candidates": [{"content": {"parts": [{"text": "नमस्ते दुनिया"}]}, "finishReason": "STOP"}]}
+        # The shape gemini-3.5-transcribe returns: one audioTranscription segment per turn.
+        reply = {"candidates": [{"content": {"role": "model", "parts": [
+            {"audioTranscription": {"text": "नमस्ते"}}, {"audioTranscription": {"text": "दुनिया"}}]},
+            "finishReason": "STOP"}]}
         response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, reply)], data={
             "language": "hi", "prompt": "Kubernetes, BigQuery\nGemini",
             "file": (io.BytesIO(b"ID3-audio"), "clip.mp3")}, content_type="multipart/form-data")
@@ -199,7 +202,8 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
                                                                      "data": base64.b64encode(b"ID3-audio").decode()}}]}],
             "generationConfig": {"audioTranscriptionConfig": {"languageCodes": ["hi-IN"],
                                                               "customVocabulary": ["Kubernetes", "BigQuery", "Gemini"]}}})
-        response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, reply)], data={
+        text_reply = {"candidates": [{"content": {"parts": [{"text": "नमस्ते दुनिया"}]}, "finishReason": "STOP"}]}
+        response, make_request = self.post("/v1/audio/transcriptions", [upstream(200, text_reply)], data={
             "model": "gemini:gemini-3.5-transcribe", "language": "en-IN", "response_format": "text",
             "file": (io.BytesIO(b"RIFF"), "clip.wav")}, content_type="multipart/form-data")
         self.assertEqual((response.data.decode(), response.mimetype), ("नमस्ते दुनिया", "text/plain"))
