@@ -42,6 +42,13 @@ class ImageRelayConfigurationTest(unittest.TestCase):
                 "AIMLAPI_API_KEY",
                 True,
             ),
+            "ce-image": (
+                "https://codex-everywhere.com",
+                None,
+                "gpt-image-2.5-sunburst",
+                "CODEX_EVERYWHERE_API_KEY_GPT_IMAGE",
+                False,
+            ),
             "ephone": (
                 "https://api.ephone.ai",
                 None,

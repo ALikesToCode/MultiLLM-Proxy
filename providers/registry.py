@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from functools import lru_cache
 
 from providers.base import ProviderCapabilities
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS, OPENAI_PROTOCOL
 from providers.image_relays import image_relay_specs
 from providers.openai_compatible import OpenAICompatibleAdapter
 
@@ -147,6 +148,21 @@ def build_default_registry(base_urls: Mapping[str, str]) -> dict[str, OpenAIComp
             base_url=base_url,
             chat_path=chat_path,
             provider_capabilities=capabilities,
+        )
+    for pool in CODEX_EVERYWHERE_POOLS:
+        base_url = base_urls.get(pool.provider)
+        if not base_url:
+            continue
+        # Unified Chat reaches Claude pools through Messages (providers/protocols.py).
+        registry[pool.provider] = OpenAICompatibleAdapter(
+            name=pool.provider,
+            base_url=base_url,
+            chat_path="v1/chat/completions",
+            provider_capabilities=ProviderCapabilities(
+                supports_tools=True,
+                supports_vision=True,
+                supports_json_schema=pool.protocol == OPENAI_PROTOCOL,
+            ),
         )
     for spec in image_relay_specs():
         base_url = base_urls.get(spec.provider)

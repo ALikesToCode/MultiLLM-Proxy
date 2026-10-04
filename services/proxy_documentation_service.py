@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_specs
 from providers.registry import get_registry
 from proxy import PROVIDER_DETAILS
@@ -41,6 +42,7 @@ PROVIDER_DISPLAY_NAMES = {
     "scaleway": "Scaleway",
     "together": "Together AI",
     "xai": "xAI",
+    **{pool.provider: pool.display_name for pool in CODEX_EVERYWHERE_POOLS},
     **{spec.provider: spec.display_name for spec in image_relay_specs()},
 }
 

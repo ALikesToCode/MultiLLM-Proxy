@@ -1,3 +1,4 @@
+from providers.codex_everywhere import CODEX_EVERYWHERE_PROVIDERS
 from providers.image_relays import image_relay_specs
 
 
@@ -5,6 +6,7 @@ RAW_PASSTHROUGH_PROVIDERS = frozenset(
     {
         "aihubmix",
         "codex-easy",
+        *CODEX_EVERYWHERE_PROVIDERS,
         "kimi-code",
         "linkapi",
         "nanogpt",

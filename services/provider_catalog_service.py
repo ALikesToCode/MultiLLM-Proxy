@@ -13,6 +13,7 @@ from providers.cline_pass import (
     CLINE_RECOMMENDED_MODELS_PATH,
     cline_pass_catalog_entries,
 )
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_specs
 from providers.opencode_go import is_opencode_zen_free_model
 from services import provider_catalog_d1
@@ -52,6 +53,10 @@ PROVIDER_CATALOG_SPECS = {
     "openrouter": ProviderCatalogSpec("models", "/openrouter/models"),
     "linkapi": ProviderCatalogSpec("v1/models", "/linkapi/v1/models"),
     "codex-easy": ProviderCatalogSpec("v1/models", "/codex-easy/v1/models"),
+    **{
+        pool.provider: ProviderCatalogSpec("v1/models", f"/{pool.provider}/v1/models")
+        for pool in CODEX_EVERYWHERE_POOLS
+    },
     "kimi-code": ProviderCatalogSpec("models", "/kimi-code/v1/models"),
     "cline-pass": ProviderCatalogSpec(
         CLINE_RECOMMENDED_MODELS_PATH, f"/cline-pass/{CLINE_RECOMMENDED_MODELS_PATH}"

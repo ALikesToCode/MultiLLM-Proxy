@@ -14,6 +14,7 @@ from providers.aihubmix import (
     is_valid_aihubmix_request,
     request_with_origin_fallback,
 )
+from providers.codex_everywhere import codex_everywhere_pool, is_valid_codex_everywhere_path
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.image_relays import (
     image_relay_backup_base_url,
@@ -184,6 +185,9 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 raise APIError("Invalid AIHubMix path", status_code=400)
             if api_provider == "codex-easy" and not _is_valid_codex_easy_path(path):
                 raise APIError("Invalid Codex Everywhere path", status_code=400)
+            pool = codex_everywhere_pool(api_provider)
+            if pool and not is_valid_codex_everywhere_path(api_provider, path):
+                raise APIError(f"Invalid {pool.display_name} path", status_code=400)
             if api_provider == "kimi-code" and not _is_valid_kimi_code_request(
                 path,
                 request.method,

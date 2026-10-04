@@ -1,5 +1,6 @@
 from config import Config
 
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS, OPENAI_PROTOCOL
 from providers.image_relays import image_relay_specs
 
 
@@ -625,6 +626,56 @@ def _image_relay_provider_details(spec):
     }
 
 
+def _codex_everywhere_provider_details(pool):
+    """One Codex Everywhere pool: its own key, the shared origin, and its group's models."""
+    if pool.protocol == OPENAI_PROTOCOL:
+        model = "grok-4.7" if pool.provider == "ce-grok-heavy" else "gpt-6.1-sol"
+        generation = [
+            {
+                'url': '/v1/chat/completions',
+                'curl': f'curl -X POST "$PROXY_BASE_URL/{pool.provider}/v1/chat/completions" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{model}","messages":[{{"role":"user","content":"Hello"}}]}}\'',
+            },
+            {
+                'url': '/v1/responses',
+                'curl': f'curl -X POST "$PROXY_BASE_URL/{pool.provider}/v1/responses" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{model}","input":"Hello"}}\'',
+            },
+        ]
+    else:
+        model = "claude-fable-5-1" if pool.provider == "ce-claude-max" else "claude-opus-5-5"
+        generation = [
+            {
+                'url': '/v1/messages',
+                'curl': f'curl -X POST "$PROXY_BASE_URL/{pool.provider}/v1/messages" -H "Authorization: Bearer $ADMIN_API_KEY" -H "Content-Type: application/json" -d \'{{"model":"{model}","max_tokens":256,"messages":[{{"role":"user","content":"Hello"}}]}}\'',
+            },
+        ]
+    return {
+        'description': (
+            f'{pool.display_name}: a Codex Everywhere key group billed at '
+            f'{pool.price_multiplier:g}x the vendor list price. The model catalog is specific to the key.'
+        ),
+        'endpoints': [
+            {
+                'url': '/v1/models',
+                'curl': f'curl -X GET "$PROXY_BASE_URL/{pool.provider}/v1/models" -H "Authorization: Bearer $ADMIN_API_KEY"',
+            },
+            *generation,
+        ],
+        'supported_features': {
+            'streaming': True,
+            'raw_streaming': True,
+            'model_discovery': True,
+            'raw_passthrough': True,
+        },
+        'default_model': model,
+    }
+
+
+PROVIDER_DETAILS.update(
+    {
+        pool.provider: _codex_everywhere_provider_details(pool)
+        for pool in CODEX_EVERYWHERE_POOLS
+    }
+)
 PROVIDER_DETAILS.update(
     {
         spec.provider: _image_relay_provider_details(spec)

@@ -6,12 +6,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from providers.codex_everywhere import CODEX_EVERYWHERE_OPENAI_PROVIDERS
 from providers.nanogpt import nanogpt_model_has_speed_suffix
 from services.context_optimizer import estimate_payload_tokens
 
 _CACHE_KEY_CHAT_PROVIDERS = frozenset({"kimi-code", "openai"})
-_CACHE_KEY_RESPONSES_PROVIDERS = frozenset({"codex-easy", "linkapi", "openai"})
-_CONVERSATION_HEADER_PROVIDERS = frozenset({"codex-easy", "linkapi"})
+_CACHE_KEY_RESPONSES_PROVIDERS = frozenset(
+    {"codex-easy", "linkapi", "openai", *CODEX_EVERYWHERE_OPENAI_PROVIDERS}
+)
+_CONVERSATION_HEADER_PROVIDERS = frozenset(
+    {"codex-easy", "linkapi", *CODEX_EVERYWHERE_OPENAI_PROVIDERS}
+)
 
 
 @dataclass(frozen=True)

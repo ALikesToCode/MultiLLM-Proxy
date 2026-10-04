@@ -1,6 +1,7 @@
 import unittest
 
 from config import Config
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_specs
 from providers.registry import PROVIDER_SPECS, build_default_registry
 from proxy import PROVIDER_DETAILS
@@ -29,6 +30,7 @@ class FeatureInventoryTest(unittest.TestCase):
         expected = {provider for provider, _path, _capabilities in PROVIDER_SPECS}
         relay_specs = {spec.provider: spec for spec in image_relay_specs()}
         expected.update(relay_specs)
+        expected.update(pool.provider for pool in CODEX_EVERYWHERE_POOLS)
 
         self.assertEqual(set(registry), expected)
         for provider, adapter in registry.items():

@@ -8,6 +8,7 @@ from typing import List, Optional
 from werkzeug.security import generate_password_hash
 
 from error_handlers import APIError
+from providers.codex_everywhere import codex_everywhere_credential_env_names
 from providers.image_relays import image_relay_credential_env_names
 
 DEFAULT_USER_SCOPES = ("chat", "models")
@@ -21,6 +22,7 @@ PROVIDER_API_KEY_ENV_NAMES = {
     "kimi-code": ("KIMI_CODE_API_KEY",),
     "cline-pass": ("CLINE_API_KEY", "CLINE_PASS_API_KEY"),
     "nanogpt": ("NANOGPT_API_KEY", "NANO_GPT_KEY"),
+    **codex_everywhere_credential_env_names(),
 }
 
 # Values copied from .env.example ("your-openai-api-key") or left as template markers are

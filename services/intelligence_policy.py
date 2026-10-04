@@ -2,6 +2,7 @@
 
 import copy
 
+from providers.codex_everywhere import CODEX_EVERYWHERE_OPENAI_PROVIDERS
 from providers.registry import get_adapter
 from services.intelligence_contract import (
     CAPABILITIES,
@@ -40,6 +41,7 @@ CHAT_PROVIDERS = frozenset(
         "linkapi",
         "aihubmix",
         "codex-easy",
+        *CODEX_EVERYWHERE_OPENAI_PROVIDERS,
         "kimi-code",
         "cline-pass",
         "gemini",

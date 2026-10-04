@@ -120,6 +120,26 @@ The model catalog is API-key-group-specific; query `/codex-easy/v1/models` inste
 
 On the Codex Everywhere and LinkAPI raw OpenAI fast paths, a Responses `prompt_cache_key` remains in the untouched body and the Chat `X-Grok-Conv-Id` header is forwarded. For Grok requests, [xAI recommends](https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits) those fields with a stable conversation ID to improve cache routing. They do not guarantee a cache hit; caching remains upstream behavior and stable request prefixes still matter. Generation POSTs are single-attempt, and this proxy does not provide idempotency.
 
+### Codex Everywhere pools
+
+A Codex Everywhere key belongs to one group, so each pool is its own provider with its own Worker secret. All pools use `https://codex-everywhere.com`. Model IDs take the pool's prefix, such as `ce-gpt-pro:gpt-6.1-sol`.
+
+| Provider | Secret | Models | Price |
+| --- | --- | --- | --- |
+| `ce-gpt-plus` | `CODEX_EVERYWHERE_API_KEY_GPT_PLUS_POOL` | GPT-6 Astra, 6.1 Sol, Sol, Luna; GPT-5.6 | 0.03× OpenAI |
+| `ce-gpt-pro` | `CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL` | Same as Plus | 0.05× OpenAI |
+| `ce-grok-heavy` | `CODEX_EVERYWHERE_API_KEY_GROK_HEAVY` | Grok 4.7, 4.6, 4.5 | 0.06× xAI |
+| `ce-claude-kiro-cheap` | `CODEX_EVERYWHERE_API_KEY_CLAUDE_UNSTABLE` | Claude Opus 5.5 and earlier | 0.045× Anthropic |
+| `ce-claude-kiro` | `CODEX_EVERYWHERE_API_KEY_CLAUDE_KIRO` | Claude Opus 5.5 and earlier | 0.08× Anthropic |
+| `ce-claude-max` | `CODEX_EVERYWHERE_API_KEY_CLAUDE_MAX` | Claude Fable 5.1 and the rest; Claude Code only | 0.24× Anthropic |
+| `ce-image` | `CODEX_EVERYWHERE_API_KEY_GPT_IMAGE` | GPT Image 2 and 2.5 Sunburst and Flare | $0.015 per image |
+
+The GPT and Grok pools accept Chat Completions and Responses, and can be `auto:intelligence` candidates. The Claude pools accept Anthropic Messages; unified `/v1/chat/completions` requests to them are translated to Messages, and they are not intelligence candidates. `ce-image` is an image relay. Raw routes such as `/ce-gpt-pro/v1/responses` and `/ce-claude-kiro/v1/messages` accept only each protocol's documented paths, and each pool's `/v1/models` lists its own key's catalog. A pool with no secret is skipped. CE answers `403 INSUFFICIENT_BALANCE` while the account has no credit.
+
+CE's GPT API runs on Codex and uses Codex's default system prompt unless a request sets one ([CE docs](https://docs.codex-everywhere.com/models/openai)). Check how a pool treats a `system` message before adding it to a chain.
+
+The Gemini via Antigravity group serves Google's native API at `/v1beta` and is not integrated.
+
 ### Kimi Code OpenAI-compatible routes
 
 Set `KIMI_CODE_API_KEY` as a Worker secret. The upstream base is fixed to `https://api.kimi.com/coding/v1`.

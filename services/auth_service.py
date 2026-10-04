@@ -20,6 +20,7 @@ from werkzeug.security import check_password_hash
 
 from config import load_numbered_env_values
 from error_handlers import APIError
+from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_api_key, image_relay_specs
 from services.auth_primitives import (
     DEFAULT_ADMIN_SCOPES,
@@ -602,6 +603,7 @@ class AuthService:
             "together",
             "nineteen",
         ]
+        providers.extend(pool.provider for pool in CODEX_EVERYWHERE_POOLS)
         providers.extend(spec.provider for spec in image_relay_specs())
         for provider in dict.fromkeys(providers):
             api_key = next(

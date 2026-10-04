@@ -10,6 +10,7 @@ from config import Config
 from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
 from providers.base import ModelInfo
 from providers.cline_pass import CLINE_PASS_MODEL_IDS
+from providers.codex_everywhere import CODEX_EVERYWHERE_PROVIDERS
 from providers.image_relays import image_relay_model_ids
 from providers.opencode_go import (
     OPENCODE_GO_LEGACY_MODEL_IDS,
@@ -31,6 +32,7 @@ STATIC_PROVIDER_MODELS = {
 
 DYNAMIC_PROVIDER_MODELS = {
     "codex-easy",
+    *CODEX_EVERYWHERE_PROVIDERS,
     "linkapi",
     "nanogpt",
     "navyai",

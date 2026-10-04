@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
+from providers.codex_everywhere import (
+    CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS,
+    CODEX_EVERYWHERE_OPENAI_PROVIDERS,
+    codex_everywhere_model_endpoint,
+)
 from providers.opencode_go import opencode_model_endpoint
 
 CHAT_COMPLETIONS = "v1/chat/completions"
@@ -19,6 +24,7 @@ MESSAGES = "v1/messages"
 # Providers whose every model accepts these endpoints besides Chat Completions.
 PROVIDER_NATIVE_ENDPOINTS: Mapping[str, frozenset[str]] = {
     "codex-easy": frozenset({RESPONSES}),
+    **{provider: frozenset({RESPONSES}) for provider in CODEX_EVERYWHERE_OPENAI_PROVIDERS},
     "linkapi": frozenset({RESPONSES}),
     "nanogpt": frozenset({RESPONSES, MESSAGES}),
     "navyai": frozenset({RESPONSES, MESSAGES}),
@@ -28,6 +34,7 @@ PROVIDER_NATIVE_ENDPOINTS: Mapping[str, frozenset[str]] = {
 # None for a model it does not know, which then uses Chat Completions.
 MODEL_ENDPOINT_RESOLVERS: Mapping[str, Callable[[str], str | None]] = {
     "opencode": opencode_model_endpoint,
+    **{provider: codex_everywhere_model_endpoint for provider in CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS},
 }
 
 

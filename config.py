@@ -9,6 +9,7 @@ from providers.aihubmix import (
     trusted_aihubmix_origin,
 )
 from providers.cline_pass import CLINE_API_BASE_URL
+from providers.codex_everywhere import codex_everywhere_base_urls
 from providers.image_relays import image_relay_base_urls
 from providers.nanogpt import nanogpt_text_base_url
 
@@ -208,6 +209,7 @@ class Config:
         'chutes': 'https://llm.chutes.ai',
         'gemini': 'https://generativelanguage.googleapis.com/v1beta',
         'gemma': 'https://generativelanguage.googleapis.com/v1beta',
+        **codex_everywhere_base_urls(),
         **image_relay_base_urls(),
     }
     
@@ -239,9 +241,10 @@ class Config:
         'gemini': (10, 120),  # Gemini API can be slow to respond
         'gemma': (10, 120),  # Gemma API can be slow to respond
         'default': (5, 60),
+        # Codex Everywhere pools serve long-running Codex and Claude agent requests.
         **{
             provider: (5, 600)
-            for provider in image_relay_base_urls()
+            for provider in (*codex_everywhere_base_urls(), *image_relay_base_urls())
         },
     }
     

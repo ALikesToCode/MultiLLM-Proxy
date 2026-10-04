@@ -14,6 +14,11 @@ from services.opencode_session import with_opencode_request_session
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.cline_pass import cline_completion_payload
+from providers.codex_everywhere import (
+    CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS,
+    CODEX_EVERYWHERE_POOLS,
+    CODEX_EVERYWHERE_PROVIDERS,
+)
 from providers.image_relays import image_relay_spec
 from services.upstream_errors import (
     STREAM_FAILURE_MESSAGE,
@@ -430,9 +435,10 @@ class ProxyService:
                     "x-client-request-id": "X-Client-Request-ID",
                 }
             )
-        elif api_provider == "codex-easy":
+        elif api_provider == "codex-easy" or api_provider in CODEX_EVERYWHERE_PROVIDERS:
             header_whitelist.update(
                 {
+                    "anthropic-beta": "Anthropic-Beta",
                     "idempotency-key": "Idempotency-Key",
                     "openai-beta": "OpenAI-Beta",
                     "openai-project": "OpenAI-Project",
@@ -455,8 +461,10 @@ class ProxyService:
             if canonical_header:
                 headers[canonical_header] = value
             elif (
-                api_provider
-                in {"codex-easy", "kimi-code", "nanogpt", "navyai", "opencode"}
+                (
+                    api_provider in {"codex-easy", "kimi-code", "nanogpt", "navyai", "opencode"}
+                    or api_provider in CODEX_EVERYWHERE_PROVIDERS
+                )
                 and header.lower().startswith("x-stainless-")
             ):
                 headers[header] = value
@@ -579,9 +587,8 @@ class ProxyService:
         elif is_linkapi_claude and not cls._has_header(headers, "Anthropic-Version"):
             headers["Anthropic-Version"] = "2023-06-01"
         elif (
-            is_opencode_go_anthropic
-            and not cls._has_header(headers, "Anthropic-Version")
-        ):
+            is_opencode_go_anthropic or api_provider in CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS
+        ) and not cls._has_header(headers, "Anthropic-Version"):
             headers["Anthropic-Version"] = "2023-06-01"
 
         return with_client_defaults(headers, api_provider)
@@ -609,7 +616,7 @@ class ProxyService:
         if api_provider not in RAW_PASSTHROUGH_PROVIDERS:
             return params
 
-        if api_provider in {"codex-easy", "kimi-code", "linkapi"}:
+        if api_provider in {"codex-easy", "kimi-code", "linkapi"} or api_provider in CODEX_EVERYWHERE_PROVIDERS:
             params = [(key, value) for key, value in params if key.lower() != "key"]
         return params
 
@@ -1399,6 +1406,7 @@ class ProxyService:
         except requests.exceptions.RequestException as e:
             if raw_passthrough:
                 provider_name = {
+                    **{pool.provider: pool.display_name for pool in CODEX_EVERYWHERE_POOLS},
                     "aihubmix": "AIHubMix",
                     "codex-easy": "Codex Everywhere",
                     "kimi-code": "Kimi Code",
