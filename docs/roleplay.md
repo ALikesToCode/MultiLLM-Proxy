@@ -158,6 +158,11 @@ usual safe-fallback statuses advance to the next entry. Set
 `provider:model` entries to replace the list. ClinePass uses `CLINE_API_KEY`
 and Cline's `reasoning.effort` field, up to `xhigh`.
 
+Production sets it (`wrangler.jsonc`, 2026-10-05) to GLM-5.3 on ClinePass, then GLM-5.3,
+GLM-5.3-Flash and GLM-5.2 on NanoGPT, then GLM-5.3-Flash and MiMo-V2.6-Pro on ClinePass.
+ClinePass GLM-5.3 gave its first words in about 4 s, while MiMo on NanoGPT took 59 s.
+OpenCode Go and NavyAI's free plan were refusing every request, so they are left out.
+
 With `ROLEPLAY_AUTO_ROUTE=intelligence`, plain `roleplay:auto` turns (and requests
 without a roleplay model) use the same chain. Turns that set `routing.mode` or
 `routing.model` keep the adaptive pool, and so does any turn whose chain has no

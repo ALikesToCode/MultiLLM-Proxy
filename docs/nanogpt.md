@@ -135,7 +135,9 @@ The empty setting retains subscription routing. An account with no pay-as-you-go
 balance rejects every suffixed request with `402 Insufficient balance` on both the
 standard and the subscription endpoint, and roleplay treats `402` as a safe
 fallback status, so the NanoGPT candidates silently drop out of rotation. Fund
-the pay-as-you-go balance before enabling it.
+the pay-as-you-go balance before enabling it. Since October 2026 NanoGPT answers a
+suffixed request from a subscription-only key with `403` instead, which roleplay does not
+retry without the suffix; production leaves the variable unset.
 
 Provider selection also accepts `quantizations` and `min_quantization`
 (`int4`, `fp4`, `fp6`, `int8`, `fp8`, `fp16`, `bf16`, `fp32`, `unknown`), and

@@ -246,6 +246,24 @@ test("deployment defaults roleplay generation to high reasoning", async () => {
   assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
+test("deployment starts roleplay on Cline Pass GLM 5.3 and keeps NanoGPT on the subscription", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  // Measured 2026-10-05: Cline Pass GLM 5.3 answered first in about 4 s; MiMo on NanoGPT
+  // took 59 s. OpenCode Go and NavyAI's free plan refused every request, so they are left out.
+  assert.deepEqual(config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(","), [
+    "cline-pass:cline-pass/glm-5.3",
+    "nanogpt:z-ai/glm-5.3",
+    "nanogpt:z-ai/glm-5.3-flash",
+    "nanogpt:z-ai/glm-5.2",
+    "cline-pass:cline-pass/glm-5.3-flash",
+    "cline-pass:cline-pass/mimo-v2.6-pro",
+  ]);
+  // The subscription-only key cannot pay for :fast, which NanoGPT now refuses with 403.
+  assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, undefined);
+});
+
 test("deployment routes GLM through LinkAPI before NavyAI", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
