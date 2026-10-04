@@ -331,3 +331,41 @@ class GeminiStreamTests(IntelligenceApiTestCase):
         calls = output[0]["choices"][0]["delta"]["tool_calls"]
         assert calls[0]["extra_content"] == SIGNATURE
         assert output[-1]["multillm"]["usage_complete"]
+
+    def test_gemini_tool_calls_without_an_index_are_numbered_by_id(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_http import SIGNATURE
+
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-flash-lite")]))
+        first = {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": '{"q":"a"}'},
+            "extra_content": SIGNATURE,
+        }
+        second = {**first, "id": "call-2", "function": {"name": "lookup", "arguments": '{"q":"b"}'}}
+        stream = frames(
+            delta({"role": "assistant", "tool_calls": [first, second]}),
+            delta({}, "tool_calls"),
+            {"choices": [], "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}},
+            "[DONE]",
+        )
+        with self.requests(
+            return_value=upstream(headers={"Content-Type": "text/event-stream"}, chunks=stream)
+        ):
+            response = self.post(stream=True, tools=[TOOL])
+            output = events(response)
+        calls = output[0]["choices"][0]["delta"]["tool_calls"]
+        assert [(call["index"], call["id"]) for call in calls] == [(0, "call-1"), (1, "call-2")]
+        assert calls[0]["extra_content"] == SIGNATURE
+        assert "error" not in output[-1] and output[-1]["multillm"]["usage_complete"]
+
+    def test_other_providers_still_need_an_index_on_every_tool_fragment(self):
+        self.seed()
+        unindexed = {"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        stream = frames(delta({"tool_calls": [unindexed]}), delta({}, "tool_calls"), "[DONE]")
+        with self.requests(
+            return_value=upstream(headers={"Content-Type": "text/event-stream"}, chunks=stream)
+        ):
+            output = events(self.post(stream=True, tools=[TOOL]))
+        assert output[-1]["error"]["code"] == "stream_interrupted"

@@ -17,6 +17,9 @@ class ChatStream:
         self.calls = {}
         self.finish = None
         self.done = False
+        # Gemini's Chat Completions stream sends each tool call whole, without the index
+        # every other provider includes; its calls are numbered here by their IDs instead.
+        self.unindexed_calls = model.split(":", 1)[0] == "gemini"
 
     def events(self):
         for event in iter_sse_events(self.chunks):
@@ -112,6 +115,8 @@ class ChatStream:
             delta["tool_calls"] = []
             for fragment in calls:
                 index = fragment.get("index")
+                if index is None and self.unindexed_calls:
+                    index = self._index_by_id(fragment)
                 if type(index) is not int or not 0 <= index < 128:
                     raise ValueError("Invalid tool index")
                 call = self.calls.setdefault(
@@ -145,6 +150,16 @@ class ChatStream:
                     call["extra_content"] = clean["extra_content"] = extra
                 delta["tool_calls"].append(clean)
         return delta
+
+    def _index_by_id(self, fragment):
+        """A whole unindexed call's position: its ID's earlier index, or the next free one."""
+        call_id = fragment.get("id") if isinstance(fragment, dict) else None
+        if not isinstance(call_id, str) or not call_id:
+            return None
+        for index, call in self.calls.items():
+            if call["id"] == call_id:
+                return index
+        return len(self.calls)
 
     def completion(self):
         message = {"content": self.content or None}
