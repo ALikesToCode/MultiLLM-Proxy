@@ -111,3 +111,133 @@ class CodexEverywhereIntelligenceTests(IntelligenceApiTestCase):
             assert call.kwargs["url"] == "https://codex-everywhere.com/v1/chat/completions"
             assert call.kwargs["headers"]["Authorization"] == f"Bearer {key}"
             assert json.loads(call.kwargs["data"])["model"] == "gpt-6.1-sol"
+
+
+def test_pool_keys_run_base_first_then_numbered_spares_and_rest_refused_ones():
+    from services.credential_pool import (
+        RATE_LIMITED_REST_SECONDS,
+        REFUSED_REST_SECONDS,
+        CredentialPool,
+    )
+
+    env = {
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL": "key-a",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_10": "key-d",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_2": "key-c",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_1": "key-b",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_3": "key-a",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_4": "your-ce-pro-pool-key",
+        "CODEX_EVERYWHERE_API_KEY_GPT_PLUS_POOL_1": "other-pool",
+    }
+    assert CredentialPool.keys("ce-gpt-pro", env) == ["key-a", "key-b", "key-c", "key-d"]
+    assert CredentialPool.keys("ce-gpt-plus", env) == ["other-pool"], "a spare works without a base key"
+    assert CredentialPool.keys("openai", env) == [] and not CredentialPool.pooled("openai")
+    keys = ["key-a", "key-b"]
+    CredentialPool.reset()
+    try:
+        CredentialPool.record("ce-gpt-pro", "key-a", 403, now=100)
+        assert CredentialPool.available("ce-gpt-pro", keys, now=101) == ["key-b"]
+        assert CredentialPool.available("ce-gpt-plus", ["key-a"], now=101) == ["key-a"], "rests are per pool"
+        assert CredentialPool.available("ce-gpt-pro", keys, now=100 + REFUSED_REST_SECONDS) == keys
+        CredentialPool.record("ce-gpt-pro", "key-b", 429, now=1000)
+        assert CredentialPool.available("ce-gpt-pro", keys, now=1001) == ["key-a"]
+        assert CredentialPool.available("ce-gpt-pro", keys, now=1000 + RATE_LIMITED_REST_SECONDS) == keys
+        CredentialPool.record("ce-gpt-pro", "key-a", 403, now=2000)
+        CredentialPool.record("ce-gpt-pro", "key-a", 200, now=2001)
+        assert CredentialPool.available("ce-gpt-pro", keys, now=2002) == keys, "a success ends the rest"
+        CredentialPool.record("ce-gpt-pro", "key-a", 400, now=3000)
+        assert CredentialPool.available("ce-gpt-pro", keys, now=3001) == keys, "a bad request is not the key's fault"
+    finally:
+        CredentialPool.reset()
+
+
+def test_auth_service_moves_to_the_spare_after_a_raw_refusal():
+    import requests
+
+    from services.auth_service import AuthService
+    from services.credential_pool import CredentialPool
+    from services.proxy_service import ProxyService
+
+    env = {
+        "CODEX_EVERYWHERE_API_KEY_GPT_IMAGE": "image-a",
+        "CODEX_EVERYWHERE_API_KEY_GPT_IMAGE_1": "image-b",
+    }
+    refused = requests.Response()
+    refused.status_code = 403
+    CredentialPool.reset()
+    try:
+        with patch.dict(os.environ, env):
+            assert AuthService.get_api_keys("ce-image") == ["image-a", "image-b"]
+            assert AuthService.get_api_key("ce-image") == "image-a"
+            with patch.object(ProxyService, "_make_base_request", return_value=refused):
+                ProxyService.make_request(
+                    method="POST",
+                    url="https://codex-everywhere.com/v1/images/generations",
+                    headers={"Authorization": "Bearer image-a"},
+                    params={},
+                    data=b"{}",
+                    api_provider="ce-image",
+                    use_cache=False,
+                )
+            assert AuthService.get_api_key("ce-image") == "image-b"
+            CredentialPool.record("ce-image", "image-b", 403)
+            assert AuthService.get_api_key("ce-image") == "image-a", "with every key resting, the first is used"
+    finally:
+        CredentialPool.reset()
+
+
+class CodexEverywhereKeyFallbackTests(IntelligenceApiTestCase):
+    def seed_pool(self, *models):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(policy(candidates=[candidate(model) for model in models]))
+
+    def pool_keys(self, *keys):
+        return patch.object(self.app_module.AuthService, "get_api_keys", return_value=list(keys))
+
+    def test_a_refused_key_retries_the_same_model_on_the_spare(self):
+        self.seed_pool("ce-gpt-pro:gpt-6.1-sol", "navyai:large")
+        with self.pool_keys("pro-a", "pro-b"), self.requests(
+            side_effect=[upstream({"code": "INSUFFICIENT_BALANCE"}, 403), upstream(completion("done"))]
+        ) as send:
+            response = self.post()
+        assert response.status_code == 200
+        assert response.json["multillm"]["selected_model"] == "ce-gpt-pro:gpt-6.1-sol"
+        assert response.json["multillm"]["attempts"] == 2
+        sent = [call.kwargs["headers"]["Authorization"] for call in send.call_args_list]
+        assert sent == ["Bearer pro-a", "Bearer pro-b"]
+
+    def test_a_pinned_pool_model_also_falls_back_to_its_spare(self):
+        self.seed_pool("ce-gpt-pro:gpt-6.1-sol")
+        with self.pool_keys("pro-a", "pro-b"), self.requests(
+            side_effect=[upstream({}, 429), upstream(completion("done"))]
+        ) as send:
+            response = self.post(model="ce-gpt-pro:gpt-6.1-sol", routing={})
+        assert response.status_code == 200 and send.call_count == 2
+
+    def test_a_request_refusal_moves_on_without_trying_the_spare(self):
+        self.seed_pool("ce-gpt-pro:gpt-6.1-sol", "navyai:large")
+        with self.pool_keys("pro-a", "pro-b"), self.requests(
+            side_effect=[upstream({}, 400), upstream(completion("done"))]
+        ) as send:
+            response = self.post()
+        assert response.status_code == 200
+        assert response.json["multillm"]["selected_model"] == "navyai:large"
+        assert send.call_count == 2, "the same request would fail on every key"
+
+    def test_resting_keys_are_skipped_and_an_all_resting_pool_costs_no_attempt(self):
+        from services.credential_pool import CredentialPool
+
+        self.seed_pool("ce-gpt-pro:gpt-6.1-sol", "navyai:large")
+        CredentialPool.reset()
+        self.addCleanup(CredentialPool.reset)
+        CredentialPool.record("ce-gpt-pro", "pro-a", 403)
+        with self.pool_keys("pro-a", "pro-b"), self.requests(return_value=upstream(completion("done"))) as send:
+            self.post()
+        assert send.call_args.kwargs["headers"]["Authorization"] == "Bearer pro-b"
+        CredentialPool.record("ce-gpt-pro", "pro-b", 403)
+        with self.pool_keys("pro-a", "pro-b"), self.requests(return_value=upstream(completion("done"))) as send:
+            response = self.post()
+        assert response.json["multillm"]["selected_model"] == "navyai:large"
+        assert response.json["multillm"]["attempts"] == 1

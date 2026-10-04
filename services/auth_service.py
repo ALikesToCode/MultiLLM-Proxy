@@ -22,6 +22,7 @@ from config import load_numbered_env_values
 from error_handlers import APIError
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_api_key, image_relay_specs
+from services.credential_pool import CredentialPool
 from services.auth_primitives import (
     DEFAULT_ADMIN_SCOPES,
     DEFAULT_USER_SCOPES,
@@ -665,6 +666,10 @@ class AuthService:
     @classmethod
     def get_api_key(cls, provider: str) -> Optional[str]:
         """Get API key for a provider."""
+        if CredentialPool.pooled(provider):
+            pooled = CredentialPool.select(provider)
+            if pooled:
+                return pooled
         for env_key in provider_api_key_env_names(provider):
             api_key = usable_credential(os.environ.get(env_key), env_key)
             if api_key:
@@ -684,6 +689,8 @@ class AuthService:
         """Get every configured key for providers that support a key pool."""
         if provider == "nanogpt":
             return configured_nanogpt_keys()
+        if CredentialPool.pooled(provider) and (pooled := CredentialPool.keys(provider)):
+            return pooled
         api_key = cls.get_api_key(provider)
         return [api_key] if api_key else []
 

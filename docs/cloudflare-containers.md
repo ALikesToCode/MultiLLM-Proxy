@@ -136,6 +136,8 @@ A Codex Everywhere key belongs to one group, so each pool is its own provider wi
 
 The GPT and Grok pools accept Chat Completions and Responses, and can be `auto:intelligence` candidates. The Claude pools accept Anthropic Messages; unified `/v1/chat/completions` requests to them are translated to Messages, and they are not intelligence candidates. `ce-image` is an image relay. Raw routes such as `/ce-gpt-pro/v1/responses` and `/ce-claude-kiro/v1/messages` accept only each protocol's documented paths, and each pool's `/v1/models` lists its own key's catalog. A pool with no secret is skipped. CE answers `403 INSUFFICIENT_BALANCE` while the account has no credit.
 
+Each pool can hold spare keys under the same name with `_1`, `_2` and so on, such as `CODEX_EVERYWHERE_API_KEY_GPT_PRO_POOL_1`. Requests use the base key first, then the spares in number order. A key that CE refuses (401, 402 or 403) rests for five minutes, and a rate-limited key (429) for one minute. In `auto:intelligence` a refused key retries the same model on the next key within the request, because a refusal generates nothing. Other routes switch on the next request. The rests are kept per Container process.
+
 CE's GPT API runs on Codex and uses Codex's default system prompt unless a request sets one ([CE docs](https://docs.codex-everywhere.com/models/openai)). Check how a pool treats a `system` message before adding it to a chain.
 
 The Gemini via Antigravity group serves Google's native API at `/v1beta` and is not integrated.

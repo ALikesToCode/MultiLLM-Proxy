@@ -11,6 +11,7 @@ from providers.base import CanonicalRequest
 from providers.nanogpt import nanogpt_model_has_speed_suffix
 from providers.opencode_go import build_opencode_model_url
 from providers.registry import get_adapter
+from services.credential_pool import CredentialPool
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -266,6 +267,15 @@ class IntelligenceTransport:
                 self.auth.get_api_keys(provider)
             )
         return self.auth.get_api_key(provider)
+
+    def credentials(self, candidate):
+        """Keys to try for one candidate in order: every resting-free key of a pooled
+        provider, otherwise the single selected credential."""
+        provider = candidate["model"].split(":", 1)[0]
+        if CredentialPool.pooled(provider):
+            return CredentialPool.available(provider, self.auth.get_api_keys(provider))
+        token = self.credential(candidate)
+        return [token] if token else []
 
     def adapter(self, candidate, *, media=False):
         provider, model = candidate["model"].split(":", 1)

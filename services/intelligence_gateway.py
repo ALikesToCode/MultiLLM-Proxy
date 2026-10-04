@@ -7,6 +7,7 @@ from datetime import timezone
 from email.utils import format_datetime, parsedate_to_datetime
 
 from routes.auto_routes import AUTO_ROUTE_FALLBACK_STATUS_CODES, _is_fallback_response
+from services.credential_pool import is_key_rejection
 from services.intelligence_contract import GatewayError
 from services.intelligence_output import (
     Usage,
@@ -149,8 +150,10 @@ class ChatGateway:
             503,
         )
         stronger_than = None
+        self._key_refused = False
         try:
-            for candidate in self.candidates:
+            for candidate, token, spare_keys in self._attempts():
+                self._key_refused = False
                 remaining(self.deadline, self.cancelled)
                 if self.attempts >= self.request.max_attempts:
                     break
@@ -158,9 +161,6 @@ class ChatGateway:
                     stronger_than is not None
                     and candidate.get("quality_tier", 0) <= stronger_than
                 ):
-                    continue
-                token = self.transport.credential(candidate)
-                if not token:
                     continue
                 payload, reserved = self._attempt_payload(candidate)
                 self.selected = candidate
@@ -190,7 +190,9 @@ class ChatGateway:
                         final_status = head.status_code
                         self.unresolved = False
                         last_error = rejection(head)
-                        if self.request.explicit:
+                        # A refused key generated nothing, so the same model may run on the next key.
+                        self._key_refused = is_key_rejection(head.status_code)
+                        if self.request.explicit and not (self._key_refused and spare_keys):
                             break
                         if not self.escalations:
                             self.reason = "availability_fallback"
@@ -236,6 +238,15 @@ class ChatGateway:
             raise last_error
         finally:
             self.settle()
+
+    def _attempts(self):
+        """Each candidate with its first usable key; the next key only after a key refusal."""
+        for candidate in self.candidates:
+            tokens = self.transport.credentials(candidate)
+            for index, token in enumerate(tokens):
+                yield candidate, token, index + 1 < len(tokens)
+                if not self._key_refused:
+                    break
 
     def _attempt_payload(self, candidate):
         prompt = input_reservation(candidate, self.request)

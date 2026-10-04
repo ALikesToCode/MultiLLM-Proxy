@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from services.auth_service import AuthService
 from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, with_client_defaults
 from services.opencode_session import with_opencode_request_session
+from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from providers.cline_pass import cline_completion_payload
@@ -3389,7 +3390,7 @@ class ProxyService:
         
         try:
             if raw_passthrough:
-                return cls._make_base_request(
+                response = cls._make_base_request(
                     method=method,
                     url=url,
                     headers=headers,
@@ -3400,6 +3401,8 @@ class ProxyService:
                     timeout_override=timeout_override,
                     force_raw_passthrough=force_raw_passthrough,
                 )
+                CredentialPool.record_headers(api_provider, headers, response.status_code)
+                return response
 
             # Check if this is a streaming request
             request_data = decode_json_object_bytes(data)
