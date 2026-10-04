@@ -6,6 +6,9 @@ reports them. Success is an exponentially weighted moving average that decays ba
 healthy prior while a candidate receives no traffic, so a provider that failed once is
 tried again in its configured place after a few half-lives and is never starved. Nothing
 here blocks on storage: services.route_health_sync writes changed entries to D1 in batches.
+
+Streamed generations also record a candidate's speed: time to its first visible output and
+visible tokens per second after it. The intelligence gateway ranks its fast profile by them.
 """
 
 from __future__ import annotations
@@ -33,16 +36,22 @@ SUCCESS_ALPHA = 0.2
 CHECK_ALPHA = 0.1
 LATENCY_ALPHA = 0.3
 LATENCY_REFERENCE_MS = 10_000.0
+SPEED_ALPHA = 0.3
+# Speed evidence older than this no longer describes the provider; reviewed figures apply.
+SPEED_MAX_AGE_SECONDS = 3 * 86_400
 # Public status thresholds over the recent window.
 UP_SUCCESS_RATE = 0.95
 DEGRADED_SUCCESS_RATE = 0.5
 DOWN_CONSECUTIVE_FAILURES = 3
 
-_STATE_FIELDS = (
+_LEGACY_STATE_FIELDS = (
     "kind", "ewma_success", "ewma_at", "ewma_latency_ms", "latency_at", "last_status",
     "last_outcome", "consecutive_failures", "last_success_at", "last_failure_at",
     "last_check_at", "last_check_ok", "last_check_status", "samples", "updated_at",
 )
+_SPEED_FIELDS = ("ewma_ttft_ms", "ewma_tps", "speed_at")
+# Rows written before speed was recorded lack its fields and remain valid.
+_STATE_FIELDS = _LEGACY_STATE_FIELDS + _SPEED_FIELDS
 _OUTCOME_LENGTH = 32
 
 
@@ -128,7 +137,7 @@ def _new_entry(kind: str) -> dict[str, Any]:
         "latency_at": None, "last_status": None, "last_outcome": None, "consecutive_failures": 0,
         "last_success_at": None, "last_failure_at": None, "last_check_at": None,
         "last_check_ok": None, "last_check_status": None, "samples": [], "updated_at": 0.0,
-        "version": 0,
+        "ewma_ttft_ms": None, "ewma_tps": None, "speed_at": None, "version": 0,
     }
 
 
@@ -152,7 +161,7 @@ def _optional_status(value: Any) -> bool:
 
 def valid_state(state: Any) -> bool:
     """A stored row's state, checked before it may replace anything in memory."""
-    if not isinstance(state, dict) or set(state) != set(_STATE_FIELDS):
+    if not isinstance(state, dict) or set(state) not in (set(_STATE_FIELDS), set(_LEGACY_STATE_FIELDS)):
         return False
     samples = state["samples"]
     return (
@@ -161,6 +170,7 @@ def valid_state(state: Any) -> bool:
         and all(_optional_number(state[name]) for name in (
             "ewma_at", "ewma_latency_ms", "latency_at", "last_success_at",
             "last_failure_at", "last_check_at"))
+        and all(_optional_number(state.get(name)) for name in _SPEED_FIELDS)
         and _number(state["updated_at"])
         and _optional_status(state["last_status"])
         and _optional_status(state["last_check_status"])
@@ -250,6 +260,47 @@ class RouteHealth:
             for target, kind in ((candidate, "candidate"), (PROVIDER_PREFIX + provider_of(candidate), "provider")):
                 cls._record_sample(target, kind, ok=ok, latency_ms=latency_ms, status=status,
                                    outcome=outcome, now=current_time, half_life=half_life)
+
+    @classmethod
+    def record_speed(cls, candidate: str, *, ttft_ms: float | None = None,
+                     tokens_per_second: float | None = None, now: float | None = None) -> None:
+        """A streamed generation's time to first visible output and its visible output rate."""
+        current_time = time.time() if now is None else now
+        observed = {
+            "ewma_ttft_ms": ttft_ms if _number(ttft_ms, maximum=3_600_000) else None,
+            "ewma_tps": tokens_per_second if _number(tokens_per_second, maximum=1_000_000) else None,
+        }
+        if all(value is None for value in observed.values()):
+            return
+        with cls._lock:
+            entry = cls._entry(candidate, "candidate")
+            for field, value in observed.items():
+                if value is not None:
+                    previous = entry[field]
+                    entry[field] = value if previous is None else previous + SPEED_ALPHA * (value - previous)
+            entry["speed_at"] = current_time
+            cls._touch(candidate, entry, current_time)
+
+    @classmethod
+    def speed(cls, candidate: str, *, now: float | None = None) -> tuple[float | None, float | None]:
+        """Recent time to first output in milliseconds and tokens per second; None when unknown."""
+        current_time = time.time() if now is None else now
+        with cls._lock:
+            entry = cls._entries.get(candidate)
+            if entry is None or entry["speed_at"] is None or current_time - entry["speed_at"] > SPEED_MAX_AGE_SECONDS:
+                return None, None
+            return entry["ewma_ttft_ms"], entry["ewma_tps"]
+
+    @classmethod
+    def success(cls, candidate: str, *, now: float | None = None) -> float:
+        """The candidate's success average, pulled back toward healthy as its evidence ages."""
+        current_time = time.time() if now is None else now
+        with cls._lock:
+            entry = cls._entries.get(candidate)
+            if entry is None:
+                return PRIOR_SUCCESS
+            return _decayed(entry["ewma_success"], entry["ewma_at"], current_time,
+                            ordering_settings().half_life_seconds)
 
     @classmethod
     def record_check(cls, provider: str, *, ok: bool, status: int | None = None,
@@ -455,6 +506,9 @@ class RouteHealth:
             entry["ewma_success"], entry["ewma_at"] = state["ewma_success"], state["ewma_at"]
         if newer("latency_at"):
             entry["ewma_latency_ms"], entry["latency_at"] = state["ewma_latency_ms"], state["latency_at"]
+        if state.get("speed_at") is not None and (entry["speed_at"] is None or state["speed_at"] > entry["speed_at"]):
+            for field in _SPEED_FIELDS:
+                entry[field] = state[field]
         if newer("last_check_at"):
             entry["last_check_at"] = state["last_check_at"]
             entry["last_check_ok"], entry["last_check_status"] = state["last_check_ok"], state["last_check_status"]

@@ -248,3 +248,57 @@ class IntelligenceStreamTests(IntelligenceApiTestCase):
                 time.sleep(0.01)
             assert send.call_count == 1
         assert rows[0]["state"] == "unknown"
+
+    def test_a_streamed_reply_records_health_and_time_to_first_output(self):
+        from services.route_health import RouteHealth
+
+        self.seed()
+        stream = frames(
+            delta({"role": "assistant"}),
+            delta({"content": "hello"}),
+            delta({}, "stop"),
+            "[DONE]",
+        )
+        with self.requests(
+            return_value=upstream(
+                headers={"Content-Type": "text/event-stream"}, chunks=stream
+            )
+        ):
+            response = self.post(stream=True)
+            assert response.status_code == 200 and b"hello" in response.data
+        first_output, _ = RouteHealth.speed("openai:small")
+        assert first_output is not None and first_output >= 0
+        health = RouteHealth.snapshot("openai:small")
+        assert health["last_outcome"] == "ok" and health["consecutive_failures"] == 0
+
+    def test_a_refusal_counts_against_the_candidate_but_not_its_speed(self):
+        from services.route_health import RouteHealth
+
+        self.seed()
+        stream = frames(delta({"content": "ok"}), delta({}, "stop"), "[DONE]")
+        with self.requests(
+            side_effect=[
+                upstream(status=429, body={"error": "busy"}),
+                upstream(headers={"Content-Type": "text/event-stream"}, chunks=stream),
+            ]
+        ):
+            response = self.post(stream=True)
+            assert response.status_code == 200 and b"ok" in response.data
+        assert RouteHealth.snapshot("openai:small")["last_outcome"] == "http_429"
+        assert RouteHealth.speed("openai:small") == (None, None)
+        assert RouteHealth.snapshot("navyai:large")["last_outcome"] == "ok"
+
+
+def test_rate_counts_visible_tokens_after_the_first_output():
+    from services.intelligence_gateway import record_speed
+    from services.route_health import RouteHealth
+
+    RouteHealth.reset()
+    try:
+        usage = {"completion_tokens": 300, "completion_tokens_details": {"reasoning_tokens": 100}}
+        record_speed("openai:a", usage, started=10.0, first_output=12.0, finished=14.0)
+        assert RouteHealth.speed("openai:a") == (2000.0, 100.0)
+        record_speed("openai:b", {"completion_tokens": 3}, started=0.0, first_output=1.0, finished=1.1)
+        assert RouteHealth.speed("openai:b") == (1000.0, None), "too little output to rate"
+    finally:
+        RouteHealth.reset()

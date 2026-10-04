@@ -166,3 +166,27 @@ def test_a_row_changed_during_a_write_stays_dirty():
     succeed(A)
     RouteHealth.mark_stored(rows)
     assert A in RouteHealth._dirty
+
+
+def test_speed_is_an_average_of_streamed_generations_and_expires():
+    RouteHealth.record_speed(A, ttft_ms=1000, tokens_per_second=100, now=NOW)
+    RouteHealth.record_speed(A, ttft_ms=2000, tokens_per_second=None, now=NOW + 1)
+    first, rate = RouteHealth.speed(A, now=NOW + 2)
+    assert first == pytest.approx(1300) and rate == 100
+    assert RouteHealth.speed(B, now=NOW) == (None, None)
+    assert RouteHealth.speed(A, now=NOW + route_health.SPEED_MAX_AGE_SECONDS + 2) == (None, None)
+    assert RouteHealth.snapshot("provider:nanogpt") is None, "speed belongs to a candidate"
+
+
+def test_speed_rows_round_trip_and_legacy_rows_still_merge():
+    RouteHealth.record_speed(A, ttft_ms=900, tokens_per_second=140, now=NOW - 10)
+    rows = RouteHealth.dirty_rows(64)
+    assert all(valid_state(row["state"]) for row in rows)
+    legacy = {name: value for name, value in rows[0]["state"].items()
+              if name not in ("ewma_ttft_ms", "ewma_tps", "speed_at")}
+    assert valid_state(legacy)
+    assert not valid_state({**legacy, "speed_at": NOW}), "speed fields arrive together"
+    RouteHealth.reset()
+    assert RouteHealth.merge_rows([{**rows[0], "target": B, "state": legacy}, rows[0]]) == 2
+    assert RouteHealth.speed(A, now=NOW) == (900, 140)
+    assert RouteHealth.speed(B, now=NOW) == (None, None)

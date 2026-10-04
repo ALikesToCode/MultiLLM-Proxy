@@ -5,6 +5,7 @@ from unittest.mock import patch
 import requests
 
 from services.intelligence_store import IntelligenceStore
+from services.route_health import RouteHealth
 from tests.test_intelligence_policy import candidate, policy
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -65,6 +66,9 @@ class IntelligenceApiTestCase(UnifiedApiTestCase):
         os.environ["CONTROL_PLANE_DATABASE_URL"] = ""
         os.environ["INTELLIGENCE_REQUIRE_DURABLE_STORAGE"] = "false"
         os.environ.pop("INTELLIGENCE_POLICY_JSON", None)
+        # Attempts feed process-wide route health; no test may inherit another's.
+        RouteHealth.reset()
+        self.addCleanup(RouteHealth.reset)
         self.headers = {
             "Authorization": "Bearer admin-test-key",
             "X-Request-ID": "omni-request-1",

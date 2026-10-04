@@ -120,17 +120,28 @@ not reviewed availability or capability evidence):
   "max_output_tokens": 4096,
   "quality_tier": 1,
   "task_scores": {"coding": 80, "reasoning": 75},
-  "latency_ms": 1200
+  "latency_ms": 1200,
+  "tokens_per_second": 90
 }
 ```
 
 Review exact-model capabilities, context and output capacity, account entitlement
 and privacy permission before enabling a candidate. Use task evaluations for
-`task_scores` (0–100), an ordinal `quality_tier` (0–100) and measured latency for
-`latency_ms`. Omit unknown measurements. No capability or quality is inferred
-from model names or provider-wide flags. The balanced profile preserves operator
-candidate order; fast prioritizes measured latency; quality prioritizes reviewed
-task score and tier. A JSON/schema, tool-argument or required-tool validation
+`task_scores` (0–100), an ordinal `quality_tier` (0–100), the measured time to
+first visible output for `latency_ms` and the visible output rate for
+`tokens_per_second`. Omit unknown measurements. No capability or quality is
+inferred from model names or provider-wide flags.
+
+The balanced profile preserves operator candidate order. Quality prioritizes
+reviewed task score and tier. Fast prioritizes the shortest expected reply: time
+to first output plus 512 tokens (or the smaller output limit) at the output rate.
+Each streamed success records both figures for its candidate in route health, as
+moving averages persisted to D1. Measurements from the last three days take
+precedence over the reviewed figures; an unknown figure counts as 10 seconds or
+20 tokens per second. Fast also moves a candidate whose recent success average is
+below one half behind healthier ones. Within quality, speed only orders candidates
+of equal score and tier. Non-streamed replies record health but not speed. A
+JSON/schema, tool-argument or required-tool validation
 failure may escalate to a later candidate with a strictly higher reviewed tier.
 It never uses model self-confidence as evidence. No free-pool retry policy is
 applied to these requests.

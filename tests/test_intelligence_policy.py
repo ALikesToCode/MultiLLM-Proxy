@@ -263,3 +263,104 @@ def test_postgres_concurrent_allowance_and_restart_when_configured(store, monkey
     assert capture()["tables"]["intelligence_reservations"][0]["state"] == "unknown"
     with pytest.raises(GatewayError):
         store.reserve("another-principal", 41, limits)
+
+
+def ranked(profile, choices, **routing):
+    from services.route_health import RouteHealth
+
+    request = ChatRequest.parse(
+        {
+            "model": "auto:intelligence",
+            "messages": [{"role": "user", "content": "hi"}],
+            "routing": {"profile": profile, **routing},
+        },
+        policy(),
+    )
+    config = {
+        "API_BASE_URLS": {
+            provider: "https://example.invalid"
+            for provider in ("openai", "nanogpt", "opencode")
+        }
+    }
+    try:
+        return [
+            c["model"]
+            for c in select_candidates(policy(candidates=choices), request, config)
+        ]
+    finally:
+        RouteHealth.reset()
+
+
+def test_fast_profile_ranks_by_expected_reply_time_from_reviewed_figures(store):
+    choices = [
+        candidate("openai:thinker", quality_tier=3),
+        candidate("nanogpt:slow", latency_ms=8000, tokens_per_second=12),
+        candidate("opencode:quick", latency_ms=900, tokens_per_second=150),
+    ]
+    assert ranked("fast", choices) == ["opencode:quick", "nanogpt:slow", "openai:thinker"]
+    assert ranked("balanced", choices)[0] == "openai:thinker", "balanced keeps operator order"
+
+
+def test_fast_profile_prefers_measured_speed_over_reviewed_figures(store):
+    from services.route_health import RouteHealth
+
+    choices = [
+        candidate("nanogpt:slow", latency_ms=500, tokens_per_second=200),
+        candidate("opencode:quick", latency_ms=8000, tokens_per_second=12),
+    ]
+    RouteHealth.record_speed("nanogpt:slow", ttft_ms=20000, tokens_per_second=10)
+    RouteHealth.record_speed("opencode:quick", ttft_ms=700, tokens_per_second=160)
+    assert ranked("fast", choices) == ["opencode:quick", "nanogpt:slow"]
+
+
+def test_stale_speed_evidence_gives_way_to_reviewed_figures(store):
+    import time
+
+    from services.route_health import SPEED_MAX_AGE_SECONDS, RouteHealth
+
+    choices = [
+        candidate("nanogpt:a", latency_ms=500, tokens_per_second=200),
+        candidate("opencode:b", latency_ms=1000, tokens_per_second=100),
+    ]
+    RouteHealth.record_speed(
+        "nanogpt:a",
+        ttft_ms=60000,
+        tokens_per_second=5,
+        now=time.time() - SPEED_MAX_AGE_SECONDS - 60,
+    )
+    assert ranked("fast", choices) == ["nanogpt:a", "opencode:b"]
+
+
+def test_fast_profile_moves_a_failing_candidate_behind_healthy_ones(store):
+    from services.route_health import RouteHealth
+
+    choices = [
+        candidate("opencode:quick", latency_ms=500, tokens_per_second=200),
+        candidate("nanogpt:steady", latency_ms=3000, tokens_per_second=40),
+    ]
+    for _ in range(5):
+        RouteHealth.record("opencode:quick", ok=False, outcome="http_503", status=503)
+    assert ranked("fast", choices) == ["nanogpt:steady", "opencode:quick"]
+
+
+def test_speed_never_promotes_a_weaker_tier_for_quality(store):
+    from services.route_health import RouteHealth
+
+    choices = [
+        candidate("opencode:quick", quality_tier=1, latency_ms=500, tokens_per_second=200),
+        candidate("nanogpt:strong", quality_tier=3),
+        candidate("openai:strong", quality_tier=3),
+    ]
+    RouteHealth.record_speed("openai:strong", ttft_ms=2000, tokens_per_second=60)
+    assert ranked("quality", choices) == [
+        "openai:strong",
+        "nanogpt:strong",
+        "opencode:quick",
+    ], "speed orders equal tiers only"
+
+
+def test_tokens_per_second_is_a_reviewed_positive_integer():
+    assert policy(candidates=[candidate(tokens_per_second=150)])
+    for value in (0, 1.5, True, "150"):
+        with pytest.raises(ValueError):
+            policy(candidates=[candidate(tokens_per_second=value)])

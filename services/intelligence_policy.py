@@ -11,6 +11,7 @@ from services.intelligence_contract import (
     integer,
 )
 from services.model_registry import ModelRegistry
+from services.route_health import RouteHealth
 
 DEFAULT_POLICY = {
     "version": 1,
@@ -55,6 +56,14 @@ CHAT_PROVIDERS = frozenset(
     }
 )
 MEDIA_PROVIDERS = frozenset({"openai", "nanogpt", "navyai"})
+# The fast profile estimates how long a reply takes: time to first output, then this many
+# tokens (or the request's smaller output limit) at the candidate's output rate. A figure
+# with no measurement or reviewed value uses the pessimistic default beside it.
+FAST_REPLY_TOKENS = 512
+UNKNOWN_FIRST_OUTPUT_MS = 10_000
+UNKNOWN_TOKENS_PER_SECOND = 20
+# Below this recent success average a candidate yields to every healthier one.
+UNHEALTHY_SUCCESS = 0.5
 MODEL_FIELDS = frozenset(
     {
         "model",
@@ -68,6 +77,7 @@ MODEL_FIELDS = frozenset(
         "quality_tier",
         "task_scores",
         "latency_ms",
+        "tokens_per_second",
         "media_input_tokens",
     }
 )
@@ -88,8 +98,9 @@ def validate_model(raw):
         integer(result.get(key), key)
     integer(result.get("quality_tier", 0), "quality_tier", minimum=0, maximum=100)
     integer(result.get("media_input_tokens", 0), "media_input_tokens", minimum=0)
-    if "latency_ms" in result:
-        integer(result["latency_ms"], "latency_ms")
+    for key in ("latency_ms", "tokens_per_second"):
+        if key in result:
+            integer(result[key], key)
     scores = result.get("task_scores", {})
     if not isinstance(scores, dict) or set(scores) - TASKS:
         raise ValueError("Invalid reviewed task scores")
@@ -175,6 +186,19 @@ def input_reservation(candidate, request):
     return request.input_tokens
 
 
+def expected_reply_ms(candidate, request, now=None):
+    """Recent measured speed first, then reviewed figures; None when neither exists."""
+    first_ms, rate = RouteHealth.speed(candidate["model"], now=now)
+    first_ms = first_ms if first_ms is not None else candidate.get("latency_ms")
+    rate = rate if rate is not None else candidate.get("tokens_per_second")
+    if first_ms is None and rate is None:
+        return None
+    tokens = min(request.output_tokens, FAST_REPLY_TOKENS)
+    first_ms = UNKNOWN_FIRST_OUTPUT_MS if first_ms is None else first_ms
+    rate = UNKNOWN_TOKENS_PER_SECOND if rate is None else rate
+    return first_ms + tokens * 1000 / max(rate, 1)
+
+
 def select_candidates(policy, request, config):
     candidates = []
     for priority, candidate in enumerate(policy["candidates"]):
@@ -201,12 +225,15 @@ def select_candidates(policy, request, config):
     def rank(item):
         priority, candidate = item
         score = candidate.get("task_scores", {}).get(request.task, 0)
-        latency = candidate.get("latency_ms", 2**31 - 1)
+        expected = expected_reply_ms(candidate, request)
+        speed = (expected is None, expected or 0)
         if request.profile == "fast":
-            return (latency, -score, priority)
+            unhealthy = RouteHealth.success(candidate["model"]) < UNHEALTHY_SUCCESS
+            return (unhealthy, *speed, -score, priority)
         if request.profile == "quality":
-            return (-score, -candidate.get("quality_tier", 0), latency, priority)
-        return (priority, -score, latency)
+            # Speed only orders candidates of equal score and tier; it never promotes a weaker one.
+            return (-score, -candidate.get("quality_tier", 0), *speed, priority)
+        return (priority, -score, *speed)
 
     return [candidate for _, candidate in sorted(candidates, key=rank)]
 

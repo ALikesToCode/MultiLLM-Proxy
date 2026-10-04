@@ -8,9 +8,11 @@ import { logFailure } from "./log.mjs";
 
 const TARGET = /^(?:provider:[a-z0-9][a-z0-9._-]{0,63}|[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255})$/;
 const TIMESTAMP = /^[0-9T:.+\-Z]{10,40}$/;
-const STATE_FIELDS = ["kind", "ewma_success", "ewma_at", "ewma_latency_ms", "latency_at", "last_status",
+const LEGACY_STATE_FIELDS = ["kind", "ewma_success", "ewma_at", "ewma_latency_ms", "latency_at", "last_status",
   "last_outcome", "consecutive_failures", "last_success_at", "last_failure_at", "last_check_at", "last_check_ok",
   "last_check_status", "samples", "updated_at"];
+// Containers started before speed was recorded still write the legacy fields.
+const STATE_FIELDS = [...LEGACY_STATE_FIELDS, "ewma_ttft_ms", "ewma_tps", "speed_at"];
 const MAX_LIST_ROWS = 512;
 const MAX_PUT_ROWS = 64;
 const MAX_STATE_BYTES = 4096;
@@ -24,7 +26,8 @@ const fields = (body, names) => Object.keys(body).length === names.length && nam
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
 function validState(state) {
-  return isObject(state) && fields(state, STATE_FIELDS) && ["candidate", "provider"].includes(state.kind)
+  return isObject(state) && (fields(state, STATE_FIELDS) || fields(state, LEGACY_STATE_FIELDS))
+    && ["candidate", "provider"].includes(state.kind)
     && Array.isArray(state.samples) && state.samples.length <= 32
     && JSON.stringify(state).length <= MAX_STATE_BYTES;
 }

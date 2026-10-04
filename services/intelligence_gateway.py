@@ -6,7 +6,7 @@ import time
 from datetime import timezone
 from email.utils import format_datetime, parsedate_to_datetime
 
-from routes.auto_routes import _is_fallback_response
+from routes.auto_routes import AUTO_ROUTE_FALLBACK_STATUS_CODES, _is_fallback_response
 from services.intelligence_contract import GatewayError
 from services.intelligence_output import (
     Usage,
@@ -18,8 +18,12 @@ from services.intelligence_policy import input_reservation, select_candidates
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_stream import ChatStream
 from services.intelligence_transport import remaining
+from services.route_health import RouteHealth
 
 logger = logging.getLogger(__name__)
+# A rate needs this much visible output over this long to say anything about a provider.
+MIN_RATE_TOKENS = 16
+MIN_RATE_SECONDS = 0.25
 
 
 def rejection(head):
@@ -164,6 +168,7 @@ class ChatGateway:
                     self.reason = "quality_escalation"
                     stronger_than = None
                 started = time.monotonic()
+                answered = None
                 # Constructing an exchange performs exactly one submission. No
                 # provider retries or implicit classification calls occur inside it.
                 self.exchange = self.transport.start(
@@ -179,6 +184,7 @@ class ChatGateway:
                 final_status = 502
                 try:
                     head = self.exchange.head()
+                    answered = time.monotonic()
                     if _is_fallback_response(head) or refused_before_output(head):
                         final_status = head.status_code
                         self.unresolved = False
@@ -191,7 +197,7 @@ class ChatGateway:
                     if head.status_code != 200:
                         raise rejection(head)
                     try:
-                        yield from self._completion(candidate, reserved)
+                        yield from self._completion(candidate, reserved, started)
                     except ValueError:
                         last_error = GatewayError(
                             "output_validation_failed",
@@ -205,6 +211,8 @@ class ChatGateway:
                         ):
                             raise last_error from None
                         stronger_than = candidate.get("quality_tier", 0)
+                        # A failed output contract says nothing about availability.
+                        final_status = None
                         continue
                     final_status = 200
                     self.settle()
@@ -223,7 +231,7 @@ class ChatGateway:
                     raise
                 finally:
                     self.exchange.close()
-                    self._record(candidate, final_status, started)
+                    self._record(candidate, final_status, started, answered)
             raise last_error
         finally:
             self.settle()
@@ -267,7 +275,7 @@ class ChatGateway:
                 502,
             )
 
-    def _completion(self, candidate, reserved):
+    def _completion(self, candidate, reserved, started):
         model = candidate["model"]
         if not self.request.payload.get("stream"):
             payload = decode_completion(self.exchange.read())
@@ -281,8 +289,11 @@ class ChatGateway:
         parsed = ChatStream(self.exchange.chunks(), model)
         buffered = []
         gated = bool(self.request.required & {"tools", "json"})
+        first_output = None
         try:
             for event in parsed.events():
+                if first_output is None and visible(event):
+                    first_output = time.monotonic()
                 if gated:
                     buffered.append(event)
                 else:
@@ -293,17 +304,50 @@ class ChatGateway:
                 self.usage.add(parsed.usage)
             raise
         self._account(parsed.usage, reserved)
+        if first_output is not None:
+            record_speed(model, parsed.usage, started, first_output, time.monotonic())
         validate_completion(parsed.completion(), self.request)
         for event in buffered:
             self.emitted = True
             yield self.identify(event)
 
-    def _record(self, candidate, status, started):
+    def _record(self, candidate, status, started, answered):
+        model = candidate["model"]
+        if status == 200:
+            RouteHealth.record(model, ok=True, outcome="ok", status=200,
+                               latency_ms=((answered or time.monotonic()) - started) * 1000)
+        elif status is not None and (status in AUTO_ROUTE_FALLBACK_STATUS_CODES or 500 <= status < 600):
+            # 499 is the caller leaving and other 4xx are the request's fault: neither is the candidate's.
+            RouteHealth.record(model, ok=False, outcome=f"http_{status}", status=status)
         if self.metrics:
             self.metrics.get_instance().track_request(
                 provider=candidate["model"].split(":", 1)[0],
-                status_code=status,
+                status_code=502 if status is None else status,
                 response_time=(time.monotonic() - started) * 1000,
                 model=candidate["model"],
                 route_decision="intelligence",
             )
+
+
+def visible(event):
+    """Whether a stream event carries output the caller sees, not just a role or a finish."""
+    delta = event["choices"][0]["delta"]
+    return any(delta.get(key) for key in ("content", "refusal", "audio", "tool_calls"))
+
+
+def record_speed(model, usage, started, first_output, finished):
+    """Feed route health one streamed generation's time to first output and visible rate."""
+    tokens = None
+    if isinstance(usage, dict) and type(usage.get("completion_tokens")) is int:
+        details = usage.get("completion_tokens_details")
+        hidden = details.get("reasoning_tokens") if isinstance(details, dict) else None
+        tokens = usage["completion_tokens"] - (hidden if type(hidden) is int and hidden >= 0 else 0)
+    seconds = finished - first_output
+    rate = (
+        tokens / seconds
+        if tokens is not None and tokens >= MIN_RATE_TOKENS and seconds >= MIN_RATE_SECONDS
+        else None
+    )
+    RouteHealth.record_speed(
+        model, ttft_ms=(first_output - started) * 1000, tokens_per_second=rate
+    )

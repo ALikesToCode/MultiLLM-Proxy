@@ -79,6 +79,12 @@ test("route health rows persist, and an older row never replaces a newer one", a
   const rows = (await call({ operation: "list" })).body.rows;
   assert.equal(rows.length, 2);
   assert.equal(rows.find(row => row.target === "opencode:glm-5.2").state.last_status, 503);
+  const timed = { ...newer, state: state({ ewma_ttft_ms: 900, ewma_tps: 140, speed_at: 1 }),
+    updated_at: "2026-09-26T13:00:00.000+00:00" };
+  assert.deepEqual((await call({ operation: "put", rows: [timed] })).body, { version: 1, stored: 1 }, "speed fields are accepted");
+  assert.equal((await call({ operation: "list" })).body.rows.find(row => row.target === newer.target).state.ewma_tps, 140);
+  const { speed_at: _omitted, ...partial } = timed.state;
+  assert.equal((await call({ operation: "put", rows: [{ ...timed, state: partial }] })).status, 400, "speed fields arrive together");
 });
 
 test("route health writes are validated before any statement runs and errors stay private", async t => {
