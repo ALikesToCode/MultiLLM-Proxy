@@ -288,3 +288,22 @@ class CodexEverywhereInstructionTests(IntelligenceApiTestCase):
         sent = json.loads(send.call_args.kwargs["data"])
         assert sent["instructions"] == "You are Omni."
         assert sent["messages"] == [{"role": "user", "content": "test"}]
+
+
+def test_image_routes_keep_gguu_first_and_try_codex_everywhere_before_cloudflare_and_openai():
+    from services.auto_route_service import (
+        DEFAULT_AUTO_ROUTES,
+        LEGACY_DEFAULT_AUTO_ROUTES,
+    )
+
+    for route in ("auto:image", "auto:image-fast", "auto:gpt-image-2.5", "auto:image-edit"):
+        candidates = DEFAULT_AUTO_ROUTES[route]
+        providers = [candidate.split(":", 1)[0] for candidate in candidates]
+        first_ce = providers.index("ce-image")
+        assert providers[0] == "gguu", route
+        assert set(providers[:first_ce]) <= {"gguu", "gguu-grok"}, route
+        assert all(p not in {"cloudflare", "openai"} for p in providers[:first_ce + 1]), route
+        previous = LEGACY_DEFAULT_AUTO_ROUTES[route][-1]
+        assert [c for c in candidates if not c.startswith("ce-image:")] == list(previous), (
+            "a stored copy of the previous default follows the new one"
+        )

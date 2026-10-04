@@ -17,6 +17,8 @@ MAX_AUTO_ROUTE_CANDIDATES = 16
 # Sunburst and Flare lead, then GPT Image 2 and Grok Imagine Image 2.0. GGUU serves
 # them first at a flat ¥0.04 per image (1K to 4K); OpenAI charges about $0.21 at max.
 # GGUU keys belong to one group, so Grok Imagine uses the separate gguu-grok relay.
+# Codex Everywhere's image pool (ce-image, $0.015 per image) follows GGUU; the user keeps
+# GGUU first because it is the cheapest.
 # Cloudflare AI (AI Gateway billing, zero data retention), xAI, Together and AIHubMix
 # follow, and a Workers AI model is the last resort. Operations edits persist in D1
 # when the Worker provides it; on Container-local SQLite until the Container restarts.
@@ -31,6 +33,9 @@ DEFAULT_AUTO_ROUTES = {
         "gguu:gpt-image-2.5-flare",
         "gguu:gpt-image-2",
         "gguu-grok:grok-imagine-image-2.0",
+        "ce-image:gpt-image-2.5-sunburst",
+        "ce-image:gpt-image-2.5-flare",
+        "ce-image:gpt-image-2",
         "cloudflare:openai/gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-sunburst",
         "xai:grok-imagine-image-2.0",
@@ -42,6 +47,8 @@ DEFAULT_AUTO_ROUTES = {
         "gguu:gpt-image-2.5-flare",
         "gguu:gpt-image-2",
         "gguu-grok:grok-imagine-image-2.0",
+        "ce-image:gpt-image-2.5-flare",
+        "ce-image:gpt-image-2",
         "cloudflare:openai/gpt-image-2.5-flare",
         "openai:gpt-image-2.5-flare",
         "xai:grok-imagine-image-2.0",
@@ -51,6 +58,8 @@ DEFAULT_AUTO_ROUTES = {
         "gguu:gpt-image-2.5-sunburst",
         "gguu:gpt-image-2.5",
         "gguu:gpt-image-2.5-flare",
+        "ce-image:gpt-image-2.5-sunburst",
+        "ce-image:gpt-image-2.5-flare",
         "cloudflare:openai/gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-flare",
@@ -60,6 +69,8 @@ DEFAULT_AUTO_ROUTES = {
     "auto:image-edit": (
         "gguu:gpt-image-2.5-sunburst",
         "gguu:gpt-image-2",
+        "ce-image:gpt-image-2.5-sunburst",
+        "ce-image:gpt-image-2",
         "cloudflare:openai/gpt-image-2.5-sunburst",
         "openai:gpt-image-2.5-sunburst",
         "xai:grok-imagine-image-2.0",
@@ -110,7 +121,19 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "navyai:glm-5.2",
         ),
     ),
-    "auto:gpt-image-2.5": (("gguu:gpt-image-2.5",),),
+    "auto:gpt-image-2.5": (
+        (
+            "gguu:gpt-image-2.5",
+        ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5",
+            "gguu:gpt-image-2.5-flare",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-flare",
+        ),
+    ),
     "auto:image": (
         (
             "gguu:gpt-image-2.5-sunburst",
@@ -124,11 +147,32 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "aihubmix:gpt-image-2-free",
             "cloudflare:@cf/leonardo/lucid-origin",
         ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "xai:grok-imagine-image-2.0",
+            "together:openai/gpt-image-2",
+            "aihubmix:gpt-image-2-free",
+            "cloudflare:@cf/leonardo/lucid-origin",
+        ),
     ),
     "auto:image-fast": (
         (
             "gguu:gpt-image-2.5-flare",
             "gguu:gpt-image-2",
+            "cloudflare:openai/gpt-image-2.5-flare",
+            "openai:gpt-image-2.5-flare",
+            "xai:grok-imagine-image-2.0",
+            "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+        ),
+        (
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
             "cloudflare:openai/gpt-image-2.5-flare",
             "openai:gpt-image-2.5-flare",
             "xai:grok-imagine-image-2.0",
@@ -149,7 +193,18 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "cloudflare:@cf/openai/whisper-large-v3-turbo",
         ),
     ),
+    "auto:image-edit": (
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "xai:grok-imagine-image-2.0",
+            "aihubmix:gpt-image-2-free",
+        ),
+    ),
 }
+
 # Providers served by the Worker rather than a credentialed OpenAI-compatible adapter.
 MEDIA_ONLY_PROVIDERS = frozenset({"cloudflare"})
 _ROUTE_ID_PATTERN = re.compile(r"^auto:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
