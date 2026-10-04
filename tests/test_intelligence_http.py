@@ -351,6 +351,37 @@ class GeminiIntelligenceTests(IntelligenceApiTestCase):
         assert navy["messages"][1]["tool_calls"] == [CALL]
         assert messages[1]["tool_calls"] == [SIGNED_CALL], "the caller's request is not mutated"
 
+    def test_gemini_thinking_tokens_settle_the_reservation(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.intelligence_fixtures import frames
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-3.8-flash")]))
+        thinking = {"prompt_tokens": 147, "completion_tokens": 204, "total_tokens": 631}
+        body = completion("trend is down")
+        body["usage"] = dict(thinking)
+        streamed = frames(
+            {"choices": [{"index": 0, "delta": {"content": "trend is down"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": thinking},
+            "[DONE]",
+        )
+        with self.requests(
+            side_effect=[
+                upstream(body),
+                upstream(headers={"Content-Type": "text/event-stream"}, chunks=streamed),
+            ]
+        ):
+            plain = self.post(reasoning_effort="high")
+            stream = self.post(reasoning_effort="high", stream=True)
+        assert plain.status_code == 200 and stream.status_code == 200
+        assert plain.json["usage"] == {
+            "prompt_tokens": 147, "completion_tokens": 484, "total_tokens": 631
+        }, "thinking tokens count as completion tokens"
+        assert plain.json["multillm"]["usage_complete"] is True
+        assert b'"total_tokens": 631' in stream.data or b'"total_tokens":631' in stream.data
+        rows = capture()["tables"]["intelligence_reservations"]
+        assert [(row["state"], row["charged"]) for row in rows] == [("settled", 631)] * 2
+
     def test_gemini_gets_a_skip_signature_for_another_providers_tool_calls(self):
         from services.intelligence_store import IntelligenceStore
         from services.intelligence_transport import SKIP_THOUGHT_SIGNATURE

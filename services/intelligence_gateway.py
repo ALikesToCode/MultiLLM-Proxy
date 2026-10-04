@@ -13,6 +13,7 @@ from services.intelligence_output import (
     decode_completion,
     validate_completion,
     visible_completion,
+    with_thinking_tokens,
 )
 from services.intelligence_policy import input_reservation, select_candidates
 from services.intelligence_store import IntelligenceStore
@@ -277,9 +278,11 @@ class ChatGateway:
 
     def _completion(self, candidate, reserved, started):
         model = candidate["model"]
+        gemini = model.split(":", 1)[0] == "gemini"
         if not self.request.payload.get("stream"):
             payload = decode_completion(self.exchange.read())
-            self._account(payload.get("usage"), reserved)
+            usage = payload.get("usage")
+            self._account(with_thinking_tokens(usage) if gemini else usage, reserved)
             completion = visible_completion(payload, model)
             validate_completion(completion, self.request)
             self.settle()
@@ -303,9 +306,10 @@ class ChatGateway:
             if parsed.usage is not None:
                 self.usage.add(parsed.usage)
             raise
-        self._account(parsed.usage, reserved)
+        usage = with_thinking_tokens(parsed.usage) if gemini else parsed.usage
+        self._account(usage, reserved)
         if first_output is not None:
-            record_speed(model, parsed.usage, started, first_output, time.monotonic())
+            record_speed(model, usage, started, first_output, time.monotonic())
         validate_completion(parsed.completion(), self.request)
         for event in buffered:
             self.emitted = True

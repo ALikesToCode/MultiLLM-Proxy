@@ -37,6 +37,34 @@ class Usage:
         return self.values.get("total_tokens", 0)
 
 
+def with_thinking_tokens(usage):
+    """Count Gemini's thinking tokens as completion tokens, as OpenAI's usage does.
+
+    Gemini's Chat Completions endpoint leaves thinking tokens out of completion_tokens
+    and counts them only in total_tokens (observed 2026-10-04: 147 + 204 = 351 against a
+    total of 631). Such usage fails the prompt + completion = total check, so the attempt
+    stayed unresolved and kept its whole reservation. The difference is moved into
+    completion_tokens and reported as reasoning_tokens; a total that falls short of the
+    parts is left alone and stays inconsistent.
+    """
+    if not isinstance(usage, dict) or not all(
+        type(usage.get(key)) is int and usage[key] >= 0 for key in USAGE_FIELDS
+    ):
+        return usage
+    hidden = usage["total_tokens"] - usage["prompt_tokens"] - usage["completion_tokens"]
+    if hidden <= 0:
+        return usage
+    details = usage.get("completion_tokens_details")
+    details = dict(details) if isinstance(details, dict) else {}
+    reasoning = details.get("reasoning_tokens")
+    details["reasoning_tokens"] = hidden + (reasoning if type(reasoning) is int and reasoning > 0 else 0)
+    return {
+        **usage,
+        "completion_tokens": usage["completion_tokens"] + hidden,
+        "completion_tokens_details": details,
+    }
+
+
 # Gemini 3 signs each function call and refuses the next request unless the caller
 # returns the signature with it. Nothing else in a call's extra_content is kept.
 MAX_THOUGHT_SIGNATURE_CHARS = 32768
