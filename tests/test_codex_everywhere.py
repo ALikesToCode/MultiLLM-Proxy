@@ -244,7 +244,10 @@ class CodexEverywhereKeyFallbackTests(IntelligenceApiTestCase):
 
 
 def test_gpt_models_get_instructions_so_codexs_coding_prompt_is_not_added():
-    from providers.codex_everywhere import DEFAULT_CODEX_INSTRUCTIONS, with_codex_instructions
+    from providers.codex_everywhere import (
+        DEFAULT_CODEX_INSTRUCTIONS,
+        with_codex_instructions,
+    )
 
     user = {"role": "user", "content": "hi"}
     payload = {
