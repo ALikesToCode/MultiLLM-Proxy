@@ -350,3 +350,30 @@ class GeminiIntelligenceTests(IntelligenceApiTestCase):
         assert gemini["messages"][1]["tool_calls"] == [SIGNED_CALL]
         assert navy["messages"][1]["tool_calls"] == [CALL]
         assert messages[1]["tool_calls"] == [SIGNED_CALL], "the caller's request is not mutated"
+
+    def test_gemini_gets_a_skip_signature_for_another_providers_tool_calls(self):
+        from services.intelligence_store import IntelligenceStore
+        from services.intelligence_transport import SKIP_THOUGHT_SIGNATURE
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-3.8-flash")]))
+        second = {**CALL, "id": "call-2"}
+        messages = [
+            {"role": "user", "content": "test"},
+            {"role": "assistant", "tool_calls": [CALL, second]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+            {"role": "tool", "tool_call_id": "call-2", "content": "result"},
+            {"role": "assistant", "tool_calls": [SIGNED_CALL]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+        ]
+        with self.requests(return_value=upstream(completion("done"))) as send:
+            response = self.post(messages=messages, tools=[TOOL], reasoning_effort="minimal")
+        assert response.status_code == 200
+        data = json.loads(send.call_args.kwargs["data"])
+        skip = {"google": {"thought_signature": SKIP_THOUGHT_SIGNATURE}}
+        assert data["messages"][1]["tool_calls"] == [{**CALL, "extra_content": skip}, second], (
+            "only the first call of an unsigned step is signed, as Gemini itself does"
+        )
+        assert data["messages"][4]["tool_calls"] == [SIGNED_CALL], "Gemini's own signature stays"
+        assert data["reasoning_effort"] == "low", "3.8 Flash has no minimal level"
+        assert messages[1]["tool_calls"] == [CALL, second], "the caller's request is not mutated"

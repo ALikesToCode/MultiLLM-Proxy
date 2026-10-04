@@ -177,5 +177,29 @@ def test_gemini_effort_fits_its_four_thinking_levels():
     }
 
 
+def test_gemini_models_without_minimal_think_at_low():
+    from services.reasoning_policy import (
+        apply_gemini_reasoning_policy,
+        gemini_rejects_minimal,
+    )
+
+    for model in ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.9-flash", "gemini-3.1-pro-preview",
+                  "models/gemini-3.8-flash"):
+        assert gemini_rejects_minimal(model), model
+    for model in ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+                  "gemini-3.8-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash", "", None):
+        assert not gemini_rejects_minimal(model), model
+    for requested in ("none", "minimal"):
+        assert apply_gemini_reasoning_policy(
+            {"reasoning_effort": requested}, "gemini", "gemini-3.8-flash"
+        ) == {"reasoning_effort": "low"}
+        assert apply_gemini_reasoning_policy(
+            {"reasoning_effort": requested}, "gemini", "gemini-3.5-flash-lite"
+        ) == {"reasoning_effort": "minimal"}
+    assert apply_gemini_reasoning_policy(
+        {"reasoning_effort": "max"}, "gemini", "gemini-3.8-flash"
+    ) == {"reasoning_effort": "high"}
+
+
 if __name__ == "__main__":
     unittest.main()

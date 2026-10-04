@@ -539,8 +539,8 @@ PROVIDER_DETAILS = {
         'description': 'Google Gemini models via Generative Language API',
         'endpoints': [
             {
-                'url': '/models/gemini-3.6-flash:generateContent',
-                'curl': 'curl -X POST "http://localhost:1400/gemini/models/gemini-3.6-flash:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
+                'url': '/models/gemini-3.8-flash:generateContent',
+                'curl': 'curl -X POST "http://localhost:1400/gemini/models/gemini-3.8-flash:generateContent" -H "Content-Type: application/json" -d "{\\"contents\\": [{\\"parts\\":[{\\"text\\": \\"Explain how AI works\\"}]}], \\"safetySettings\\": [{\\"category\\": \\"HARM_CATEGORY_HARASSMENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_HATE_SPEECH\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_SEXUALLY_EXPLICIT\\", \\"threshold\\": \\"BLOCK_NONE\\"}, {\\"category\\": \\"HARM_CATEGORY_DANGEROUS_CONTENT\\", \\"threshold\\": \\"BLOCK_NONE\\"}]}"'
             },
             {
                 'url': '/models/gemini-3.5-flash-lite:generateContent',
@@ -553,7 +553,7 @@ PROVIDER_DETAILS = {
             'json_mode': True,
             'web_search': True  # Gemini has web search capability
         },
-        'default_model': 'gemini-3.6-flash'
+        'default_model': 'gemini-3.8-flash'
     },
     'gemma': {
         'description': 'Google Gemma open-source models via Generative Language API',

@@ -181,7 +181,7 @@ class GeminiProviderRequestTest(unittest.TestCase):
             base_request.call_args.kwargs["url"],
             (
                 "https://generativelanguage.googleapis.com/v1beta/"
-                "models/gemini-3.6-flash:generateContent"
+                "models/gemini-3.8-flash:generateContent"
             ),
         )
 

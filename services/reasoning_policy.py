@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -156,11 +157,33 @@ GEMINI_EFFORTS = {
 }
 
 
-def apply_gemini_reasoning_policy(payload: Mapping[str, Any], provider: str) -> dict[str, Any]:
+_GEMINI_VERSIONED = re.compile(r"^gemini-(\d+)\.(\d+)-(flash|pro)(-lite)?\b")
+
+
+def gemini_rejects_minimal(model: str) -> bool:
+    """Gemini 3.7 Flash and later Flash models, and every Pro, refuse `minimal` with a 400.
+
+    Google's thinking-level table (ai.google.dev/gemini-api/docs/thinking) lists `minimal` as
+    unsupported for 3.8 and 3.7 Flash and for 3.1 Pro; 3.6 and 3.5 Flash and the Flash-Lite
+    models accept it. Later Flash versions are assumed to keep the 3.7 behavior.
+    """
+    if not isinstance(model, str):
+        return False
+    match = _GEMINI_VERSIONED.match(model.strip().lower().rsplit("/", 1)[-1])
+    if match is None or match.group(4):
+        return False
+    major, minor, family = int(match.group(1)), int(match.group(2)), match.group(3)
+    return family == "pro" or (major, minor) >= (3, 7)
+
+
+def apply_gemini_reasoning_policy(
+    payload: Mapping[str, Any], provider: str, model: str = ""
+) -> dict[str, Any]:
     """Fit an explicit effort to the levels Gemini's Chat Completions endpoint accepts.
 
     Gemini thinks at minimal, low, medium or high; it has no `none`, `xhigh` or `max`,
-    so those become the nearest level it has. An omitted effort keeps the model's default.
+    so those become the nearest level it has. Models without `minimal` think at `low`
+    instead. An omitted effort keeps the model's default.
     """
     normalized = dict(payload)
     if provider != "gemini":
@@ -168,8 +191,11 @@ def apply_gemini_reasoning_policy(payload: Mapping[str, Any], provider: str) -> 
     specified, requested = _requested_effort(normalized)
     if not specified or requested is None:
         return normalized
+    effort = GEMINI_EFFORTS[requested]
+    if effort == "minimal" and gemini_rejects_minimal(model):
+        effort = "low"
     normalized.pop("reasoning", None)
-    normalized["reasoning_effort"] = GEMINI_EFFORTS[requested]
+    normalized["reasoning_effort"] = effort
     return normalized
 
 

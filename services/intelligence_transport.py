@@ -201,6 +201,54 @@ def without_thought_signatures(body):
     return {**body, "messages": cleaned}
 
 
+# Google's documented stand-in for a function call Gemini did not write itself, such as one
+# from an earlier fallback model (ai.google.dev/gemini-api/docs/thought-signatures). Gemini 3
+# refuses a turn whose first call in a step has no signature; this value skips the check.
+SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator"
+
+
+def _signed(call):
+    extra = call.get("extra_content") if isinstance(call, dict) else None
+    google = extra.get("google") if isinstance(extra, dict) else None
+    return isinstance(google, dict) and bool(google.get("thought_signature"))
+
+
+def with_thought_signatures(body):
+    """Give Gemini a signature on each tool-call step another provider made.
+
+    Gemini's own calls keep their signatures; a step with none gets the skip value on its
+    first call, which is the only call Gemini itself would have signed.
+    """
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return body
+    unsigned = [
+        index
+        for index, message in enumerate(messages)
+        if isinstance(message, dict)
+        and isinstance(message.get("tool_calls"), list)
+        and message["tool_calls"]
+        and isinstance(message["tool_calls"][0], dict)
+        and not any(_signed(call) for call in message["tool_calls"])
+    ]
+    if not unsigned:
+        return body
+    cleaned = list(messages)
+    for index in unsigned:
+        first, *rest = cleaned[index]["tool_calls"]
+        extra = first.get("extra_content") if isinstance(first.get("extra_content"), dict) else {}
+        google = extra.get("google") if isinstance(extra.get("google"), dict) else {}
+        signed = {
+            **first,
+            "extra_content": {
+                **extra,
+                "google": {**google, "thought_signature": SKIP_THOUGHT_SIGNATURE},
+            },
+        }
+        cleaned[index] = {**cleaned[index], "tool_calls": [signed, *rest]}
+    return {**body, "messages": cleaned}
+
+
 class IntelligenceTransport:
     def __init__(self, config, auth, proxy):
         self.config, self.auth, self.proxy = config, auth, proxy
@@ -259,8 +307,10 @@ class IntelligenceTransport:
         if path is None:
             body = apply_glm_5_reasoning_policy(body, provider, model)
             body = apply_mimo_reasoning_policy(body, model)
-            body = apply_gemini_reasoning_policy(body, provider)
-            if provider != "gemini":
+            body = apply_gemini_reasoning_policy(body, provider, model)
+            if provider == "gemini":
+                body = with_thought_signatures(body)
+            else:
                 body = without_thought_signatures(body)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)

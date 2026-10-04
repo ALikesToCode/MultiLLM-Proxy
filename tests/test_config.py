@@ -85,7 +85,9 @@ class ConfigRuntimeEnvTest(unittest.TestCase):
     def test_gemini_static_model_list_prefers_current_public_models(self):
         from config import Config
 
-        self.assertEqual(Config.GEMINI_MODELS[0], "gemini-3.6-flash")
+        self.assertEqual(Config.GEMINI_MODELS[0], "gemini-3.8-flash")
+        self.assertIn("gemini-3.7-flash", Config.GEMINI_MODELS)
+        self.assertIn("gemini-3.6-flash", Config.GEMINI_MODELS)
         self.assertIn("gemini-3.5-flash", Config.GEMINI_MODELS)
         self.assertIn("gemini-3.5-flash-lite", Config.GEMINI_MODELS)
         self.assertIn("gemini-3.1-pro-preview", Config.GEMINI_MODELS)
