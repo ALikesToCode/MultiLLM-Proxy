@@ -117,3 +117,57 @@ def is_valid_codex_everywhere_path(provider: str, path: str) -> bool:
 def codex_everywhere_model_endpoint(model_id: str) -> str | None:
     """Claude pools speak only Anthropic Messages, so unified Chat is translated to it."""
     return "v1/messages"
+
+
+# CE serves its GPT models through Codex, which prepends its own coding-agent system prompt
+# (about 4,400 tokens) unless the request sets `instructions`
+# (docs.codex-everywhere.com/models/openai). Observed 2026-10-04 on Chat Completions: with
+# only a system message the model introduced itself as Codex, a software engineer; with
+# `instructions` the prompt was 44 tokens and the system prompt was followed. Grok pools
+# follow system messages and need nothing.
+CODEX_INSTRUCTION_PROVIDERS = frozenset({"codex-easy", "ce-gpt-plus", "ce-gpt-pro"})
+DEFAULT_CODEX_INSTRUCTIONS = "You are a helpful assistant."
+
+
+def _message_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and all(
+        isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+        for part in content
+    ):
+        return "\n".join(part["text"] for part in content)
+    return None
+
+
+def with_codex_instructions(payload: dict, provider: str, model: str) -> dict:
+    """Give a Chat Completions request to a CE GPT model its own `instructions`.
+
+    Leading system and developer messages become the instructions and leave the message
+    list; later ones stay where they are. A request with none gets a neutral instruction,
+    so Codex's coding prompt is never added. A caller's own `instructions` is kept.
+    """
+    name = str(model or "").strip().lower()
+    if (
+        provider not in CODEX_INSTRUCTION_PROVIDERS
+        or not name.startswith(("gpt-", "codex-"))
+        or name.startswith("gpt-image")
+        or "instructions" in payload
+    ):
+        return payload
+    messages = payload.get("messages")
+    messages = list(messages) if isinstance(messages, list) else []
+    lifted = []
+    while (
+        messages
+        and isinstance(messages[0], dict)
+        and messages[0].get("role") in {"system", "developer"}
+        and (text := _message_text(messages[0].get("content"))) is not None
+    ):
+        lifted.append(text)
+        messages.pop(0)
+    instructions = "\n\n".join(text for text in lifted if text.strip()) or DEFAULT_CODEX_INSTRUCTIONS
+    result = {**payload, "instructions": instructions}
+    if "messages" in payload:
+        result["messages"] = messages
+    return result

@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from providers.base import CanonicalRequest
+from providers.codex_everywhere import with_codex_instructions
 from providers.nanogpt import nanogpt_model_has_speed_suffix
 from providers.opencode_go import build_opencode_model_url
 from providers.registry import get_adapter
@@ -322,6 +323,7 @@ class IntelligenceTransport:
                 body = with_thought_signatures(body)
             else:
                 body = without_thought_signatures(body)
+            body = with_codex_instructions(body, provider, model)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )

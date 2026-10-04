@@ -241,3 +241,47 @@ class CodexEverywhereKeyFallbackTests(IntelligenceApiTestCase):
             response = self.post()
         assert response.json["multillm"]["selected_model"] == "navyai:large"
         assert response.json["multillm"]["attempts"] == 1
+
+
+def test_gpt_models_get_instructions_so_codexs_coding_prompt_is_not_added():
+    from providers.codex_everywhere import DEFAULT_CODEX_INSTRUCTIONS, with_codex_instructions
+
+    user = {"role": "user", "content": "hi"}
+    payload = {
+        "model": "gpt-6.1-sol",
+        "messages": [
+            {"role": "system", "content": "You are Omni."},
+            {"role": "developer", "content": [{"type": "text", "text": "Be brief."}]},
+            user,
+            {"role": "system", "content": "Later note."},
+        ],
+    }
+    lifted = with_codex_instructions(payload, "ce-gpt-pro", "gpt-6.1-sol")
+    assert lifted["instructions"] == "You are Omni.\n\nBe brief."
+    assert lifted["messages"] == [user, {"role": "system", "content": "Later note."}]
+    assert payload["messages"][0]["role"] == "system", "the caller's payload is not mutated"
+    bare = with_codex_instructions({"messages": [user]}, "codex-easy", "codex-auto-review")
+    assert bare == {"messages": [user], "instructions": DEFAULT_CODEX_INSTRUCTIONS}
+    own = {"messages": [user], "instructions": "mine"}
+    assert with_codex_instructions(own, "ce-gpt-plus", "gpt-6-luna") is own
+    for provider, model in (("ce-grok-heavy", "grok-4.7"), ("openai", "gpt-6.1-sol"), ("ce-gpt-pro", "gpt-image-2")):
+        assert with_codex_instructions(payload, provider, model) is payload, (provider, model)
+
+
+class CodexEverywhereInstructionTests(IntelligenceApiTestCase):
+    def test_the_chain_sends_system_messages_to_a_gpt_pool_as_instructions(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(policy(candidates=[candidate("ce-gpt-pro:gpt-6.1-sol")]))
+        with self.requests(return_value=upstream(completion("done"))) as send:
+            response = self.post(
+                messages=[
+                    {"role": "system", "content": "You are Omni."},
+                    {"role": "user", "content": "test"},
+                ]
+            )
+        assert response.status_code == 200
+        sent = json.loads(send.call_args.kwargs["data"])
+        assert sent["instructions"] == "You are Omni."
+        assert sent["messages"] == [{"role": "user", "content": "test"}]

@@ -7,6 +7,7 @@ from flask import Response, jsonify, request
 
 from error_handlers import APIError
 from providers.aihubmix import build_aihubmix_image_request
+from providers.codex_everywhere import with_codex_instructions
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.nanogpt import (
     apply_nanogpt_speed_routing,
@@ -450,7 +451,9 @@ def _dispatch_unified_chat_candidate(
                 metrics_model=metrics_model,
                 route_decision=route_decision,
             )
-        candidate_payload = _copy_request_payload(payload, provider_model)
+        candidate_payload = with_codex_instructions(
+            _copy_request_payload(payload, provider_model), provider, provider_model
+        )
         subscription_only = provider == "nanogpt" and nanogpt_subscription_only(
             app.config
         )
