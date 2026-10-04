@@ -3,7 +3,7 @@
 import json
 
 from services.intelligence_contract import GatewayError
-from services.intelligence_output import safe_message
+from services.intelligence_output import safe_message, thought_extra
 from streaming.sse import iter_sse_events
 
 
@@ -140,6 +140,9 @@ class ChatStream:
                             raise ValueError("Invalid function delta")
                         call["function"][name] += function[name]
                         clean["function"][name] = function[name]
+                extra = thought_extra(fragment.get("extra_content"))
+                if extra:
+                    call["extra_content"] = clean["extra_content"] = extra
                 delta["tool_calls"].append(clean)
         return delta
 

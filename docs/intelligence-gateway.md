@@ -11,8 +11,10 @@ The gateway is disabled until an operator supplies reviewed eligibility and
 allowance settings. Source and synthetic HTTP tests do not establish deployed
 provider availability. `/v1/models` advertises the alias, its reviewed capabilities
 (tags in `capability_tags`, flags in `capabilities`), and `availability: "unverified"`;
-it never reports credential presence as a live probe. Native Gemini/Gemma/Vertex conversion paths are not eligible in version one
-because their internal attempts do not yet share this accounting contract.
+it never reports credential presence as a live probe. Gemini candidates use Gemini's
+OpenAI-compatible Chat Completions endpoint. Native Gemma/Vertex conversion paths are not
+eligible in version one because their internal attempts do not yet share this accounting
+contract.
 
 ## Chat contract
 
@@ -44,6 +46,12 @@ advisory: no Jev or judge request is made here. Omni owns intent classification,
 conversation state, tools, approvals, execution and its run budget.
 
 Messages, function tools, assistant tool calls and tool results are preserved.
+Gemini 3 signs each tool call it makes in `extra_content.google.thought_signature` and
+refuses the follow-up unless that signature comes back with the call. Responses keep that
+one field (other `extra_content` is dropped), and callers must echo it on the replayed
+assistant tool call. It is removed from replayed calls sent to any other provider. Gemini
+thinks at `minimal`, `low`, `medium` or `high`, so `none` becomes `minimal` and `xhigh`
+or `max` becomes `high`.
 Actual payload requirements supplement hints. `response_format`, explicit
 `reasoning_effort`, output limits and streaming retain their meanings. Limits
 are clamped to server ceilings; the gateway may further reduce the output limit

@@ -32,6 +32,7 @@ DEFAULT_POLICY = {
 }
 # These adapters expose Chat Completions directly. Native conversion handlers
 # with internal retries cannot yet provide the single-attempt accounting contract.
+# Gemini qualifies through its OpenAI-compatible endpoint (see intelligence_transport).
 CHAT_PROVIDERS = frozenset(
     {
         "openai",
@@ -41,6 +42,7 @@ CHAT_PROVIDERS = frozenset(
         "codex-easy",
         "kimi-code",
         "cline-pass",
+        "gemini",
         "groq",
         "opencode",
         "mimo",

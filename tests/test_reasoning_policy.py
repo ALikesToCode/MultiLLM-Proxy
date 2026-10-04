@@ -159,5 +159,23 @@ class ReasoningPolicyTest(unittest.TestCase):
         )
 
 
+
+def test_gemini_effort_fits_its_four_thinking_levels():
+    from services.reasoning_policy import apply_gemini_reasoning_policy
+
+    for requested, expected in {"none": "minimal", "minimal": "minimal", "low": "low",
+                                "medium": "medium", "xhigh": "high", "max": "high"}.items():
+        assert apply_gemini_reasoning_policy({"reasoning_effort": requested}, "gemini") == {
+            "reasoning_effort": expected
+        }
+    assert apply_gemini_reasoning_policy({"reasoning": {"effort": "max"}}, "gemini") == {
+        "reasoning_effort": "high"
+    }
+    assert apply_gemini_reasoning_policy({}, "gemini") == {}, "the model default stays"
+    assert apply_gemini_reasoning_policy({"reasoning_effort": "max"}, "nanogpt") == {
+        "reasoning_effort": "max"
+    }
+
+
 if __name__ == "__main__":
     unittest.main()

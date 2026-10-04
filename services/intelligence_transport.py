@@ -14,6 +14,7 @@ from providers.registry import get_adapter
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
+    apply_gemini_reasoning_policy,
     apply_glm_5_reasoning_policy,
     apply_mimo_reasoning_policy,
 )
@@ -174,6 +175,32 @@ class Exchange:
         self.stopped.set()
 
 
+def without_thought_signatures(body):
+    """Drop Gemini thought signatures from replayed tool calls before another provider sees them."""
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not any(
+        isinstance(message, dict)
+        and isinstance(message.get("tool_calls"), list)
+        and any(isinstance(call, dict) and "extra_content" in call for call in message["tool_calls"])
+        for message in messages
+    ):
+        return body
+    cleaned = []
+    for message in messages:
+        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+            message = {
+                **message,
+                "tool_calls": [
+                    {key: value for key, value in call.items() if key != "extra_content"}
+                    if isinstance(call, dict)
+                    else call
+                    for call in message["tool_calls"]
+                ],
+            }
+        cleaned.append(message)
+    return {**body, "messages": cleaned}
+
+
 class IntelligenceTransport:
     def __init__(self, config, auth, proxy):
         self.config, self.auth, self.proxy = config, auth, proxy
@@ -208,6 +235,9 @@ class IntelligenceTransport:
                 if subscription
                 else "NANOGPT_STANDARD_BASE_URL"
             ]
+        if provider == "gemini" and not media and bases.get(provider):
+            # Gemini's Chat Completions endpoint, not the native API other routes convert to.
+            bases[provider] = f"{bases[provider].rstrip('/')}/openai"
         return get_adapter(provider, bases)
 
     def start(
@@ -229,6 +259,9 @@ class IntelligenceTransport:
         if path is None:
             body = apply_glm_5_reasoning_policy(body, provider, model)
             body = apply_mimo_reasoning_policy(body, model)
+            body = apply_gemini_reasoning_policy(body, provider)
+            if provider != "gemini":
+                body = without_thought_signatures(body)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )

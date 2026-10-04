@@ -37,6 +37,20 @@ class Usage:
         return self.values.get("total_tokens", 0)
 
 
+# Gemini 3 signs each function call and refuses the next request unless the caller
+# returns the signature with it. Nothing else in a call's extra_content is kept.
+MAX_THOUGHT_SIGNATURE_CHARS = 32768
+
+
+def thought_extra(value):
+    """A tool call's Gemini thought signature in its wire shape, or None."""
+    google = value.get("google") if isinstance(value, dict) else None
+    signature = google.get("thought_signature") if isinstance(google, dict) else None
+    if not isinstance(signature, str) or not 0 < len(signature) <= MAX_THOUGHT_SIGNATURE_CHARS:
+        return None
+    return {"google": {"thought_signature": signature}}
+
+
 def safe_message(message):
     if not isinstance(message, dict):
         raise ValueError("Invalid assistant message")
@@ -52,15 +66,17 @@ def safe_message(message):
         for call in calls:
             if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
                 raise ValueError("Invalid tool call")
-            result["tool_calls"].append(
-                {
-                    "id": call.get("id"),
-                    "type": call.get("type"),
-                    "function": {
-                        key: call["function"].get(key) for key in ("name", "arguments")
-                    },
-                }
-            )
+            clean = {
+                "id": call.get("id"),
+                "type": call.get("type"),
+                "function": {
+                    key: call["function"].get(key) for key in ("name", "arguments")
+                },
+            }
+            extra = thought_extra(call.get("extra_content"))
+            if extra:
+                clean["extra_content"] = extra
+            result["tool_calls"].append(clean)
     return result
 
 

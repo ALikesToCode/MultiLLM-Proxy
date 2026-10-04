@@ -302,3 +302,32 @@ def test_rate_counts_visible_tokens_after_the_first_output():
         assert RouteHealth.speed("openai:b") == (1000.0, None), "too little output to rate"
     finally:
         RouteHealth.reset()
+
+
+class GeminiStreamTests(IntelligenceApiTestCase):
+    def test_streamed_tool_calls_keep_their_thought_signature(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_http import SIGNATURE
+
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-flash-lite")]))
+        fragment = {
+            "index": 0,
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": '{"q":"test"}'},
+            "extra_content": {**SIGNATURE, "unreviewed": True},
+        }
+        stream = frames(
+            delta({"role": "assistant", "tool_calls": [fragment]}),
+            delta({}, "tool_calls"),
+            {"choices": [], "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}},
+            "[DONE]",
+        )
+        with self.requests(
+            return_value=upstream(headers={"Content-Type": "text/event-stream"}, chunks=stream)
+        ):
+            response = self.post(stream=True, tools=[TOOL])
+            output = events(response)
+        calls = output[0]["choices"][0]["delta"]["tool_calls"]
+        assert calls[0]["extra_content"] == SIGNATURE
+        assert output[-1]["multillm"]["usage_complete"]

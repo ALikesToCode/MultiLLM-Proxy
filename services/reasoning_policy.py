@@ -145,6 +145,34 @@ def apply_mimo_reasoning_policy(payload: Mapping[str, Any], model: str) -> dict[
     return normalized
 
 
+GEMINI_EFFORTS = {
+    "none": "minimal",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "high",
+    "max": "high",
+}
+
+
+def apply_gemini_reasoning_policy(payload: Mapping[str, Any], provider: str) -> dict[str, Any]:
+    """Fit an explicit effort to the levels Gemini's Chat Completions endpoint accepts.
+
+    Gemini thinks at minimal, low, medium or high; it has no `none`, `xhigh` or `max`,
+    so those become the nearest level it has. An omitted effort keeps the model's default.
+    """
+    normalized = dict(payload)
+    if provider != "gemini":
+        return normalized
+    specified, requested = _requested_effort(normalized)
+    if not specified or requested is None:
+        return normalized
+    normalized.pop("reasoning", None)
+    normalized["reasoning_effort"] = GEMINI_EFFORTS[requested]
+    return normalized
+
+
 def apply_glm_52_reasoning_policy(
     payload: Mapping[str, Any],
     provider: str,

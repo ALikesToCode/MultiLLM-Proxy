@@ -285,3 +285,68 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
             and "tools" in model["capability_tags"]
             and model["capabilities"]["supports_tools"] is True
         )
+
+
+SIGNATURE = {"google": {"thought_signature": "c2lnbmVkIHJlYXNvbmluZw=="}}
+SIGNED_CALL = {**CALL, "extra_content": SIGNATURE}
+
+
+class GeminiIntelligenceTests(IntelligenceApiTestCase):
+    def seed_gemini(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(
+            policy(
+                candidates=[
+                    candidate("gemini:gemini-flash-lite"),
+                    candidate("navyai:large", quality_tier=2),
+                ]
+            )
+        )
+
+    def test_gemini_uses_chat_completions_and_returns_only_the_signature(self):
+        self.seed_gemini()
+        returned = {
+            **CALL,
+            "extra_content": {
+                "google": {"thought_signature": "c2ln", "private": "dropped"},
+                "other": "dropped",
+            },
+        }
+        messages = [
+            {"role": "user", "content": "test"},
+            {"role": "assistant", "tool_calls": [SIGNED_CALL]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+        ]
+        with self.requests(return_value=upstream(completion(None, calls=[returned]))) as send:
+            response = self.post(messages=messages, tools=[TOOL], reasoning_effort="xhigh")
+        assert response.status_code == 200
+        assert response.get_json()["choices"][0]["message"]["tool_calls"] == [
+            {**CALL, "extra_content": {"google": {"thought_signature": "c2ln"}}}
+        ]
+        sent = send.call_args.kwargs
+        assert sent["url"] == (
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        )
+        assert sent["headers"]["Authorization"] == "Bearer synthetic-provider-key"
+        data = json.loads(sent["data"])
+        assert data["messages"] == messages, "Gemini gets its own signatures back"
+        assert data["reasoning_effort"] == "high" and data["model"] == "gemini-flash-lite"
+
+    def test_a_fallback_provider_never_receives_gemini_signatures(self):
+        self.seed_gemini()
+        messages = [
+            {"role": "user", "content": "test"},
+            {"role": "assistant", "tool_calls": [SIGNED_CALL]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "result"},
+        ]
+        with self.requests(
+            side_effect=[upstream({}, 429), upstream(completion("done"))]
+        ) as send:
+            response = self.post(messages=messages, tools=[TOOL])
+        assert response.status_code == 200
+        gemini, navy = (json.loads(call.kwargs["data"]) for call in send.call_args_list)
+        assert gemini["messages"][1]["tool_calls"] == [SIGNED_CALL]
+        assert navy["messages"][1]["tool_calls"] == [CALL]
+        assert messages[1]["tool_calls"] == [SIGNED_CALL], "the caller's request is not mutated"
