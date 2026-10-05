@@ -199,6 +199,30 @@ def apply_gemini_reasoning_policy(
     return normalized
 
 
+# Codex Everywhere's Pro pool refuses `minimal` for GPT-6.1 Sol (three refusals on
+# 2026-10-05) while the Plus pool accepts it. Sol thinks at `low` on both pools, so a
+# fallback from one pool to the other sends the same effort.
+SOL_POOLS = frozenset({"ce-gpt-plus", "ce-gpt-pro"})
+
+
+def apply_sol_reasoning_policy(
+    payload: Mapping[str, Any], provider: str, model: str = ""
+) -> dict[str, Any]:
+    """Raise GPT-6.1 Sol's `minimal` effort to `low`; every other effort is unchanged."""
+    normalized = dict(payload)
+    name = model.strip().lower().rsplit("/", 1)[-1] if isinstance(model, str) else ""
+    if provider not in SOL_POOLS or not name.startswith("gpt-6.1-sol"):
+        return normalized
+    specified, requested = _requested_effort(normalized)
+    if not specified or requested != "minimal":
+        return normalized
+    if "reasoning_effort" in normalized:
+        normalized["reasoning_effort"] = "low"
+    else:
+        normalized["reasoning"] = {**dict(normalized["reasoning"]), "effort": "low"}
+    return normalized
+
+
 def apply_glm_52_reasoning_policy(
     payload: Mapping[str, Any],
     provider: str,

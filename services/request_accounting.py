@@ -300,6 +300,27 @@ def _sse_usage(tail: bytes) -> Optional[tuple[int, int]]:
     return None
 
 
+def _reported_model(value: Any) -> Optional[str]:
+    """The model a gateway reply names in `multillm.selected_model`, such as an
+    `auto:intelligence` answer, whose route picks the model after the view returns."""
+    meta = value.get("multillm") if isinstance(value, dict) else None
+    return _clean_model(meta.get("selected_model")) if isinstance(meta, dict) else None
+
+
+def _sse_model(tail: bytes) -> Optional[str]:
+    for line in reversed(tail.decode("utf-8", "replace").splitlines()):
+        line = line.strip()
+        if not line.startswith("data:") or '"selected_model"' not in line:
+            continue
+        try:
+            found = _reported_model(json.loads(line[5:].strip()))
+        except (ValueError, RecursionError):
+            continue
+        if found:
+            return found
+    return None
+
+
 def _json_tail_usage(tail: bytes) -> Optional[tuple[int, int]]:
     """Token usage from the last `"usage": {...}` object in a streamed JSON body's tail."""
     text = tail.decode("utf-8", "replace")
@@ -463,11 +484,15 @@ def finish(result: Any) -> Any:
 
         def closed(tail: bytes) -> None:
             usage = _sse_usage(tail) if event_stream else _json_tail_usage(tail) if json_stream else None
+            if event_stream and context.selected is None:
+                context.selected = _sse_model(tail)
             _record(context, status, usage, None)
 
         response.response = _SniffedStream(response.response, closed)
         return response
     body = _json_body(response)
+    if context.selected is None:
+        context.selected = _reported_model(body)
     _record(context, response.status_code, _usage_from(body),
             _image_count(body) if context.kind == "images" and response.status_code < 400 else None)
     return response

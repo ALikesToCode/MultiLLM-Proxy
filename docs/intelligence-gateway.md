@@ -165,9 +165,10 @@ existing provider credential environment variables, base URLs and key cooldowns.
 Intelligence dispatch does not trigger a credential probe.
 
 Token admission conservatively estimates text/tool/schema input from UTF-8 bytes
-plus framing overhead. Vision/audio chat candidates additionally require a
-reviewed `media_input_tokens` ceiling. This is deliberately conservative, and
-the reviewed ceiling must cover the accepted media workload. Oversized requests
+plus framing overhead. Encoded image and audio parts are left out of that byte count.
+Vision/audio chat candidates instead require a reviewed `media_input_tokens` ceiling,
+reserved on top of the text estimate; the reviewed ceiling must cover the accepted
+media workload. Oversized requests
 fail before dispatch. `max_total_tokens` includes all attempts; an unknown attempt
 consumes its entire per-attempt bound for subsequent admission.
 

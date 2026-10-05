@@ -19,6 +19,7 @@ from services.reasoning_policy import (
     apply_gemini_reasoning_policy,
     apply_glm_5_reasoning_policy,
     apply_mimo_reasoning_policy,
+    apply_sol_reasoning_policy,
 )
 from services.upstream_transport import iter_stream_content
 
@@ -319,6 +320,7 @@ class IntelligenceTransport:
             body = apply_glm_5_reasoning_policy(body, provider, model)
             body = apply_mimo_reasoning_policy(body, model)
             body = apply_gemini_reasoning_policy(body, provider, model)
+            body = apply_sol_reasoning_policy(body, provider, model)
             if provider == "gemini":
                 body = with_thought_signatures(body)
             else:

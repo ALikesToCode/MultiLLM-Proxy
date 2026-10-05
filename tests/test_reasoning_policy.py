@@ -203,3 +203,25 @@ def test_gemini_models_without_minimal_think_at_low():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_sol_raises_only_minimal_to_low():
+    from services.reasoning_policy import apply_sol_reasoning_policy
+
+    for provider in ("ce-gpt-pro", "ce-gpt-plus"):
+        assert apply_sol_reasoning_policy(
+            {"reasoning_effort": "minimal"}, provider, "gpt-6.1-sol"
+        ) == {"reasoning_effort": "low"}
+        assert apply_sol_reasoning_policy(
+            {"reasoning": {"effort": "minimal", "summary": "auto"}}, provider, "gpt-6.1-sol"
+        ) == {"reasoning": {"effort": "low", "summary": "auto"}}
+    for effort in ("none", "low", "high", "max"):
+        assert apply_sol_reasoning_policy(
+            {"reasoning_effort": effort}, "ce-gpt-pro", "gpt-6.1-sol"
+        ) == {"reasoning_effort": effort}
+    for provider, model in (("ce-gpt-pro", "gpt-6-luna"), ("ce-grok-heavy", "grok-4.7"),
+                            ("openrouter", "openai/gpt-6.1-sol")):
+        assert apply_sol_reasoning_policy(
+            {"reasoning_effort": "minimal"}, provider, model
+        ) == {"reasoning_effort": "minimal"}
+    assert apply_sol_reasoning_policy({}, "ce-gpt-pro", "gpt-6.1-sol") == {}

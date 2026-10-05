@@ -133,6 +133,25 @@ def _message_requirements(messages):
     return required
 
 
+MEDIA_PARTS = frozenset({"image_url", "input_image", "input_audio", "audio"})
+
+
+def _without_media(messages):
+    """The messages with each media part reduced to its type."""
+    return [
+        {
+            **message,
+            "content": [
+                {"type": part["type"]} if part.get("type") in MEDIA_PARTS else part
+                for part in message["content"]
+            ],
+        }
+        if isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
 def _validate_tools(tools):
     if not isinstance(tools, list) or len(tools) > 128:
         raise ValueError("Invalid tools")
@@ -274,13 +293,14 @@ class ChatRequest:
         )
         payload.pop("max_tokens", None)
         payload[output_field] = output
-        # Byte counting deliberately over-reserves text and tool schemas. Media
-        # models additionally reserve their reviewed input ceiling during selection.
+        # Byte counting deliberately over-reserves text and tool schemas. Encoded
+        # media is left out: media models reserve their reviewed input ceiling on top
+        # during selection, since a base64 photo's bytes say nothing about its tokens.
         input_tokens = (
             len(
                 json.dumps(
                     {
-                        k: v
+                        k: _without_media(v) if k == "messages" else v
                         for k, v in payload.items()
                         if k in {"messages", "tools", "response_format"}
                     },

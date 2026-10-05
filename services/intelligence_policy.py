@@ -185,8 +185,9 @@ def eligible(candidate, allow_paid, config):
 
 
 def input_reservation(candidate, request):
+    # The request estimate leaves encoded media out, so its reviewed ceiling is added.
     if request.required & {"vision", "audio"}:
-        return max(request.input_tokens, candidate.get("media_input_tokens", 0))
+        return request.input_tokens + candidate.get("media_input_tokens", 0)
     return request.input_tokens
 
 

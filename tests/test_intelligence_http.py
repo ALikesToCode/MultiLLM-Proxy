@@ -408,3 +408,115 @@ class GeminiIntelligenceTests(IntelligenceApiTestCase):
         assert data["messages"][4]["tool_calls"] == [SIGNED_CALL], "Gemini's own signature stays"
         assert data["reasoning_effort"] == "low", "3.8 Flash has no minimal level"
         assert messages[1]["tool_calls"] == [CALL, second], "the caller's request is not mutated"
+
+    def test_sol_thinks_at_low_instead_of_minimal(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(
+            policy(
+                candidates=[
+                    candidate("ce-gpt-pro:gpt-6.1-sol"),
+                    candidate("ce-gpt-plus:gpt-6-luna"),
+                ]
+            )
+        )
+        sent = []
+        for model in ("ce-gpt-pro:gpt-6.1-sol", "ce-gpt-plus:gpt-6-luna"):
+            for effort in ("minimal", "high"):
+                with self.requests(return_value=upstream(completion())) as send:
+                    response = self.post(
+                        model=model,
+                        reasoning_effort=effort,
+                        routing={"version": 1, "source": "explicit"},
+                    )
+                assert response.status_code == 200
+                sent.append(json.loads(send.call_args.kwargs["data"])["reasoning_effort"])
+        # Codex Everywhere's Pro pool refuses minimal for Sol; Luna accepts it.
+        assert sent == ["low", "high", "minimal", "high"]
+
+    def test_a_photo_reserves_the_media_ceiling_instead_of_its_bytes(self):
+        from services.intelligence_store import IntelligenceStore
+        from tests.test_intelligence_policy import candidate, policy
+
+        IntelligenceStore.seed(
+            policy(
+                candidates=[
+                    candidate("openai:text-only"),
+                    candidate(
+                        "gemini:gemini-3.8-flash",
+                        capabilities=["tools", "json", "streaming", "reasoning", "vision"],
+                        context_window=1048576,
+                        media_input_tokens=16384,
+                    ),
+                ]
+            )
+        )
+        photo = "data:image/jpeg;base64," + "A" * 400_000
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Estimate this meal."},
+                    {"type": "image_url", "image_url": {"url": photo}},
+                ],
+            }
+        ]
+        with self.requests(return_value=upstream(completion("about 650 kcal"))) as send:
+            response = self.post(
+                messages=messages,
+                max_tokens=1024,
+                routing={"version": 1, "max_total_tokens": 24000},
+            )
+        assert response.status_code == 200, response.json
+        assert response.json["multillm"]["selected_model"] == "gemini:gemini-3.8-flash"
+        data = json.loads(send.call_args.kwargs["data"])
+        assert data["messages"][0]["content"][1]["image_url"]["url"] == photo, "the photo is sent whole"
+        # Without room for the media ceiling the photo is refused before dispatch.
+        with self.requests(return_value=upstream(completion())) as send:
+            response = self.post(
+                messages=messages,
+                max_tokens=1024,
+                routing={"version": 1, "max_total_tokens": 16000},
+            )
+        assert response.status_code == 429 and not send.called
+
+    def test_usage_events_name_the_model_that_answered(self):
+        import os
+
+        from services import usage_ledger
+        from tests.intelligence_fixtures import frames
+
+        os.environ.update(
+            {
+                "USAGE_LEDGER_ENABLED": "true",
+                "USAGE_LEDGER_BACKEND": "sql",
+                "USAGE_LEDGER_FLUSH_SECONDS": "300",
+                "USAGE_DB_PATH": os.path.join(self.temp_dir.name, "usage.sqlite3"),
+            }
+        )
+        usage_ledger.LEDGER.reset()
+        self.addCleanup(usage_ledger.LEDGER.reset)
+        self.seed()
+        streamed = frames(
+            {"choices": [{"index": 0, "delta": {"content": "ok"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+             "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}},
+            "[DONE]",
+        )
+        with self.requests(
+            side_effect=[
+                upstream(completion()),
+                upstream(headers={"Content-Type": "text/event-stream"}, chunks=streamed),
+            ]
+        ):
+            plain = self.post()
+            stream = self.post(stream=True)
+            assert plain.status_code == 200 and stream.status_code == 200
+            stream.get_data()
+            stream.close()
+        assert usage_ledger.LEDGER.flush(timeout=5)
+        rows = usage_ledger.LEDGER.store().recent("2000-01-01T00:00:00.000Z", None, None, 10)
+        assert sorted((row["requested_model"], row["selected_model"]) for row in rows) == [
+            ("auto:intelligence", "openai:small")
+        ] * 2
