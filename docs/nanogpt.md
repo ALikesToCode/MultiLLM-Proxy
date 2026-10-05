@@ -141,9 +141,10 @@ endpoint with the subscription-only guards back on, so the turn stays on the
 same provider instead of falling back. Roleplay retries on any `403` from a
 suffixed request, since a genuine key fault fails the plain retry the same way.
 
-Production leaves the variable unset (since 2026-10-05): its subscription-only key
+Production sets the variable to `""` (since 2026-10-05): its subscription-only key
 cannot pay for provider selection, so `:fast` would only add a refused round trip
-before each process's first turn after every cooldown.
+before each process's first turn after every cooldown. It has to be set empty rather
+than removed, because `keep_vars` keeps a deployed value that `wrangler.jsonc` omits.
 
 Provider selection also accepts `quantizations` and `min_quantization`
 (`int4`, `fp4`, `fp6`, `int8`, `fp8`, `fp16`, `bf16`, `fp32`, `unknown`), and

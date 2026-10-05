@@ -262,7 +262,9 @@ test("deployment starts roleplay on Cline Pass GLM 5.3 and keeps NanoGPT on the 
     "cline-pass:cline-pass/mimo-v2.6-pro",
   ]);
   // The subscription-only key cannot pay for :fast, so NanoGPT requests stay on the subscription.
-  assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, undefined);
+  // It must be set empty, not left out: keep_vars keeps a deployed value that the file omits.
+  assert.equal(config.keep_vars, true);
+  assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, "");
 });
 
 test("deployment routes GLM through LinkAPI before NavyAI", async () => {
