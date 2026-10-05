@@ -216,3 +216,94 @@ for (const path of ["/v1/roleplay", "/roleplay/v1/chat/completions"]) {
     }
   });
 }
+
+// NanoGPT refuses :fast from a key that cannot pay for it; the turn must still be
+// answered by the same model on the subscription, and later turns skip the suffix.
+const SUBSCRIPTION_URL = "https://nano-gpt.com/api/subscription/v1/chat/completions";
+const PAYGO_URL = "https://nano-gpt.com/api/v1/chat/completions";
+
+// The Worker bundle keeps its own pause state, which this file cannot reset. Each
+// scenario moves the clock a day on so an earlier pause has lapsed.
+let scenarioDay = 0;
+
+async function fastRefusalTurns(t, status, envOverrides, request) {
+  scenarioDay += 1;
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + scenarioDay * 86_400_000 });
+  const fixture = makeRoleplayEnv({
+    ...BASE_ENV,
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_SPEED_ROUTING: "fast",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+    ...envOverrides,
+  });
+  const sent = [];
+  const responses = await withGlobalFetch(async (input, init) => {
+    if (init.method === "GET") {
+      return new Response(JSON.stringify({ data: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const payload = JSON.parse(init.body);
+    sent.push({ url: String(input), model: payload.model, caching: payload.caching });
+    if (payload.model.endsWith(":fast")) {
+      return new Response(JSON.stringify({ code: "provider_selected" }), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ choices: [{
+      message: { role: "assistant", content: "The scene continues." },
+      finish_reason: "stop",
+    }] }), { headers: { "Content-Type": "application/json" } });
+  }, async () => {
+    const results = [];
+    for (const input of ["Continue the scene.", "Continue again."]) {
+      const response = await handleRoleplayEdgeRequest(
+        roleplayRequest({ ...request, input, stream: false }),
+        fixture.env,
+      );
+      results.push({ response, body: await response.text() });
+      await fixture.waitForBackgroundWork();
+    }
+    return results;
+  });
+  return { sent, responses };
+}
+
+for (const status of [402, 403]) {
+  for (const [route, envOverrides, request, model] of [
+    ["adaptive", {}, { model: "roleplay:5.3-flash" }, "z-ai/glm-5.3-flash"],
+    [
+      "intelligence",
+      {
+        ROLEPLAY_AUTO_ROUTE: "intelligence",
+        ROLEPLAY_INTELLIGENCE_MODELS: "nanogpt:z-ai/glm-5.3",
+      },
+      { model: "roleplay:auto" },
+      "z-ai/glm-5.3",
+    ],
+  ]) {
+    test(`a ${status} on :fast retries the ${route} turn on the subscription`, async (t) => {
+      const { sent, responses } = await fastRefusalTurns(t, status, envOverrides, request);
+      for (const { response, body } of responses) {
+        assert.equal(response.status, 200, body);
+        assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "0");
+        assert.equal(response.headers.get("X-Roleplay-Model"), model);
+      }
+      assert.deepEqual(sent.map(({ url, model: sentModel }) => [url, sentModel]), [
+        [PAYGO_URL, `${model}:fast`],
+        [SUBSCRIPTION_URL, model],
+        // The refusal paused the suffix, so the next turn goes straight to the subscription.
+        [SUBSCRIPTION_URL, model],
+      ]);
+      assert.equal(sent.some(({ caching }) => caching !== undefined), false);
+    });
+  }
+}
+
+test("a rate-limited :fast request is not retried without the suffix", async (t) => {
+  const { sent } = await fastRefusalTurns(t, 429, {}, { model: "roleplay:5.3-flash" });
+  assert.ok(sent.length >= 2);
+  // No plain retry and no pause: every request, on both turns, still asks for :fast.
+  assert.equal(sent.every(({ model }) => model.endsWith(":fast")), true);
+});

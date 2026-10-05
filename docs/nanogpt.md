@@ -131,13 +131,20 @@ NANOGPT_SPEED_ROUTING=fast
 # moonshotai/kimi-k2.6 -> moonshotai/kimi-k2.6:fast
 ```
 
-The empty setting retains subscription routing. An account with no pay-as-you-go
-balance rejects every suffixed request with `402 Insufficient balance` on both the
-standard and the subscription endpoint, and roleplay treats `402` as a safe
-fallback status, so the NanoGPT candidates silently drop out of rotation. Fund
-the pay-as-you-go balance before enabling it. Since October 2026 NanoGPT answers a
-suffixed request from a subscription-only key with `403` instead, which roleplay does not
-retry without the suffix; production leaves the variable unset.
+The empty setting retains subscription routing. NanoGPT refuses a suffixed request
+it cannot bill: `402 Insufficient balance` when no pay-as-you-go balance covers it,
+`403 provider_selected` when the key has paid usage turned off. On either refusal
+the same model is retried once without the suffix, and the suffix is paused for
+`NANOGPT_SPEED_ROUTING_COOLDOWN_SECONDS` (900 s by default) in that process. The
+gateway retries on the same endpoint; roleplay retries on the subscription
+endpoint with the subscription-only guards back on, so the turn stays on the
+same provider instead of falling back. Roleplay retries on any `403` from a
+suffixed request, since a genuine key fault fails the plain retry the same way.
+
+Production sets `fast` (`wrangler.jsonc`, restored 2026-10-05). A key that cannot
+pay for provider selection gets no speed from it: each process spends one refused
+round trip, serves the turn from the subscription, and asks for `:fast` again
+after the cooldown.
 
 Provider selection also accepts `quantizations` and `min_quantization`
 (`int4`, `fp4`, `fp6`, `int8`, `fp8`, `fp16`, `bf16`, `fp32`, `unknown`), and

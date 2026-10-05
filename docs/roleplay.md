@@ -43,6 +43,10 @@ does not match the trigger. Version-pinned routes remain pinned; set
 NanoGPT accepts `NANOGPT_API_KEY`, numbered `NANOGPT_API_KEY_N` secrets, and
 the compatibility `NANO_GPT_KEY[_N]` names. A definite `401`, `403`, or `429`
 advances to the next key. A `402` insufficient-balance rejection does the same.
+When `NANOGPT_SPEED_ROUTING` added a suffix such as `:fast` and NanoGPT answers
+`402` or `403`, the same key and model are first retried without the suffix on
+the subscription endpoint, and the suffix pauses for the cooldown
+([NanoGPT](nanogpt.md)).
 The successful key identifier—not the secret—is kept
 in that Durable Object's session state and is preferred on later turns.
 Fresh sessions begin with `NANOGPT_PREFERRED_KEY_INDEX` when it is configured;

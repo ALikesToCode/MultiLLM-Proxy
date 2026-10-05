@@ -2,6 +2,7 @@ import {
   buildProviderHeaders,
   isSafeFallbackStatus,
   noteNanogptPaygoRejection,
+  withoutNanogptSpeedRouting,
 } from "./config.mjs";
 import { prepareCompactionCandidates } from "./compaction-budget.mjs";
 import {
@@ -554,9 +555,12 @@ export function applyRoleplayRouteHeaders(
   headers.set("X-Roleplay-Fallback-Count", String(fallbackCount));
 }
 
-// NanoGPT answers 402 when provider selection is not covered by a balance. The
-// suffix only rides on the request body, so the same candidate can be retried
-// without it rather than surrendering the provider to the fallback chain.
+// NanoGPT refuses provider selection it cannot bill: 402 when no balance covers it,
+// 403 when the key has paid usage off. The suffix only rides on the request body, so
+// the same candidate is retried as a plain subscription request rather than
+// surrendering the provider to the fallback chain, and the suffix is paused.
+const NANOGPT_PAYGO_REFUSALS = new Set([402, 403]);
+
 async function fetchCandidateWithPaygoFallback(
   candidate,
   payload,
@@ -570,7 +574,7 @@ async function fetchCandidateWithPaygoFallback(
     candidate.provider === "nanogpt" &&
     typeof candidate.upstreamModel === "string" &&
     candidate.upstreamModel !== candidate.model;
-  if (!suffixed || attempt?.response?.status !== 402) {
+  if (!suffixed || !NANOGPT_PAYGO_REFUSALS.has(attempt?.response?.status)) {
     return attempt;
   }
   noteNanogptPaygoRejection(settings.nanogptPaygoCooldownMs ?? 900_000);
@@ -579,14 +583,12 @@ async function fetchCandidateWithPaygoFallback(
   } catch {
     // The retry supersedes this attempt; a cleanup failure must not mask it.
   }
-  return fetchCandidate(
-    candidate,
-    { ...payload, model: candidate.model },
-    env,
-    settings,
-    signal,
-    key,
-  );
+  const plain = withoutNanogptSpeedRouting(candidate, env);
+  const plainPayload = { ...payload, model: candidate.model };
+  if (plain.subscriptionOnly) {
+    delete plainPayload.caching;
+  }
+  return fetchCandidate(plain, plainPayload, env, settings, signal, key);
 }
 
 async function fetchCandidate(candidate, payload, env, settings, signal, key) {

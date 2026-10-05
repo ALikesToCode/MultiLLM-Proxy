@@ -748,7 +748,7 @@ export function autoRoutePreference(parsed, settings) {
 }
 
 // Credentials, billing mode and endpoints of one provider, or null without a key.
-function providerRoute(env, provider) {
+function providerRoute(env, provider, allowSpeedRouting = true) {
   const definition = PROVIDERS[provider];
   const tokens = configuredProviderTokens(env, definition);
   if (!tokens.length) {
@@ -756,7 +756,7 @@ function providerRoute(env, provider) {
   }
 
   const speedRouting =
-    provider === "nanogpt" && nanogptSpeedRoutingAllowed()
+    provider === "nanogpt" && allowSpeedRouting && nanogptSpeedRoutingAllowed()
       ? nanogptSpeedRouting(env.NANOGPT_SPEED_ROUTING)
       : "";
   const billingMode =
@@ -781,6 +781,23 @@ function providerRoute(env, provider) {
     subscriptionOnly,
     endpoint: appendEndpointPath(baseUrl, definition.defaultPath).toString(),
     catalogEndpoint: appendEndpointPath(baseUrl, "/v1/models").toString(),
+  };
+}
+
+// The request speed routing replaced: the plain model on the endpoint and billing
+// mode NanoGPT would get with NANOGPT_SPEED_ROUTING unset.
+export function withoutNanogptSpeedRouting(candidate, env) {
+  const route = providerRoute(env, candidate.provider, false);
+  if (!route) {
+    return { ...candidate, upstreamModel: candidate.model };
+  }
+  return {
+    ...candidate,
+    upstreamModel: candidate.model,
+    endpoint: route.endpoint,
+    catalogEndpoint: route.catalogEndpoint,
+    billingMode: route.billingMode,
+    subscriptionOnly: route.subscriptionOnly,
   };
 }
 

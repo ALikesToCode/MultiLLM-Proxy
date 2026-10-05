@@ -246,7 +246,7 @@ test("deployment defaults roleplay generation to high reasoning", async () => {
   assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
-test("deployment starts roleplay on Cline Pass GLM 5.3 and keeps NanoGPT on the subscription", async () => {
+test("deployment starts roleplay on Cline Pass GLM 5.3 and tries NanoGPT :fast first", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
@@ -260,8 +260,8 @@ test("deployment starts roleplay on Cline Pass GLM 5.3 and keeps NanoGPT on the 
     "cline-pass:cline-pass/glm-5.3-flash",
     "cline-pass:cline-pass/mimo-v2.6-pro",
   ]);
-  // The subscription-only key cannot pay for :fast, which NanoGPT now refuses with 403.
-  assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, undefined);
+  // NanoGPT is asked for :fast first; a 402 or 403 refusal retries the turn on the subscription.
+  assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, "fast");
 });
 
 test("deployment routes GLM through LinkAPI before NavyAI", async () => {
