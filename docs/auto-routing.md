@@ -9,7 +9,11 @@ Startup seeds these routes:
 
 - `auto:glm-5.2`: `nanogpt:zai-org/glm-5.2:thinking`, `opencode:glm-5.2`,
   `navyai:glm-5.2`
-- `auto:gpt-image-2.5`: `gguu:gpt-image-2.5`
+- `auto:glm-5.3`: `cline-pass:cline-pass/glm-5.3`, `nanogpt:z-ai/glm-5.3`
+- `auto:gpt-6.1`: `ce-gpt-plus:gpt-6.1-sol`, `ce-gpt-pro:gpt-6.1-sol` (cheapest first; each
+  pool also tries its spare key)
+- The image, speech, transcription and video routes in
+  [media generation](media-generation.md#routes)
 
 Use `auto:glm-5.2` with the normal unified endpoint:
 

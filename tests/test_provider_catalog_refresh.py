@@ -166,4 +166,5 @@ class ProviderCatalogAutoRefreshTest(UnifiedApiTestCase):
             models = self._models()
         transport.assert_not_called()
         self.assertIn("cline-pass:cline-pass/glm-5.3", models)
-        self.assertEqual(models["cline-pass:cline-pass/glm-5.3"]["sources"], ["built-in"])
+        # The built-in list supplies it; auto:glm-5.3 also names it as a route candidate.
+        self.assertIn("built-in", models["cline-pass:cline-pass/glm-5.3"]["sources"])

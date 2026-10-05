@@ -307,3 +307,31 @@ def test_image_routes_keep_gguu_first_and_try_codex_everywhere_before_cloudflare
         assert [c for c in candidates if not c.startswith("ce-image:")] == list(previous), (
             "a stored copy of the previous default follows the new one"
         )
+
+
+def test_chat_routes_for_glm_5_3_and_gpt_6_1_run_cheapest_first():
+    from services.auto_route_service import DEFAULT_AUTO_ROUTES
+
+    assert DEFAULT_AUTO_ROUTES["auto:glm-5.3"] == ("cline-pass:cline-pass/glm-5.3", "nanogpt:z-ai/glm-5.3")
+    assert DEFAULT_AUTO_ROUTES["auto:gpt-6.1"] == ("ce-gpt-plus:gpt-6.1-sol", "ce-gpt-pro:gpt-6.1-sol")
+
+
+class CodexEverywhereAutoRouteTests(IntelligenceApiTestCase):
+    def test_auto_gpt_6_1_falls_back_from_plus_to_pro_and_sends_instructions(self):
+        with self.requests(
+            side_effect=[upstream({"code": "INSUFFICIENT_BALANCE"}, 403), upstream(completion("done"))]
+        ) as send:
+            response = self.client.post(
+                "/v1/chat/completions",
+                headers=self.headers,
+                json={
+                    "model": "auto:gpt-6.1",
+                    "messages": [{"role": "system", "content": "You are Omni."}, {"role": "user", "content": "hi"}],
+                },
+            )
+        assert response.status_code == 200, response.get_data(as_text=True)[:300]
+        assert response.headers["X-MultiLLM-Auto-Selected-Model"] == "ce-gpt-pro:gpt-6.1-sol"
+        urls = [call.kwargs["url"] for call in send.call_args_list]
+        assert urls == ["https://codex-everywhere.com/v1/chat/completions"] * 2
+        sent = json.loads(send.call_args.kwargs["data"])
+        assert sent["model"] == "gpt-6.1-sol" and sent["instructions"] == "You are Omni."

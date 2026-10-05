@@ -28,6 +28,18 @@ DEFAULT_AUTO_ROUTES = {
         "opencode:glm-5.2",
         "navyai:glm-5.2",
     ),
+    # GLM 5.3 on the two subscriptions: ClinePass gave the first words in about 4 s through
+    # the roleplay endpoint (2026-10-05), NanoGPT is the second provider.
+    "auto:glm-5.3": (
+        "cline-pass:cline-pass/glm-5.3",
+        "nanogpt:z-ai/glm-5.3",
+    ),
+    # GPT-6.1 Sol cheapest first: Codex Everywhere Plus (0.03x OpenAI), then Pro (0.05x). Each
+    # pool also rotates to its spare key. Seeded routes never use OpenRouter.
+    "auto:gpt-6.1": (
+        "ce-gpt-plus:gpt-6.1-sol",
+        "ce-gpt-pro:gpt-6.1-sol",
+    ),
     "auto:image": (
         "gguu:gpt-image-2.5-sunburst",
         "gguu:gpt-image-2.5-flare",
