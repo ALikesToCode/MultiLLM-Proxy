@@ -3,6 +3,7 @@ import {
   isSafeFallbackStatus,
   noteNanogptPaygoRejection,
   withoutNanogptSpeedRouting,
+  withoutNanogptSpeedSuffix,
 } from "./config.mjs";
 import { prepareCompactionCandidates } from "./compaction-budget.mjs";
 import {
@@ -584,7 +585,8 @@ async function fetchCandidateWithPaygoFallback(
     // The retry supersedes this attempt; a cleanup failure must not mask it.
   }
   const plain = withoutNanogptSpeedRouting(candidate, env);
-  const plainPayload = { ...payload, model: candidate.model };
+  // Compaction sends its own model, so strip the suffix rather than swap the model.
+  const plainPayload = { ...payload, model: withoutNanogptSpeedSuffix(payload.model) };
   if (plain.subscriptionOnly) {
     delete plainPayload.caching;
   }
@@ -806,7 +808,7 @@ export async function requestCompaction(
       );
       let attempted;
       try {
-        attempted = await fetchCandidate(
+        attempted = await fetchCandidateWithPaygoFallback(
           candidate,
           payload,
           env,

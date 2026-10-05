@@ -294,6 +294,12 @@ export function nanogptModelHasSpeedSuffix(model) {
   return NANOGPT_SPEED_ROUTING_SUFFIXES.has(tail);
 }
 
+export function withoutNanogptSpeedSuffix(model) {
+  return nanogptModelHasSpeedSuffix(model)
+    ? model.slice(0, model.lastIndexOf(":"))
+    : model;
+}
+
 function withNanogptSpeedSuffix(model, suffix) {
   if (!suffix || typeof model !== "string" || !model.trim()) {
     return model;

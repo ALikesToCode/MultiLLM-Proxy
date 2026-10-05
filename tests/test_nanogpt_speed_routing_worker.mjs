@@ -11,6 +11,7 @@ import {
 import { buildUpstreamPayload } from "../worker/roleplay/memory.mjs";
 import { applyRoleplayPromptCache } from "../worker/roleplay/prompt-cache.mjs";
 import {
+  completionResponse,
   handleRoleplayEdgeRequest,
   makeRoleplayEnv,
   roleplayRequest,
@@ -306,4 +307,59 @@ test("a rate-limited :fast request is not retried without the suffix", async (t)
   assert.ok(sent.length >= 2);
   // No plain retry and no pause: every request, on both turns, still asks for :fast.
   assert.equal(sent.every(({ model }) => model.endsWith(":fast")), true);
+});
+
+test("a refused :fast compaction retries on the subscription with the compaction model", async (t) => {
+  scenarioDay += 1;
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() + scenarioDay * 86_400_000 });
+  const fixture = makeRoleplayEnv({
+    ...BASE_ENV,
+    OPENCODE_GO_API_KEY: "",
+    NANOGPT_SPEED_ROUTING: "fast",
+    ROLEPLAY_COMPACTION_MODELS: JSON.stringify({ nanogpt: "moonshotai/kimi-k2.6" }),
+    ROLEPLAY_COMPACT_TRIGGER_TOKENS: "64",
+    ROLEPLAY_KEEP_RECENT_MESSAGES: "4",
+    ROLEPLAY_MAX_AUTO_CONTINUATIONS: "0",
+  });
+  const sent = [];
+  const response = await withGlobalFetch(async (input, init) => {
+    const payload = JSON.parse(init.body);
+    const compaction = payload.messages?.[0]?.content?.startsWith(
+      "You manage continuity for a long-running roleplay.",
+    );
+    sent.push([compaction ? "compaction" : "turn", String(input), payload.model]);
+    if (String(input) === PAYGO_URL) {
+      return new Response(JSON.stringify({ code: "provider_selected" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return completionResponse(
+      payload.model,
+      compaction
+        ? JSON.stringify({ compact: true, summary: "The scene goes on.", character_facts: [],
+          relationships: [], world_state: [], open_threads: [], tone_style: [] })
+        : "The scene continues.",
+    );
+  }, async () => {
+    const result = await handleRoleplayEdgeRequest(roleplayRequest({
+      model: "roleplay:5.3-flash",
+      messages: Array.from({ length: 6 }, (_, index) => ({
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `Continuity event ${index}: ${"x".repeat(180)}`,
+      })),
+      max_tokens: 128,
+      stream: false,
+    }), fixture.env);
+    await result.text();
+    await fixture.waitForBackgroundWork();
+    return result;
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Roleplay-Memory"), "model_compacted");
+  assert.deepEqual(sent.filter(([kind]) => kind === "compaction"), [
+    ["compaction", PAYGO_URL, "moonshotai/kimi-k2.6"],
+    ["compaction", SUBSCRIPTION_URL, "moonshotai/kimi-k2.6"],
+  ]);
+  assert.deepEqual(sent.at(-1), ["turn", SUBSCRIPTION_URL, "z-ai/glm-5.3-flash"]);
 });
