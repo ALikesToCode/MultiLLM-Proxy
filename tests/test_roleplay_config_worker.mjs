@@ -250,10 +250,11 @@ test("deployment starts roleplay on Cline Pass GLM 5.3 and tries NanoGPT :fast f
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  // Measured 2026-10-05: Cline Pass GLM 5.3 answered first in about 4 s; MiMo on NanoGPT
-  // took 59 s. OpenCode Go and NavyAI's free plan refused every request, so they are left out.
+  // Measured 2026-10-05: Cline Pass GLM 5.3 answered first in about 4 s, so it leads; MiMo on
+  // NanoGPT is the first fallback. OpenCode Go and NavyAI's free plan refused every request.
   assert.deepEqual(config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(","), [
     "cline-pass:cline-pass/glm-5.3",
+    "nanogpt:xiaomi/mimo-v2.6-pro",
     "nanogpt:z-ai/glm-5.3",
     "nanogpt:z-ai/glm-5.3-flash",
     "nanogpt:z-ai/glm-5.2",
