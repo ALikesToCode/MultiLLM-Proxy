@@ -22,7 +22,8 @@ synchronous SHA-256 helper keeps the Worker API synchronous without Node-only im
 Shared synthetic vectors concatenate credential prefixes and payloads at runtime.
 
 Recognized formats: PEM private keys; AKIA/ASIA access IDs; GitHub classic and fine-grained
-tokens; Anthropic and OpenAI project/legacy keys; Google API/OAuth tokens; Slack tokens and
+tokens; Anthropic and OpenAI project/service-account/admin/legacy keys; OpenRouter,
+Groq, xAI, GitLab personal, Replicate and Perplexity credentials; generic vendor `sk-` keys; Google API/OAuth tokens; Slack tokens and
 webhooks; Stripe live keys; npm and Hugging Face tokens; Telegram bot tokens; JWTs; URLs
 with embedded passwords; and `mllm_intelligence_` integration credentials. Dashboard keys
 are unprefixed random 32-character alphanumeric strings, so no precise standalone format
@@ -44,6 +45,30 @@ The edge buffers at most 32 MiB and waits at most one second for body consumptio
 stalled, malformed-binary or otherwise uninspectable bodies follow the original dispatch
 path. Detector/audit failures fail open and log only a fixed message or exception type.
 Scanning a bounded prefix cannot guarantee secrets beyond that prefix are caught.
+
+### Format evidence
+
+The [public Gitleaks rules](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml)
+were cross-checked on 2026-10-07: `openai-api-key` lists project/service-account/admin
+prefixes and 124/156-character suffix forms; `gitlab-pat` has 20 suffix characters and
+`gitlab-pat-routable` covers 27–300 plus a dot and nine routing characters;
+`perplexity-api-key` has 48 suffix characters. The OpenAI detector preserves the
+existing 48–200 suffix range, GitLab accepts both classic and routed forms, and
+Perplexity allows 32–128. These bounded ranges accommodate format variation.
+
+Gitleaks currently has no OpenRouter, Groq, xAI or Replicate rules. Public sources
+confirm [OpenRouter's prefix](https://openrouter.ai/docs/cookbook/get-started/quickstart),
+[Groq's prefix](https://console.groq.com/docs/production-readiness/security-onboarding),
+[xAI's prefix and an 80-character suffix example](https://docs.x.ai/developers/rest-api-reference/management/auth),
+and [Replicate's 40-character total length](https://replicate.com/docs/topics/security/api-tokens).
+OpenRouter's 64 hex suffix and Groq's roughly 52 alphanumeric suffix follow the
+operator's supplied formats; public docs do not establish their complete length
+ranges. Detection uses 64 hex for OpenRouter, 48–64 for Groq, 32–128 for xAI and
+32–64 for Replicate. All formats have prefix and terminal boundaries.
+
+The generic fallback accepts zero, one or two lowercase vendor segments of 2–12
+characters and a final alphanumeric segment of 32–200 containing both a digit and
+a letter. A specific finding on the same span wins, so fallback counts are not duplicated.
 
 ## Dispatch coverage
 

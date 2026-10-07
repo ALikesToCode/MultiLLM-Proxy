@@ -60,6 +60,10 @@ export function scanText(text) {
   for (const [type, pattern] of PATTERNS) {
     pattern.lastIndex = 0;
     while ((match = pattern.exec(text))) {
+      if (type === "generic_sk_key") {
+        const final = match[0].slice(match[0].lastIndexOf("-") + 1);
+        if (!/[0-9]/.test(final) || !/[A-Za-z]/.test(final)) continue;
+      }
       if (!example(match[0])) candidates.push({ type, confidence: "high", start: match.index, end: pattern.lastIndex });
       if (candidates.length >= MAX_FINDINGS) break;
     }

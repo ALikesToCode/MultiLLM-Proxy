@@ -74,6 +74,10 @@ def scan_text(text):
                 break
     for name, pattern in _PATTERNS:
         for match in pattern.finditer(text):
+            if name == "generic_sk_key":
+                final = match[0].rsplit("-", 1)[-1]
+                if not re.search(r"[0-9]", final) or not re.search(r"[A-Za-z]", final):
+                    continue
             if not _example(match[0]):
                 candidates.append((match.start(), match.end(), name, "high"))
             if len(candidates) >= MAX_FINDINGS:
