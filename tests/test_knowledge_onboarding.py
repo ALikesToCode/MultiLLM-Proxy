@@ -49,8 +49,8 @@ def test_discovery_and_skill_download_agree(client):
     config = client.get("/agent-onboarding/config.json", base_url="https://gateway.example").json
     assert config["url"] == "https://gateway.example/mcp"
     assert config["authentication"] == {"type": "bearer", "env": "MULTILLM_KNOWLEDGE_API_KEY"}
-    assert len(config["tools"]) == 32
-    assert len({tool["name"] for tool in config["tools"]}) == 32
+    assert len(config["tools"]) == 34
+    assert len({tool["name"] for tool in config["tools"]}) == 34
     assert {"knowledge_exa_search", "knowledge_firecrawl_crawl", "knowledge_context7_docs",
             "knowledge_deepwiki_ask", "knowledge_mintlify_context",
             "knowledge_product_sites_get", "knowledge_product_sites_update"} <= {tool["name"] for tool in config["tools"]}
