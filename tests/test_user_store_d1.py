@@ -139,6 +139,17 @@ def test_account_lists_are_paged_and_rows_are_validated(d1):
         user_store.list_users()
 
 
+def test_rows_with_and_without_the_newer_control_columns_are_accepted(d1):
+    # The Worker returns shadow_eval_rate after migration 0013; an older Worker omits both columns.
+    current = dict(d1.rows["admin"], secret_scan_mode="block", shadow_eval_rate=0.2)
+    assert user_store._row(current)["shadow_eval_rate"] == 0.2
+    older = {name: value for name, value in d1.rows["admin"].items() if name not in {"secret_scan_mode", "shadow_eval_rate"}}
+    assert {name: user_store._row(older)[name] for name in ("secret_scan_mode", "shadow_eval_rate")} == {
+        "secret_scan_mode": None, "shadow_eval_rate": None}
+    with pytest.raises(APIError):
+        user_store._row(dict(current, shadow_eval_rate="0.2"))
+
+
 def test_backend_names_are_explicit(monkeypatch):
     for value, expected in (("", False), ("sql", False), ("D1", True)):
         monkeypatch.setenv("AUTH_STORAGE_BACKEND", value)
