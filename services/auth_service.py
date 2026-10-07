@@ -144,6 +144,7 @@ class AuthService:
             "allowed_models": "TEXT",
             "allowed_ips": "TEXT",
             "expires_at": "TEXT",
+            "secret_scan_mode": "TEXT",
         }
         for column_name, column_definition in required_columns.items():
             if column_name not in columns:
@@ -181,7 +182,8 @@ class AuthService:
                 monthly_budget_usd DOUBLE PRECISION,
                 allowed_models TEXT,
                 allowed_ips TEXT,
-                expires_at TEXT
+                expires_at TEXT,
+                secret_scan_mode TEXT
             )
             """
         )
@@ -298,7 +300,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode
                         FROM users
                         ORDER BY username
                         """
@@ -323,7 +325,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode
                         FROM users
                         WHERE username = ?
                         """,
@@ -353,7 +355,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode
                         FROM users
                         WHERE api_key_prefix = ? AND revoked_at IS NULL
                         ORDER BY username
@@ -423,9 +425,9 @@ class AuthService:
                         username, api_key_hash, api_key_prefix, scopes, is_admin,
                         created_at, last_login, last_used_at, last_used_ip,
                         created_by, rotated_at, revoked_at, daily_budget_usd,
-                        monthly_budget_usd, allowed_models, allowed_ips, expires_at
+                        monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(username) DO UPDATE SET
                         api_key_hash = excluded.api_key_hash,
                         api_key_prefix = excluded.api_key_prefix,
@@ -442,7 +444,8 @@ class AuthService:
                         monthly_budget_usd = excluded.monthly_budget_usd,
                         allowed_models = excluded.allowed_models,
                         allowed_ips = excluded.allowed_ips,
-                        expires_at = excluded.expires_at
+                        expires_at = excluded.expires_at,
+                        secret_scan_mode = excluded.secret_scan_mode
                     """,
                     (
                         username,

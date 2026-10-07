@@ -10,6 +10,7 @@ import { dispatchNative, NATIVE_OPERATIONS, nativeToolsHash } from "./native.mjs
 import { getMemos } from "./memos.mjs";
 import { parseMemoPurge } from "./memo-store.mjs";
 import { logFailure } from "../log.mjs";
+import { protectPayload } from "../secret-firewall.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
   "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
@@ -97,10 +98,20 @@ async function artifactResult(env, authority, id, corpus) {
 }
 
 export async function dispatchKnowledge(env, envelope, options = {}) {
-  fields(envelope, ["version", "operation", "principal", "payload"], ["version", "operation", "principal", "payload"]);
+  fields(envelope, ["version", "operation", "principal", "payload", "secret_scan_mode", "secret_scan_checked"], ["version", "operation", "principal", "payload"]);
   if (envelope.version !== 1 || !OPERATIONS.has(envelope.operation)) fail("unknown_operation", "Unknown Knowledge operation.", 404);
   const { operation, principal, payload } = envelope;
   authorize(principal, READ.has(operation) ? "knowledge:read" : "knowledge:manage");
+  if (envelope.secret_scan_mode !== undefined && !["off", "block"].includes(envelope.secret_scan_mode)) fail("invalid_request", "Invalid secret scan mode.");
+  if (envelope.secret_scan_checked !== undefined && typeof envelope.secret_scan_checked !== "boolean") fail("invalid_request", "Invalid secret scan marker.");
+  // Only the private service binding accepts this marker from authenticated ingress.
+  // Scan arguments once before fan-out, caches, receipts or generated provider wrappers.
+  if (!envelope.secret_scan_checked) {
+    const decision = await protectPayload(payload, env, { knowledge: true,
+      principal: { ...principal, secret_scan_mode: envelope.secret_scan_mode }, route: `/v1/knowledge/${operation}`, provider: "knowledge" });
+    options.onSecretScan?.(decision);
+    if (decision.blocked) fail("secret_detected", `High-confidence secrets detected: ${JSON.stringify(decision.report.types)}`, 422);
+  }
   const authority = options.authority || getAuthority(env);
   if (ALEXANDRIA_OPERATIONS.includes(operation)) return dispatchAlexandria(env, authority, principal, operation, payload, options);
   if (NATIVE_OPERATIONS.includes(operation)) return dispatchNative(env, authority, principal, operation, payload, options);

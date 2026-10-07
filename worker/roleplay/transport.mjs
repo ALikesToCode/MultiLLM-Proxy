@@ -1,3 +1,4 @@
+import { firewallFetch, isSecretScanBlock } from "../secret-firewall.mjs";
 import {
   buildProviderHeaders,
   isSafeFallbackStatus,
@@ -30,6 +31,7 @@ const RESPONSE_HEADER_WHITELIST = new Set([
   "vary",
   "x-request-id",
   "x-should-retry",
+  "x-multillm-secret-scan",
 ]);
 const RESPONSE_HEADER_PREFIXES = [
   "anthropic-ratelimit-",
@@ -633,7 +635,11 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
             requestInit,
           ),
         )
-      : await fetch(candidate.endpoint, requestInit);
+      : await firewallFetch(new Request(candidate.endpoint, requestInit), env, {
+          route: "/v1/roleplay/chat/completions", provider: candidate.provider,
+          onDecision: settings.onSecretScan,
+          principal: { id: env.ADMIN_USERNAME || "admin" },
+        }, async checked => fetch(checked.url, { ...requestInit, headers: checked.headers, body: await checked.text() }));
     clearTimeout(timeout);
     const headerMs = performance.now() - startedAt;
     return {
@@ -833,6 +839,10 @@ export async function requestCompaction(
       }
 
       const { response } = attempted;
+      if (isSecretScanBlock(response)) {
+        attempted.cleanup();
+        return { blockedResponse: response };
+      }
       if (!response.ok) {
         attempted.cleanup();
         logRoleplayError(
@@ -961,6 +971,11 @@ export async function attemptRoleplayCandidates(
         state: nextState,
         terminalResponse: failure.terminalResponse,
       };
+    }
+
+    if (isSecretScanBlock(attempted.response)) {
+      attempted.cleanup();
+      return { state: nextState, terminalResponse: attempted.response };
     }
 
     if (attempted.response.ok) {

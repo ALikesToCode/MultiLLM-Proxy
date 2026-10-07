@@ -14,6 +14,7 @@ from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
 from providers.codex_everywhere import (
     CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS,
@@ -1195,6 +1196,10 @@ class ProxyService:
         """
         Make a single request with a given timeout (not widely used in code below).
         """
+        data = protect_body(data, headers)
+        for key in list(headers):
+            if key.lower() == "content-length" and data is not None:
+                headers[key] = str(len(data))
         with requests.Session() as session:
             session.max_redirects = 3
             is_streaming = False
@@ -1245,6 +1250,10 @@ class ProxyService:
         """
         Make a base request with retries and error handling
         """
+        data = protect_body(data, headers, provider=api_provider)
+        for key in list(headers):
+            if key.lower() == "content-length" and data is not None:
+                headers[key] = str(len(data))
         raw_passthrough = (
             force_raw_passthrough
             or api_provider in RAW_PASSTHROUGH_PROVIDERS

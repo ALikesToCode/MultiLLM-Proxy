@@ -40,6 +40,7 @@ from services.provider_catalog_refresh import ProviderCatalogAutoRefresh
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 from services import usage_ledger
+from services.secret_firewall import init_secret_firewall
 
 _LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(name)s] %(message)s"
 _LOG_LEVELS = {
@@ -117,6 +118,7 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = flask_env != "development"
 
     init_error_handlers(app)
+    init_secret_firewall(app)
     AuthService.initialize()
     app.extensions["image_relay_catalog_refresh"] = ImageRelayCatalogRefresh()
     app.extensions["provider_catalog_refresh"] = ProviderCatalogAutoRefresh(

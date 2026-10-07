@@ -12,7 +12,7 @@ const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "knowledge:read", is_admin: 0,
   created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
   created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-  allowed_models: null, allowed_ips: null, expires_at: null, ...changes,
+  allowed_models: null, allowed_ips: null, expires_at: null, secret_scan_mode: null, ...changes,
 });
 
 async function database(options) {
@@ -189,5 +189,20 @@ test("the edge applies key expiry and address ranges the same way as the Contain
   for (const [address, allowed] of [["203.0.113.9", true], ["203.0.114.1", false], ["::ffff:203.0.113.5", true],
     ["2001:db8::1", true], ["2001:db9::1", false], ["198.51.100.7", true], ["198.51.100.8", false], [null, false], ["x", false]]) {
     assert.equal(keyControlsPermit(ranged, address, now), allowed, String(address));
+  }
+});
+
+test("secret mode persists and pre-0011 reads preserve existing controls", async () => {
+  for (const migrated of [true, false]) {
+    const { mf, call } = await database(migrated ? undefined : { skip: ["0011_secret_firewall.sql"] });
+    try {
+      assert.equal((await call({ operation: "upsert", user: user("reader", { daily_budget_usd: 2 }) })).status, 200);
+      const existing = (await call({ operation: "get", username: "reader" })).body.user;
+      assert.equal(existing.daily_budget_usd, 2); assert.equal(existing.secret_scan_mode, null);
+      for (const mode of ["off", "observe", "redact", "block"]) {
+        assert.equal((await call({ operation: "upsert", user: user("reader", { daily_budget_usd: 2, secret_scan_mode: mode }) })).status, migrated ? 200 : 503);
+        if (migrated) assert.equal((await call({ operation: "get", username: "reader" })).body.user.secret_scan_mode, mode);
+      }
+    } finally { await mf.dispose(); }
   }
 });

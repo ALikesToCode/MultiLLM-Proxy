@@ -321,6 +321,8 @@ def register_optimized_routes(
                                 status_code=503,
                             ) from error
                     except Exception as error:
+                        if isinstance(error, APIError) and error.status_code == 422 and (error.payload or {}).get("error") == "secret_detected":
+                            raise
                         logger.warning(
                             "Context summary skipped (%s)",
                             type(error).__name__,

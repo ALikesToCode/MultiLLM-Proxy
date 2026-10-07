@@ -207,5 +207,6 @@ def register_dashboard_security_routes(app) -> None:
             next_cursor=result["next"],
             filters=query,
             actions=audit_log.ACTIONS,
+            secret_events=audit_log.page(action="secret_scan", limit=50)["entries"] if available else [],
             current_user=current_user,
         )

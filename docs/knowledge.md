@@ -429,3 +429,8 @@ verified publication → indexed query → artifact citation, plus a version mis
 revoked read key and exhausted allowance. Check the visible dashboard and its
 network/console behavior in the approved browser session. Local tests and a
 deployment dry run do not establish live provider or deployed readiness.
+
+Knowledge arguments reject high-confidence secrets with HTTP 422 / `secret_detected`
+before provider fan-out or persistence, regardless of an effective `observe` or `redact`
+mode. An effective `off` mode bypasses inspection. Error bodies contain types and counts,
+never the matched text. See [outbound secret scanning](plans/2026-10-07-secret-firewall-design.md).

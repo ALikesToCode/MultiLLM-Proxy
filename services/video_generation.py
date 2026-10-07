@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 
 import requests
+from services.secret_firewall import protect_body, protect_payload
 from flask import Response
 
 from error_handlers import APIError
@@ -151,6 +152,10 @@ def _failure(status: int, message: str, transport: str | None = None) -> Respons
 
 def _send(method: str, url: str, *, timeout, **kwargs) -> requests.Response | Response:
     """One provider call without retries: a sent job may already be accepted and billed."""
+    if "json" in kwargs:
+        kwargs["json"] = protect_payload(kwargs["json"], provider="video")
+    if "data" in kwargs:
+        kwargs["data"] = protect_body(kwargs["data"], kwargs.get("headers"), provider="video")
     try:
         return requests.request(method, url, timeout=timeout, allow_redirects=False, **kwargs)
     except requests.exceptions.ConnectTimeout:

@@ -18,14 +18,14 @@ from services.intelligence_d1_store import PrivateIntelligenceError, request_pri
 
 logger = logging.getLogger(__name__)
 
-EVENT_ACTIONS = ("sign_in", "sign_out", "setting_change")
+EVENT_ACTIONS = ("sign_in", "sign_out", "setting_change", "secret_scan")
 ACCOUNT_ACTIONS = ("upsert", "delete")
 ACTIONS = ACCOUNT_ACTIONS + EVENT_ACTIONS
 OUTCOMES = frozenset({"succeeded", "refused"})
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
 MAX_FILTER_LENGTH = 256
-MAX_DETAIL_LENGTH = 512
+MAX_DETAIL_LENGTH = 1024
 READ_RETRY_DELAY_SECONDS = 0.25
 ENTRY_FIELDS = frozenset({
     "source", "id", "at", "actor", "action", "outcome", "target", "detail",
@@ -57,7 +57,7 @@ def record(action: str, outcome: str, *, actor: Any = None, target: Any = None, 
     payload = {
         "operation": "audit_record", "action": action, "outcome": outcome,
         "actor": _text(actor, MAX_FILTER_LENGTH), "target": _text(target, MAX_FILTER_LENGTH),
-        "detail": _text(detail, MAX_DETAIL_LENGTH),
+        "detail": _text(detail, MAX_DETAIL_LENGTH if action == "secret_scan" else 512),
     }
     try:
         response = request_private_intelligence(payload, endpoint="users")

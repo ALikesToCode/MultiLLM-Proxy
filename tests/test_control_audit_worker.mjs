@@ -137,3 +137,15 @@ test("an unavailable audit table fails closed without revealing storage details"
     assert.equal((await response.text()).includes("private database detail"), false);
   }
 });
+
+test("secret decisions reuse immutable audit storage and filter as secret_scan", async t => {
+  const { db, call } = await database(t);
+  assert.equal((await call(event("secret_scan", "succeeded", "reader", "/v1/chat/completions", "invalid JSON"))).status, 400);
+  const metadata = { mode: "redact", action: "redacted", provider: "opencode", types: { aws_access_key: 1 } };
+  assert.equal((await call(event("secret_scan", "succeeded", "reader", "/v1/chat/completions", JSON.stringify(metadata)))).status, 200);
+  const entries = (await call(list({ action: "secret_scan", limit: 50 }))).body.entries;
+  assert.equal(entries.length, 1); assert.equal(entries[0].action, "secret_scan");
+  assert.deepEqual(JSON.parse(entries[0].detail), { ...metadata, kind: "secret_scan" });
+  const stored = await db.prepare("SELECT action FROM control_audit_events").first();
+  assert.equal(stored.action, "setting_change");
+});

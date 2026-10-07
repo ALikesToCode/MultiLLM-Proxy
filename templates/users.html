@@ -135,7 +135,7 @@
                             <td role="cell" data-label="Actions">
                                 <div class="table-actions">
                                     <button class="button button--secondary button--sm" type="button" data-controls-user="{{ user.username }}"
-                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at} | tojson }}'
+                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at, "secret_scan_mode": user.secret_scan_mode} | tojson }}'
                                         aria-label="Limits for {{ user.username }}">Limits</button>
                                     <button class="button button--secondary button--sm" type="button" data-rotate-user="{{ user.username }}" aria-label="Rotate key for {{ user.username }}">Rotate key</button>
                                     <button class="button button--danger button--sm" type="button" data-delete-user="{{ user.username }}" aria-label="Delete {{ user.username }}"
@@ -180,6 +180,12 @@
             <span class="field-hint" id="key-allowed-ips-hint">One IP address or CIDR range per line, such as <code>203.0.113.0/24</code>.</span>
             <label class="form-field" for="key-expires-at">Expires (UTC)
                 <input id="key-expires-at" name="expires_at" class="field" type="datetime-local">
+            </label>
+            <label class="form-field" for="key-secret-scan-mode">Outbound secret scanning
+                <select id="key-secret-scan-mode" name="secret_scan_mode" class="field-select">
+                    <option value="">Global default</option><option value="redact">Redact</option>
+                    <option value="observe">Observe</option><option value="block">Block</option><option value="off">Off</option>
+                </select>
             </label>
             <div class="dialog__actions">
                 <button id="key-controls-cancel" class="button button--secondary" type="button">Cancel</button>

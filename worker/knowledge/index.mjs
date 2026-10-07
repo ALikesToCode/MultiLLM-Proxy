@@ -5,6 +5,7 @@ import { runIngestion } from "./ingestion.mjs";
 import { errorReply, fail, fields, KnowledgeError, readJson, reply } from "./contracts.mjs";
 import { logFailure } from "../log.mjs";
 import { MemoStore } from "./memo-store.mjs";
+import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 
 // Refusals are answers; unexpected faults and server-side failures are logged.
 function failure(event, error) {
@@ -56,7 +57,11 @@ export default {
       if (request.method !== "POST" || url.origin !== "http://knowledge.internal" || url.pathname !== "/v1/dispatch"
         || url.search || url.hash || url.username || url.password) fail("not_found", "Unknown Knowledge route.", 404);
       const body = await readJson(request);
-      return reply(await dispatchKnowledge(env, body, { signal: request.signal, waitUntil: promise => ctx.waitUntil(promise) }));
+      let decision;
+      const result = await dispatchKnowledge(env, body, { signal: request.signal, waitUntil: promise => ctx.waitUntil(promise), onSecretScan: value => { decision = value; } });
+      const response = reply(result);
+      if (decision?.header) response.headers.set(SECRET_SCAN_HEADER, decision.header);
+      return response;
     } catch (error) { return failure("knowledge_request_failed", error); }
   },
   async scheduled(_event, env, ctx) {

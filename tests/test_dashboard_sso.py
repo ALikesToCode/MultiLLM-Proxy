@@ -308,7 +308,7 @@ def test_audit_page_filters_and_pages_through_the_private_handler(client, monkey
     admin(client)
     response = client.get("/admin/audit?actor=owner&action=sign_in&before=40:&limit=20")
     assert response.status_code == 200
-    assert domain.calls[-1] == {"operation": "audit_list", "actor": "owner", "target": None, "action": "sign_in",
+    assert domain.calls[-2] == {"operation": "audit_list", "actor": "owner", "target": None, "action": "sign_in",
                                 "before_account": 40, "before_event": None, "limit": 20}
     html = response.get_data(as_text=True)
     assert "method=access email=owner@example.com" in html and "mallory" in html and "mllm_abcdefgh" in html

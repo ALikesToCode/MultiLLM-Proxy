@@ -12,6 +12,7 @@ import requests
 from flask import Response
 
 from services.media_catalog import TRANSPORT_FAILURE_HEADER
+from services.secret_firewall import protect_payload
 
 ORIGIN = "http://ai.internal"
 IMAGE_TIMEOUT = (5, 600)
@@ -37,6 +38,7 @@ def _transport_failure(kind: str) -> Response:
 
 def post(path: str, payload: dict, timeout) -> requests.Response | Response:
     """One private call, never retried: a sent generation may already be billed."""
+    payload = protect_payload(payload, provider="cloudflare")
     with requests.Session() as session:
         session.trust_env = False
         try:

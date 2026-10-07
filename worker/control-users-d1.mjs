@@ -7,7 +7,7 @@ import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at"]);
+  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode"]);
 // Migration 0007 added the per-key controls. Until it is applied, reads return the
 // older columns with no controls, so deploying before migrating cannot lock keys out.
 const CONTROL_FIELDS = USER_FIELDS.slice(12);
@@ -32,12 +32,14 @@ const reply = (value, status = 200) => Response.json(value.error
 const fields = (body, names) => Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
 
 export function validUser(user) {
+  if (user && !Object.hasOwn(user, "secret_scan_mode")) user = { ...user, secret_scan_mode: null };
   return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS)
     && text(user.username, 128) && text(user.api_key_hash, 512) && text(user.api_key_prefix, 64)
     && typeof user.scopes === "string" && user.scopes.length <= 512 && /^[A-Za-z0-9:_.,-]*$/.test(user.scopes)
     && (user.is_admin === 0 || user.is_admin === 1) && text(user.created_at, 64)
     && ["last_login", "last_used_at", "rotated_at", "revoked_at"].every(name => optionalText(user[name], 64))
     && optionalText(user.last_used_ip, 128) && optionalText(user.created_by, 128)
+    && (user.secret_scan_mode === null || ["off", "observe", "redact", "block"].includes(user.secret_scan_mode))
     && budget(user.daily_budget_usd) && budget(user.monthly_budget_usd)
     && list(user.allowed_models, MODEL_PATTERNS) && list(user.allowed_ips, IP_RANGES)
     && (user.expires_at === null || (text(user.expires_at, 64) && Number.isFinite(Date.parse(user.expires_at))));
@@ -128,8 +130,15 @@ async function readUsers(query) {
   catch (error) {
     if (!missingColumn(error)) throw error;
     logFailure("account_controls_unmigrated", error);
-    const rows = await read(() => query(LEGACY_FIELDS.join(", ")));
-    return Array.isArray(rows) ? rows.map(withoutControls) : withoutControls(rows);
+    try {
+      const rows = await read(() => query(USER_FIELDS.slice(0, -1).join(", ")));
+      const defaults = row => row && { ...row, secret_scan_mode: null };
+      return Array.isArray(rows) ? rows.map(defaults) : defaults(rows);
+    } catch (older) {
+      if (!missingColumn(older)) throw older;
+      const rows = await read(() => query(LEGACY_FIELDS.join(", ")));
+      return Array.isArray(rows) ? rows.map(withoutControls) : withoutControls(rows);
+    }
   }
 }
 
@@ -214,7 +223,7 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"]) || !validUser(body.user)) break;
-        const user = body.user;
+        const user = { secret_scan_mode: null, ...body.user };
         if (grantsAdmin(user) && !adminUsernames(env).has(user.username)) {
           logFailure("account_admin_refused", new Error("Administration is not configured for this username"));
           await audit(db, "upsert", "refused", user).run();
@@ -225,8 +234,13 @@ export async function handleControlUsersRequest(request, env) {
           await db.batch([upsertStatement(db, user, USER_FIELDS), audit(db, "upsert", "stored", user)]);
         } catch (error) {
           // Before migration 0007 an account without controls can still be stored; controls cannot.
-          if (!missingColumn(error) || CONTROL_FIELDS.some(name => user[name] !== null)) throw error;
-          await db.batch([upsertStatement(db, user, LEGACY_FIELDS), audit(db, "upsert", "stored", user)]);
+          if (!missingColumn(error) || user.secret_scan_mode !== null) throw error;
+          try {
+            await db.batch([upsertStatement(db, user, USER_FIELDS.slice(0, -1)), audit(db, "upsert", "stored", user)]);
+          } catch (older) {
+            if (!missingColumn(older) || CONTROL_FIELDS.slice(0, -1).some(name => user[name] !== null)) throw older;
+            await db.batch([upsertStatement(db, user, LEGACY_FIELDS), audit(db, "upsert", "stored", user)]);
+          }
         }
         return reply({ version: 1, stored: true });
       }

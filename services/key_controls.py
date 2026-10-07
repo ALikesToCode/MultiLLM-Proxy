@@ -15,7 +15,7 @@ from typing import Any, Mapping, Optional
 
 from error_handlers import APIError
 
-CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at")
+CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")
 MAX_BUDGET_USD = 1_000_000_000
 MAX_PATTERNS = 64
 MAX_RANGES = 64
@@ -115,6 +115,11 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
     unknown = set(payload) - set(CONTROL_FIELDS)
     if unknown:
         raise APIError(f"Unknown key control: {sorted(unknown)[0][:64]}", 400)
+    mode = payload.get("secret_scan_mode")
+    if mode == "":
+        mode = None
+    if mode is not None and (not isinstance(mode, str) or mode not in {"off", "observe", "redact", "block"}):
+        raise APIError("secret_scan_mode must be off, observe, redact or block", 400)
     expires_at = _parse_time(payload.get("expires_at"))
     return {
         "daily_budget_usd": _budget(payload.get("daily_budget_usd"), "daily_budget_usd"),
@@ -122,6 +127,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_models": _models(payload.get("allowed_models")),
         "allowed_ips": _ranges(payload.get("allowed_ips")),
         "expires_at": expires_at.isoformat() if expires_at else None,
+        "secret_scan_mode": mode,
     }
 
 
@@ -132,7 +138,7 @@ def from_storage(row: Mapping[str, Any]) -> dict[str, Any]:
         value = row.get(name) if hasattr(row, "get") else row[name]
         if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= MAX_BUDGET_USD:
             controls[name] = float(value)
-    for name in ("allowed_models", "allowed_ips", "expires_at"):
+    for name in ("allowed_models", "allowed_ips", "expires_at", "secret_scan_mode"):
         value = row.get(name) if hasattr(row, "get") else row[name]
         controls[name] = value if isinstance(value, str) and value else None
     return controls
@@ -154,6 +160,7 @@ def public(controls: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_models": model_patterns(controls),
         "allowed_ips": ip_ranges(controls),
         "expires_at": controls.get("expires_at"),
+        "secret_scan_mode": controls.get("secret_scan_mode"),
     }
 
 

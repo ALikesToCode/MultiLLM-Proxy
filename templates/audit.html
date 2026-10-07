@@ -9,7 +9,7 @@
 {% block content %}
 {% set action_labels = {
     'upsert': 'Account saved', 'delete': 'Account deleted', 'sign_in': 'Sign-in',
-    'sign_out': 'Sign-out', 'setting_change': 'Setting change',
+    'sign_out': 'Sign-out', 'setting_change': 'Setting change', 'secret_scan': 'Secret scan',
 } %}
 {% set outcome_tones = {
     'stored': 'tone-positive', 'deleted': 'tone-warning', 'missing': 'tone-neutral', 'refused': 'tone-danger',
@@ -29,6 +29,15 @@
     {% if not available %}
     <p class="callout callout--neutral">The audit log is stored in the Worker's D1 database. It is available when accounts use D1 storage (<code>AUTH_STORAGE_BACKEND=d1</code>).</p>
     {% else %}
+    <section class="panel" aria-labelledby="secret-scan-heading">
+        <header class="panel__header"><div><h2 id="secret-scan-heading">Latest 50 secret scans</h2>
+            <p>Key, route, action, provider and finding counts. Secret values are never recorded.</p></div></header>
+        <div class="table-scroll"><table class="data-table">
+            <thead><tr><th scope="col">When</th><th scope="col">Key</th><th scope="col">Route</th><th scope="col">Details</th></tr></thead>
+            <tbody>{% for event in secret_events %}<tr><td>{{ event.at }}</td><td>{{ event.actor or 'Unknown' }}</td>
+                <td>{{ event.target }}</td><td>{{ event.detail }}</td></tr>{% else %}<tr><td colspan="4">No secret scan events.</td></tr>{% endfor %}</tbody>
+        </table></div>
+    </section>
     <section class="panel" aria-labelledby="audit-heading">
         <header class="panel__header">
             <div>

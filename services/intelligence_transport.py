@@ -22,6 +22,7 @@ from services.reasoning_policy import (
     apply_sol_reasoning_policy,
 )
 from services.upstream_transport import iter_stream_content
+from services.secret_firewall import protect_body
 
 _TRANSPORT_SLOTS = threading.BoundedSemaphore(32)
 logger = logging.getLogger(__name__)
@@ -351,6 +352,8 @@ class IntelligenceTransport:
         if content_type:
             headers["Content-Type"] = content_type
 
+        dispatch_data = protect_body(upstream.data if data is None else data, headers, provider=provider)
+
         def send():
             seconds = remaining(deadline, cancelled)
             return self.proxy.make_request(
@@ -358,7 +361,7 @@ class IntelligenceTransport:
                 url=url,
                 headers=headers,
                 params={},
-                data=upstream.data if data is None else data,
+                data=dispatch_data,
                 api_provider=provider,
                 use_cache=False,
                 timeout_override=(min(5, seconds), seconds),

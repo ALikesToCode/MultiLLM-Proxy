@@ -15,7 +15,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-from flask import Response, copy_current_request_context, jsonify
+from flask import Response, copy_current_request_context, g, jsonify
 
 from error_handlers import APIError
 from routes.auto_routes import AutoRouteCandidateUnavailable, dispatch_auto_route
@@ -64,6 +64,8 @@ def _dispatch_single(payload: dict, validate_candidate: Callable[[str], None],
         try:
             return dispatch_candidate(prepared)
         except APIError as error:
+            if (error.payload or {}).get("error") == "secret_detected":
+                raise
             if error.status_code in _PRE_GENERATION_STATUSES:
                 raise AutoRouteCandidateUnavailable(error.message) from error
             raise
@@ -92,18 +94,38 @@ def run_image_tasks(tasks: list[Callable[[], Response]]) -> list[dict]:
         try:
             return _read(task())
         except APIError as error:
-            return {"status": error.status_code, "body": {"error": {"message": error.message}}, "headers": {}}
+            body = {"error": {"message": error.message}}
+            if (error.payload or {}).get("error") == "secret_detected":
+                body = {**error.payload, "message": error.message}
+            return {"status": error.status_code, "body": body, "headers": {}}
         except Exception as error:  # One failed image must not discard the others.
             logger.warning("Image task failed (%s)", type(error).__name__)
             return {"status": 502, "body": {"error": {"message": "The image request failed"}}, "headers": {}}
 
+    user = getattr(g, "authenticated_user", None)
+
+    def with_controls(task):
+        # A copied request context creates a fresh g in each worker thread.
+        g.authenticated_user = user
+        result = finish(task)
+        return result, getattr(g, "secret_scan_counts", [0, 0])
+
     with ThreadPoolExecutor(max_workers=min(IMAGE_PARALLELISM, len(tasks))) as pool:
-        futures = [pool.submit(copy_current_request_context(lambda task=task: finish(task))) for task in tasks]
-        return [future.result() for future in futures]
+        futures = [pool.submit(copy_current_request_context(lambda task=task: with_controls(task))) for task in tasks]
+        completed = [future.result() for future in futures]
+    counts = getattr(g, "secret_scan_counts", [0, 0])
+    for _, scanned in completed:
+        counts = [counts[0] + scanned[0], counts[1] + scanned[1]]
+    if any(counts):
+        g.secret_scan_counts = counts
+    return [result for result, _ in completed]
 
 
 def _error(result: dict) -> dict:
     error = (result.get("body") or {}).get("error")
+    if error == "secret_detected":
+        return {"status": 422, "code": "secret_detected", "message": "High-confidence secrets detected in outbound content",
+                "types": result["body"].get("types", {})}
     message = error.get("message") if isinstance(error, dict) else error if isinstance(error, str) else None
     return {"status": result["status"], "message": message or f"The image request failed with HTTP {result['status']}"}
 

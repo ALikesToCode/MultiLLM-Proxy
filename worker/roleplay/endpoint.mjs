@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 import { clientContextHeaders } from "../client-headers.mjs";
 import { TurnTraceJournal } from "./turn-trace.mjs";
 import { handleOperatorMemory } from "./operator-memory.mjs";
@@ -177,7 +178,15 @@ export class RoleplaySession extends DurableObject {
   }
 
   async handleTurn(request, settings, queueMs = 0, trace = null) {
-    settings = { ...settings, clientHeaders: clientContextHeaders(request.headers, "opencode") };
+    const scanCounts = [0, 0];
+    const applyScanHeader = headers => {
+      if (scanCounts.some(Boolean)) headers.set(SECRET_SCAN_HEADER, `redacted=${scanCounts[0]}; observed=${scanCounts[1]}`);
+    };
+    settings = { ...settings, clientHeaders: clientContextHeaders(request.headers, "opencode"), onSecretScan: decision => {
+      if (!decision.report || decision.blocked) return;
+      scanCounts[0] += decision.action === "redacted" ? decision.report.high : 0;
+      scanCounts[1] += decision.report.heuristic + (decision.action === "observed" ? decision.report.high : 0);
+    } };
     const turnStartedAt = performance.now();
     let compactionMs = 0;
     const payload = await request.json();
@@ -378,6 +387,14 @@ export class RoleplaySession extends DurableObject {
             capacitySettings,
             request.signal,
           );
+          if (compacted.blockedResponse) {
+            state = markRoleplayRequest(state, idempotencyKey, "provider_failed");
+            await this.stateRepository.save(state);
+            return {
+              response: compacted.blockedResponse,
+              completion: Promise.resolve(),
+            };
+          }
           compactionDigest = compacted.digest;
           if (plan.forced && !compactionDigest.compact) {
             throw new Error("Model declined required memory compaction");
@@ -609,6 +626,8 @@ export class RoleplaySession extends DurableObject {
       timings,
     );
 
+    applyScanHeader(responseHeaders);
+
     if (
       parsed.stream &&
       response.body &&
@@ -801,6 +820,7 @@ export class RoleplaySession extends DurableObject {
     if (trace) await trace.finish(completionResult.success, completionResult.reason, (metadata) => this.stateRepository.save(state, metadata));
     else await this.stateRepository.save(state);
     await preserveRecovery(this.ctx.storage, recovery, completionResult, trace?.id);
+    applyScanHeader(responseHeaders);
     return {
       response: new Response(responseBytes, {
         status: response.status,

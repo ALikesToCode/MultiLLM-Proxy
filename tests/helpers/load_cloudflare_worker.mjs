@@ -389,6 +389,7 @@ export async function roleplayModuleUrl() {
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
+      .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
       .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace(
         'from "./capacity.mjs";',
@@ -482,6 +483,7 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./recovery.mjs";', `from "${new URL("../../worker/roleplay/recovery.mjs", import.meta.url)}";`)
     .replace('from "./operator-memory.mjs";', `from "${new URL("../../worker/roleplay/operator-memory.mjs", import.meta.url)}";`)
@@ -720,6 +722,7 @@ export async function loadWorkerModule() {
   );
   const patchedSource = source
     .replace('from "./worker/cors-policy.mjs";', `from "${new URL("../../worker/cors-policy.mjs", import.meta.url)}";`)
+    .replace('from "./worker/secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/d1-schema.mjs";', `from "${new URL("../../worker/d1-schema.mjs", import.meta.url)}";`)
     .replace('from "./worker/ai-outbound.mjs";', `from "${new URL("../../worker/ai-outbound.mjs", import.meta.url)}";`)

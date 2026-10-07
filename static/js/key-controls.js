@@ -5,6 +5,7 @@
     /** The PUT /users/<name>/controls body for the dialog's field values. */
     function controlsPayload(fields) {
         return {
+            secret_scan_mode: fields.secret_scan_mode || null,
             daily_budget_usd: amount(fields.daily_budget_usd),
             monthly_budget_usd: amount(fields.monthly_budget_usd),
             allowed_models: lines(fields.allowed_models),
@@ -45,6 +46,7 @@
         field('monthly_budget_usd').value = controls.monthly_budget_usd ?? '';
         field('allowed_models').value = (controls.allowed_models || []).join('\n');
         field('allowed_ips').value = (controls.allowed_ips || []).join('\n');
+        field('secret_scan_mode').value = controls.secret_scan_mode ?? '';
         field('expires_at').value = controls.expires_at ? String(controls.expires_at).slice(0, 16) : '';
         if (typeof dialog.showModal === 'function') {
             dialog.showModal();

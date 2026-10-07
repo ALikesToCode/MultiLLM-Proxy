@@ -1236,7 +1236,7 @@ test("worker keeps Gemini provider secrets out of upstream URLs and failure logs
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker streams gated LinkAPI request and response bodies without retrying the generation POST", async () => {
+test("worker streams gated LinkAPI request and response bodies without retrying the generation POST in off mode", async () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let releaseRequest;
@@ -1275,6 +1275,7 @@ test("worker streams gated LinkAPI request and response bodies without retrying 
     },
     {
       ADMIN_API_KEY: "admin-live-key",
+      SECRET_SCAN_DEFAULT: "off",
       LINKAPI_KEY: "linkapi-live-key",
     },
   );
@@ -1893,7 +1894,7 @@ test("worker preserves Codex Everywhere multipart uploads and binary image respo
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetches once", async () => {
+test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetches once in off mode", async () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let releaseRequest;
@@ -1932,6 +1933,7 @@ test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetch
     },
     {
       ADMIN_API_KEY: "admin-live-key",
+      SECRET_SCAN_DEFAULT: "off",
       CODEX_EASY_API_KEY: "codex-easy-live-key",
     },
   );
@@ -3220,7 +3222,7 @@ test("worker preserves native OpenCode Go Responses events", async () => {
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker streams OpenCode request bodies without buffering", async () => {
+test("worker streams OpenCode request bodies without buffering in off mode", async () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let releaseTail;
@@ -3246,6 +3248,7 @@ test("worker streams OpenCode request bodies without buffering", async () => {
     },
     {
       ADMIN_API_KEY: "admin-live-key",
+      SECRET_SCAN_DEFAULT: "off",
       OPENCODE_API_KEY: "opencode-live-key",
     },
   );

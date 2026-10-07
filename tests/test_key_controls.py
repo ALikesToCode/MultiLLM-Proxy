@@ -20,7 +20,7 @@ def test_validation_normalizes_every_control():
         "daily_budget_usd": 5.0, "monthly_budget_usd": 50.123457,
         "allowed_models": "auto:*,free:*,openai:gpt-4.1",
         "allowed_ips": "203.0.113.7/32,198.51.100.0/24,2001:db8::/32,192.0.2.1/32",
-        "expires_at": "2026-10-01T12:00:00+00:00",
+        "expires_at": "2026-10-01T12:00:00+00:00", "secret_scan_mode": None,
     }
     assert key_controls.validate({}) == key_controls.empty()
     assert key_controls.validate({"allowed_models": [], "allowed_ips": "", "daily_budget_usd": None}) == key_controls.empty()
@@ -100,16 +100,19 @@ def test_sqlite_accounts_keep_controls_through_rotation_and_backups(tmp_path, mo
     AuthService.initialize()
     with patch.object(AuthService, "get_current_user", return_value={"username": "admin", "is_admin": True}):
         AuthService.create_user("agent", scopes=["chat"])
-        AuthService.set_key_controls("agent", {"daily_budget_usd": 3, "allowed_models": ["free:*"]})
+        AuthService.set_key_controls("agent", {"daily_budget_usd": 3, "allowed_models": ["free:*"], "secret_scan_mode": "block"})
         with pytest.raises(APIError, match="break-glass|cannot expire"):
             AuthService.set_key_controls("admin", {"expires_at": "2099-01-01T00:00:00Z"})
         key = AuthService.rotate_api_key("agent")["api_key"]
     user = AuthService.verify_api_key(key)
     assert (user["daily_budget_usd"], user["allowed_models"]) == (3.0, ["free:*"])
 
+    assert user["secret_scan_mode"] == "block"
+
     document = capture()
     [row] = [item for item in document["tables"]["users"] if item["username"] == "agent"]
     assert row["daily_budget_usd"] == 3.0 and row["allowed_models"] == "free:*"
+    assert row["secret_scan_mode"] == "block"
     for item in document["tables"]["users"]:
         for name in key_controls.CONTROL_FIELDS:
             item.pop(name)
@@ -129,5 +132,5 @@ def test_stored_values_are_read_defensively():
     row = {"daily_budget_usd": 2, "monthly_budget_usd": "9", "allowed_models": "", "allowed_ips": "10.0.0.0/8",
            "expires_at": None}
     assert key_controls.from_storage(row) == {"daily_budget_usd": 2.0, "monthly_budget_usd": None,
-                                              "allowed_models": None, "allowed_ips": "10.0.0.0/8", "expires_at": None}
+                                              "allowed_models": None, "allowed_ips": "10.0.0.0/8", "expires_at": None, "secret_scan_mode": None}
     assert key_controls.public(row)["allowed_ips"] == ["10.0.0.0/8"]

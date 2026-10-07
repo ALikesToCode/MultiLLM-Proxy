@@ -13,6 +13,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import quote, urlsplit
@@ -301,6 +302,9 @@ def _gateway(method: str, path: str, body: dict | None = None, *, limit: int = M
         parsed = json.loads(raw) if raw else None
     except ValueError:
         parsed = None
+    scan_header = reply_headers.get("X-MultiLLM-Secret-Scan")
+    if scan_header and re.fullmatch(r"redacted=\d+; observed=\d+", scan_header):
+        g.secret_scan_counts = [int(value) for value in re.findall(r"\d+", scan_header)]
     return GatewayReply(status, reply_headers, parsed)
 
 
@@ -313,6 +317,8 @@ def _error_result(reply: GatewayReply) -> dict[str, Any]:
     result: dict[str, Any] = {"error": {"status": reply.status, "code": str(code or "gateway_error")[:100],
                                         "message": str(message)[:2000]}, "retried": False,
                               "gateway": reply.gateway}
+    if code == "secret_detected":
+        result["error"]["types"] = body.get("types", details.get("types", {}))
     if details:
         result["error"]["details"] = {key: value for key, value in details.items() if key not in {"code", "message"}}
     if reply.status in {502, 504} or reply.headers.get("X-MultiLLM-Transport-Failure") in {"timeout", "interrupted"}:
@@ -670,7 +676,11 @@ def _mcp():
     if not _visible(tool):
         return _rpc_result(identifier, _tool_error(
             "insufficient_scope", f"The key needs the {tool['scope']} scope for this tool."))
-    return _rpc_result(identifier, call_tool(name, arguments))
+    result = call_tool(name, arguments)
+    error = result.get("structuredContent", {}).get("error", {})
+    if error.get("code") == "secret_detected":
+        return jsonify(result["structuredContent"]), 422
+    return _rpc_result(identifier, result)
 
 
 def _entry_scope() -> str:

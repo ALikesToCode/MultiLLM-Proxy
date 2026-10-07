@@ -95,7 +95,7 @@ test("durable read keys discover and call only read tools through the private se
   const body = await response.json();
   assert.deepEqual(body.result.structuredContent, { status: "ok", excerpts: [] });
   assert.equal(body.result.isError, false);
-  assert.deepEqual(dispatched, [{ version: 1, operation: "context",
+  assert.deepEqual(dispatched, [{ version: 1, secret_scan_checked: true, secret_scan_mode: "block", operation: "context",
     principal: { id: "integration:agents", scopes: ["knowledge:read"] }, payload: { query: "limits", product: "flask" } }]);
   const denied = await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_policy_update", arguments: {} }))).json();
   assert.equal(denied.result.isError, true);
@@ -110,7 +110,7 @@ test("admin and manager principals see every tool with only Knowledge scopes for
     const tools = (await (await call(env, mcpRequest(key, "tools/list"))).json()).result.tools;
     assert.equal(tools.length, catalogue.tools.length);
     await call(env, mcpRequest(key, "tools/call", { name: "knowledge_status" }));
-    assert.deepEqual(dispatched.at(-1), { version: 1, operation: "status", principal: { id, scopes: expected }, payload: {} });
+    assert.deepEqual(dispatched.at(-1), { version: 1, operation: "status", principal: { id, scopes: expected }, payload: {}, secret_scan_checked: true, secret_scan_mode: "block" });
   }
 });
 
@@ -302,7 +302,7 @@ test("provider tools are served at the edge over MCP and REST", async () => {
   const rest = await call(env, new Request(`${ORIGIN}/v1/knowledge/native/firecrawl_map`, { method: "POST",
     headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" }, body: JSON.stringify({ url: "https://docs.python.org/3/" }) }));
   assert.equal(rest.status, 200);
-  assert.deepEqual(dispatched.at(-1), { version: 1, operation: "native.firecrawl_map",
+  assert.deepEqual(dispatched.at(-1), { version: 1, secret_scan_checked: true, secret_scan_mode: "block", operation: "native.firecrawl_map",
     principal: { id: "integration:agents", scopes: ["knowledge:read"] }, payload: { url: "https://docs.python.org/3/" } });
   assert.equal(await handleKnowledgeEdgeRequest(new Request(`${ORIGIN}/v1/knowledge/native/unknown_tool`, { method: "POST",
     headers: { authorization: `Bearer ${reader.key}` } }), env), null);

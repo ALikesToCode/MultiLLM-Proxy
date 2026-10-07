@@ -19,11 +19,11 @@ USER_FIELDS = (
     "username", "api_key_hash", "api_key_prefix", "scopes", "is_admin", "created_at",
     "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
     # Per-key controls (migration 0007); NULL means no budget, every model, no expiry, any address.
-    "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at",
+    "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode",
 )
 _REQUIRED_TEXT = ("username", "api_key_hash", "api_key_prefix", "scopes", "created_at")
 _OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-                  "allowed_models", "allowed_ips", "expires_at")
+                  "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")
 _OPTIONAL_NUMBER = ("daily_budget_usd", "monthly_budget_usd")
 PAGE_SIZE = 200
 READ_OPERATIONS = frozenset({"list", "get", "by_prefix"})
@@ -76,6 +76,8 @@ def _call(operation, **values):
 
 
 def _row(value):
+    if isinstance(value, dict) and "secret_scan_mode" not in value:
+        value = {**value, "secret_scan_mode": None}
     if (
         not isinstance(value, dict)
         or set(value) != set(USER_FIELDS)

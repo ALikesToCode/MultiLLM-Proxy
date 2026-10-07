@@ -211,3 +211,11 @@ Backups and private `example.json` are excluded from Git and the Container image
 Roleplay session state remains in Cloudflare Durable Objects, not this backup.
 Provider secrets remain in the deployment secret store. This feature neither
 exports those secrets nor changes the configured upstream credentials.
+
+## Outbound secret scanning
+
+Per-key controls include nullable `secret_scan_mode` (`off`, `observe`, `redact`, `block`).
+Migration `0011_secret_firewall.sql` adds the D1 column; an unset override uses
+`SECRET_SCAN_DEFAULT`, which defaults to `redact`. `/admin/audit` lists the latest 50
+scan decisions with counts only. See [the design](plans/2026-10-07-secret-firewall-design.md)
+for dispatch coverage, bounded inspection and rollout requirements.

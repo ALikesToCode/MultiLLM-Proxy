@@ -11,6 +11,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from services.knowledge_native import NATIVE_OPERATIONS
+from services.secret_firewall import protect_payload, scan_mode
 
 ENDPOINT = "http://knowledge.internal/v1/dispatch"
 MAX_REQUEST_BYTES = 65536
@@ -149,8 +150,10 @@ def dispatch(operation, user, payload=None):
         if operation == "status":
             return setup_status()
         raise KnowledgeError("setup_needed", "The private Knowledge service has not been connected.")
+    payload = protect_payload(payload or {}, provider="knowledge", user=user, knowledge=True)
     envelope = {"version": 1, "operation": operation,
-                "principal": principal_for(user), "payload": payload or {}}
+                "principal": principal_for(user), "payload": payload,
+                "secret_scan_mode": scan_mode(user, knowledge=True), "secret_scan_checked": True}
     body = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(body) > MAX_REQUEST_BYTES:
         raise KnowledgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413)

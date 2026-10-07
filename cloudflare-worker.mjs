@@ -1,3 +1,4 @@
+import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
 import { d1Readiness } from "./worker/d1-schema.mjs";
@@ -129,6 +130,7 @@ const LINKAPI_RESPONSE_HEADER_WHITELIST = new Set([
   "vary",
   "x-request-id",
   "x-should-retry",
+  "x-multillm-secret-scan",
 ]);
 const LINKAPI_RESPONSE_HEADER_PREFIXES = [
   "anthropic-ratelimit-",
@@ -164,6 +166,7 @@ const CODEX_EASY_RESPONSE_HEADER_WHITELIST = new Set([
   "vary",
   "x-request-id",
   "x-should-retry",
+  "x-multillm-secret-scan",
 ]);
 const CODEX_EASY_RESPONSE_HEADER_PREFIXES = ["ratelimit-", "x-ratelimit-"];
 
@@ -1487,7 +1490,10 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
     signal: request.signal,
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await fetch(upstreamRequest);
+  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+    provider: requestUrl.pathname.split("/")[1],
+  });
 
   if (isOpencodeNativeRequest(requestUrl.pathname, request.method)) {
     const downstreamResponse = new Response(upstreamResponse.body, {
@@ -1619,7 +1625,10 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await fetch(upstreamRequest);
+  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+    provider: requestUrl.pathname.split("/")[1],
+  });
 
   return applyCorsHeaders(
     request,
@@ -1674,7 +1683,10 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await fetch(upstreamRequest);
+  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+    provider: requestUrl.pathname.split("/")[1],
+  });
 
   return applyCorsHeaders(
     request,

@@ -12,6 +12,7 @@ import { authStorageBackend } from "./container-env.mjs";
 import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { protectPayload, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
 const KEY_NAMESPACE = "mllm_intelligence_";
@@ -169,7 +170,7 @@ async function accountPrincipal(env, key, clientAddress) {
   // An expired key, or one used outside its address ranges, is never served here; the
   // Container refuses it with key_expired or ip_not_allowed.
   if (index >= 0 && !keyControlsPermit(verifiable[index], clientAddress)) return null;
-  if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env) } };
+  if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env), secret_scan_mode: verifiable[index].secret_scan_mode } };
   // A hash format the edge cannot check is left to the Container.
   return verifiable.length < users.length ? null : { denied: true };
 }
@@ -244,7 +245,15 @@ function contractCheck(status) {
 }
 
 async function dispatch(env, operation, principal, payload, signal) {
-  const body = JSON.stringify({ version: 1, operation, principal, payload });
+  const decision = await protectPayload(payload, env, { principal, knowledge: true, provider: "knowledge", route: `/v1/knowledge/${operation}` });
+  if (decision.blocked) {
+    const error = new KnowledgeEdgeError("secret_detected", "High-confidence secrets detected in outbound content", 422);
+    error.blockedResponse = decision.blocked;
+    throw error;
+  }
+  if (decision.header) principal.secretScanHeader = decision.header;
+  const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes }, payload,
+    secret_scan_mode: decision.mode, secret_scan_checked: true });
   if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
@@ -343,6 +352,7 @@ async function callTool(env, request, principal, id, params) {
     return rpcResult(id, toolResult);
   } catch (error) {
     if (!(error instanceof KnowledgeEdgeError)) throw error;
+    if (error.blockedResponse) return error.blockedResponse;
     return failure(error.code, error.message);
   }
 }
@@ -469,7 +479,7 @@ async function handleRest(request, env, principal, route) {
     return json(await dispatch(env, route.operation, principal, payload, request.signal));
   } catch (error) {
     if (!(error instanceof KnowledgeEdgeError)) throw error;
-    return restError(error.code, error.message, error.status);
+    return error.blockedResponse ?? restError(error.code, error.message, error.status);
   }
 }
 
@@ -495,7 +505,9 @@ export async function handleKnowledgeEdgeRequest(request, env) {
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${scope} scope` }, 403);
   }
   try {
-    return route === "mcp" ? await handleMcp(request, env, principal) : await handleRest(request, env, principal, route);
+    const response = route === "mcp" ? await handleMcp(request, env, principal) : await handleRest(request, env, principal, route);
+    if (response.ok && principal.secretScanHeader) response.headers.set(SECRET_SCAN_HEADER, principal.secretScanHeader);
+    return response;
   } catch {
     const error = unavailable();
     return route === "mcp" ? rpcError(null, -32603, error.message, error.status) : restError(error.code, error.message, error.status);

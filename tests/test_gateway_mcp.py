@@ -2,7 +2,8 @@
 
 import base64
 import json
-from unittest.mock import patch
+import os
+from unittest.mock import patch, Mock
 
 import requests
 
@@ -190,6 +191,24 @@ class GatewayMcpTest(UnifiedApiTestCase):
         self.assertEqual([message["role"] for message in sent["messages"]], ["system", "user"])
         self.assertEqual(sent["max_tokens"], gateway_mcp.DEFAULT_MAX_TOKENS)
         self.assertNotIn("stream", sent)
+
+    def test_secret_firewall_counts_and_blocks_survive_the_inner_rest_context(self):
+        token = "AK" + "IA" + "AB12CD34EF56GH78"
+        for mode in ("redact", "block"):
+            session = Mock()
+            session.request.return_value = upstream(200, {"choices": [{"message": {"content": "safe reply"}}]})
+            with patch.dict(os.environ, {"SECRET_SCAN_DEFAULT": mode}), \
+                    patch.object(self.app_module.ProxyService, "_get_provider_session", return_value=session), \
+                    patch.object(self.app_module.ProxyService, "_circuit_open_response", return_value=None):
+                response = self.rpc("tools/call", {"name": "chat", "arguments": {"model": "opencode:glm-5.2", "prompt": token}})
+            self.assertEqual(response.status_code, 422 if mode == "block" else 200, response.get_data(as_text=True))
+            self.assertNotIn(token, response.get_data(as_text=True))
+            if mode == "block":
+                session.request.assert_not_called()
+                self.assertEqual(response.json["error"]["types"], {"aws_access_key": 1})
+            else:
+                self.assertNotIn(token.encode(), session.request.call_args.kwargs["data"])
+                self.assertEqual(response.headers.get("X-MultiLLM-Secret-Scan"), "redacted=1; observed=0")
 
     def test_chat_defaults_to_the_free_text_pool(self):
         with patch("services.free_model_policy.build_model_catalog", return_value=[]), \

@@ -8,7 +8,7 @@
 import { logFailure } from "./log.mjs";
 
 export const AUDIT_OPERATIONS = new Set(["audit_list", "audit_record"]);
-export const EVENT_ACTIONS = new Set(["sign_in", "sign_out", "setting_change"]);
+export const EVENT_ACTIONS = new Set(["sign_in", "sign_out", "setting_change", "secret_scan"]);
 export const ACCOUNT_ACTIONS = new Set(["upsert", "delete"]);
 const OUTCOMES = new Set(["succeeded", "refused"]);
 const MAX_AUDIT_PAGE = 100;
@@ -29,10 +29,20 @@ async function read(query) {
 async function recordEvent(db, body) {
   if (!fields(body, ["version", "operation", "action", "outcome", "actor", "target", "detail"])
     || !EVENT_ACTIONS.has(body.action) || !OUTCOMES.has(body.outcome) || !optionalText(body.actor, 256)
-    || !optionalText(body.target, 256) || !optionalText(body.detail, 512)) return null;
+    || !optionalText(body.target, 256) || !optionalText(body.detail, body.action === "secret_scan" ? 1024 : 512)) return null;
+  const action = body.action === "secret_scan" ? "setting_change" : body.action;
+  let detail = body.detail;
+  if (body.action === "secret_scan") {
+    let metadata;
+    try { metadata = JSON.parse(detail); } catch { return null; }
+    if (!metadata || Array.isArray(metadata) || typeof metadata !== "object") return null;
+    detail = JSON.stringify({ ...metadata, kind: "secret_scan" });
+    if (detail.length > 1024) return null;
+  }
+  // Keep migration 0010 immutable; the metadata distinguishes scan decisions.
   // The Worker's clock stamps the row, as it does for account writes.
   await db.prepare("INSERT INTO control_audit_events (at, actor, action, outcome, target, detail) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(new Date().toISOString(), body.actor, body.action, body.outcome, body.target, body.detail).run();
+    .bind(new Date().toISOString(), body.actor, action, body.outcome, body.target, detail).run();
   return { version: 1, recorded: true };
 }
 
@@ -47,14 +57,16 @@ function accountStatement(db, { before, target, action }, limit) {
     revoked_at FROM control_user_audit ${where} ORDER BY id DESC LIMIT ?`).bind(...values, limit);
 }
 
+const EVENT_ACTION = "CASE WHEN action = 'setting_change' AND json_valid(detail) THEN CASE WHEN json_extract(detail, '$.kind') = 'secret_scan' THEN 'secret_scan' ELSE action END ELSE action END";
+
 function eventStatement(db, { before, actor, target, action }, limit) {
   const clauses = [], values = [];
   if (before !== null) { clauses.push("id < ?"); values.push(before); }
   if (actor !== null) { clauses.push("actor = ?"); values.push(actor); }
   if (target !== null) { clauses.push("target = ?"); values.push(target); }
-  if (action !== null) { clauses.push("action = ?"); values.push(action); }
+  if (action !== null) { clauses.push(`${EVENT_ACTION} = ?`); values.push(action); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  return db.prepare(`SELECT id, at, actor, action, outcome, target, detail FROM control_audit_events ${where}
+  return db.prepare(`SELECT id, at, actor, ${EVENT_ACTION} AS action, outcome, target, detail FROM control_audit_events ${where}
     ORDER BY id DESC LIMIT ?`).bind(...values, limit);
 }
 
