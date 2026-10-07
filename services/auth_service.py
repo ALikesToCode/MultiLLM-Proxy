@@ -144,7 +144,7 @@ class AuthService:
             "allowed_models": "TEXT",
             "allowed_ips": "TEXT",
             "expires_at": "TEXT",
-            "secret_scan_mode": "TEXT",
+            "secret_scan_mode": "TEXT",  # nosec B105 - a column type, not a password
             "shadow_eval_rate": "DOUBLE PRECISION",
         }
         for column_name, column_definition in required_columns.items():

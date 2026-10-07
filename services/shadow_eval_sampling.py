@@ -181,7 +181,7 @@ def _sampling_decision(payload):
     # Only the outer eligible request consumes its one decision; subrequests return before here.
     g.shadow_eval_sampled = True
     count("eligible")
-    if random.random() >= user["shadow_eval_rate"]:
+    if random.random() >= user["shadow_eval_rate"]:  # nosec B311 - sampling, not security
         count("skipped_rate")
         return None
     retained = {name: payload[name] for name in REQUEST_FIELDS if name in payload}

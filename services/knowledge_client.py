@@ -157,7 +157,7 @@ def dispatch(operation, user, payload=None):
         payload = protect_payload(payload or {}, provider="knowledge", user=user, knowledge=True)
     envelope = {"version": 1, "operation": operation,
                 "principal": principal_for(user), "payload": payload,
-                "secret_scan_mode": scan_mode(user, knowledge=True), "secret_scan_checked": True}
+                "secret_scan_mode": scan_mode(user, knowledge=True), "secret_scan_checked": True}  # nosec B105 - a flag, not a password
     body = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(body) > (SYNC_REQUEST_BYTES if operation == "skills.sync" else MAX_REQUEST_BYTES):
         raise KnowledgeError("request_too_large", "The Knowledge sync request exceeds 8 MiB." if operation == "skills.sync" else "The Knowledge request exceeds 64 KiB.", 413)
