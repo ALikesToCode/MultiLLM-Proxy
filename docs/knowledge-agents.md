@@ -50,6 +50,13 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 | `knowledge_source_refresh` | Start or reconcile indexing (manage) |
 | `knowledge_job_cancel` | Fence future job work (manage) |
 | `knowledge_policy_update` | Save a complete policy with revision protection (manage) |
+| `knowledge_memos_stats` | Memo counts, hit counts and age ranges (manage) |
+| `knowledge_memos_purge` | Purge one product or all memos (manage) |
+
+A normal query may return `path: "memo"` with validated cited revisions and
+`memo` metadata. Exact repeats are enabled by default; similar questions remain
+in observe mode and report `index_diagnostics.memo_candidate` while retrieval
+runs. Use `freshness: "fresh"` to bypass both memos and the evidence cache.
 
 The same operations are available through REST. `/knowledge` provides the
 administrator UI. The private Knowledge Worker has no public client URL. Chat, model

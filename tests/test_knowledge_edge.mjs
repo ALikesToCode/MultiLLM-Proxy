@@ -417,3 +417,51 @@ test("product-site REST and MCP share management scope, product names and privat
   }
   assert.equal(dispatched.length, before);
 });
+
+test("memo REST and MCP management have scope and payload parity", async () => {
+  const { env, dispatched } = environment({ result: { accepted: true } });
+  for (const [method, path, payload, operation, contentType] of [
+    ["GET", "/v1/knowledge/memos", null, "memos.stats"],
+    ["DELETE", "/v1/knowledge/memos", { product: "flask" }, "memos.purge"],
+    ["DELETE", "/v1/knowledge/memos", { all: true }, "memos.purge", "application/merge-patch+json"],
+    ["DELETE", "/v1/knowledge/memos?all=true", null, "memos.purge"],
+    ["DELETE", "/v1/knowledge/memos?product=", null, "memos.purge"],
+  ]) {
+    const make = key => new Request(ORIGIN + path, { method, headers: { authorization: `Bearer ${key}`,
+      ...(payload ? { "content-type": contentType || "application/json" } : {}) }, ...(payload ? { body: JSON.stringify(payload) } : {}) });
+    const count = dispatched.length;
+    assert.equal((await call(env, make(reader.key))).status, 403);
+    assert.equal(dispatched.length, count);
+    const response = await call(env, make(manager.key));
+    assert.equal(response.status, 200);
+    const expected = payload || (path.includes("all=true") ? { all: true } : path.includes("product=") ? { product: "" } : {});
+    assert.equal(dispatched.at(-1).operation, operation);
+    assert.deepEqual(dispatched.at(-1).payload, expected);
+    const tool = operation === "memos.stats" ? "knowledge_memos_stats" : "knowledge_memos_purge";
+    const mcp = await (await call(env, mcpRequest(manager.key, "tools/call", { name: tool, arguments: expected }))).json();
+    assert.deepEqual(mcp.result.structuredContent, await response.json());
+    assert.equal(dispatched.at(-1).operation, operation);
+    assert.deepEqual(dispatched.at(-1).payload, expected);
+  }
+});
+
+test("memo query parsing rejects duplicate, mixed and invalid fields before dispatch", async () => {
+  const { env, dispatched } = environment();
+  for (const [path, body] of [
+    ["?all=1", null], ["?all=true&all=false", null], ["?other=flask", null], ["?product=flask", { all: true }],
+  ]) {
+    const response = await call(env, new Request(ORIGIN + "/v1/knowledge/memos" + path, { method: "DELETE",
+      headers: { authorization: `Bearer ${manager.key}`, ...(body ? { "content-type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}) }));
+    assert.equal(response.status, 400);
+  }
+  assert.deepEqual(dispatched, []);
+});
+
+test("memo metadata survives edge MCP evidence trimming", async () => {
+  const memo = { kind: "semantic", similarity: 0.95, matched_query: "limits", age_seconds: 12 };
+  const { env } = environment({ result: { excerpts: [], usage: [], served_at: "synthetic", memo } });
+  const response = await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_context", arguments: { query: "limits" } }))).json();
+  assert.deepEqual(response.result.structuredContent.memo, memo);
+  assert.equal(response.result.structuredContent.served_at, undefined);
+});

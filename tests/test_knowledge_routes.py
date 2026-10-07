@@ -157,9 +157,9 @@ def test_mcp_initialize_and_discovery(app, keys):
 def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app, keys):
     client = app.test_client()
     tools = mcp(client, keys["manager"], "tools/list").json["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_source_register",
+    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_memos_stats", "knowledge_memos_purge", "knowledge_source_register",
         "knowledge_source_update", "knowledge_source_refresh", "knowledge_job_cancel", "knowledge_policy_update"]
-    assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_status", "knowledge_product_sites_get"})
+    assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_status", "knowledge_product_sites_get", "knowledge_memos_stats"})
                for tool in tools)
     with patch.object(knowledge, "dispatch") as remote:
         for key, tool in ((keys["reader"], "knowledge_policy_update"), (keys["manager"], "knowledge_context")):
@@ -172,6 +172,8 @@ def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app
 
 @pytest.mark.parametrize("tool,operation,payload", [
     ("knowledge_status", "status", {}),
+    ("knowledge_memos_stats", "memos.stats", {}),
+    ("knowledge_memos_purge", "memos.purge", {"product": "flask"}),
     ("knowledge_source_register", "sources.create", {"url": "https://docs.python.org/3/", "product": "python"}),
     ("knowledge_source_update", "sources.update", {"id": "source-1", "expected_revision": 2, "enabled": False}),
     ("knowledge_source_refresh", "sources.refresh", {"id": "source-1"}),
@@ -537,3 +539,46 @@ def test_product_sites_validation_errors_surface_without_retry(app, keys):
         assert rpc.json["result"]["isError"] is True
         assert "invalid_request" in rpc.json["result"]["content"][0]["text"]
         assert remote.call_count == 2
+
+
+@pytest.mark.parametrize("method,path,body,operation,payload", [
+    ("GET", "/v1/knowledge/memos", None, "memos.stats", {}),
+    ("DELETE", "/v1/knowledge/memos", {"product": "flask"}, "memos.purge", {"product": "flask"}),
+    ("DELETE", "/v1/knowledge/memos?all=true", None, "memos.purge", {"all": True}),
+    ("DELETE", "/v1/knowledge/memos?product=", None, "memos.purge", {"product": ""}),
+])
+def test_memo_rest_mcp_parity_and_scope(app, keys, method, path, body, operation, payload):
+    client = app.test_client()
+    with patch.object(knowledge, "dispatch", return_value={"accepted": True}) as remote:
+        denied = client.open(path, method=method, json=body, headers=bearer(keys["reader"]))
+        assert denied.status_code == 403
+        remote.assert_not_called()
+        response = client.open(path, method=method, json=body, headers=bearer(keys["manager"]))
+        assert response.status_code == 200
+        assert remote.call_args.args[0] == operation
+        assert remote.call_args.args[2] == payload
+        tool = "knowledge_memos_stats" if operation == "memos.stats" else "knowledge_memos_purge"
+        result = mcp(client, keys["manager"], "tools/call", {"name": tool, "arguments": payload})
+        assert result.json["result"]["structuredContent"] == response.json
+        assert remote.call_args.args[0] == operation
+        assert remote.call_args.args[2] == payload
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/v1/knowledge/memos?all=1", None),
+    ("/v1/knowledge/memos?all=true&all=false", None),
+    ("/v1/knowledge/memos?other=flask", None),
+    ("/v1/knowledge/memos?product=flask", {"all": True}),
+])
+def test_memo_rest_rejects_ambiguous_or_invalid_query(app, keys, path, body):
+    with patch.object(knowledge, "dispatch") as remote:
+        response = app.test_client().delete(path, json=body, headers=bearer(keys["manager"]))
+        assert response.status_code == 400
+        remote.assert_not_called()
+
+
+def test_memo_metadata_survives_mcp_trim():
+    memo = {"kind": "semantic", "similarity": 0.95, "matched_query": "limits", "age_seconds": 12}
+    result = knowledge._agent_evidence({"excerpts": [], "usage": [], "served_at": "synthetic", "memo": memo})
+    assert result["memo"] == memo
+    assert "served_at" not in result

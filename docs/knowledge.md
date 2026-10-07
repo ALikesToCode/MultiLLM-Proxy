@@ -24,6 +24,7 @@ separate release steps. Configuration status is not a connectivity test.
 | Cloudflare AI Search | Hybrid retrieval and managed indexing | `KNOWLEDGE_INDEX`, instance `multillm-knowledge` |
 | Cloudflare R2 | Immutable source snapshots | `KNOWLEDGE_SNAPSHOTS`, private bucket `multillm-knowledge-snapshots` |
 | SQLite-backed Durable Object | Sources, jobs, publication fences and operation allowances | `KNOWLEDGE_AUTHORITY` |
+| SQLite-backed memo Durable Object | Shared verified answers with product and global LRU limits | `KNOWLEDGE_MEMOS`, class `KnowledgeMemos` |
 | Cloudflare Workflows | Acquisition, index submission and verification | `KNOWLEDGE_INGESTION` |
 | Private Worker service binding | Existing Flask authentication to Knowledge | Main Worker `KNOWLEDGE_SERVICE` → `multillm-knowledge` |
 | Exa | Discovery plus original source text | Knowledge Worker secret `EXA_API_KEY` |
@@ -143,6 +144,8 @@ dry run, conflicts and uncertain outcomes.
 | `POST /v1/knowledge/context` | `knowledge:read` | Cited excerpts, related versions, coverage gaps and operation bounds |
 | `POST /v1/knowledge/search` | `knowledge:read` | Same evidence contract for search clients |
 | `GET /v1/knowledge/artifacts/<id>` | `knowledge:read` | Retained source text and immutable manifest |
+| `GET /v1/knowledge/memos` | `knowledge:manage` | Memo counts, hits, age range and limits |
+| `DELETE /v1/knowledge/memos` | `knowledge:manage` | Purge one product or all memos |
 | `GET /v1/knowledge/status` | `knowledge:manage` | Sources, recent jobs, policy, usage and setup |
 | `POST /v1/knowledge/sources` | `knowledge:manage` | Register a source without immediate acquisition |
 | `PATCH /v1/knowledge/sources/<id>` | `knowledge:manage` | Change enabled/pinned/refresh state with `expected_revision` |
@@ -170,7 +173,7 @@ route:
 The MCP endpoint is `/mcp`, using streamable HTTP with a privately configured
 bearer key. It exposes 24 read tools (context, search, artifacts, the four
 [Alexandria tools](knowledge-alexandria.md#discover-inspect-execute) and 17 provider
-tools) and six
+tools) and eight
 [management tools](knowledge-agents.md#connect-to-the-gateway), filtered by scope. Send
 `Accept: application/json, text/event-stream` (clients that accept only JSON also
 work), initialize with at least `protocolVersion`, and include the negotiated
@@ -294,6 +297,41 @@ tool stays callable. The status contract check compares the provider tool contra
 and operations the deployed Knowledge Worker serves with this build's catalogue. Firecrawl crawl and extract jobs belong to the Firecrawl account
 that started them; with several Firecrawl keys, a status read may reach another account.
 
+## Verified answer memos
+
+Normal queries try a shared memo before the principal-specific evidence cache.
+Exact lookup normalizes case, whitespace and trailing punctuation; product, exact
+version, repository and mode must match, and the stored excerpt token count must
+fit the new budget. An unrelated corpus publication does not invalidate a memo.
+Every hit checks all cited hashes, current published revisions, expiry, source
+permissions and current provider/host policy in one authority transaction.
+
+Policy defaults are `memo_exact: "on"`, `memo_semantic: "observe"`,
+`memo_similarity: 0.92` and `memo_ttl_hours: 72`. Similarity accepts 0.85–0.99;
+TTL accepts integer hours from 1–720. Semantic `observe` runs ordinary retrieval
+and adds `index_diagnostics.memo_candidate` for a valid match. Semantic `on`
+serves matching evidence; `off` skips query embeddings. Memo responses have
+`path: "memo"` and `memo` metadata, which survives MCP evidence trimming.
+Workers AI `@cf/baai/bge-m3` uses `KNOWLEDGE_SEARCH_AI`; embedding usage reports
+zero reserved units as an `unmetered_platform_operation`, not a free operation.
+Cloudflare platform billing still applies.
+
+Only successful or partial answers with excerpts and no retrieval failures are
+stored, and every cited revision must already be current and published. A small
+local secret-shape guard skips memo work. Optional memo failures and timeouts
+fall through to ordinary retrieval. The bundle limit is 256 KiB. One SQLite
+Durable Object holds logical product shards, with atomic eviction at 2,000 memos
+per product and 20,000 total; it retains only the active product's Int8 vectors
+in memory. This central store keeps the global bound and purge atomic.
+
+Use `knowledge_memos_stats` and `knowledge_memos_purge` in the manage toolset.
+REST purge accepts a JSON body or query parameters: `{"product":"flask"}` or
+`{"all":true}`; an empty product selects the unscoped shard. Missing targets,
+unknown or duplicate query fields, and mixed body/query payloads are rejected.
+Deployment needs the `KNOWLEDGE_MEMOS` binding and appended `knowledge-memos-v1`
+SQLite DO migration; no D1 migration or new secret is required. See the
+[implemented design](plans/2026-10-07-knowledge-answer-memos-design.md).
+
 ## Evidence, freshness and recovery
 
 Excerpts include an original URL, SHA-256 content hash, immutable artifact ID and
@@ -302,7 +340,7 @@ provider answers are discoveries, never primary excerpts. Version claims require
 a recognized upstream identity or operator-registered source and an explicit
 versioned URL; caller-supplied target versions alone are not proof.
 
-`fresh` bypasses evidence cache and requires an origin check within one hour.
+`fresh` bypasses answer memos and evidence cache and requires an origin check within one hour.
 Ordinary provider-cache retrieval has no invented check timestamp. `checked_at`,
 `fetched_at` and `published_at` represent different events. Token counts are
 conservative text/citation estimates, not an exact model tokenizer guarantee.

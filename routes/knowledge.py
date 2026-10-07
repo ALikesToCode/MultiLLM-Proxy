@@ -11,6 +11,7 @@ from route_helpers import api_authenticate_only, login_required
 from routes import knowledge_alexandria as alexandria
 from routes import knowledge_management as management
 from routes import knowledge_mcp as mcp
+from routes.knowledge_memos import purge_query
 from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
 from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch as _dispatch
@@ -291,6 +292,24 @@ def register_knowledge_routes(app, csrf):
     @api_authenticate_only(required_scope="knowledge:read")
     def knowledge_artifact(artifact_id):
         return jsonify(dispatch("artifact", g.authenticated_user, {"id": _identifier(artifact_id)}))
+
+    @app.route("/v1/knowledge/memos", methods=["GET", "DELETE", "OPTIONS"])
+    @csrf.exempt
+    @api_authenticate_only(required_scope="knowledge:manage")
+    def knowledge_memos():
+        if request.method == "GET":
+            if request.args:
+                raise KnowledgeError("invalid_request", "Memo stats accepts no query fields.", 400)
+            return jsonify(dispatch("memos.stats", g.authenticated_user, {}))
+        if request.is_json:
+            if request.args:
+                raise KnowledgeError("invalid_request", "Choose a JSON body or query parameters.", 400)
+            payload = _body()
+        else:
+            if request.content_length or request.stream.read(1):
+                raise KnowledgeError("invalid_request", "Use application/json or query parameters.", 415)
+            payload = purge_query(request.args)
+        return jsonify(dispatch("memos.purge", g.authenticated_user, payload))
 
     # Either Knowledge scope opens MCP; a key with neither is told the smaller one it needs.
     app.add_url_rule("/mcp", "knowledge_mcp",

@@ -54,7 +54,10 @@ def test_discovery_and_skill_download_agree(client):
     assert {"knowledge_exa_search", "knowledge_firecrawl_crawl", "knowledge_context7_docs",
             "knowledge_deepwiki_ask", "knowledge_mintlify_context",
             "knowledge_product_sites_get", "knowledge_product_sites_update"} <= {tool["name"] for tool in config["tools"]}
-    assert sum(tool["scope"] == "knowledge:manage" for tool in config["tools"]) == 8
+    assert sum(tool["scope"] == "knowledge:manage" for tool in config["tools"]) == 10
+    assert {tool["name"]: tool["scope"] for tool in config["tools"] if tool["name"].startswith("knowledge_memos_")} == {
+        "knowledge_memos_stats": "knowledge:manage", "knowledge_memos_purge": "knowledge:manage",
+    }
     assert len(config["providers"]) == 7
     skill = client.get("/agent-onboarding/SKILL.md?download=1", base_url="https://gateway.example")
     assert skill.data.startswith(b"---\nname: multillm-knowledge\n")

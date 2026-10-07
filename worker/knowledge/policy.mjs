@@ -7,6 +7,7 @@ export function defaultPolicy() {
   return {
     product_sites_mode: "observe", revision: 1, enabled: false, cache_ttl_seconds: 300, retention_hours: 168,
     unreviewed_retention_hours: UNREVIEWED_RETENTION_HOURS,
+    memo_exact: "on", memo_semantic: "observe", memo_similarity: 0.92, memo_ttl_hours: 72,
     allowed_hosts: ["developers.cloudflare.com", "flask.palletsprojects.com", "werkzeug.palletsprojects.com",
       "docs.python.org", "github.com", "raw.githubusercontent.com", "nextjs.org", "react.dev"],
     providers: Object.fromEntries(PROVIDER_IDS.map(id => [id, {
@@ -17,7 +18,7 @@ export function defaultPolicy() {
 }
 
 export function withProviderDefaults(policy) {
-  return { ...policy, product_sites_mode: policy.product_sites_mode ?? "observe", unreviewed_retention_hours: policy.unreviewed_retention_hours ?? UNREVIEWED_RETENTION_HOURS,
+  return { ...defaultPolicy(), ...policy, product_sites_mode: policy.product_sites_mode ?? "observe", unreviewed_retention_hours: policy.unreviewed_retention_hours ?? UNREVIEWED_RETENTION_HOURS,
     providers: { ...defaultPolicy().providers, ...policy.providers } };
 }
 
@@ -37,7 +38,8 @@ export function retentionHours(source, policy) {
 }
 
 export function validatePolicy(body) {
-  fields(body, ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours", "product_sites_mode", "allowed_hosts", "providers"],
+  fields(body, ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours", "product_sites_mode", "allowed_hosts", "providers",
+    "memo_exact", "memo_semantic", "memo_similarity", "memo_ttl_hours"],
     ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "allowed_hosts", "providers"]);
   if (body.product_sites_mode !== undefined && !["off", "observe", "enforce"].includes(body.product_sites_mode)) {
     fail("invalid_policy", "Choose off, observe or enforce for product_sites_mode.");
@@ -51,6 +53,11 @@ export function validatePolicy(body) {
   }
   integer(body.cache_ttl_seconds, 0, 3600, "cache_ttl_seconds");
   integer(body.retention_hours, 1, 720, "retention_hours");
+  if (body.memo_exact !== undefined && !["on", "off"].includes(body.memo_exact)
+    || body.memo_semantic !== undefined && !["off", "observe", "on"].includes(body.memo_semantic)
+    || body.memo_similarity !== undefined && (typeof body.memo_similarity !== "number" || !Number.isFinite(body.memo_similarity)
+      || body.memo_similarity < 0.85 || body.memo_similarity > 0.99)) fail("invalid_policy", "Invalid memo policy.");
+  if (body.memo_ttl_hours !== undefined) integer(body.memo_ttl_hours, 1, 720, "memo_ttl_hours");
   if (body.unreviewed_retention_hours !== undefined) integer(body.unreviewed_retention_hours, 1, 720, "unreviewed_retention_hours");
   if (!isRecord(body.providers) || Object.keys(body.providers).some(id => !PROVIDER_IDS.includes(id))
     || PROVIDER_IDS.filter(id => id !== "alexandria").some(id => !Object.hasOwn(body.providers, id))) fail("invalid_policy", "Configure every provider allocation.");

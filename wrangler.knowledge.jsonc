@@ -7,9 +7,11 @@
   "workers_dev": false,
   "preview_urls": false,
   "durable_objects": {
-    "bindings": [{ "name": "KNOWLEDGE_AUTHORITY", "class_name": "KnowledgeCatalogue" }]
+    "bindings": [{ "name": "KNOWLEDGE_AUTHORITY", "class_name": "KnowledgeCatalogue" },
+      { "name": "KNOWLEDGE_MEMOS", "class_name": "KnowledgeMemos" }]
   },
-  "migrations": [{ "tag": "knowledge-v1", "new_sqlite_classes": ["KnowledgeCatalogue"] }],
+  "migrations": [{ "tag": "knowledge-v1", "new_sqlite_classes": ["KnowledgeCatalogue"] },
+    { "tag": "knowledge-memos-v1", "new_sqlite_classes": ["KnowledgeMemos"] }],
   "r2_buckets": [{ "binding": "KNOWLEDGE_SNAPSHOTS", "bucket_name": "multillm-knowledge-snapshots" }],
   "ai_search": [{ "binding": "KNOWLEDGE_INDEX", "instance_name": "multillm-knowledge" }],
   "ai": { "binding": "KNOWLEDGE_SEARCH_AI" },

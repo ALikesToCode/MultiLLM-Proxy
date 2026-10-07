@@ -414,6 +414,9 @@ function restRoute(method, pathname) {
   if (path.length === 2 && method === "POST" && first === "native" && NATIVE_OPERATIONS.has(`native.${second}`)) {
     return { operation: `native.${second}`, scope: "knowledge:read", body: true };
   }
+  if (path.length === 1 && first === "memos" && ["GET", "DELETE"].includes(method)) {
+    return { operation: method === "GET" ? "memos.stats" : "memos.purge", scope: "knowledge:manage", memo: true };
+  }
   if (path.length === 1 && method === "GET" && first === "status") return { operation: "status", scope: "knowledge:manage" };
   if (path.length === 1 && method === "PUT" && first === "policy") return { operation: "policy.update", scope: "knowledge:manage", body: true };
   if (first === "product-sites" && path.length === 2 && ["GET", "PATCH"].includes(method)) {
@@ -436,11 +439,27 @@ async function handleRest(request, env, principal, route) {
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${route.scope} scope` }, 403);
   }
   try {
-    const payload = route.body ? await readBody(request) : {};
+    let payload = route.body ? await readBody(request) : {};
     if (route.product !== undefined) {
       if (Object.hasOwn(payload, "product")) throw new KnowledgeEdgeError("invalid_request", "The product belongs in the URL.", 400);
       try { payload.product = decodeURIComponent(route.product); }
       catch { throw new KnowledgeEdgeError("invalid_request", "Invalid product URL encoding.", 400); }
+    }
+    if (route.memo) {
+      const params = new URL(request.url).searchParams;
+      if (route.operation === "memos.stats") {
+        if (params.size) throw new KnowledgeEdgeError("invalid_request", "Memo stats accepts no query fields.", 400);
+      } else if (/^application\/(?:json|[^/]+\+json)$/.test(request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() || "")) {
+        if (params.size) throw new KnowledgeEdgeError("invalid_request", "Choose a JSON body or query parameters.", 400);
+        payload = await readBody(request);
+      } else {
+        if (request.body) throw new KnowledgeEdgeError("invalid_request", "Use application/json or query parameters.", 415);
+        for (const [key, value] of params) {
+          if (!["product", "all"].includes(key) || Object.hasOwn(payload, key)) throw new KnowledgeEdgeError("invalid_request", "Unsupported or duplicate memo query fields.", 400);
+          if (key === "all" && !["true", "false"].includes(value)) throw new KnowledgeEdgeError("invalid_request", "all must be true or false.", 400);
+          payload[key] = key === "all" ? value === "true" : value;
+        }
+      }
     }
     if (route.id !== undefined) {
       if (Object.hasOwn(payload, "id")) throw new KnowledgeEdgeError("invalid_request", "Source and job ids belong in the URL.", 400);

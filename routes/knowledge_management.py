@@ -44,6 +44,10 @@ TOOLS = [
     _tool("knowledge_product_sites_update", "Pin, unpin, block, unblock or rebuild a product's learned documentation sites from retained artifacts. Requires knowledge:manage.",
           {"product": _PRODUCT, "pin": _SITES, "unpin": _SITES, "block": _SITES, "unblock": _SITES,
            "note": {"type": "string", "maxLength": 500}, "rebuild": _BOOLEAN}, ("product",)),
+    _tool("knowledge_memos_stats", "Inspect verified answer memo counts, hits and ages by product. Requires knowledge:manage.",
+          {}, read_only=True),
+    _tool("knowledge_memos_purge", "Purge verified answer memos for a product or explicitly all products. Requires knowledge:manage.",
+          {"product": {"type": "string", "maxLength": 100}, "all": _BOOLEAN}),
     _tool("knowledge_source_register", "Register an approved public documentation URL without fetching it. Requires knowledge:manage.", {
         "url": {"type": "string", "maxLength": 2048},
         "title": {"type": "string", "maxLength": 200},
@@ -65,6 +69,10 @@ TOOLS = [
         "expected_revision": _REVISION, "enabled": _BOOLEAN,
         "product_sites_mode": {"type": "string", "enum": ["off", "observe", "enforce"], "default": "observe"},
         "cache_ttl_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+        "memo_exact": {"type": "string", "enum": ["on", "off"], "default": "on"},
+        "memo_semantic": {"type": "string", "enum": ["off", "observe", "on"], "default": "observe"},
+        "memo_similarity": {"type": "number", "minimum": 0.85, "maximum": 0.99, "default": 0.92},
+        "memo_ttl_hours": {"type": "integer", "minimum": 1, "maximum": 720, "default": 72},
         "retention_hours": {"type": "integer", "minimum": 1, "maximum": 720},
         "unreviewed_retention_hours": {"type": "integer", "minimum": 1, "maximum": 720, "default": 24,
                                        "description": "Retention for discoveries from hosts that only * admits."},
@@ -77,7 +85,7 @@ TOOLS = [
 ]
 
 OPERATIONS = dict(zip((tool["name"] for tool in TOOLS), (
-    "artifact", "status", "product_sites.get", "product_sites.update", "sources.create", "sources.update", "sources.refresh", "jobs.cancel", "policy.update",
+    "artifact", "status", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "sources.create", "sources.update", "sources.refresh", "jobs.cancel", "policy.update",
 )))
 
 

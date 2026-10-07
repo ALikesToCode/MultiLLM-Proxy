@@ -5,6 +5,7 @@ import { ledgerStats, reserve, settle, usageFor, pruneSettled } from "./ledger.m
 import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
 import { getProductSites, learnProductSite, parseProductSites, productSitesSummary, publicProductSites, updateProductSites } from "./product-sites.mjs";
 import { credentialOperation } from "./credentials.mjs";
+import { validateMemoCitations } from "./memo-validation.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -338,6 +339,7 @@ export class KnowledgeAuthority {
         return cancelled;
       }
       if (operation === "artifact.save") return saveArtifact(tx, input.artifact);
+      if (operation === "memos.validate") return validateMemoCitations(tx, input, await policyOf(tx), now);
       if (operation === "artifact.get") return await tx.get(`artifact:${input.id}`) ?? null;
       if (operation === "artifact.for_key") {
         const id = await tx.get(`index:${input.key}`);

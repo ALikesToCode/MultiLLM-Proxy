@@ -6,6 +6,7 @@ import { confirmSnapshot, metered } from "./operations.mjs";
 import { cacheKey, productSitesCacheState, readCache, writeCache } from "./cache.mjs";
 import { filterProviderSites } from "./provider-site-filter.mjs";
 import { retentionHours, sourceReviewed } from "./policy.mjs";
+import { memoSession } from "./memos.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
 // Economy asks one provider; smart and deep ask every eligible provider in parallel.
@@ -326,11 +327,24 @@ async function runRetrieval(env, authority, principal, request, options, signal,
         outcome: confirmed ? "completed" : "unconfirmed", measurement: "configured_operation_bound" });
     }
   };
+  const memos = memoSession(env, authority, request, snapshot.policy,
+    { ...options, memoWriteDeadlineAt: started + RETRIEVAL_DEADLINE_MS - 100 }, started, state.usage);
+  const memoLookup = await memos.lookup();
+  if (memoLookup.bundle) return memoLookup.bundle;
+  const diagnostics = bundle => {
+    if (memoLookup.candidate) bundle.index_diagnostics = { ...(bundle.index_diagnostics || {}), memo_candidate: memoLookup.candidate };
+    return bundle;
+  };
   const cache = options.cache ?? globalThis.caches?.default;
   const key = await cacheKey(principal, request, snapshot);
   if (request.freshness === "normal" && snapshot.policy.cache_ttl_seconds > 0) {
     const cached = await cacheHit(cache, key, state);
-    if (cached) return cached;
+    if (cached) {
+      // This request may have embedded an observed semantic candidate before the cache hit.
+      cached.usage = state.usage;
+      await memos.write(cached, false);
+      return diagnostics(cached);
+    }
   }
   await indexedEvidence(state);
   if (!state.candidates.some(item => item.target_match !== "unverified") || request.freshness === "fresh" || request.mode === "deep") {
@@ -384,8 +398,9 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     const finalKey = await cacheKey(principal, request, latest);
     await untilDeadline(() => writeCache(cache, finalKey, bundle, snapshot.policy.cache_ttl_seconds), signal);
   }
+  await memos.write(bundle, state.failed);
   checkAbort(signal);
-  return bundle;
+  return diagnostics(bundle);
 }
 
 export async function retrieveKnowledge(env, authority, principal, request, options = {}) {

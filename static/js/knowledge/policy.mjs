@@ -24,6 +24,9 @@ export function renderPolicy(policy) {
   form.dataset.productSitesMode = policy.product_sites_mode ?? "observe";
   form.elements.namedItem("enabled").checked = policy.enabled;
   for (const name of ["cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours"]) form.elements.namedItem(name).value = policy[name] ?? 24;
+  for (const [name, fallback] of Object.entries({ memo_exact: "on", memo_semantic: "observe", memo_similarity: 0.92, memo_ttl_hours: 72 })) {
+    form.elements.namedItem(name).value = policy[name] ?? fallback;
+  }
   form.elements.namedItem("allowed_hosts").value = (policy.allowed_hosts || []).join("\n");
   const cards = element("knowledge-provider-policy");
   cards.replaceChildren();
@@ -56,5 +59,7 @@ export function policyPayload(values, revision, productSitesMode = "observe") {
   return { product_sites_mode: productSitesMode, expected_revision: Number(revision), enabled: values.get("enabled") === "on",
     cache_ttl_seconds: Number(values.get("cache_ttl_seconds")), retention_hours: Number(values.get("retention_hours")),
     unreviewed_retention_hours: Number(values.get("unreviewed_retention_hours")),
+    memo_exact: values.get("memo_exact") ?? "on", memo_semantic: values.get("memo_semantic") ?? "observe",
+    memo_similarity: Number(values.get("memo_similarity") ?? 0.92), memo_ttl_hours: Number(values.get("memo_ttl_hours") ?? 72),
     allowed_hosts: String(values.get("allowed_hosts") || "").split(/\s+/).filter(Boolean), providers };
 }

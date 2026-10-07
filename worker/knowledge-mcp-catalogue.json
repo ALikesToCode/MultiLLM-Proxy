@@ -1429,6 +1429,52 @@
       }
     },
     {
+      "operation": "memos.stats",
+      "scope": "knowledge:manage",
+      "toolset": "manage",
+      "definition": {
+        "name": "knowledge_memos_stats",
+        "description": "Inspect verified answer memo counts, hits and ages by product. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {},
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "memos.purge",
+      "scope": "knowledge:manage",
+      "toolset": "manage",
+      "definition": {
+        "name": "knowledge_memos_purge",
+        "description": "Purge verified answer memos for a product or explicitly all products. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "all": {
+              "type": "boolean"
+            }
+          },
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
       "operation": "sources.create",
       "scope": "knowledge:manage",
       "toolset": "manage",
@@ -1612,6 +1658,35 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 3600
+            },
+            "memo_exact": {
+              "type": "string",
+              "enum": [
+                "on",
+                "off"
+              ],
+              "default": "on"
+            },
+            "memo_semantic": {
+              "type": "string",
+              "enum": [
+                "off",
+                "observe",
+                "on"
+              ],
+              "default": "observe"
+            },
+            "memo_similarity": {
+              "type": "number",
+              "minimum": 0.85,
+              "maximum": 0.99,
+              "default": 0.92
+            },
+            "memo_ttl_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 72
             },
             "retention_hours": {
               "type": "integer",

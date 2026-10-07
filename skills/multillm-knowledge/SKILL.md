@@ -40,10 +40,12 @@ was rotated, revoked or deleted, and the operator must issue a replacement.
 | Start or reconcile indexing | `knowledge_source_refresh` |
 | Cancel future indexing work | `knowledge_job_cancel` |
 | Change allowances or retention | `knowledge_policy_update` |
+| Inspect verified answer memos | `knowledge_memos_stats` (manage) |
+| Purge one product or all answer memos | `knowledge_memos_purge` (manage) |
 | Implement Firecrawl itself | Official `firecrawl-build` skills |
 | Query Firecrawl Developer or Research indexes directly | Their official native index skills and methods |
 
-Gateway MCP exposes 24 read tools (retrieval, Alexandria and provider tools) and six
+Gateway MCP exposes 24 read tools (retrieval, Alexandria and provider tools) and eight
 management tools, filtered by the key's scopes. Source and policy management also use
 REST. Direct Context7, Exa, Firecrawl, DeepWiki or Mintlify calls bypass the gateway's
 key pool, allowances, retained corpus and receipt enforcement; the provider tools below

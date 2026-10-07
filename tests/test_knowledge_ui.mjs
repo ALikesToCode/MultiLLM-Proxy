@@ -101,6 +101,16 @@ test("policy serializes all providers with finite numeric fields and unchecked a
   }
   const policy = policyPayload(values, "5");
   assert.equal(policy.expected_revision, 5);
+  assert.equal(policy.memo_exact, "on");
+  assert.equal(policy.memo_semantic, "observe");
+  assert.equal(policy.memo_similarity, 0.92);
+  assert.equal(policy.memo_ttl_hours, 72);
+  for (const [key, value] of Object.entries({ memo_exact: "off", memo_semantic: "on", memo_similarity: "0.95", memo_ttl_hours: "24" })) values.set(key, value);
+  const updated = policyPayload(values, "5");
+  assert.equal(updated.memo_exact, "off");
+  assert.equal(updated.memo_semantic, "on");
+  assert.equal(updated.memo_similarity, 0.95);
+  assert.equal(updated.memo_ttl_hours, 24);
   assert.equal(policy.unreviewed_retention_hours, 24);
   assert.equal(Object.keys(policy.providers).length, 7);
   assert.deepEqual(policy.allowed_hosts, ["docs.example", "release.example"]);

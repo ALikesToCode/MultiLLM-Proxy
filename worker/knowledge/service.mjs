@@ -7,10 +7,12 @@ import { OPERATIONS as ALEXANDRIA_OPERATIONS } from "./alexandria/contracts.mjs"
 import { dispatchAlexandria } from "./alexandria/service.mjs";
 import { configuredKeys } from "./providers/keys.mjs";
 import { dispatchNative, NATIVE_OPERATIONS, nativeToolsHash } from "./native.mjs";
+import { getMemos } from "./memos.mjs";
+import { parseMemoPurge } from "./memo-store.mjs";
 import { logFailure } from "../log.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 const READ = new Set(["context", "search", "artifact", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 
 export function setupStatus(env) {
@@ -110,6 +112,12 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
   }
   if (operation === "artifact") { fields(payload, ["id"], ["id"]); return artifactResult(env, authority, payload.id, options.corpus); }
   if (operation === "product_sites.get" || operation === "product_sites.update") return authority.call(operation, payload);
+  if (operation === "memos.stats" || operation === "memos.purge") {
+    const parsed = operation === "memos.purge" ? parseMemoPurge(payload) : (fields(payload, []), payload);
+    const memos = options.memos ?? getMemos(env);
+    if (!memos) fail("memos_unavailable", "Configure the Knowledge memo binding.", 503);
+    return memos.call(operation === "memos.stats" ? "stats" : "purge", parsed);
+  }
   if (operation === "policy.update") return { policy: await authority.call("policy.update", payload) };
   if (operation === "sources.create") return { source: await authority.call("source.create", payload), job: null };
   if (operation === "sources.update") return { source: await authority.call("source.update", payload) };

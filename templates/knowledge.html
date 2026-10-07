@@ -112,6 +112,10 @@
           <div class="form-grid knowledge-policy-general">
             <label class="check-field form-grid__wide"><input name="enabled" type="checkbox">Enable Knowledge retrieval</label>
             <label>Cache lifetime <span class="label-note">seconds</span><input name="cache_ttl_seconds" type="number" min="0" max="3600" step="1" required></label>
+            <label>Exact answer memos<select name="memo_exact"><option value="on">On</option><option value="off">Off</option></select></label>
+            <label>Similar question memos<select name="memo_semantic"><option value="off">Off</option><option value="observe">Observe candidates</option><option value="on">Serve matches</option></select></label>
+            <label>Memo similarity threshold<input name="memo_similarity" type="number" min="0.85" max="0.99" step="0.01" required></label>
+            <label>Memo lifetime <span class="label-note">hours</span><input name="memo_ttl_hours" type="number" min="1" max="720" step="1" required></label>
             <label>Snapshot retention <span class="label-note">hours</span><input name="retention_hours" type="number" min="1" max="720" step="1" required></label>
             <label>Unreviewed discovery retention <span class="label-note">hours, for hosts only * admits</span><input name="unreviewed_retention_hours" type="number" min="1" max="720" step="1" required></label>
             <label class="form-grid__wide">Approved public hosts <span class="label-note">one hostname per line, or * for any public host</span><textarea name="allowed_hosts" rows="3" placeholder="flask.palletsprojects.com&#10;docs.python.org"></textarea></label>
