@@ -48,6 +48,8 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
     for name in _ROUTING_FIELDS:
         setattr(g, name, None)
     response = None
+    outer_subrequest = getattr(g, "gateway_subrequest", False)
+    g.gateway_subrequest = True
     try:
         if not skip_rate:
             decision = RateLimitService.enforce_request(
@@ -81,5 +83,6 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
         request_accounting._record(context, getattr(error, "status_code", 502), None, None)
         raise
     finally:
+        g.gateway_subrequest = outer_subrequest
         for name, value in routing.items():
             setattr(g, name, value)

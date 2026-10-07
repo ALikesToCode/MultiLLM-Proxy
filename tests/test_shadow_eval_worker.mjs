@@ -171,3 +171,23 @@ test('private sample/result contracts retain replay bounds and classify exclusio
   assert.equal((await call('finish', { id: id(200), document: JSON.stringify(excluded) })).result, true);
   assert.deepEqual(JSON.parse((await call('results', { after: '' })).result[0].document), excluded);
 });
+
+
+test('dashboard coverage renders numeric counters only', async t => {
+  const { renderCounts } = await import('../static/js/workbench/shadow.mjs');
+  class Element {
+    children = [];
+    textContent = '';
+    append(...children) { this.children.push(...children); }
+    replaceChildren() { this.children = []; }
+  }
+  const previous = globalThis.document;
+  t.after(() => { if (previous === undefined) delete globalThis.document; else globalThis.document = previous; });
+  globalThis.document = { createElement() { return new Element(); } };
+  const container = new Element();
+  renderCounts(container, { eligible: 10, sampled: 2, skipped_secret: '<synthetic prompt>', extra: 'private' },
+    [['eligible', 'Eligible'], ['sampled', 'Sampled'], ['skipped_secret', 'Skipped: secret']]);
+  const list = container.children[0];
+  assert.deepEqual(list.children.map(child => child.textContent), ['Eligible', '10', 'Sampled', '2', 'Skipped: secret', '0']);
+  assert.doesNotMatch(JSON.stringify(container), /synthetic prompt|private/);
+});

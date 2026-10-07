@@ -56,6 +56,9 @@
       <header class="panel__header"><div><h2 id="shadow-title">Model league</h2><p>Compare opted-in routed chat traffic. Prompts and answers expire after 7 days. Routing changes only after you review and confirm a proposal.</p></div></header>
       <div class="panel__body form-stack">
         <div class="button-row"><button id="shadow-load" class="button button--secondary" type="button">Load league and settings</button><button id="shadow-export" class="button button--secondary" type="button" disabled>Export league</button></div>
+        <p class="field-hint">Sampling coverage resets when the process restarts. Agent requests above 64 KiB are not sampled.</p>
+        <div id="shadow-coverage" aria-label="Sampling coverage"></div>
+        <div id="shadow-results" aria-label="Comparison counts"></div>
         <div id="shadow-league" class="table-scroll" tabindex="0" aria-label="Model league table"></div>
         <form id="shadow-config-form" class="form-stack" hidden>
           <label class="check-field"><input id="shadow-enabled" type="checkbox"><span>Enable background evaluations (potentially billed)</span></label>

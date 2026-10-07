@@ -14,6 +14,7 @@ from services.intelligence_store import IntelligenceStore
 from services.shadow_eval_contract import validate_config
 from services.shadow_eval_league import league, proposal, result_counts
 from services.shadow_eval_runner import start_run
+from services.shadow_eval_sampling import sampling_counts
 from services.shadow_eval_store import ShadowEvalStore
 
 
@@ -49,7 +50,8 @@ def register_shadow_eval_routes(app, csrf, auth, metrics, proxy):
     def shadow_league():
         require_admin_dashboard_user()
         results = ShadowEvalStore.results()
-        return jsonify({"league": league(results), "result_counts": result_counts(results)})
+        return jsonify({"league": league(results), "result_counts": result_counts(results),
+                        "sampling_counts": sampling_counts()})
 
     @app.get("/admin/workbench/shadow/samples")
     @login_required

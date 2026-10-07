@@ -87,3 +87,21 @@ def test_apply_requires_confirmation_revision_validation_and_backup(client, monk
     response = browser.post("/admin/workbench/shadow/apply", json={"confirm": True, "revision": proposed["revision"]})
     assert response.status_code == 200 and response.json == {"applied": True, "auto_routes_applied": False}
     assert IntelligenceStore.policy() != base
+
+
+def test_league_exposes_only_numeric_coverage_and_separate_exclusions(client, monkeypatch):
+    _, browser = client
+    from services.shadow_eval_sampling import sampling_counts
+    counts = {name: index for index, name in enumerate(sampling_counts())}
+    monkeypatch.setattr("routes.shadow_eval.sampling_counts", lambda: counts)
+    monkeypatch.setattr(Store, "results", lambda: [result(), result(outcome="failed"),
+        result(outcome="same_model"), result(outcome="candidate_truncated", candidate_truncated=True)])
+    response = browser.get("/admin/workbench/shadow/league")
+    assert response.json["sampling_counts"] == counts
+    assert all(type(value) is int for value in response.json["sampling_counts"].values())
+    assert response.json["result_counts"] == {"judged": 1, "failed": 1, "same_model": 1, "candidate_truncated": 1}
+    assert len(response.json["league"]) == 2
+    assert b'Synthetic answer' not in response.data and b'Synthetic greeting' not in response.data
+    page = browser.get("/workbench")
+    assert b'id="shadow-coverage"' in page.data and b'id="shadow-results"' in page.data
+    assert b'Agent requests above 64 KiB are not sampled' in page.data

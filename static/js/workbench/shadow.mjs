@@ -20,12 +20,31 @@ export function renderLeague(container, rows) {
   container.append(table);
 }
 
+export function renderCounts(container, counts, columns) {
+  container.replaceChildren();
+  const list = document.createElement("dl");
+  for (const [name, label] of columns) {
+    const term = document.createElement("dt"); term.textContent = label;
+    const value = document.createElement("dd");
+    value.textContent = Number.isSafeInteger(counts?.[name]) && counts[name] >= 0 ? String(counts[name]) : "0";
+    list.append(term, value);
+  }
+  container.append(list);
+}
+
+const coverageColumns = [["eligible", "Eligible"], ["sampled", "Sampled"], ["skipped_rate", "Skipped: rate"],
+  ["skipped_secret", "Skipped: secret"], ["skipped_oversize", "Skipped: size"], ["skipped_queue_full", "Skipped: queue full"],
+  ["skipped_error", "Skipped: error"]];
+const resultColumns = [["judged", "Judged"], ["failed", "Failed"], ["same_model", "Same model"], ["candidate_truncated", "Candidate truncated"]];
+
 export function initShadow() {
-  let config, rows = [], proposal;
+  let config, rows = [], proposal, sampling_counts, result_counts;
   const invalidate = () => { proposal = undefined; element("shadow-apply").disabled = true; element("shadow-confirm-apply").checked = false; };
   action("shadow-load", async () => {
-    [config, { league: rows }] = await Promise.all([api("shadow/config"), api("shadow/league")]);
+    [config, { league: rows, sampling_counts, result_counts }] = await Promise.all([api("shadow/config"), api("shadow/league")]);
     renderLeague(element("shadow-league"), rows);
+    renderCounts(element("shadow-coverage"), sampling_counts, coverageColumns);
+    renderCounts(element("shadow-results"), result_counts, resultColumns);
     element("shadow-export").disabled = false;
     element("shadow-config-form").hidden = false;
     element("shadow-enabled").checked = config.enabled;
@@ -46,7 +65,7 @@ export function initShadow() {
       invalidate(); note("Evaluation settings saved.");
     } catch (error) { note(error.message); } finally { button.disabled = false; }
   });
-  action("shadow-export", async () => download("model-league.json", { league: rows }));
+  action("shadow-export", async () => download("model-league.json", { league: rows, sampling_counts, result_counts }));
   action("shadow-propose", async () => {
     invalidate(); proposal = await api("shadow/propose", {});
     element("shadow-proposal").textContent = JSON.stringify({ policy_diff: proposal.policy_diff,
@@ -75,7 +94,8 @@ export function initShadow() {
   });
   action("shadow-purge", async () => {
     if (!element("shadow-confirm-purge").checked) throw new Error("Confirm deletion of evaluation data first.");
-    await api("shadow/purge", { confirm: true }); rows = []; invalidate();
+    await api("shadow/purge", { confirm: true }); rows = []; result_counts = Object.fromEntries(resultColumns.map(([name]) => [name, 0])); invalidate();
+    renderCounts(element("shadow-results"), result_counts, resultColumns);
     renderLeague(element("shadow-league"), rows);
     element("shadow-sample-detail").textContent = "Retained samples purged.";
     element("shadow-sample-id").replaceChildren(new Option("No samples", ""));

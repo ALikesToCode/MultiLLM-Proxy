@@ -56,6 +56,8 @@ def test_sampling_probability(rate, draw, accepted):
 @pytest.mark.parametrize("model,path,expected", [("auto:test", "/v1/chat/completions", True), ("cascade:test", "/v1/chat/completions", True),
     ("openai:concrete", "/v1/chat/completions", False), ("free:json", "/v1/chat/completions", False),
     ("auto:image", "/v1/images/generations", False), ("auto:test", "/roleplay/v1/chat/completions", False),
+    ("auto:test", "/v1/messages", True), ("cascade:test", "/optimize/v1/chat/completions", True),
+    ("openai:concrete", "/v1/messages", False), ("openai:concrete", "/optimize/v1/chat/completions", False),
     ("auto:test", "/v1/knowledge", False), ("openai:concrete", "/intelligence/v1/chat/completions", True)])
 def test_eligibility(model, path, expected):
     assert eligible({"model": model, "messages": []}, {"shadow_eval_rate": 0.1}, path, random_value=0) is expected
@@ -550,3 +552,127 @@ def test_capture_preserves_nonstream_and_stream_finish_reasons(monkeypatch):
     chunks = [b'data: {"choices":[{"delta":{"content":"Synthetic"},"finish_reason":"length"}]}\n\n', b'data: [DONE]\n\n']
     list(SampleStream(iter(chunks), lambda *args: captured.append(args), "openai:production"))
     assert captured[0][3] == "length"
+
+
+@pytest.fixture
+def coverage(monkeypatch):
+    import queue
+    from services import shadow_eval_sampling as sampling
+    monkeypatch.setattr(sampling, "_COUNTS", dict.fromkeys(sampling.sampling_counts(), 0))
+    monkeypatch.setattr(sampling, "_QUEUE", queue.Queue(maxsize=1))
+    monkeypatch.setattr(sampling, "_WORKER", SimpleNamespace(is_alive=lambda: True))
+    return sampling
+
+
+@pytest.mark.parametrize("path", ["/v1/responses", "/v1/messages", "/optimize/v1/chat/completions"])
+def test_accounted_subrequest_cannot_consume_outer_sampling_decision(monkeypatch, coverage, path):
+    from services.accounted_dispatch import accounted_dispatch
+    from services.shadow_eval_sampling import sample_chat_dispatch
+    collaborators = accounted_dispatch.__globals__
+    monkeypatch.setattr(collaborators["RateLimitService"], "enforce_request", lambda **kwargs: SimpleNamespace(allowed=True))
+    monkeypatch.setattr(collaborators["request_accounting"], "_record", Mock())
+    draws = Mock(return_value=0.1)
+    monkeypatch.setattr(coverage.random, "random", draws)
+    app = Flask(__name__)
+    init_shadow_sampling(app)
+    payload = {"model": "cascade:test", "messages": [{"role": "user", "content": "Synthetic"}]}
+
+    @sample_chat_dispatch
+    def chat_dispatch(app, auth, metrics, proxy, payload):
+        return response("Synthetic answer", "openai:production")
+
+    def outer():
+        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        # Even a routed subrequest with an otherwise eligible payload must be ignored.
+        accounted_dispatch({**payload, "model": "auto:internal"}, lambda data: chat_dispatch(app, None, None, None, data), kind="chat")
+        assert not getattr(g, "gateway_subrequest", False)
+        assert not getattr(g, "shadow_eval_sampled", False)
+        return chat_dispatch(app, None, None, None, payload)
+    app.add_url_rule(path, view_func=outer, methods=["POST"])
+    assert app.test_client().post(path, json=payload).status_code == 200
+    assert draws.call_count == 1
+    assert coverage.sampling_counts() == {"eligible": 1, "sampled": 1, "skipped_rate": 0,
+        "skipped_secret": 0, "skipped_oversize": 0, "skipped_queue_full": 0, "skipped_error": 0}
+    assert coverage._QUEUE.get_nowait()["route"] == "cascade:test"
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_accounted_subrequest_flag_restores_after_nested_success_or_exception(monkeypatch, initial):
+    from services.accounted_dispatch import accounted_dispatch
+    collaborators = accounted_dispatch.__globals__
+    monkeypatch.setattr(collaborators["RateLimitService"], "enforce_request", lambda **kwargs: SimpleNamespace(allowed=True))
+    monkeypatch.setattr(collaborators["request_accounting"], "_record", Mock())
+    app = Flask(__name__)
+    with app.test_request_context(json={}):
+        g.gateway_subrequest = initial
+        def child(data):
+            assert g.gateway_subrequest is True
+            return response("Synthetic")
+        def parent(data):
+            assert g.gateway_subrequest is True
+            accounted_dispatch(data, child, kind="chat")
+            assert g.gateway_subrequest is True
+            return response("Synthetic")
+        payload = {"model": "openai:synthetic", "messages": []}
+        accounted_dispatch(payload, parent, kind="chat")
+        assert g.gateway_subrequest is initial
+        with pytest.raises(RuntimeError):
+            accounted_dispatch(payload, Mock(side_effect=RuntimeError("Synthetic")), kind="chat")
+        assert g.gateway_subrequest is initial
+
+
+def test_sampling_counters_cover_rate_secret_size_queue_error_and_are_bounded(monkeypatch, coverage):
+    app = Flask(__name__)
+    init_shadow_sampling(app)
+    draw = Mock(return_value=0.1)
+    monkeypatch.setattr(coverage.random, "random", draw)
+    payload = {"model": "auto:test", "messages": [{"role": "user", "content": "Synthetic"}]}
+    def visit(body, reply=None):
+        with app.test_request_context("/v1/chat/completions", method="POST", json=body):
+            g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+            g.shadow_eval_started = time.monotonic()
+            reply = reply if reply is not None else response("Synthetic", "openai:production")
+            assert coverage.sample_success(reply, body) is reply
+            coverage.sample_success(reply, body)  # No second decision or skip count.
+    draw.return_value = 0.3; visit(payload)
+    draw.return_value = 0.1
+    secret = "sk-" + "proj-" + "Abc0123456789" * 6
+    visit({**payload, "messages": [{"role": "user", "content": secret}]})
+    visit({**payload, "messages": [{"role": "user", "content": "x" * 65536}]})
+    visit(payload); visit(payload)
+    visit(payload, Response("Not JSON", mimetype="application/json"))
+    assert coverage.sampling_counts() == {"eligible": 6, "sampled": 1, "skipped_rate": 1,
+        "skipped_secret": 1, "skipped_oversize": 1, "skipped_queue_full": 1, "skipped_error": 1}
+    assert draw.call_count == 6
+    snapshot = coverage.sampling_counts(); snapshot["sampled"] = 99
+    assert coverage.sampling_counts()["sampled"] == 1
+    coverage._COUNTS["eligible"] = coverage._COUNTER_MAX
+    coverage.count("eligible")
+    assert coverage.sampling_counts()["eligible"] == coverage._COUNTER_MAX
+
+
+def test_answer_secret_and_size_skips_are_visible(coverage):
+    reasons = []
+    args = ({"model": "auto:test", "messages": []}, {"username": "synthetic"}, "auto:test")
+    secret = "sk-" + "proj-" + "Abc0123456789" * 6
+    assert make_sample(*args, {"content": secret}, "openai:production", 1, {}, on_skip=reasons.append) is None
+    assert make_sample(*args, {"content": "x" * 32768}, "openai:production", 1, {}, on_skip=reasons.append) is None
+    assert reasons == ["skipped_secret", "skipped_oversize"]
+
+
+def test_stream_skip_counters_do_not_count_failure_twice(coverage):
+    for chunks in ([b'x' * 131073], [b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n']):
+        stream = SampleStream(iter(chunks), Mock(), "openai:production")
+        assert list(stream) == chunks
+        stream.close(); stream.close()
+    assert coverage.sampling_counts()["skipped_oversize"] == 1
+    assert coverage.sampling_counts()["skipped_error"] == 1
+
+
+def test_persistence_failure_counter_is_content_free(monkeypatch, coverage):
+    monkeypatch.setattr(coverage._QUEUE, "get", Mock(side_effect=[sample(), StopIteration]))
+    monkeypatch.setattr(coverage._QUEUE, "task_done", Mock())
+    monkeypatch.setattr(coverage.ShadowEvalStore, "put", Mock(side_effect=RuntimeError("Synthetic")))
+    with pytest.raises(StopIteration):
+        coverage._persist()
+    assert coverage.sampling_counts()["skipped_error"] == 1

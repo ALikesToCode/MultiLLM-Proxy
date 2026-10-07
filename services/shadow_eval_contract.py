@@ -66,27 +66,36 @@ def task_type(payload):
     return "chat"
 
 
-def eligible(payload, user, path, *, random_value):
+def eligible(payload, user, path, *, random_value=None):
     model = payload.get("model")
     rate = user.get("shadow_eval_rate")
-    return (path in {"/v1/chat/completions", "/v1/responses", "/intelligence/v1/chat/completions"}
+    return (path in {"/v1/chat/completions", "/v1/responses", "/intelligence/v1/chat/completions",
+                        "/v1/messages", "/optimize/v1/chat/completions"}
             and isinstance(payload.get("messages"), list)
             and ((isinstance(model, str) and model.startswith(("auto:", "cascade:")))
                  or path == "/intelligence/v1/chat/completions" or "routing" in payload)
-            and type(rate) in (int, float) and 0 < rate <= 0.2 and random_value < rate)
+            and type(rate) in (int, float) and 0 < rate <= 0.2 and (random_value is None or random_value < rate))
 
 
-def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=None, finish_reason=None):
+def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=None, finish_reason=None, on_skip=None):
     request = {name: payload[name] for name in REQUEST_FIELDS if name in payload}
     answer = {name: answer[name] for name in ("content", "tool_calls") if name in answer}
-    if (len(encoded(request).encode()) > REQUEST_BYTES or len(encoded(answer).encode()) > ANSWER_BYTES
-            or not isinstance(model, str) or not MODEL.fullmatch(model)):
+    def reject(reason):
+        if on_skip:
+            on_skip(reason)
         return None
+
+    if len(encoded(request).encode()) > REQUEST_BYTES or len(encoded(answer).encode()) > ANSWER_BYTES:
+        return reject("skipped_oversize")
+    if not isinstance(model, str) or not MODEL.fullmatch(model):
+        return reject("skipped_error")
     # Scan the entire request, including fields omitted from persisted replay data.
     for value in (payload, answer):
         report = scan_payload(value)
-        if report["high"] or report["truncated"]:
-            return None
+        if report["high"]:
+            return reject("skipped_secret")
+        if report["truncated"]:
+            return reject("skipped_error")
     sample = {"id": uuid.uuid4().hex, "created_at": time.time() if now is None else now,
             "key_id": str(user.get("username") or user.get("id") or "")[:128],
             "route": route, "task_type": task_type(payload), "request": request,
