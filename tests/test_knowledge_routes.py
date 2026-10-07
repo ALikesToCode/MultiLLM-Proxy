@@ -639,7 +639,7 @@ def test_handoff_flask_firewall_blocks_before_private_transport(app, keys, path)
 def test_skills_rest_mcp_scope_toolset_and_list_parity(app, keys):
     client = app.test_client()
     result = [{"skill_id": "testing", "name": "Testing", "description": "Test guide", "score": 1,
-               "why": ["test"], "files": ["SKILL.md"]}]
+               "why": ["test"], "files": ["SKILL.md"], "confidence": "high"}]
     with patch.object(knowledge, "dispatch", return_value=result) as remote:
         rest = client.get("/v1/knowledge/skills?query=test&mode=fast&limit=3&roots=agents,codex", headers=bearer(keys["reader"]))
         assert remote.call_args.args[0] == "skills.find"
@@ -647,6 +647,16 @@ def test_skills_rest_mcp_scope_toolset_and_list_parity(app, keys):
         rpc = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_find", "arguments": {"query": "test", "mode": "fast"}})
         assert rest.json == json.loads(rpc.json["result"]["content"][0]["text"])
         assert "structuredContent" not in rpc.json["result"]
+        payload = {"query": "test", "mode": "fast", "limit": 3, "roots": ["agents", "codex"], "min_confidence": "high"}
+        posted = client.post("/v1/knowledge/skills/find", json=payload, headers=bearer(keys["reader"]))
+        assert posted.status_code == 200 and posted.json == rest.json
+        assert remote.call_args.args[0] == "skills.find" and remote.call_args.args[2] == payload
+        get = client.get("/v1/knowledge/skills?query=test&min_confidence=high", headers=bearer(keys["reader"]))
+        assert get.status_code == 200 and remote.call_args.args[2]["min_confidence"] == "high"
+        rpc = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_find", "arguments": payload})
+        assert rpc.status_code == 200 and posted.json == json.loads(rpc.json["result"]["content"][0]["text"])
+    assert client.post("/v1/knowledge/skills/find", json={"query": "test"}, headers=bearer(keys["manager"])).status_code == 403
+    assert client.post("/v1/knowledge/skills/find", json={"query": "test"}).status_code == 401
     with patch.object(knowledge, "dispatch", return_value={"text": "Guide", "trust": "operator"}) as remote:
         response = client.get("/v1/knowledge/skills/testing?path=references/guide.md", headers=bearer(keys["reader"]))
         assert response.json["trust"] == "operator"
@@ -683,8 +693,16 @@ def test_skills_client_delegates_sync_scan_to_handler_and_retains_normal_scans(m
         scan.assert_called_once()
 
 
-def test_skills_sync_transport_limits(app, keys, monkeypatch):
+def test_skills_post_find_validation_firewall_and_transport_limits(app, keys, monkeypatch):
     client = app.test_client()
+    token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"
+    with patch.object(knowledge_client, "_submit") as submit:
+        assert client.post("/v1/knowledge/skills/find", json={"query": token}, headers=bearer(keys["reader"])).status_code == 422
+        submit.assert_not_called()
+    invalid = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_find", "arguments": []})
+    assert invalid.json["error"]["code"] == -32602
+    assert client.post("/v1/knowledge/skills/find", data='{"query":"x","query":"y"}', content_type="application/json", headers=bearer(keys["reader"])).status_code == 400
+    assert client.post("/v1/knowledge/skills/find", data="x" * 65537, content_type="application/json", headers=bearer(keys["reader"])).status_code == 413
     maximum = 8 * 1024 * 1024
     assert knowledge_client.SYNC_REQUEST_BYTES == maximum
     raw = json.dumps({"skills": []})

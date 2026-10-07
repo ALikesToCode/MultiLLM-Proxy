@@ -30,6 +30,7 @@ TOOLS = [
         "query": {"type": "string", "minLength": 1, "maxLength": 2000},
         "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
         "mode": {"type": "string", "enum": ["fast", "hybrid"], "default": "hybrid"},
+        "min_confidence": {"type": "string", "enum": ["high"]},
         "roots": {"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": True,
                   "items": {"type": "string", "enum": ROOTS}}}, ["query"]),
     _tool("get", "Load operator skill instructions or a referenced file. Requires knowledge:read.",
@@ -44,7 +45,7 @@ OPERATIONS = {tool["name"]: "skills." + tool["name"].removeprefix("knowledge_ski
 
 def query(args, skill_id=None):
     payload = {}
-    allowed = {"path"} if skill_id is not None else {"query", "limit", "mode", "roots"}
+    allowed = {"path"} if skill_id is not None else {"query", "limit", "mode", "roots", "min_confidence"}
     for key, value in args.items(multi=True):
         if key not in allowed or key in payload:
             raise KnowledgeError("invalid_request", "Unsupported or duplicate skills query fields.", 400)

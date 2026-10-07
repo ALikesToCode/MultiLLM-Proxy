@@ -439,6 +439,9 @@ function restRoute(method, pathname) {
     return { operation: method === "GET" ? "skills.find" : "skills.sync",
       scope: method === "GET" ? "knowledge:read" : "knowledge:manage", body: method === "POST", skills: true };
   }
+  if (first === "skills" && second === "find" && path.length === 2 && method === "POST") {
+    return { operation: "skills.find", scope: "knowledge:read", body: true, skills: true };
+  }
   if (first === "skills" && path.length === 2 && method === "GET") {
     return { operation: "skills.get", scope: "knowledge:read", skills: true, skill: second };
   }
@@ -482,7 +485,7 @@ async function handleRest(request, env, principal, route) {
       }
     }
     if (route.skills && !route.body) {
-      const allowed = route.skill !== undefined ? ["path"] : ["query", "limit", "mode", "roots"];
+      const allowed = route.skill !== undefined ? ["path"] : ["query", "limit", "mode", "roots", "min_confidence"];
       for (const [key, value] of new URL(request.url).searchParams) {
         if (!allowed.includes(key) || Object.hasOwn(payload, key)) throw new KnowledgeEdgeError("invalid_request", "Unsupported or duplicate skills query fields.", 400);
         if (key === "limit" && !/^\d+$/.test(value)) throw new KnowledgeEdgeError("invalid_request", "limit must be an integer.", 400);

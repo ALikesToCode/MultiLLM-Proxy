@@ -37,7 +37,7 @@ export class SkillsStore {
   }
   getIndex() {
     if (!this.index) this.index = new SkillsIndex(this.rows("SELECT * FROM skills ORDER BY skill_id LIMIT ?", SKILLS_LIMIT)
-      .map(row => ({ ...JSON.parse(row.record), suggested: row.suggested, fetched: row.fetched, helpful: row.helpful })));
+      .map(row => ({ ...JSON.parse(row.record), suggested: row.suggested, fetched: row.fetched, helpful: row.helpful })), { confidentCosine: this.env.SKILLS_CONFIDENT_COSINE });
     return this.index;
   }
   async embedding(text) {

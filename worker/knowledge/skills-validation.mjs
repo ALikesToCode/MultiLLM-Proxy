@@ -18,13 +18,14 @@ export function skillPath(value) {
   return value;
 }
 export function parseFind(payload) {
-  fields(payload, ["query", "limit", "mode", "roots"], ["query"]);
+  fields(payload, ["query", "limit", "mode", "roots", "min_confidence"], ["query"]);
   const query = string(payload.query, 2000, "query");
   const mode = payload.mode ?? "hybrid";
   if (!["fast", "hybrid"].includes(mode)) fail("invalid_request", "Choose fast or hybrid mode.");
   if (payload.roots !== undefined && (!Array.isArray(payload.roots) || !payload.roots.length || payload.roots.length > 4
     || new Set(payload.roots).size !== payload.roots.length || payload.roots.some(root => !SKILL_ROOTS.includes(root)))) fail("invalid_request", "Invalid roots filter.");
-  return { query, limit: integer(payload.limit ?? 3, 1, 5, "limit"), mode, roots: payload.roots };
+  if (payload.min_confidence !== undefined && payload.min_confidence !== "high") fail("invalid_request", "Choose high min_confidence.");
+  return { min_confidence: payload.min_confidence, query, limit: integer(payload.limit ?? 3, 1, 5, "limit"), mode, roots: payload.roots };
 }
 export function parseGet(payload) {
   fields(payload, ["skill_id", "path"], ["skill_id"]);

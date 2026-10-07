@@ -1310,6 +1310,12 @@
               ],
               "default": "hybrid"
             },
+            "min_confidence": {
+              "type": "string",
+              "enum": [
+                "high"
+              ]
+            },
             "roots": {
               "type": "array",
               "minItems": 1,

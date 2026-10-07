@@ -309,6 +309,12 @@ def register_knowledge_routes(app, csrf):
         payload = skills.query(request.args, skill_id)
         return jsonify(dispatch("skills.get" if skill_id is not None else "skills.find", g.authenticated_user, payload))
 
+    def skills_find_api():
+        return jsonify(dispatch("skills.find", g.authenticated_user, _body()))
+
+    app.add_url_rule("/v1/knowledge/skills/find", "knowledge_skills_find",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(skills_find_api)),
+                     methods=["POST", "OPTIONS"])
     app.add_url_rule("/v1/knowledge/skills", "knowledge_skills",
                      csrf.exempt(api_authenticate_only(required_scope=lambda:
                          "knowledge:manage" if request.method == "POST" else "knowledge:read")(skills_api)),

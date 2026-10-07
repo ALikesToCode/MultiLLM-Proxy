@@ -7,10 +7,11 @@ import { DatabaseSync } from "node:sqlite";
 import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { SkillsStore } from "../worker/knowledge/skills-store.mjs";
-import { SkillsIndex } from "../worker/knowledge/skills-index.mjs";
+import { SkillsIndex, terms } from "../worker/knowledge/skills-index.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, SKILLS_LIMIT, SYNC_REQUEST_BYTES } from "../worker/knowledge/skills-validation.mjs";
 import { quantizeEmbedding } from "../worker/knowledge/memo-store.mjs";
 import { digest } from "../worker/knowledge/evidence.mjs";
+import { errorReply } from "../worker/knowledge/contracts.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
@@ -170,8 +171,10 @@ test("real Skills Durable Object survives restart with R2 files and helpful coun
 test("edge REST/MCP parity, skills toolset and per-file firewall delegation", async t => {
   const f = fixture(t);
   const env = { ADMIN_API_KEY: "synthetic-skills-admin", ADMIN_USERNAME: "operator", KNOWLEDGE_SERVICE: { fetch: async (_url, init) => {
-    const result = await dispatchKnowledge(f.env, JSON.parse(init.body), { skills: f.store });
-    return Response.json({ version: 1, result });
+    try {
+      const result = await dispatchKnowledge(f.env, JSON.parse(init.body), { skills: f.store });
+      return Response.json({ version: 1, result });
+    } catch (error) { return errorReply(error); }
   } } };
   const request = (path, method = "GET", body) => handleKnowledgeEdgeRequest(new Request(`https://gateway.example${path}`, {
     method, headers: { authorization: "Bearer synthetic-skills-admin", "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) }), env);
@@ -184,6 +187,16 @@ test("edge REST/MCP parity, skills toolset and per-file firewall delegation", as
   const mcp = (await (await rpc("tools/call", { name: "knowledge_skills_find", arguments: { query: "test", mode: "fast", limit: 3, roots: ["agents"] } })).json()).result;
   assert.deepEqual(JSON.parse(mcp.content[0].text), rest);
   assert.equal(mcp.structuredContent, undefined);
+  const confident = { query: "testing", mode: "fast", limit: 3, roots: ["agents"], min_confidence: "high" };
+  const posted = await (await request("/v1/knowledge/skills/find", "POST", confident)).json();
+  const filteredGet = await (await request("/v1/knowledge/skills?query=testing&mode=fast&limit=3&roots=agents&min_confidence=high")).json();
+  const filteredMcp = (await (await rpc("tools/call", { name: "knowledge_skills_find", arguments: confident })).json()).result;
+  assert.deepEqual(posted, filteredGet);
+  assert.deepEqual(posted, JSON.parse(filteredMcp.content[0].text));
+  assert.equal(posted[0].confidence, "high");
+  assert.deepEqual(await (await request("/v1/knowledge/skills/find", "POST", { ...confident, query: "test" })).json(), []);
+  assert.equal((await request("/v1/knowledge/skills/find", "POST", { query: "test", min_confidence: "low" })).status, 400);
+  assert.equal((await request("/v1/knowledge/skills/find", "POST", { query: "test", unexpected: true })).status, 400);
   assert.equal((await (await request("/v1/knowledge/skills/testing?path=reference.md")).json()).text.length, 100000);
   assert.equal((await rpc("tools/call", { name: "knowledge_skills_sync", arguments: { skills: [long] } })).status, 200);
   const token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5";
@@ -194,6 +207,7 @@ test("edge REST/MCP parity, skills toolset and per-file firewall delegation", as
   const mcpSync = (await (await rpc("tools/call", { name: "knowledge_skills_sync", arguments: partial })).json()).result;
   assert.deepEqual(JSON.parse(mcpSync.content[0].text), synced);
   assert.equal((await request(`/v1/knowledge/skills?query=${token}&mode=fast`)).status, 422);
+  assert.equal((await request("/v1/knowledge/skills/find", "POST", { query: token, mode: "fast", min_confidence: "high" })).status, 422);
   assert.equal((await request("/v1/knowledge/skills?query=test&limit=bad")).status, 400);
 });
 
@@ -312,6 +326,68 @@ test("pending R2 operations prevent cleanup or reuse of their immutable revision
   assert.equal(f.store.pendingR2.size, 0);
 });
 
+
+function confidenceRecords() {
+  const record = (skill_id, name, description, index_text = "common implement") => ({ skill_id, name, description, index_text,
+    root: "agents", helpful: 0, files: [{ path: "SKILL.md" }] });
+  return [record("lunar-weaver", "Lunar Weaver", "Orbital tapestry"), record("implement", "implement", "Execution guide"),
+    record("zircon", "zircon", "Mineral guide"), record("specimen", "specimen", "quasar nebula shared"),
+    ...Array.from({ length: 96 }, (_, i) => record(`filler-${i}`, `Filler ${i}`, "Ordinary shared guide"))];
+}
+
+test("synthetic labeled confidence regressions ignore stopwords, stem plurals and scale with query length", () => {
+  const index = new SkillsIndex(confidenceRecords());
+  const cases = [
+    ["please with the next step", []], ["please you should be doing it", []],
+    ["Use the lunar weaver", ["lunar-weaver"]], ["implement this", []], ["zircon", ["zircon"]],
+    ["quasars nebulas shared", ["specimen"]], ["quasar nebula", []],
+    [`quasar nebula shared ${Array.from({ length: 20 }, (_, i) => `padding${i}`).join(" ")}`, []],
+    [`quasar nebula shared ${Array.from({ length: 16 }, (_, i) => `padding${i}`).join(" ")}`, ["specimen"]],
+    ["LUNAR-WEAVERS", ["lunar-weaver"]],
+  ];
+  for (const [query, expected] of cases) assert.deepEqual(index.find({ query, mode: "fast", limit: 3, min_confidence: "high" }).map(r => r.skill_id), expected, query);
+  assert.equal(index.find({ query: "implement", mode: "fast", limit: 3 })[0].confidence, "low");
+  assert.equal(index.ndf.get("implement"), 1);
+  assert.equal(index.fdf.get("implement"), 100);
+  assert.deepEqual(terms("I Please A tests CLASS status analysis 测试123 foo-bar"), ["test", "class", "status", "analysis", "测试123", "foo", "bar"]);
+  assert.throws(() => parseFind({ query: "test", min_confidence: "low" }), { code: "invalid_request" });
+});
+
+test("only returned high-confidence skills create suggestion receipts and helpful feedback", async t => {
+  const f = fixture(t);
+  const records = confidenceRecords();
+  for (let offset = 0; offset < records.length; offset += 16) {
+    await f.submit("sync", { skills: await Promise.all(records.slice(offset, offset + 16).map(r => skill(r.skill_id, r.description))) });
+  }
+  // Low matches must not be recorded even if their normalized score is 1.0.
+  assert.deepEqual(await f.submit("find", { query: "guide", mode: "fast", min_confidence: "high" }), []);
+  assert.equal(f.store.rows("SELECT COUNT(*) AS count FROM skill_suggestions")[0].count, 0);
+  assert.equal(f.store.read("implement").suggested, 0);
+  await f.submit("get", { skill_id: "implement" });
+  assert.equal(f.store.read("implement").helpful, 0);
+  const results = await f.submit("find", { query: "lunar weavers", mode: "fast", min_confidence: "high", limit: 3 });
+  assert.deepEqual(results.map(r => r.skill_id), ["lunar-weaver"]);
+  assert.equal(f.store.read("lunar-weaver").suggested, 1);
+  assert.equal(f.store.rows("SELECT COUNT(*) AS count FROM skill_suggestions")[0].count, 1);
+  await f.submit("get", { skill_id: "lunar-weaver" });
+  assert.equal(f.store.read("lunar-weaver").helpful, 1);
+});
+
+test("hybrid semantic confidence requires explicit calibration and fast mode never uses it", async t => {
+  const records = confidenceRecords().map(r => ({ ...r, embedding: quantizeEmbedding([1, 0]) }));
+  const query = { query: "unrelated", mode: "hybrid", limit: 3, min_confidence: "high" };
+  const embedding = quantizeEmbedding([1, 0]);
+  for (const confidentCosine of [undefined, "", "invalid", 0, -1, 1.1]) {
+    assert.deepEqual(new SkillsIndex(records, { confidentCosine }).find(query, embedding), []);
+  }
+  assert.equal(new SkillsIndex(records, { confidentCosine: "0.95" }).find(query, embedding).length, 3);
+  assert.deepEqual(new SkillsIndex(records, { confidentCosine: 0.95 }).find({ ...query, mode: "fast" }, embedding), []);
+  const f = fixture(t, { embed: async () => [1, 0] });
+  f.env.SKILLS_CONFIDENT_COSINE = "0.95";
+  await f.submit("sync", { skills: [await skill()] });
+  assert.equal((await f.submit("find", query))[0].confidence, "high");
+});
+
 test("8 MiB sync ingress and outbound boundary accept exact size and reject one extra byte", async () => {
   assert.equal(SYNC_REQUEST_BYTES, 8 * 1024 * 1024);
   const env = { ADMIN_API_KEY: "synthetic-skills-boundary", ADMIN_USERNAME: "operator", KNOWLEDGE_SERVICE: { fetch: async () => Response.json({ version: 1, result: { results: [] } }) } };
@@ -323,4 +399,6 @@ test("8 MiB sync ingress and outbound boundary accept exact size and reject one 
     const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync" }).padEnd(bytes)), env);
     assert.equal(outbound.status, expected);
   }
+  const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills/find", JSON.stringify({ query: "x" }).padEnd(65537)), env);
+  assert.equal(response.status, 413);
 });
