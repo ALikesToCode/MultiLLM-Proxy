@@ -50,6 +50,33 @@ def test_plan_frontmatter_references_hashes_and_root_scoped_deletion(tmp_path):
     assert sync.build_plan({"agents": tmp_path / "missing"}, {"agents": ["old"]})["delete"] == []
 
 
+@pytest.mark.parametrize("description", [
+    "|\n  First line\n  Second line",
+    "|-\n  First line\n  Second line",
+    '"First line\\nSecond line"',
+    '"First line\\r\\nSecond line"',
+    '"First line\\tSecond line"',
+])
+def test_multiline_frontmatter_metadata_keeps_original_file_bytes(tmp_path, description):
+    root, directory = library(tmp_path, description=description)
+    original = (directory / "SKILL.md").read_text()
+    plan = sync.build_plan({"agents": root}, {})
+    assert plan["rejected"] == []
+    skill = plan["skills"][0]
+    assert skill["description"] == "First line Second line"
+    file = next(item for item in skill["files"] if item["path"] == "SKILL.md")
+    assert file["content"] == original
+    assert file["sha256"] == sync.hashlib.sha256(original.encode()).hexdigest()
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x0b", "\x1f", "\x7f"])
+def test_control_characters_in_metadata_disable_pruning(tmp_path, control):
+    root, _directory = library(tmp_path, description=json.dumps("First" + control + "Second"))
+    plan = sync.build_plan({"agents": root}, {"agents": ["old", "testing"]})
+    assert plan["skills"] == [] and plan["delete"] == []
+    assert plan["rejected"] == [{"root": "agents", "skill_id": "testing", "reason": "invalid_frontmatter"}]
+
+
 def test_secret_rejection_disables_pruning_and_symlink_escape_is_skipped(tmp_path):
     root, directory = library(tmp_path)
     token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"

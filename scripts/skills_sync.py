@@ -74,9 +74,10 @@ def frontmatter(text):
             value = value[1:-1].replace("''", "'")
         else:
             value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
-        if not isinstance(value, str) or not value.strip():
+        if not isinstance(value, str) or not value.strip() or re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", value):
             raise PlanError("invalid_frontmatter")
-        fields[key] = value.strip()
+        # API metadata is one line; retain the original SKILL.md bytes and hash.
+        fields[key] = " ".join(value.split())
     if set(fields) != {"name", "description"} or len(fields["name"]) > 100 or len(fields["description"]) > 2000:
         raise PlanError("invalid_frontmatter")
     return fields

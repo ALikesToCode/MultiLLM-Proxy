@@ -139,7 +139,10 @@ Only HTTPS or local test HTTP is accepted; redirects are refused.
 
 The bounded frontmatter reader supports scalar strings (plain, single-quoted,
 JSON double-quoted) and YAML literal/folded blocks for name/description. It does
-not claim to implement arbitrary YAML. Markdown links, inline paths and standard
+not claim to implement arbitrary YAML. Metadata whitespace is collapsed to one
+line for the API, while uploaded SKILL.md bytes and hashes remain unchanged.
+Other control characters reject the local skill and disable pruning for its root.
+Markdown links, inline paths and standard
 scripts/references/assets/templates/examples paths collect files recursively
 within the folder; unreferenced files are omitted. Absolute paths, `~` prefixes,
 any `..` segment and references resolving outside the skill are mentions and
