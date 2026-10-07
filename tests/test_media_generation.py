@@ -235,7 +235,8 @@ class VideoJobTest(UnifiedApiTestCase):
         self.assertEqual(self.client.get(f"/v1/videos/{job_id}", headers=ADMIN).status_code, 404)
         with self.app.app_context():
             mine = video_generation.issue_job_id("admin", "openai", "sora-2", "video_123")
-        self.assertEqual(self.client.get(f"/v1/videos/{mine[:-1]}0", headers=ADMIN).status_code, 404)
+        tampered = mine[:-1] + ("0" if mine[-1] != "0" else "1")
+        self.assertEqual(self.client.get(f"/v1/videos/{tampered}", headers=ADMIN).status_code, 404)
         for body in ({}, {"prompt": "x", "seconds": 60}, {"prompt": "x", "aspect_ratio": "21:9"},
                      {"prompt": "x", "image_url": "http://insecure.example/a.png"}):
             self.assertEqual(self.client.post("/v1/videos", headers=ADMIN, json=body).status_code, 400, body)
