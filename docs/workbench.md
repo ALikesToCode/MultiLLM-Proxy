@@ -156,3 +156,60 @@ isolated database through `TEST_CONTROL_PLANE_DATABASE_URL`.
 fixture. Run it only from a secret-free source snapshot with the fixture's explicit
 synthetic environment. It never measures real providers or validates production
 deployment. It is excluded from the Container image.
+
+## Model league and shadow evaluation
+
+The Model league panel samples successful routed chat requests only for keys with
+an explicit `shadow_eval_rate` between 0 and 0.2 in Users → key controls. Blank,
+null and zero disable sampling. `auto:*`, `cascade:*` and intelligence requests
+are eligible, including the normalized `/v1/responses` chat path. Media, roleplay,
+Knowledge and direct concrete models are excluded. Retained requests are scanned
+with the existing secret scanner; high-confidence findings or incomplete scans
+skip the sample. Heuristic findings remain unchanged. Answers are also scanned.
+Request data is limited to 64 KiB and answer data to 32 KiB. Successful streaming
+answers require a terminal finish and `[DONE]`; partial/error streams are skipped.
+
+Load league & settings to configure candidate IDs by coding, extraction, writing,
+reasoning and chat. Evaluation starts disabled. The judge defaults to `free:json`
+(or `SHADOW_EVAL_JUDGE_MODEL` when first seeded), with three replays per run and a
+50-replay UTC daily cap. A replay can include one candidate and two judge calls;
+all three are separately accounted to `internal:shadow-evaluation`. Optional
+`SHADOW_EVAL_DAILY_BUDGET_USD` and `SHADOW_EVAL_MONTHLY_BUDGET_USD` constrain that
+principal. Free/subscription candidates in the reviewed policy run first. Routed
+free/auto judges exclude Gemini; a concrete Gemini judge is an explicit choice.
+
+The five-minute scheduled trigger uses `fetchIfRunning` and never wakes or renews
+an idle Container. Claims and a five-minute lease prevent concurrent duplicate
+runs and enforce the daily cap. Failed attempts consume their claim and are not
+retried. A run starts no more than the configured count within four minutes; calls
+use existing dispatch timeouts. Replays cap output at 2,048 tokens. Judging uses
+random A/B order followed by swapped order. Only agreeing valid judgments record
+a win/loss; disagreement is a tie and malformed output is excluded from ratings.
+
+The league shows per-task wins/losses/ties, Elo (1500 initial, K=32), comparison
+count, median latency and known cost. Export league contains numeric results and
+model identifiers, never retained text. Propose update changes only task scores
+for models with at least 20 judged comparisons in that task; auto-route order
+suggestions are displayed separately. Applying requires a checked confirmation
+and the current proposal revision. Policy validation, an atomic revision guard
+and a retained policy backup run before replacing the policy. Auto routes never
+change automatically.
+
+Inspect sample metadata before selecting Load sample text. Only administrators
+can request individual retained text. Samples expire from access after seven days
+and the oldest are evicted above 2,000. D1 retention cleanup runs on every cron,
+even while the Container is asleep, and on storage access. Physical deletion
+depends on successful cron/storage execution; this is not a D1 native TTL.
+Content-free results retain at most 10,000 records for 90 days; policy backups
+retain at most 20. Purge requires confirmation and removes samples and results,
+without resetting the daily allowance or removing policy backups. This data is
+excluded from the general control-plane export so prompt text cannot enter it.
+
+Apply `0014_shadow_eval.sql` before releasing the Worker/Container. It adds the
+nullable key override and four tables (including guarded policy backups). Reuse
+`INTELLIGENCE_DB`, the private intelligence outbound service and existing cron;
+no new binding or Durable Object migration is needed. Configure the judge and
+optional evaluation budgets through the existing Container environment path,
+then enable evaluation and opt in individual keys. Provider credentials remain
+in the existing server configuration. Local-only installations clean retention
+on access/run; they need periodic invocation if idle physical deletion is required.

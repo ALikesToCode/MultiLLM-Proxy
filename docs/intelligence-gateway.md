@@ -39,7 +39,7 @@ contract.
 ```
 
 Tasks: `general`, `coding`, `reasoning`, `planning`, `assessment`, `research`,
-`writing`. Profiles: `fast`, `balanced`, `quality`. Sources: `jev`, `rules`,
+`writing`, `chat`, `extraction`. Profiles: `fast`, `balanced`, `quality`. Sources: `jev`, `rules`,
 `explicit`. Capabilities: `tools`, `json`, `vision`, `reasoning`, `streaming`,
 `audio`. Omitted hints default to general/balanced/rules. Classification is
 advisory: no Jev or judge request is made here. Omni owns intent classification,
@@ -255,3 +255,13 @@ review exact models/accounts and task evaluations; set bounded principal/global
 allowances; provision existing credential variables through the secret manager;
 configure voice/model/dimension pins; and arrange approved scopes for Omni's key.
 Run an authorized provider contract check before claiming live availability.
+
+## Traffic-based policy proposals
+
+[Shadow evaluation](workbench.md#model-league-and-shadow-evaluation) is disabled
+until configured and per-key opted in. Its internal evaluation principal uses the
+normal admission, usage ledger, budgets, route health and outbound firewall.
+Twenty valid per-task comparisons are required before a candidate's `task_scores`
+can be proposed. The dashboard applies reviewed scores with policy validation,
+a revision guard and an atomic backup; `quality_tier` and auto routes remain
+unchanged. Migration `0014_shadow_eval.sql` must precede the code release.
