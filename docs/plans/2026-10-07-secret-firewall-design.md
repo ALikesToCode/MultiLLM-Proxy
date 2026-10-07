@@ -125,6 +125,13 @@ these as `secret_scan`, and `/admin/audit` includes the latest 50 decisions. Exi
 sign-in/out metadata limits remain 512 characters; scan metadata is bounded at 1024.
 Audit failure never prevents a generation or intentional block. Edge audit waiting is
 bounded to one second; Container auditing uses the existing bounded private RPC.
+Identical identity/route/mode/action/type-count events reserve one audit attempt per
+10 minutes in each process or edge isolate. The 1,024-entry in-memory map evicts the
+oldest reservation; duplicates do not refresh it. Python reservations are locked
+for parallel image tasks, and edge reservations occur before awaiting D1. Failed
+writes also consume the window to bound retries. Response counts remain per request.
+Restarts and separate processes/isolates have independent windows; eviction can
+allow an older event to be recorded again before 10 minutes.
 
 Parallel image tasks carry the caller's key controls into their copied contexts and
 aggregate response counts back to the parent. Secret blocks stop image candidate fallback.

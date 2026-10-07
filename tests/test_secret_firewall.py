@@ -1,4 +1,5 @@
 import json
+from collections import OrderedDict
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,6 +10,11 @@ from services import secret_firewall as firewall
 from services.secret_scan import scan_text
 
 TOKEN = "AK" + "IA" + "AB12CD34EF56GH78"
+
+@pytest.fixture(autouse=True)
+def reset_audit_window(monkeypatch):
+    monkeypatch.setattr(firewall, "_audit_events", OrderedDict())
+
 
 def application(monkeypatch, mode):
     from services.proxy_service import ProxyService
@@ -123,7 +129,7 @@ def test_parallel_image_tasks_keep_key_mode_and_counts(monkeypatch, mode):
         return app.json.response({"items": run_image_tasks([send, send])})
     response = app.test_client().post("/synthetic-images", json={})
     assert len(bodies) == (0 if mode == "block" else 2)
-    assert len(events) == (0 if mode == "off" else 2)
+    assert len(events) == (0 if mode == "off" else 1)
     assert all(event[1]["actor"] == "synthetic-agent" for event in events)
     if bodies: assert all((TOKEN.encode() in body) == (mode != "redact") for body in bodies)
     assert all(item["status"] == (422 if mode == "block" else 200) for item in response.json["items"])
@@ -157,3 +163,54 @@ def test_parallel_image_tasks_add_to_counts_recorded_before_fan_out(monkeypatch)
     assert len(bodies) == 2
     # Worker threads must not share the caller's counter list, or counts multiply.
     assert response.headers.get(firewall.HEADER) == "redacted=3; observed=0"
+
+
+def test_audit_window_expiry_keeps_per_request_headers(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(firewall.time, "monotonic", lambda: now[0])
+    app, events, bodies = application(monkeypatch, "redact")
+    client = app.test_client()
+    for instant, expected in ((0, 1), (599.999, 1), (600, 2), (601, 2)):
+        now[0] = instant
+        response = client.post("/v1/chat/completions", json={"prompt": TOKEN})
+        assert response.headers[firewall.HEADER] == "redacted=1; observed=0"
+        assert len(events) == expected
+    assert len(bodies) == 8
+
+
+def test_audit_identity_dimensions_and_oldest_eviction(monkeypatch):
+    monkeypatch.setattr(firewall.time, "monotonic", lambda: 0.0)
+    types = {"aws_access_key": 1, "github_token": 1}
+    base = ("agent", "/chat", "redact", "redacted", types)
+    assert firewall._reserve_audit(*base)
+    assert not firewall._reserve_audit(*base[:-1], dict(reversed(list(types.items()))))
+    variants = [
+        ("other", *base[1:]),
+        (base[0], "/images", *base[2:]),
+        (*base[:2], "observe", *base[3:]),
+        (*base[:3], "observed", types),
+        (*base[:4], {"aws_access_key": 1}),
+    ]
+    for args in variants:
+        assert firewall._reserve_audit(*args)
+    for index in range(1018):
+        assert firewall._reserve_audit(f"agent-{index}", *base[1:])
+    assert len(firewall._audit_events) == 1024
+    assert not firewall._reserve_audit(*base)  # Duplicate reads do not reorder oldest.
+    assert firewall._reserve_audit("one-more", *base[1:])
+    assert len(firewall._audit_events) == 1024
+    assert firewall._reserve_audit(*base)
+
+
+def test_failed_audit_is_suppressed_without_changing_policy(monkeypatch, caplog):
+    from services import audit_log
+    now = [0.0]
+    monkeypatch.setattr(firewall.time, "monotonic", lambda: now[0])
+    record = Mock(side_effect=RuntimeError(TOKEN))
+    monkeypatch.setattr(audit_log, "record", record)
+    for instant in (0, 1, 600):
+        now[0] = instant
+        with pytest.raises(APIError):
+            firewall.protect_payload(TOKEN, user={"secret_scan_mode": "block"})
+    assert record.call_count == 2
+    assert TOKEN not in caplog.text

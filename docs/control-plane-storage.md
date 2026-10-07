@@ -217,5 +217,9 @@ exports those secrets nor changes the configured upstream credentials.
 Per-key controls include nullable `secret_scan_mode` (`off`, `observe`, `redact`, `block`).
 Migration `0011_secret_firewall.sql` adds the D1 column; an unset override uses
 `SECRET_SCAN_DEFAULT`, which defaults to `redact`. `/admin/audit` lists the latest 50
-scan decisions with counts only. See [the design](plans/2026-10-07-secret-firewall-design.md)
+scan decisions with counts only. Identical identity/route/mode/action/type-count
+events get one audit attempt per 10 minutes per process or edge isolate, in an
+in-memory map capped at 1,024 entries with oldest eviction. Failed attempts consume
+the window; restarts and eviction reset suppression. Response counts remain per
+request. See [the design](plans/2026-10-07-secret-firewall-design.md)
 for dispatch coverage, bounded inspection and rollout requirements.

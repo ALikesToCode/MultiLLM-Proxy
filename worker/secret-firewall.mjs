@@ -7,6 +7,20 @@ export const isSecretScanBlock = response => blockedResponses.has(response);
 const MODES = new Set(["off", "observe", "redact", "block"]);
 const MAX_BUFFER_BYTES = 32 * 1024 * 1024;
 const READ_TIMEOUT_MS = 1000;
+const AUDIT_WINDOW_MS = 10 * 60 * 1000;
+const MAX_AUDIT_EVENTS = 1024;
+const auditEvents = new Map();
+
+function reserveAudit(identity, route, mode, action, types) {
+  const key = JSON.stringify([identity, route, mode, action, Object.entries(types).sort(([a], [b]) => a.localeCompare(b))]);
+  const now = Date.now(), previous = auditEvents.get(key);
+  if (previous !== undefined && now - previous < AUDIT_WINDOW_MS) return false;
+  // Reserve before dispatch so concurrent requests and failed writes stay bounded.
+  auditEvents.delete(key);
+  if (auditEvents.size >= MAX_AUDIT_EVENTS) auditEvents.delete(auditEvents.keys().next().value);
+  auditEvents.set(key, now);
+  return true;
+}
 
 export function secretScanMode(env = {}, principal = {}, knowledge = false) {
   let mode = MODES.has(principal?.secret_scan_mode) ? principal.secret_scan_mode : String(env.SECRET_SCAN_DEFAULT ?? "redact").trim().toLowerCase();
@@ -22,11 +36,13 @@ function safeLabel(value, fallback) {
 async function record(env, report, { principal, route, provider, mode, action }) {
   if (!env.INTELLIGENCE_DB) return;
   try {
+    const identity = safeLabel(principal?.id ?? principal?.username, null), target = safeLabel(route, "redacted_route");
+    if (!reserveAudit(identity, target, mode, action, report.types)) return;
     const detail = JSON.stringify({ kind: "secret_scan", mode, action, provider: safeLabel(provider, null), types: report.types });
     let timer;
     const write = env.INTELLIGENCE_DB.prepare("INSERT INTO control_audit_events (at, actor, action, outcome, target, detail) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(new Date().toISOString(), safeLabel(principal?.id ?? principal?.username, null), "setting_change",
-        action === "blocked" ? "refused" : "succeeded", safeLabel(route, "redacted_route"), detail).run();
+      .bind(new Date().toISOString(), identity, "setting_change",
+        action === "blocked" ? "refused" : "succeeded", target, detail).run();
     try { await Promise.race([write, new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error("audit_timeout")), 1000);
     })]); } finally { clearTimeout(timer); }

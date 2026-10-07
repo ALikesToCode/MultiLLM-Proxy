@@ -5,6 +5,9 @@ import json
 import logging
 import os
 import re
+import threading
+import time
+from collections import OrderedDict
 from urllib.parse import parse_qsl, urlencode
 
 from flask import g, has_request_context, request
@@ -15,6 +18,25 @@ from services.secret_scan import redact_payload, scan_text
 logger = logging.getLogger(__name__)
 MODES = frozenset({"off", "observe", "redact", "block"})
 HEADER = "X-MultiLLM-Secret-Scan"
+_AUDIT_WINDOW_SECONDS = 600
+_MAX_AUDIT_EVENTS = 1024
+_audit_events = OrderedDict()
+_audit_lock = threading.Lock()
+
+
+def _reserve_audit(identity, route, mode, action, types):
+    key = (identity, route, mode, action, tuple(sorted(types.items())))
+    with _audit_lock:
+        now = time.monotonic()
+        previous = _audit_events.get(key)
+        if previous is not None and now - previous < _AUDIT_WINDOW_SECONDS:
+            return False
+        # Reserve before dispatch so parallel tasks and failed writes stay bounded.
+        _audit_events.pop(key, None)
+        if len(_audit_events) >= _MAX_AUDIT_EVENTS:
+            _audit_events.popitem(last=False)
+        _audit_events[key] = now
+        return True
 
 
 class ScannedBody(bytes):
@@ -61,8 +83,10 @@ def protect_payload(value, *, provider=None, user=None, knowledge=False):
                          "types": report["types"]}, separators=(",", ":"))
     try:
         from services import audit_log
-        audit_log.record("secret_scan", "refused" if action == "blocked" else "succeeded",
-                         actor=safe_identity, target=_route(), detail=detail)
+        route = _route()
+        if _reserve_audit(safe_identity, route, mode, action, report["types"]):
+            audit_log.record("secret_scan", "refused" if action == "blocked" else "succeeded",
+                             actor=safe_identity, target=route, detail=detail)
     except Exception as error:
         logger.warning("Secret scan audit unavailable type=%s", type(error).__name__)
     if has_request_context():

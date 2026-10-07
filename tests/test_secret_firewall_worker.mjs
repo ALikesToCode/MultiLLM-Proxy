@@ -111,3 +111,65 @@ for (const mode of ["redact", "observe"]) test(`roleplay ${mode} reports finding
   assert.equal(response.headers.get("X-MultiLLM-Secret-Scan"), mode === "redact" ? "redacted=1; observed=0" : "redacted=0; observed=1");
   await fixture.waitForBackgroundWork();
 });
+
+
+function auditDatabase(events) {
+  return { prepare() { return { bind(...args) { events.push(args); return { run: async () => ({}) }; } }; } };
+}
+
+test("audit window expiry preserves per-request headers", async t => {
+  const { firewallFetch: dispatch } = await import("../worker/secret-firewall.mjs?audit-window");
+  let now = 0;
+  t.mock.method(Date, "now", () => now);
+  const events = [], env = { INTELLIGENCE_DB: auditDatabase(events) };
+  for (const [instant, expected] of [[0, 1], [599999, 1], [600000, 2], [600001, 2]]) {
+    now = instant;
+    const response = await dispatch(new Request("https://provider.invalid", { method: "POST", body: TOKEN }), env,
+      { principal: { id: "agent" }, route: "/chat" }, async req => {
+        assert.ok(!(await req.text()).includes(TOKEN)); return Response.json({ ok: true });
+      });
+    assert.equal(response.headers.get("X-MultiLLM-Secret-Scan"), "redacted=1; observed=0");
+    assert.equal(events.length, expected);
+  }
+  assert.ok(!JSON.stringify(events).includes(TOKEN));
+});
+
+test("audit identity dimensions, provider independence and oldest eviction", async t => {
+  const { protectPayload: protect } = await import("../worker/secret-firewall.mjs?audit-bound");
+  t.mock.method(Date, "now", () => 0);
+  const events = [], env = { INTELLIGENCE_DB: auditDatabase(events) };
+  const base = { principal: { id: "agent" }, route: "/chat" };
+  const send = (options = base, payload = TOKEN) => protect(payload, env, options);
+  await send();
+  await send({ ...base, provider: "other" });
+  assert.equal(events.length, 1);
+  await send({ ...base, principal: { id: "other" } });
+  await send({ ...base, route: "/images" });
+  await send({ ...base, principal: { id: "agent", secret_scan_mode: "observe" } });
+  await send({ ...base, principal: { id: "agent", secret_scan_mode: "block" } });
+  await send(base, { password: "AbCdEf0123456789" });
+  assert.equal(events.length, 6);
+  for (let index = 0; index < 1018; index += 1) await send({ ...base, principal: { id: `agent-${index}` } });
+  assert.equal(events.length, 1024);
+  await send(); // Duplicate reads do not reorder oldest.
+  assert.equal(events.length, 1024);
+  await send({ ...base, principal: { id: "one-more" } });
+  await send();
+  assert.equal(events.length, 1026);
+});
+
+test("parallel audit reservations and failed writes remain bounded", async t => {
+  const { protectPayload: protect } = await import("../worker/secret-firewall.mjs?audit-failure");
+  let now = 0, calls = 0;
+  t.mock.method(Date, "now", () => now);
+  const logs = [];
+  t.mock.method(console, "warn", (...args) => logs.push(args));
+  const env = { SECRET_SCAN_DEFAULT: "block", INTELLIGENCE_DB: { prepare() { calls += 1; throw new Error(TOKEN); } } };
+  const decisions = await Promise.all(Array.from({ length: 8 }, () => protect(TOKEN, env)));
+  assert.ok(decisions.every(decision => decision.blocked.status === 422));
+  assert.equal(calls, 1);
+  now = 600000;
+  assert.equal((await protect(TOKEN, env)).blocked.status, 422);
+  assert.equal(calls, 2);
+  assert.ok(!JSON.stringify(logs).includes(TOKEN));
+});
