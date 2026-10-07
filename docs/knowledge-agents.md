@@ -165,12 +165,13 @@ Injected tags, agent instructions, interrupted requests, metadata, compaction an
 sidechain user records are excluded. User messages are labeled `User:` in
 deterministic `decisions`; they are not inferred decisions. Tool output is used only to identify failure status, never copied.
 High-confidence secrets are redacted before truncation and before saving.
-Transcript input is limited to 64 MiB total and 1 MiB per line; discovery examines
+Transcript recovery reads the last 64 MiB, drops any partial first line, and skips
+lines over 1 MiB in bounded reads; the goal is the first operator message in that
+window. Discovery examines
 at most 20,000 files per client. Claude paths encode all punctuation as hyphens
 and fall back to bounded cwd-field matching for shortened paths. Recorded cwd
-paths are resolved before matching in both clients so symlink aliases agree. Codex discovery
-checks date directories and rollout filenames newest first. Oversized inputs
-fail without partial recovery.
+paths are resolved before matching in both clients so symlink aliases agree.
+Codex discovery checks date directories and rollout filenames newest first.
 
 `build --summarize MODEL` optionally uses `/v1/chat/completions` with at most
 30,000 characters of sanitized sections and the closing summary. Supply a

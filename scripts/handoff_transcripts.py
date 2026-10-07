@@ -30,24 +30,37 @@ def sanitized(value):
     return result
 
 
+def discard_line(stream, end):
+    while stream.tell() < end:
+        chunk = stream.readline(min(MAX_LINE_BYTES + 1, end - stream.tell()))
+        if not chunk or chunk.endswith(b"\n"):
+            return
+
+
 def records(path):
-    consumed = 0
     with Path(path).open("rb") as stream:
-        while consumed < MAX_TRANSCRIPT_BYTES:
-            line = stream.readline(MAX_LINE_BYTES + 1)
+        end = stream.seek(0, 2)
+        start = max(0, end - MAX_TRANSCRIPT_BYTES)
+        stream.seek(start)
+        if start:
+            # Keep a complete first line when the tail starts exactly at its boundary.
+            stream.seek(start - 1)
+            if stream.read(1) != b"\n":
+                discard_line(stream, end)
+        while stream.tell() < end:
+            line = stream.readline(min(MAX_LINE_BYTES + 1, end - stream.tell()))
             if not line:
                 return
-            consumed += len(line)
-            if len(line) > MAX_LINE_BYTES or consumed > MAX_TRANSCRIPT_BYTES:
-                raise ValueError("Transcript exceeds extraction bounds")
+            if len(line) > MAX_LINE_BYTES:
+                if not line.endswith(b"\n"):
+                    discard_line(stream, end)
+                continue
             try:
                 value = json.loads(line)
             except (ValueError, UnicodeDecodeError):
                 continue
             if isinstance(value, dict):
                 yield value
-        if stream.read(1):
-            raise ValueError("Transcript exceeds extraction bounds")
 
 
 def cwd_matches(recorded, cwd):

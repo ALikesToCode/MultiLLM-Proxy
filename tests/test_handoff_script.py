@@ -238,14 +238,82 @@ def test_local_validation_allows_empty_bounded_strings():
     assert value["sections"]["files"][0]["path"] == ""
 
 
-def test_transcript_line_and_scan_bounds_fail_closed(tmp_path, monkeypatch):
+def test_transcript_skips_oversized_lines_and_scan_bounds_fail_closed(tmp_path, monkeypatch):
     path = tmp_path / "synthetic.jsonl"
     path.write_text("{" + "x" * 100 + "}\n")
     monkeypatch.setattr(transcripts, "MAX_LINE_BYTES", 50)
-    with pytest.raises(ValueError):
-        list(transcripts.records(path))
+    assert list(transcripts.records(path)) == []
     assert transcripts.clean("x" * 100) == "[oversized fact omitted]"
     assert len(contracts.render(payload(summary="🧭" * 4000)).encode()) <= 4500
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_oversized_middle_line_preserves_facts_before_and_after(tmp_path, monkeypatch, agent):
+    monkeypatch.setattr(transcripts, "MAX_LINE_BYTES", 256)
+    def message(role, text):
+        return ({"type": role, "message": {"content": text}} if agent == "claude" else
+                {"type": "response_item", "payload": {"type": "message", "role": role, "content": text}})
+    before = message("user", "Recover the synthetic task")
+    oversized = message("user", "Skipped fact " + "x" * 2000)
+    after = message("assistant", "Synthetic recovery complete")
+    path = tmp_path / "synthetic.jsonl"
+    path.write_text("\n".join(json.dumps(item) for item in (before, oversized, after)))
+    assert list(transcripts.records(path)) == [before, after]
+    with patch.object(transcripts, "git", return_value=""):
+        value = transcripts.extract(path, tmp_path, agent)
+    assert value["sections"]["goal"] == "Recover the synthetic task"
+    assert value["sections"]["state"] == "Synthetic recovery complete"
+    assert value["sections"]["decisions"] == ["User: Recover the synthetic task"]
+
+
+@pytest.mark.parametrize("aligned", [False, True])
+def test_oversized_transcript_recovers_tail_goal_and_final(tmp_path, monkeypatch, aligned):
+    def message(role, text):
+        return json.dumps({"type": "response_item", "payload": {
+            "type": "message", "role": role, "content": text}}).encode() + b"\n"
+    tail = message("user", "Recent synthetic task") + message("assistant", "Recent synthetic state")
+    prefix = message("user", "Old synthetic task") + b"x" * 1000 + b"\n"
+    path = tmp_path / "synthetic.jsonl"
+    path.write_bytes(prefix + tail)
+    monkeypatch.setattr(transcripts, "MAX_LINE_BYTES", 256)
+    monkeypatch.setattr(transcripts, "MAX_TRANSCRIPT_BYTES", len(tail) + (0 if aligned else 100))
+    with patch.object(transcripts, "git", return_value=""):
+        value = transcripts.extract(path, tmp_path, "codex")
+    assert value["sections"]["goal"] == "Recent synthetic task"
+    assert value["sections"]["state"] == "Recent synthetic state"
+    assert "Old synthetic task" not in json.dumps(value)
+
+
+@pytest.mark.parametrize("tail_only", [False, True])
+def test_transcript_reads_are_bounded_while_discarding_long_lines(monkeypatch, tail_only):
+    monkeypatch.setattr(transcripts, "MAX_LINE_BYTES", 64)
+    first, last = b'{"fact":"before"}\n', b'{"fact":"after"}\n'
+    data = first + b"x" * 1000 + b"\n" + last
+    if tail_only:
+        monkeypatch.setattr(transcripts, "MAX_TRANSCRIPT_BYTES", 500)
+    reads = []
+    class BoundedStream(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            assert 0 < size <= transcripts.MAX_LINE_BYTES + 1
+            return super().read(size)
+
+        def readline(self, size=-1):
+            reads.append(size)
+            assert 0 < size <= transcripts.MAX_LINE_BYTES + 1
+            return super().readline(size)
+
+    with patch.object(Path, "open", return_value=BoundedStream(data)):
+        values = list(transcripts.records("/synthetic/transcript.jsonl"))
+    assert values == ([{"fact": "after"}] if tail_only else [{"fact": "before"}, {"fact": "after"}])
+    assert len(reads) > 3
+
+
+def test_oversized_final_line_without_newline_is_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(transcripts, "MAX_LINE_BYTES", 64)
+    path = tmp_path / "synthetic.jsonl"
+    path.write_bytes(b'{"fact":"before"}\n' + b"x" * 1000)
+    assert list(transcripts.records(path)) == [{"fact": "before"}]
 
 
 def test_summarize_validation_and_transport_failures_keep_deterministic_sections(server, monkeypatch):

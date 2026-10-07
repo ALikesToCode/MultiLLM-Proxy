@@ -102,9 +102,11 @@ newest first, stopping at the first metadata match in the first five lines.
 Both metadata scans compare resolved cwd paths, including symlink aliases, and
 ignore malformed or unresolvable recorded paths.
 Discovery examines up to 20,000 files per client; lines use the 1 MiB parse cap
-and date-directory enumeration is also bounded to 20,000 entries. Parsing accepts
-at most 64 MiB total and 1 MiB per line, skips malformed JSON lines, and fails if byte limits are exceeded. These operational
-caps bound recovery; large threads need a smaller explicit transcript.
+and date-directory enumeration is also bounded to 20,000 entries. Parsing reads
+the last 64 MiB, discarding a partial first line, and skips malformed JSON and
+lines over 1 MiB. Oversized lines are discarded through newline in reads of at
+most 1 MiB plus one byte. The goal is the first operator message in this recent
+window; facts outside it are omitted.
 
 Synthetic fixtures reflect inspected key/type shapes only. Claude Edit/Write/
 MultiEdit/NotebookEdit inputs identify files; Bash inputs and failure statuses
