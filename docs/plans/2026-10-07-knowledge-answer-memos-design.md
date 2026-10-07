@@ -46,10 +46,13 @@ timestamps persist across object restarts. Stats group at most 20,000 products.
 1. Exact lookup lowercases the query, collapses whitespace and removes trailing
    Unicode punctuation. Product, exact version, repository and mode must match;
    stored token count must fit the new request budget. An exact hit needs no
-   embedding or provider calls.
+   embedding or provider calls. The complete exact path (lookup, validation and
+   hit accounting) is bounded to 300 ms; timeout is a miss.
 2. Semantic lookup embeds once per request and scans only vectors for the same
    product/version/repository/mode and fitting budget. Cosine must meet the
-   configured threshold. Invalid or unavailable embeddings are a miss.
+   configured threshold. In semantic `on` mode, embedding, matching, validation
+   and hit accounting share a 400 ms total deadline before retrieval. Timeout,
+   invalid or unavailable embeddings are a miss.
 3. A candidate must be younger than the memo TTL. One batched authority
    transaction verifies every citation using the same shared eligibility predicate
    as retrieval and cached answers: artifact exists and is not expiring, source
@@ -65,9 +68,13 @@ timestamps persist across object restarts. Stats group at most 20,000 products.
    `memo: {kind, similarity, age_seconds}`; semantic adds `matched_query`.
    MCP trims bookkeeping while preserving `memo` and observed candidates.
 
-Semantic observe mode validates a candidate but never serves it or increments
-its hit counter. The normal response adds
+Semantic observe mode starts embedding and matching concurrently with ordinary
+retrieval and never waits for them. It validates a candidate but never serves it
+or increments its hit counter. If the candidate has finished by bundle assembly,
+the normal response adds
 `index_diagnostics.memo_candidate: {similarity, matched_query, age_seconds}`.
+A later completion is ignored; observation is bounded to two seconds in the
+background and retained with `waitUntil` when available.
 
 ## Writes and failures
 
@@ -84,17 +91,21 @@ prefixes. Such queries perform neither memo lookup, embedding nor writes.
 Record validation repeats the guard and enforces payload, vector and citation
 bounds. Normal cache hits can populate memos after validation.
 
-Validation and embedding preparation are awaited within the optional budget;
-the final put uses `waitUntil` when available and otherwise is awaited. Preparation
-must finish before response serialization so embedding usage is accurate. Lookup
-and write each have a two-second ceiling across their optional stages; writes
-also leave 100 ms before the existing 24-second retrieval deadline. Memo exceptions,
-binding faults and embedding timeouts never turn successful retrieval into an
-error. Ordinary retrieval still enforces its existing request deadline.
+When `waitUntil` is available, the whole write (validation, embedding and put)
+runs in the background; returning the answer waits for none of those stages.
+Without `waitUntil`, tests await the whole write. Writing shares a two-second
+ceiling across its stages. Foreground writes also leave 100 ms before the existing
+24-second retrieval deadline; background writes have their own deadline and may
+outlive the response. Memo exceptions, binding faults, background-registration
+failures and embedding timeouts never turn successful retrieval into an error.
+Ordinary retrieval still enforces its existing request deadline.
 
 Workers AI embeddings have no existing reservation tariff in this gateway.
-Each attempt reports provider `workers_ai`, zero `bound_units`, outcome
+Each attempt records provider `workers_ai`, zero `bound_units`, outcome
 `completed` or `unconfirmed`, and measurement `unmetered_platform_operation`.
+Response usage is a snapshot of work started by return time: an unfinished
+embedding is `unconfirmed`, and a background embedding started later is not
+retroactively appended. Background embeddings remain zero-unit operations.
 These units are not a cost estimate; Cloudflare billing applies. Exact hits record
 no embedding usage and semantic lookup/write reuse one embedding attempt.
 
@@ -131,8 +142,9 @@ Synthetic tests cover exact cross-principal reuse, corpus generation independenc
 semantic observe/on/off and below-threshold behavior, target/mode/budget separation,
 hash/current-revision/expiry/TTL and policy revocation, fresh bypass, failure and
 secret guards, payload bounds, LRU, stats/purge/scope checks, Flask/edge REST/MCP
-parity, trimming, policy serialization and deadline fail-open behavior. Local
-Miniflare exercises the actual SQLite Durable Object, concurrent hit updates,
+parity, trimming, policy serialization, full background writes, concurrent
+observation, immutable returned usage and 300/400 ms deadline fail-open behavior.
+Local Miniflare exercises the actual SQLite Durable Object, concurrent hit updates,
 restart persistence and purge. Catalogue generation/check and Worker regression
 suites are required.
 

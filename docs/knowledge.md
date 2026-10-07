@@ -311,19 +311,28 @@ be their source's current revision.
 
 Policy defaults are `memo_exact: "on"`, `memo_semantic: "observe"`,
 `memo_similarity: 0.92` and `memo_ttl_hours: 72`. Similarity accepts 0.85–0.99;
-TTL accepts integer hours from 1–720. Semantic `observe` runs ordinary retrieval
-and adds `index_diagnostics.memo_candidate` for a valid match. Semantic `on`
-serves matching evidence; `off` skips query embeddings. Memo responses have
+TTL accepts integer hours from 1–720. Exact lookup has a 300 ms total bound;
+a timeout is a miss. Semantic `observe` starts embedding and matching concurrently
+with ordinary retrieval and never waits: `index_diagnostics.memo_candidate` is
+added only when validation finishes by bundle assembly. Later results are ignored;
+the background observation is bounded to two seconds. Semantic `on` serves
+matching evidence with a 400 ms total bound across embedding, matching and
+validation; a timeout is a miss. `off` skips query embeddings. Memo responses have
 `path: "memo"` and `memo` metadata, which survives MCP evidence trimming.
 Workers AI `@cf/baai/bge-m3` uses `KNOWLEDGE_SEARCH_AI`; embedding usage reports
 zero reserved units as an `unmetered_platform_operation`, not a free operation.
-Cloudflare platform billing still applies.
+Cloudflare platform billing still applies. Returned usage is a snapshot; pending
+embeddings are `unconfirmed`, and later background work does not mutate it.
 
 Only successful or partial answers with excerpts and no retrieval failures are
 stored; both retained live citations and current published citations are eligible.
-A small local secret-shape guard skips memo work. Optional memo failures and timeouts
-fall through to ordinary retrieval. The bundle limit is 256 KiB. One SQLite
-Durable Object holds logical product shards, with atomic eviction at 2,000 memos
+A small local secret-shape guard skips memo work. With `waitUntil`, the complete
+write (validation, embedding and storage) runs in the background without delaying
+the answer. Without it, tests await the whole write. Writes have a two-second
+total bound, and background embeddings remain zero-unit operations. Optional memo
+failures and timeouts fall through to ordinary retrieval. The bundle limit is
+256 KiB. One SQLite Durable Object holds logical product shards, with atomic
+eviction at 2,000 memos
 per product and 20,000 total; it retains only the active product's Int8 vectors
 in memory. This central store keeps the global bound and purge atomic.
 

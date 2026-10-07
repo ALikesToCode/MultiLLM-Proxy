@@ -302,7 +302,7 @@ test("Workers AI binding receives bge-m3 request and storage uses waitUntil", as
   await f.run(f.query, { embed: undefined, waitUntil: promise => tasks.push(promise) });
   await Promise.all(tasks);
   assert.deepEqual(called, ["@cf/baai/bge-m3", { text: [f.query.query] }]);
-  assert.equal(tasks.length, 1);
+  assert.equal(tasks.length, 2);
   assert.equal((await f.memos.call("stats")).totals.count, 1);
 });
 

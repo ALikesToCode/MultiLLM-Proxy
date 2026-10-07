@@ -318,14 +318,11 @@ async function runRetrieval(env, authority, principal, request, options, signal,
         outcome: confirmed ? "completed" : "unconfirmed", measurement: "configured_operation_bound" });
     }
   };
-  const memos = memoSession(env, authority, request, snapshot.policy,
+  // Memo stages have their own bounds; background writes can outlive this request.
+  const memos = memoSession(env, meterAuthority, request, snapshot.policy,
     { ...options, memoWriteDeadlineAt: started + RETRIEVAL_DEADLINE_MS - 100 }, started, state.usage);
   const memoLookup = await memos.lookup();
   if (memoLookup.bundle) return memoLookup.bundle;
-  const diagnostics = bundle => {
-    if (memoLookup.candidate) bundle.index_diagnostics = { ...(bundle.index_diagnostics || {}), memo_candidate: memoLookup.candidate };
-    return bundle;
-  };
   const cache = options.cache ?? globalThis.caches?.default;
   const key = await cacheKey(principal, request, snapshot);
   if (request.freshness === "normal" && snapshot.policy.cache_ttl_seconds > 0) {
@@ -333,8 +330,9 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     if (cached) {
       // This request may have embedded an observed semantic candidate before the cache hit.
       cached.usage = state.usage;
+      memos.assembledBundle(cached);
       await memos.write(cached, false);
-      return diagnostics(cached);
+      return memos.finish(cached);
     }
   }
   await indexedEvidence(state);
@@ -374,6 +372,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     ...(latest.policy.product_sites_mode === "observe" && relevant.flagged.length ? { provider_sections_flagged: relevant.flagged } : {}),
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
+  memos.assembledBundle(bundle);
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {
     await Promise.all([...state.sourcesToIndex].map(([sourceId, artifactId]) =>
       untilDeadline(() => options.schedule(sourceId, signal, artifactId), signal).catch(() => {
@@ -391,7 +390,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   }
   await memos.write(bundle, state.failed);
   checkAbort(signal);
-  return diagnostics(bundle);
+  return memos.finish(bundle);
 }
 
 export async function retrieveKnowledge(env, authority, principal, request, options = {}) {
