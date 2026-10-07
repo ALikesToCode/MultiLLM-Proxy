@@ -324,7 +324,8 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         entry = response.get_json()["data"][0]
         self.assertEqual(entry["b64_json"], image(1)["b64_json"])
         self.assertEqual((entry["quality"]["score"], entry["quality"]["attempts"]), (5, 2))
-        self.assertIn("judge_error", entry["quality"])
+        self.assertNotIn("judge_error", entry["quality"])
+        self.assertEqual(entry["quality"]["stopped_reason"], "judge_error")
 
     def test_retry_judge_budget_stop_is_reported(self):
         decisions = iter([BudgetDecision(True)] * 4 + [
@@ -337,7 +338,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         quality = response.get_json()["data"][0]["quality"]
         self.assertEqual((quality["score"], quality["attempts"], quality["stopped_reason"]),
                          (3, 2, "budget_exceeded"))
-        self.assertIn("judge_error", quality)
+        self.assertNotIn("judge_error", quality)
         self.assertEqual((len(generations), len(judges)), (2, 1))
 
     def test_qa_header_is_allowed_and_exposed_by_flask(self):

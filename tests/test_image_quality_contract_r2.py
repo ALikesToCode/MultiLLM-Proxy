@@ -104,3 +104,11 @@ class ContractRoundTwoTest(UnifiedApiTestCase):
                 assert image_quality.image_source({"url": "https://provider.example/image"}, MODEL) == ("https://gateway.example/signed", True)
                 assert put.call_count == 1
                 assert put.call_args.kwargs["owner"] == "admin"
+
+    def test_retry_prompt_falls_back_to_issues_or_original(self):
+        for issues, suffix in [(["Wrong color"], "\n\nAvoid: Wrong color"), ([], "")]:
+            value = grade(3, fixes="")
+            value["issues"] = issues
+            response, generations, _, _ = self.generate([value, 9])
+            assert response.status_code == 200
+            assert generations[1]["prompt"] == "A blue square" + suffix

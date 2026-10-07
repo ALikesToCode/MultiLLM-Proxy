@@ -52,7 +52,7 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
         quality.update(score=grade["score"], passed=grade["score"] >= options.min_score, issues=grade["issues"])
         if expected:
             quality["text_similarity"] = grade["text_similarity"]
-        return quality, grade["fix_instructions"]
+        return quality, grade["fix_instructions"] or "; ".join(grade["issues"])[:300]
     except Exception as error:
         # Never expose judge/provider bodies, which may contain sensitive content.
         quality["judge_error"] = "judge_error"
@@ -66,7 +66,7 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
 
 
 def _retry_payload(payload, model, prompt, fixes):
-    retry = {**payload, "model": model, "prompt": prompt + "\n\nAvoid: " + fixes[:300], "n": 1}
+    retry = {**payload, "model": model, "prompt": prompt + ("\n\nAvoid: " + fixes[:300] if fixes else ""), "n": 1}
     if AutoRouteService.is_auto_route(payload.get("model")):
         provider, provider_model = model.split(":", 1)
         retry = prepare_image_payload(provider, provider_model, retry)
@@ -103,9 +103,7 @@ def _one_image(payload, options, generate, judge, skip_rate):
             break
         candidate_quality, fixes = _judge(images[0], model, prompt, options, judge)
         if "judge_error" in candidate_quality:
-            quality["judge_error"] = candidate_quality["judge_error"]
-            if "stopped_reason" in candidate_quality:
-                quality["stopped_reason"] = candidate_quality["stopped_reason"]
+            quality["stopped_reason"] = candidate_quality.get("stopped_reason", "judge_error")
             break
         if candidate_quality["score"] > quality["score"]:
             best, quality = images[0], candidate_quality
