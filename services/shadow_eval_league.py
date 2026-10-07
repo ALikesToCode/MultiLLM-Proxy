@@ -2,9 +2,15 @@
 
 import copy
 import hashlib
-from statistics import median
+from statistics import mean, median
 
 from services.shadow_eval_contract import encoded
+
+
+# Anchor Elo differences to existing absolute policy scores (100 Elo = 10 points).
+SCORE_PER_ELO = 0.1
+# Limit one reviewed update to 15 points from an existing task score.
+MAX_STEP = 15
 
 
 def league(results):
@@ -50,13 +56,24 @@ def proposal(policy, rows, auto_routes=()):
     updated = copy.deepcopy(policy)
     candidates = {candidate["model"]: candidate for candidate in updated["candidates"]}
     changes = []
+    anchors = {}
+    for task in {row["task_type"] for row in rows}:
+        rated = [row for row in rows if row["task_type"] == task and row["sample_count"] >= 20]
+        if not rated:
+            continue
+        scores = [candidates[row["model"]]["task_scores"][task] for row in rated
+                  if row["model"] in candidates and task in candidates[row["model"]].get("task_scores", {})]
+        anchors[task] = (mean(scores) if scores else 70, mean(row["rating"] for row in rated))
     for row in rows:
         candidate = candidates.get(row["model"])
         if row["sample_count"] < 20 or candidate is None:
             continue
-        score = round(100 / (1 + 10 ** ((1500 - row["rating"]) / 400)))
         task = row["task_type"]
+        anchor, mean_rating = anchors[task]
+        score = min(100, max(0, round(anchor + (row["rating"] - mean_rating) * SCORE_PER_ELO)))
         previous = candidate.get("task_scores", {}).get(task)
+        if previous is not None:
+            score = min(previous + MAX_STEP, max(previous - MAX_STEP, score))
         if previous == score:
             continue
         candidate.setdefault("task_scores", {})[task] = score

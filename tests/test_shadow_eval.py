@@ -374,3 +374,40 @@ def test_native_dispatch_is_sampled_once_after_normalization(monkeypatch):
     draws.return_value = 0.5
     assert app.test_client().post("/v1/responses", json={"model": "auto:test", "input": "Synthetic"}).status_code == 200
     assert len(samples) == 1 and draws.call_count == 2
+
+
+def rated(model, rating, task="chat", count=20):
+    return {"model": model, "task_type": task, "sample_count": count, "rating": rating}
+
+
+def test_proposal_anchors_mean_and_orders_rated_models_without_touching_unevaluated():
+    base = policy(candidates=[candidate("openai:better", task_scores={"chat": 80}),
+        candidate("openai:worse", task_scores={"chat": 90}), candidate("openai:unrated", task_scores={"chat": 95})])
+    document = proposal(base, [rated("openai:better", 1550), rated("openai:worse", 1450), rated("openai:unrated", 1800, count=19)])
+    scores = {item["model"]: item["task_scores"]["chat"] for item in document["policy"]["candidates"]}
+    assert scores == {"openai:better": 90, "openai:worse": 80, "openai:unrated": 95}
+    assert (scores["openai:better"] + scores["openai:worse"]) / 2 == 85
+    assert all(change["model"] != "openai:unrated" for change in document["policy_diff"])
+    assert base["candidates"][0]["task_scores"]["chat"] == 80
+
+
+@pytest.mark.parametrize("previous,ratings,expected", [
+    (80, [2000, 1000], [95, 65]), (None, [2000, 1000], [100, 20]),
+    (None, [3000, 0], [100, 0]), (None, [1500, 1500], [70, 70]),
+])
+def test_proposal_step_limit_clamp_and_default_anchor(previous, ratings, expected):
+    scores = {} if previous is None else {"chat": previous}
+    base = policy(candidates=[candidate("openai:a", task_scores=scores), candidate("openai:b", task_scores=scores)])
+    document = proposal(base, [rated("openai:a", ratings[0]), rated("openai:b", ratings[1])])
+    assert [item["task_scores"]["chat"] for item in document["policy"]["candidates"]] == expected
+
+
+def test_proposal_anchors_each_task_independently():
+    base = policy(candidates=[candidate("openai:a", task_scores={"chat": 90, "coding": 70}),
+                             candidate("openai:b", task_scores={"chat": 90, "coding": 70})])
+    # Use the same Elo spread against two different absolute score baselines.
+    rows = [rated(model, rating, task) for task in ("chat", "coding")
+            for model, rating in (("openai:a", 1550), ("openai:b", 1450))]
+    document = proposal(base, rows)
+    assert [item["task_scores"] for item in document["policy"]["candidates"]] == [
+        {"chat": 95, "coding": 75}, {"chat": 85, "coding": 65}]
