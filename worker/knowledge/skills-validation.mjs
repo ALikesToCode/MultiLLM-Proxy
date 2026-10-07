@@ -4,7 +4,7 @@ import { scanText } from "../secret-scan.mjs";
 
 export const SKILL_ROOTS = ["claude", "claude-library", "codex", "agents"];
 export const SKILLS_LIMIT = 2000;
-export const SYNC_REQUEST_BYTES = 32 * 1024 * 1024;
+export const SYNC_REQUEST_BYTES = 8 * 1024 * 1024;
 export const SYNC_BATCH_LIMIT = 16;
 const encoder = new TextEncoder();
 export const slug = name => name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");

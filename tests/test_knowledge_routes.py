@@ -681,3 +681,30 @@ def test_skills_client_delegates_sync_scan_to_handler_and_retains_normal_scans(m
     with patch.object(knowledge_client, "protect_payload", return_value={"query": "testing"}) as scan, patch.object(knowledge_client, "_submit", side_effect=submit):
         knowledge_client.dispatch("skills.find", user, {"query": "testing"})
         scan.assert_called_once()
+
+
+def test_skills_sync_transport_limits(app, keys, monkeypatch):
+    client = app.test_client()
+    maximum = 8 * 1024 * 1024
+    assert knowledge_client.SYNC_REQUEST_BYTES == maximum
+    raw = json.dumps({"skills": []})
+    with patch.object(knowledge, "dispatch", return_value={"results": []}) as remote:
+        assert client.post("/v1/knowledge/skills", data=raw.ljust(maximum), content_type="application/json", headers=bearer(keys["manager"])).status_code == 200
+        remote.reset_mock()
+        assert client.post("/v1/knowledge/skills", data=raw.ljust(maximum + 1), content_type="application/json", headers=bearer(keys["manager"])).status_code == 413
+        remote.assert_not_called()
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_ENABLED", "true")
+    user = {"username": "synthetic-operator", "scopes": ["knowledge:manage"]}
+    received = []
+    def submit(body, stopped, deadline, results):
+        received.append(len(body))
+        results.put(({"results": []}, None))
+        knowledge_client._SLOTS.release()
+    with patch.object(knowledge_client, "_submit", side_effect=submit):
+        knowledge_client.dispatch("skills.sync", user, {"skills": [], "padding": ""})
+        overhead = received.pop()
+        assert knowledge_client.dispatch("skills.sync", user, {"skills": [], "padding": "x" * (maximum - overhead)}) == {"results": []}
+        assert received == [maximum]
+        with pytest.raises(knowledge_client.KnowledgeError) as error:
+            knowledge_client.dispatch("skills.sync", user, {"skills": [], "padding": "x" * (maximum - overhead + 1)})
+        assert error.value.status == 413

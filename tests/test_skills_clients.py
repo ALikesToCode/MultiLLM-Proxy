@@ -195,3 +195,30 @@ def test_plan_never_exceeds_global_capacity_and_delete_batches(tmp_path, monkeyp
     assert len(plan["skills"]) == 1 and plan["delete"] == []
     assert plan["rejected"][0]["reason"] == "skills_limit"
     assert [batch["delete"] for batch in sync.batches({"skills": [], "delete": ["one", "two"]})] == [["one"], ["two"]]
+
+
+def test_sync_batch_byte_boundary_and_maximal_binary_skill(tmp_path, monkeypatch):
+    import base64
+    chunk = base64.b64encode(b"x" * 262144).decode()
+    files = [{"path": "SKILL.md", "content": "x" * 65536, "sha256": "0" * 64}]
+    files += [{"path": f"assets/{i}.bin", "content_base64": chunk, "sha256": "0" * 64} for i in range(19)]
+    files += [{"path": "assets/final.bin", "content_base64": base64.b64encode(b"x" * 196608).decode(), "sha256": "0" * 64}]
+    skill = {"skill_id": "maximal", "name": "maximal", "description": "Synthetic", "root": "agents", "files": files}
+    assert sum(len(base64.b64decode(f["content_base64"])) if "content_base64" in f else len(f["content"]) for f in files) == 5 * 1024 * 1024
+    assert sync.MAX_BATCH_BYTES == 8 * 1024 * 1024 - 4096
+    assert list(sync.batches({"skills": [skill], "delete": []})) == [{"skills": [skill]}]
+    exact = len(json.dumps({"skills": [skill]}).encode())
+    monkeypatch.setattr(sync, "MAX_BATCH_BYTES", exact)
+    assert len(list(sync.batches({"skills": [skill, skill], "delete": []}))) == 2
+    monkeypatch.setattr(sync, "MAX_BATCH_BYTES", exact - 1)
+    with pytest.raises(sync.PlanError, match="batch_bytes_limit"):
+        list(sync.batches({"skills": [skill], "delete": []}))
+
+
+def test_json_escaped_text_uses_base64_without_losing_reference_collection(tmp_path):
+    root, directory = library(tmp_path)
+    (directory / "scripts/run.py").write_text("\x00" * 262144)
+    plan = sync.build_plan({"agents": root}, {})
+    file = next(f for f in plan["skills"][0]["files"] if f["path"] == "scripts/run.py")
+    assert "content_base64" in file and "content" not in file
+    assert len(list(sync.batches(plan))) == 1

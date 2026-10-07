@@ -8,11 +8,12 @@ import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { SkillsStore } from "../worker/knowledge/skills-store.mjs";
 import { SkillsIndex } from "../worker/knowledge/skills-index.mjs";
-import { parseFind, parseGet, parseSync, validateSkill, SKILLS_LIMIT } from "../worker/knowledge/skills-validation.mjs";
+import { parseFind, parseGet, parseSync, validateSkill, SKILLS_LIMIT, SYNC_REQUEST_BYTES } from "../worker/knowledge/skills-validation.mjs";
 import { quantizeEmbedding } from "../worker/knowledge/memo-store.mjs";
 import { digest } from "../worker/knowledge/evidence.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 
 async function skill(name = "testing", description = "Test regression behavior", root = "agents", extra = []) {
   const content = `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\nTest guide`;
@@ -309,4 +310,17 @@ test("pending R2 operations prevent cleanup or reuse of their immutable revision
   assert.equal((await f.store.call("sync", { skills: [first] })).results[0].status, "updated");
   assert.equal((await f.store.get({ skill_id: "testing" }, "principal")).text, first.files[0].content);
   assert.equal(f.store.pendingR2.size, 0);
+});
+
+test("8 MiB sync ingress and outbound boundary accept exact size and reject one extra byte", async () => {
+  assert.equal(SYNC_REQUEST_BYTES, 8 * 1024 * 1024);
+  const env = { ADMIN_API_KEY: "synthetic-skills-boundary", ADMIN_USERNAME: "operator", KNOWLEDGE_SERVICE: { fetch: async () => Response.json({ version: 1, result: { results: [] } }) } };
+  const request = (url, body) => new Request(url, { method: "POST", headers: { authorization: "Bearer synthetic-skills-boundary", "content-type": "application/json" }, body });
+  const raw = JSON.stringify({ skills: [] });
+  for (const [bytes, expected] of [[SYNC_REQUEST_BYTES, 200], [SYNC_REQUEST_BYTES + 1, 413]]) {
+    const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills", raw.padEnd(bytes)), env);
+    assert.equal(response.status, expected);
+    const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync" }).padEnd(bytes)), env);
+    assert.equal(outbound.status, expected);
+  }
 });

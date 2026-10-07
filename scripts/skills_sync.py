@@ -20,7 +20,7 @@ from services.secret_scan import scan_text
 
 ROOTS = ("claude", "claude-library", "codex", "agents")
 DEFAULT_ROOTS = dict(zip(ROOTS, ("~/.claude/skills", "~/.claude/skills-library", "~/.codex/skills", "~/.agents/skills")))
-MAX_BATCH_BYTES = 32 * 1024 * 1024 - 4096
+MAX_BATCH_BYTES = 8 * 1024 * 1024 - 4096
 MAX_SKILLS = 2000
 
 
@@ -137,6 +137,10 @@ def collect_skill(directory, root):
             encoding = {"content_base64": base64.b64encode(content).decode("ascii")}
         else:
             encoding = {"content": text}
+            binary = {"content_base64": base64.b64encode(content).decode("ascii")}
+            # Escaped control characters can otherwise exceed the encoded batch bound.
+            if len(json.dumps(encoding, ensure_ascii=False).encode()) > len(json.dumps(binary).encode()):
+                encoding = binary
             # Resolve links relative to the file containing them.
             for reference in referenced(text):
                 candidate = (directory / Path(relative).parent / reference).resolve()
@@ -205,10 +209,10 @@ def batches(plan):
     current = []
     for skill in plan["skills"]:
         candidate = {"skills": current + [skill]}
-        if current and (len(current) >= 16 or len(json.dumps(candidate).encode()) > MAX_BATCH_BYTES):
+        if current and (len(current) >= 16 or len(json.dumps(candidate, ensure_ascii=False).encode()) > MAX_BATCH_BYTES):
             yield {"skills": current}
             current = []
-        if len(json.dumps({"skills": [skill]}).encode()) > MAX_BATCH_BYTES:
+        if len(json.dumps({"skills": [skill]}, ensure_ascii=False).encode()) > MAX_BATCH_BYTES:
             raise PlanError("batch_bytes_limit")
         current.append(skill)
     if current:
@@ -228,7 +232,7 @@ def sync_batch(base_url, key, payload):
             or url.scheme != "https" and not (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"})):
         raise PlanError("invalid_base_url")
     request = urllib.request.Request(base_url.rstrip("/") + "/v1/knowledge/skills",
-                                     data=json.dumps(payload).encode(), method="POST",
+                                     data=json.dumps(payload, ensure_ascii=False).encode(), method="POST",
                                      headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
     with urllib.request.build_opener(NoRedirect).open(request, timeout=55) as response:
         raw = response.read(1048577)
