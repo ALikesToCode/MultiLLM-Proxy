@@ -183,6 +183,30 @@ test("service failures become tool errors without inventing a result", async () 
   assert.match(failure.result.content[0].text, /knowledge_unavailable/);
 });
 
+test("MCP evidence answers drop bookkeeping that REST clients still receive", async () => {
+  const excerpt = { artifact_id: "art-1", source_id: "src-1", text: "Limits apply.", url: "https://docs.example/limits",
+    locator: "#limits", content_hash: "abc", expires_at: "2026-10-08T00:00:00Z", source_review: "reviewed" };
+  const bundle = { status: "ok", query: "limits", excerpts: [excerpt], related_evidence: [{ ...excerpt, artifact_id: "art-2",
+    url: "https://docs.example/v1/limits" }], discoveries: [{ url: "https://docs.example/limits" }, { url: "https://other.example" }],
+  token_count: 40, token_counting_method: "estimate", served_at: "2026-10-07T00:00:00Z", path: "index", elapsed_ms: 12,
+  gaps: [], index_diagnostics: { skipped: { unpublished: 0 } },
+  usage: [{ provider: "ai_search", operation_id: "op-1", bound_units: 1, outcome: "ok" },
+    { provider: "exa", operation_id: "op-2", bound_units: 2 }, { provider: "exa", operation_id: "op-3", bound_units: "x" }] };
+  const { env } = environment({ result: bundle });
+  for (const name of ["knowledge_context", "knowledge_search"]) {
+    const { result } = await (await call(env, mcpRequest(reader.key, "tools/call", { name, arguments: { query: "limits" } }))).json();
+    const kept = { artifact_id: "art-1", text: "Limits apply.", url: "https://docs.example/limits", locator: "#limits", source_review: "reviewed" };
+    assert.deepEqual(result.structuredContent, { status: "ok", excerpts: [kept],
+      related_evidence: [{ ...kept, artifact_id: "art-2", url: "https://docs.example/v1/limits" }],
+      discoveries: [{ url: "https://other.example" }], token_count: 40, path: "index", elapsed_ms: 12, gaps: [],
+      index_diagnostics: { skipped: { unpublished: 0 } }, units: { ai_search: 1, exa: 2 } });
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+  }
+  const rest = await call(env, new Request(`${ORIGIN}/v1/knowledge/context`, { method: "POST",
+    headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" }, body: JSON.stringify({ query: "limits" }) }));
+  assert.deepEqual(await rest.json(), bundle);
+});
+
 test("REST routes enforce scopes, identifiers and body placement before dispatch", async () => {
   const { env, dispatched } = environment({ result: { job: { id: "job-1" } } });
   const rest = (key, method, path, body) => new Request(`${ORIGIN}/v1/knowledge/${path}`, { method,

@@ -174,7 +174,11 @@ tools) and six
 work), initialize with at least `protocolVersion`, and include the negotiated
 `MCP-Protocol-Version` on later requests. Supported versions are `2025-06-18` and
 `2025-03-26`. Responses are JSON; no persistent session or GET event stream is
-required. Cross-origin browser MCP requests are refused. The edge Worker and Flask
+required. Cross-origin browser MCP requests are refused. To save agent context, MCP
+`knowledge_context` and `knowledge_search` results drop `query`, `served_at`,
+`token_counting_method`, each excerpt's `source_id`, `content_hash` and `expires_at`, and
+discoveries an excerpt already cites; `usage` becomes per-provider `units`. REST
+responses keep the full bundle. The edge Worker and Flask
 serve the same catalogue: `routes/knowledge_mcp.py` is the source and
 `python scripts/build_knowledge_mcp_catalogue.py` regenerates
 `worker/knowledge-mcp-catalogue.json` (a test fails when they differ).

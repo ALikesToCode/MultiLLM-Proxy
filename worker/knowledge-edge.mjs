@@ -298,6 +298,32 @@ function acceptsJson(header) {
   });
 }
 
+const EVIDENCE_BOOKKEEPING = new Set(["source_id", "content_hash", "expires_at"]);
+const BUNDLE_BOOKKEEPING = ["usage", "token_counting_method", "served_at", "query"];
+
+// Agents re-read every tool result on each later call, so MCP context and search answers drop
+// metering and storage bookkeeping. REST clients and the dashboard still receive all of it.
+function agentEvidence(result) {
+  if (!isRecord(result) || !Array.isArray(result.excerpts)) return result;
+  const trim = item => isRecord(item)
+    ? Object.fromEntries(Object.entries(item).filter(([key]) => !EVIDENCE_BOOKKEEPING.has(key))) : item;
+  const compact = { ...result, excerpts: result.excerpts.map(trim) };
+  for (const key of BUNDLE_BOOKKEEPING) delete compact[key];
+  if (Array.isArray(result.related_evidence)) compact.related_evidence = result.related_evidence.map(trim);
+  const cited = new Set([...compact.excerpts, ...(compact.related_evidence ?? [])]
+    .map(item => item?.url).filter(url => typeof url === "string"));
+  if (Array.isArray(result.discoveries)) compact.discoveries = result.discoveries.filter(item => !cited.has(item?.url));
+  if (Array.isArray(result.usage) && result.usage.length) {
+    compact.units = {};
+    for (const entry of result.usage) {
+      if (typeof entry?.provider !== "string") continue;
+      const bound = Number.isFinite(entry.bound_units) ? entry.bound_units : 0;
+      compact.units[entry.provider] = (compact.units[entry.provider] ?? 0) + bound;
+    }
+  }
+  return compact;
+}
+
 async function callTool(env, request, principal, id, params) {
   const entry = typeof params.name === "string" ? TOOLS.get(params.name) : undefined;
   if (!entry) return rpcError(id, -32602, "Unknown Knowledge tool.");
@@ -311,8 +337,9 @@ async function callTool(env, request, principal, id, params) {
   try {
     // The private service validates every contract identically for REST and MCP.
     const result = await dispatch(env, entry.operation, principal, args, request.signal);
-    const toolResult = { content: [{ type: "text", text: JSON.stringify(result) }], isError: Boolean(result?.error) };
-    if (isRecord(result)) toolResult.structuredContent = result;
+    const shown = ["context", "search"].includes(entry.operation) ? agentEvidence(result) : result;
+    const toolResult = { content: [{ type: "text", text: JSON.stringify(shown) }], isError: Boolean(result?.error) };
+    if (isRecord(shown)) toolResult.structuredContent = shown;
     return rpcResult(id, toolResult);
   } catch (error) {
     if (!(error instanceof KnowledgeEdgeError)) throw error;

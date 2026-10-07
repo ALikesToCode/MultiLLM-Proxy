@@ -1,6 +1,7 @@
 """Scoped Knowledge REST/MCP and session-authenticated operator routes."""
 
 import json
+import math
 import re
 from urllib.parse import urlsplit
 
@@ -133,6 +134,44 @@ def _mcp_initialize(identifier, params):
                        "instructions": mcp.INSTRUCTIONS})
 
 
+_EVIDENCE_BOOKKEEPING = frozenset({"source_id", "content_hash", "expires_at"})
+_BUNDLE_BOOKKEEPING = frozenset({"usage", "token_counting_method", "served_at", "query"})
+
+
+def _agent_evidence(result):
+    """Drop metering and storage bookkeeping from MCP context and search answers.
+
+    Agents re-read every tool result on each later call. REST clients and the
+    dashboard still receive the full bundle.
+    """
+    if not isinstance(result, dict) or not isinstance(result.get("excerpts"), list):
+        return result
+
+    def trim(item):
+        return {key: value for key, value in item.items() if key not in _EVIDENCE_BOOKKEEPING} if isinstance(item, dict) else item
+
+    compact = {key: value for key, value in result.items() if key not in _BUNDLE_BOOKKEEPING}
+    compact["excerpts"] = [trim(item) for item in result["excerpts"]]
+    if isinstance(result.get("related_evidence"), list):
+        compact["related_evidence"] = [trim(item) for item in result["related_evidence"]]
+    cited = {item.get("url") for item in compact["excerpts"] + compact.get("related_evidence", [])
+             if isinstance(item, dict) and isinstance(item.get("url"), str)}
+    if isinstance(result.get("discoveries"), list):
+        compact["discoveries"] = [item for item in result["discoveries"]
+                                  if not (isinstance(item, dict) and item.get("url") in cited)]
+    usage = result.get("usage")
+    if isinstance(usage, list) and usage:
+        units = {}
+        for entry in usage:
+            if not isinstance(entry, dict) or not isinstance(entry.get("provider"), str):
+                continue
+            bound = entry.get("bound_units")
+            valid = isinstance(bound, (int, float)) and not isinstance(bound, bool) and math.isfinite(bound)
+            units[entry["provider"]] = units.get(entry["provider"], 0) + (bound if valid else 0)
+        compact["units"] = units
+    return compact
+
+
 def _mcp_tool(identifier, params):
     tool_name = params.get("name")
     entry = _TOOLS.get(tool_name) if isinstance(tool_name, str) else None
@@ -158,8 +197,9 @@ def _mcp_tool(identifier, params):
         else:
             payload = _query(arguments)
         result = dispatch(operation, g.authenticated_user, payload)
-        tool_result = {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "isError": bool(result.get("error")),
-                       "structuredContent": result}
+        shown = _agent_evidence(result) if operation in ("context", "search") else result
+        tool_result = {"content": [{"type": "text", "text": json.dumps(shown, ensure_ascii=False)}], "isError": bool(result.get("error")),
+                       "structuredContent": shown}
         return _rpc_result(identifier, tool_result)
     except KnowledgeError as error:
         return _rpc_result(identifier, {"isError": True, "content": [{"type": "text",

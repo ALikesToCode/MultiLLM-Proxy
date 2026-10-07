@@ -212,6 +212,32 @@ def test_mcp_calls_share_domain_operation_and_surface_tool_failures(app, keys):
     assert "budget_exhausted" in response.json["result"]["content"][0]["text"]
 
 
+def test_mcp_evidence_answers_drop_bookkeeping_that_rest_clients_still_receive(app, keys):
+    excerpt = {"artifact_id": "art-1", "source_id": "src-1", "text": "Limits apply.", "url": "https://docs.example/limits",
+               "locator": "#limits", "content_hash": "abc", "expires_at": "2026-10-08T00:00:00Z", "source_review": "reviewed"}
+    bundle = {"status": "ok", "query": "limits", "excerpts": [excerpt],
+              "related_evidence": [{**excerpt, "artifact_id": "art-2", "url": "https://docs.example/v1/limits"}],
+              "discoveries": [{"url": "https://docs.example/limits"}, {"url": "https://other.example"}],
+              "token_count": 40, "token_counting_method": "estimate", "served_at": "2026-10-07T00:00:00Z",
+              "path": "index", "elapsed_ms": 12, "gaps": [], "index_diagnostics": {"skipped": {"unpublished": 0}},
+              "usage": [{"provider": "ai_search", "operation_id": "op-1", "bound_units": 1, "outcome": "ok"},
+                        {"provider": "exa", "operation_id": "op-2", "bound_units": 2},
+                        {"provider": "exa", "operation_id": "op-3", "bound_units": "x"}]}
+    kept = {"artifact_id": "art-1", "text": "Limits apply.", "url": "https://docs.example/limits", "locator": "#limits",
+            "source_review": "reviewed"}
+    client = app.test_client()
+    with patch.object(knowledge, "dispatch", return_value=bundle):
+        for name in ("knowledge_context", "knowledge_search"):
+            result = mcp(client, keys["reader"], "tools/call", {"name": name, "arguments": {"query": "limits"}}).json["result"]
+            assert result["structuredContent"] == {
+                "status": "ok", "excerpts": [kept],
+                "related_evidence": [{**kept, "artifact_id": "art-2", "url": "https://docs.example/v1/limits"}],
+                "discoveries": [{"url": "https://other.example"}], "token_count": 40, "path": "index", "elapsed_ms": 12,
+                "gaps": [], "index_diagnostics": {"skipped": {"unpublished": 0}}, "units": {"ai_search": 1, "exa": 2}}
+            assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
+        assert client.post("/v1/knowledge/context", json={"query": "limits"}, headers=bearer(keys["reader"])).json == bundle
+
+
 def test_mcp_origin_protocol_media_and_notifications(app, keys):
     client = app.test_client()
     assert mcp(client, keys["reader"], "ping", Origin="https://evil.example").status_code == 403
