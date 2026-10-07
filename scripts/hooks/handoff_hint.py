@@ -14,8 +14,32 @@ from handoff import load
 from handoff_contracts import render
 
 
+def clipped(value, maximum):
+    return value.encode("utf-8")[:maximum].decode("utf-8", "ignore")
+
+
+def pointer(record, age):
+    project, branch = record["project"], record.get("branch", "")
+    title = " ".join(record["title"].split())[:120]
+    duration = f"{int(age // 3600)} hours" if age >= 3600 else f"{int(age // 60)} minutes"
+    query = json.dumps({"project": project, "branch": branch}, ensure_ascii=False)
+    action = ("If this session continues that task, load it with knowledge_handoff_get " + query
+              + " or run scripts/handoff.py load.")
+    def message(project, branch, title, action):
+        return (f'Handoff available for {project} ({branch}) from {record["source"]["agent"]}, '
+                f'{duration} ago: "{title}". {action}')
+    text = message(project, branch, title, action)
+    if len(text.encode("utf-8")) > 600:
+        # CLI loading preserves complete identities when they exceed the pointer budget.
+        text = message(clipped(project, 64), clipped(branch, 64), clipped(title, 160),
+                       "If this session continues that task, run scripts/handoff.py load.")
+    return text
+
+
 def hint(event, args, *, fetch=load, now=None):
     if not isinstance(event, dict) or event.get("hook_event_name") != "SessionStart":
+        return None
+    if event.get("source", "startup") not in {"startup", "clear"}:
         return None
     if not isinstance(event.get("cwd"), str):
         return None
@@ -29,7 +53,7 @@ def hint(event, args, *, fetch=load, now=None):
     expires = datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
     if not 0 <= age < 48 * 3600 or expires <= current:
         return None
-    markdown = render(record)
+    markdown = render(record) if getattr(args, "mode", "pointer") == "full" else pointer(record, age)
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": markdown}}
 
 
@@ -45,6 +69,7 @@ def main(argv=None):
         try:
             parser = QuietParser(add_help=False)
             parser.add_argument("--agent", choices=("claude", "codex"), required=True)
+            parser.add_argument("--mode", choices=("pointer", "full"), default="pointer")
             parser.add_argument("--base-url")
             parser.add_argument("--key-file")
             args = parser.parse_args(argv)

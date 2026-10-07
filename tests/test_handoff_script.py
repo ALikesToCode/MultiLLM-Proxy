@@ -10,7 +10,7 @@ import threading
 import time
 from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from scripts import handoff
@@ -273,17 +273,18 @@ def test_http_redirect_does_not_forward_credentials(server, monkeypatch):
 
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])
-def test_hook_official_output_formats_and_age(agent):
+@pytest.mark.parametrize("mode", ["pointer", "full"])
+def test_hook_official_output_formats_and_age(agent, mode):
     now = datetime.now(timezone.utc)
     options = args()
-    options.agent = agent
+    options.agent, options.mode = agent, mode
     event = {"hook_event_name": "SessionStart", "cwd": "/synthetic/project", "source": "startup"}
     for age, shown in [(0, True), (47, True), (48, False), (49, False), (-1, False)]:
         value = record(now - timedelta(hours=age))
         result = hook.hint(event, options, fetch=lambda *_a, **_k: {"record": value}, now=now)
         assert bool(result) == shown
         if result:
-            assert result == {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": contracts.render(value)}}
+            assert result == {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": contracts.render(value) if mode == "full" else hook.pointer(value, age * 3600)}}
     assert hook.hint({**event, "hook_event_name": "Stop"}, options, fetch=lambda *_a, **_k: {}) is None
     assert hook.hint(event, options, fetch=lambda *_a, **_k: {"record": None}) is None
 
@@ -443,3 +444,42 @@ def test_no_operator_user_facts_uses_default_goal(tmp_path, agent):
         result = transcripts.extract(path, tmp_path, agent)
     assert result["sections"]["goal"] == "Continue the task"
     assert result["sections"]["decisions"] == []
+
+
+@pytest.mark.parametrize("source,shown", [("startup", True), ("clear", True), ("resume", False),
+                                         ("compact", False), ("unknown", False), (None, False)])
+def test_hook_only_fetches_for_new_sessions(source, shown):
+    event = {"hook_event_name": "SessionStart", "cwd": "/synthetic/project", "source": source}
+    fetch = lambda *_a, **_k: {"record": record()}
+    fetched = Mock(side_effect=fetch)
+    assert bool(hook.hint(event, args(), fetch=fetched)) == shown
+    assert fetched.call_count == int(shown)
+    assert hook.hint({key: value for key, value in event.items() if key != "source"}, args(), fetch=fetch)
+
+
+def test_hook_default_pointer_and_full_mode_show_saved_branch_after_fallback():
+    value = record()
+    value["branch"] = "saved-main"
+    now = datetime.now(timezone.utc)
+    options = args()
+    event = {"hook_event_name": "SessionStart", "cwd": "/synthetic/project"}
+    fetched = lambda *_a, **_k: {"record": value}
+    pointer = hook.hint(event, options, fetch=fetched, now=now)["hookSpecificOutput"]["additionalContext"]
+    assert "(saved-main)" in pointer and '"branch": "saved-main"' in pointer
+    assert "knowledge_handoff_get" in pointer
+    assert "Goal:" not in pointer
+    assert len(pointer.encode()) <= 600
+    options.mode = "full"
+    assert hook.hint(event, options, fetch=fetched, now=now)["hookSpecificOutput"]["additionalContext"] == contracts.render(value)
+
+
+@pytest.mark.parametrize("unicode", [False, True])
+def test_hook_pointer_utf8_budget_and_title_clip(unicode):
+    value = record()
+    value.update(project=("🧭" if unicode else "p") * 200, branch=("枝" if unicode else "b") * 200,
+                 title="t" * 200)
+    text = hook.pointer(value, 47 * 3600)
+    assert len(text.encode()) <= 600
+    assert "t" * 121 not in text
+    assert "scripts/handoff.py load" in text
+    assert "�" not in text
