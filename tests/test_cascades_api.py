@@ -172,3 +172,23 @@ class CascadeApiTests(UnifiedApiTestCase):
         self.assertEqual(upstream.call_count, 1)
         self.assertEqual(json.loads(upstream.call_args.kwargs['data'])['model'], 'mimo-v2.5-free')
         self.assertIn('model=opencode:mimo-v2.5-free', response.headers['X-MultiLLM-Cascade'])
+
+
+    def test_agent_tool_calls_skip_judge_in_normal_dispatch(self):
+        from services.cascade_service import CascadeService
+        from tests.test_cascades import TOOLS
+        CascadeService.save_route({**self.config, 'checks': ['tools', 'judge'], 'judge': {'model': 'opencode:judge'}}, self.app.config['API_BASE_URLS'])
+        upstream_response = self._upstream('')
+        body = json.loads(upstream_response.content)
+        call = {'id': 'synthetic-call', 'type': 'function', 'function': {'name': 'lookup', 'arguments': '{"count":2}'}}
+        body['choices'][0].update(message={'role': 'assistant', 'content': None, 'tool_calls': [call]}, finish_reason='tool_calls')
+        upstream_response._content = json.dumps(body).encode()
+        ledger = []
+        with patch.object(usage_ledger.LEDGER, 'record', side_effect=ledger.append), patch('app.ProxyService.make_request', return_value=upstream_response) as upstream:
+            response = self.client.post('/v1/chat/completions', headers=ADMIN, json={'model': 'cascade:api', 'messages': [{'role': 'user', 'content': 'lookup two'}], 'tools': TOOLS, 'tool_choice': 'required'})
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            self.assertEqual(response.get_json()['choices'][0]['message']['tool_calls'], [call])
+            response.close()
+        self.assertEqual(upstream.call_count, 1)
+        self.assertEqual(len(ledger), 1)
+        self.assertNotIn('notes=', response.headers['X-MultiLLM-Cascade'])

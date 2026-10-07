@@ -68,10 +68,12 @@ def _selected(response, model):
     return response.headers.get("X-MultiLLM-Auto-Selected-Model") or response.headers.get("X-MultiLLM-Model") or model
 
 
-def _result(response, payload, index, count, model, skipped):
+def _result(response, payload, index, count, model, skipped, notes):
     g.multillm_model, g.multillm_provider = model, model.split(":", 1)[0]
     g.multillm_route_decision = "cascade"
     response.headers[HEADER] = f"tier={index}/{count}; model={model}; skipped=" + ",".join(skipped)
+    if notes:
+        response.headers[HEADER] += "; notes=" + ",".join(notes)
     if payload.get("stream") and response.mimetype != "text/event-stream" and response.status_code < 400:
         body = _body(response)
         if body is not None:
@@ -96,7 +98,51 @@ def _tier_payload(payload, tier, final):
     return result
 
 
-def _checks(config, body, payload, response, call, can_call):
+def _advisory_error(error):
+    if isinstance(error, APIError) and (error.payload or {}).get("error") == "secret_detected":
+        raise error
+    return True, True
+
+
+def _agreement_check(config, text, payload, call):
+    model = config.get("agreement", {}).get("model", payload["model"])
+    sample = {**payload, "model": model, "stream": False}
+    if model == payload["model"]:
+        sample["temperature"] = 1
+        sample.pop("top_p", None)
+        sample.pop("seed", None)
+    try:
+        with excluding_gemini(model):
+            other = call(sample)
+        try:
+            body = _body(other)
+            repeat = short_answer(body)
+            if other.status_code >= 400 or body is None or body.get("error") or repeat is None:
+                return True, True
+            return agrees(text, repeat), False
+        finally:
+            other.close()
+    except Exception as error:
+        return _advisory_error(error)
+
+
+def _judge_check(options, payload, call):
+    try:
+        with excluding_gemini(options["model"]):
+            judge = call(payload)
+        try:
+            body = _body(judge)
+            verdict = judge_passes(body, options["min_score"])
+            if judge.status_code >= 400 or body is None or body.get("error") or verdict is None:
+                return True, True
+            return verdict, False
+        finally:
+            judge.close()
+    except Exception as error:
+        return _advisory_error(error)
+
+
+def _checks(config, body, payload, response, call, can_call, position, notes):
     for check in config["checks"]:
         if check == "agreement":
             text = short_answer(body)
@@ -104,40 +150,22 @@ def _checks(config, body, payload, response, call, can_call):
                 continue
             if not can_call():
                 return "deadline"
-            model = config.get("agreement", {}).get("model", payload["model"])
-            try:
-                with excluding_gemini(model):
-                    other = call({**payload, "model": model, "stream": False})
-                try:
-                    if other.status_code >= 400 or not agrees(text, short_answer(_body(other))):
-                        return check
-                finally:
-                    other.close()
-            except APIError as error:
-                if (error.payload or {}).get("error") == "secret_detected":
-                    raise
-                return check
-            except Exception:
-                return check
+            passed, error = _agreement_check(config, text, payload, call)
         elif check == "judge":
+            options = config["judge"]
+            judge = judge_payload(options["model"], payload, body)
+            if judge is None:
+                continue
             if not can_call():
                 return "deadline"
-            options = config["judge"]
-            try:
-                with excluding_gemini(options["model"]):
-                    judge = call(judge_payload(options["model"], payload, body))
-                try:
-                    if judge.status_code < 400 and not judge_passes(_body(judge), options["min_score"]):
-                        return check
-                finally:
-                    judge.close()
-            except APIError as error:
-                if (error.payload or {}).get("error") == "secret_detected":
-                    raise
-                # The judge is advisory; an unavailable judge never blocks an answer.
-            except Exception:
-                pass
-        elif not local_check(check, body, payload, response.status_code):
+            passed, error = _judge_check(options, judge, call)
+        else:
+            if not local_check(check, body, payload, response.status_code):
+                return check
+            continue
+        if error:
+            notes.append(f"{position}:{check}_error")
+        if not passed:
             return check
     return None
 
@@ -160,7 +188,7 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
     g.cascade_deadline = deadline
     skip_first_rate = getattr(g, "usage_context", None) is not None
     release_outer_accounting()
-    skipped, best = [], None
+    skipped, notes, best = [], [], None
     best_rank = -1
     estimate = 1.0
     first = True
@@ -208,12 +236,12 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
             if final:
                 if best is not None:
                     best[0].close()
-                return _result(response, payload, position, len(config["tiers"]), selected, skipped)
+                return _result(response, payload, position, len(config["tiers"]), selected, skipped, notes)
             body = _body(response)
             failure = "complete" if response.status_code >= 400 or body is None or body.get("error") else None
             if failure is None:
                 try:
-                    failure = _checks(config, body, body_payload, response, call, can_call)
+                    failure = _checks(config, body, body_payload, response, call, can_call, position, notes)
                 except (ValueError, TypeError, RecursionError):
                     failure = "complete"
                 except Exception:
@@ -224,7 +252,7 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
             if failure is None:
                 if best is not None:
                     best[0].close()
-                return _result(response, payload, position, len(config["tiers"]), selected, skipped)
+                return _result(response, payload, position, len(config["tiers"]), selected, skipped, notes)
             skipped.append(f"{position}:{failure}")
             usable = local_check("complete", body, body_payload, response.status_code) or (
                 response.status_code < 400 and choice_message(body)[0].get("finish_reason") == "length"
@@ -242,7 +270,7 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
         if best is None:
             raise APIError("No permitted cascade tier is available", 503)
         response, position, selected = best
-        return _result(response, payload, position, len(config["tiers"]), selected, skipped)
+        return _result(response, payload, position, len(config["tiers"]), selected, skipped, notes)
     except Exception:
         if best is not None:
             best[0].close()

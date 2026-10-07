@@ -10,7 +10,7 @@ from flask import Flask, Response, g, jsonify
 from error_handlers import APIError
 from services import cascade_d1, intelligence_d1_store, request_accounting, usage_ledger
 from services.budget_service import BudgetDecision, BudgetService
-from services.cascade_checks import agrees, judge_passes, local_check
+from services.cascade_checks import agrees, local_check
 from services.cascade_config import normalize_config
 from services.cascade_service import CascadeService
 from services.rate_limit_service import LimitDecision, RateLimitService
@@ -165,7 +165,7 @@ def test_judge_pass_fail_error_and_every_call_accounted(context, judge, escalate
     judged = judge if isinstance(judge, Exception) else answer(judge)
     response, calls = run({**CONFIG, 'checks': ['judge'], 'judge': {'model': 'opencode:judge'}}, [answer('4'), judged, answer('final')])
     assert len(calls) == len(context[1]) == (3 if escalates else 2)
-    assert ('1:judge' in response.headers['X-MultiLLM-Cascade']) == escalates
+    assert ('skipped=1:judge' in response.headers['X-MultiLLM-Cascade']) == escalates
     assert calls[1]['response_format'] == {'type': 'json_object'}
     assert calls[1]['messages'][0]['role'] == 'system'
 
@@ -472,3 +472,157 @@ def test_free_tier_accounting_receipt_and_health_owner(context, text, expected_c
         assert 'model=opencode:synthetic-free' in response.headers['X-MultiLLM-Cascade']
     else:
         assert 'skipped=1:complete' in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('choice', ['required', {'type': 'function', 'function': {'name': 'lookup'}}])
+def test_forced_tool_choice_prose_escalates(context, choice):
+    response, calls = run({**CONFIG, 'checks': ['tools']}, [answer('Here is prose'), answer('final')],
+                          {**PAYLOAD, 'tools': TOOLS, 'tool_choice': choice})
+    assert len(calls) == len(context[1]) == 2
+    assert 'skipped=1:tools' in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('choice', ['required', {'type': 'function', 'function': {'name': 'lookup'}}])
+def test_forced_tool_choice_requires_allowed_valid_call(choice):
+    call = {'id': 'synthetic', 'type': 'function', 'function': {'name': 'lookup', 'arguments': '{"count":2}'}}
+    payload = {'tools': TOOLS, 'tool_choice': choice}
+    assert local_check('tools', answer(None, calls=[call]), payload, 200)
+    assert not local_check('tools', answer(None, calls=[{**call, 'function': {'name': 'unknown', 'arguments': '{}'}}]), payload, 200)
+    assert not local_check('tools', answer(None, calls=[{**call, 'function': {'name': 'lookup', 'arguments': '{}'}}]), payload, 200)
+    assert not local_check('tools', answer('prose'), {'tool_choice': choice}, 200)
+
+
+def test_tool_call_answer_skips_judge_without_call_or_charge(context):
+    call = {'id': 'synthetic', 'type': 'function', 'function': {'name': 'lookup', 'arguments': '{"count":2}'}}
+    config = {**CONFIG, 'checks': ['tools', 'judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [answer(None, 'tool_calls', [call])], {**PAYLOAD, 'tools': TOOLS})
+    assert len(calls) == len(context[1]) == 1
+    assert response.get_json()['choices'][0]['message']['tool_calls'] == [call]
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('last', [
+    {'role': 'tool', 'tool_call_id': 'synthetic', 'content': '4'},
+    {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'synthetic', 'content': '4'}]},
+    {'role': 'user', 'content': [{'type': 'image_url', 'image_url': {'url': 'https://synthetic.invalid/image'}}]},
+    {'role': 'user', 'content': None},
+])
+def test_nontext_last_turn_skips_judge_without_call_or_charge(context, last):
+    config = {**CONFIG, 'checks': ['judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [answer()], {**PAYLOAD, 'messages': [*PAYLOAD['messages'], last]})
+    assert len(calls) == len(context[1]) == 1
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('blocks', [False, True])
+def test_judge_input_is_bounded_valid_json_and_content_only(context, blocks):
+    text = ('"\\\n雪' * 6000)
+    user_content = [{'type': 'text', 'text': text}] if blocks else text
+    payload = {**PAYLOAD, 'messages': [{'role': 'user', 'content': 'earlier'}, {'role': 'user', 'content': user_content}]}
+    body = answer(text)
+    body['choices'][0]['message'].update(reasoning_content='synthetic-private-reasoning', reasoning='synthetic-reasoning')
+    config = {**CONFIG, 'checks': ['judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [body, answer('{"score":9}')], payload)
+    assert len(calls) == len(context[1]) == 2
+    sent = calls[1]
+    assert sent['max_completion_tokens'] == 1024
+    data = json.loads(sent['messages'][1]['content'])
+    assert data == {'request': text[:16000], 'answer': text[:16000]}
+    assert 'synthetic-private-reasoning' not in sent['messages'][1]['content']
+    assert 'reasoning_content' not in sent['messages'][1]['content']
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('reply', [
+    '', 'bad JSON', '{"score":11}', '{"score":-1}', '{"score":true}', '{"score":NaN}',
+    '{"score":8,"extra":1}', APIError('synthetic failure', 503), RuntimeError('synthetic failure'),
+    {'error': {'message': 'synthetic failure'}},
+])
+def test_judge_advisory_errors_are_noted(context, reply):
+    value = reply if isinstance(reply, (Exception, dict)) else answer(reply)
+    config = {**CONFIG, 'checks': ['judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [answer(), value])
+    assert len(calls) == len(context[1]) == 2
+    assert response.get_json()['choices'][0]['message']['content'] == '4'
+    assert response.headers['X-MultiLLM-Cascade'] == 'tier=1/2; model=opencode:cheap; skipped=; notes=1:judge_error'
+
+
+@pytest.mark.parametrize('check', ['judge', 'agreement'])
+def test_advisory_error_status_is_noted_even_with_parseable_output(context, check):
+    config = {**CONFIG, 'checks': [check], 'judge': {'model': 'opencode:judge'}}
+    failed = jsonify(answer('{"score":0}' if check == 'judge' else '5'))
+    failed.status_code = 503
+    response, calls = run(config, [answer(), failed])
+    assert len(calls) == len(context[1]) == 2
+    assert f'notes=1:{check}_error' in response.headers['X-MultiLLM-Cascade']
+    assert 'skipped=;' in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('configured', [False, True])
+def test_same_model_agreement_uses_independent_sampling(context, configured):
+    config = {**CONFIG, 'checks': ['agreement']}
+    if configured:
+        config['agreement'] = {'model': 'opencode:cheap'}
+    payload = {**PAYLOAD, 'temperature': 0, 'top_p': 0.1, 'seed': 42}
+    response, calls = run(config, [answer(), answer()], payload)
+    assert len(calls) == len(context[1]) == 2
+    assert calls[0]['temperature'] == 0 and calls[0]['top_p'] == 0.1 and calls[0]['seed'] == 42
+    assert calls[1]['temperature'] == 1 and 'top_p' not in calls[1] and 'seed' not in calls[1]
+    assert payload['temperature'] == 0 and payload['seed'] == 42
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+def test_different_agreement_model_keeps_client_sampling(context):
+    config = {**CONFIG, 'checks': ['agreement'], 'agreement': {'model': 'opencode:other'}}
+    payload = {**PAYLOAD, 'temperature': 0, 'top_p': 0.1, 'seed': 42}
+    response, calls = run(config, [answer(), answer()], payload)
+    assert calls[1]['model'] == 'opencode:other'
+    assert {key: calls[1][key] for key in ('temperature', 'top_p', 'seed')} == {key: payload[key] for key in ('temperature', 'top_p', 'seed')}
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+@pytest.mark.parametrize('reply', [
+    APIError('synthetic failure', 503), APIError('synthetic admission failure', 403),
+    RuntimeError('synthetic failure'), {'error': {'message': 'synthetic failure'}}, answer(''),
+])
+def test_agreement_failures_are_advisory_and_accounted(context, reply):
+    response, calls = run({**CONFIG, 'checks': ['agreement']}, [answer(), reply])
+    assert len(calls) == len(context[1]) == 2
+    assert response.headers['X-MultiLLM-Cascade'] == 'tier=1/2; model=opencode:cheap; skipped=; notes=1:agreement_error'
+
+
+@pytest.mark.parametrize('check', ['judge', 'agreement'])
+def test_advisory_secret_rejection_still_blocks(context, check):
+    error = APIError('Synthetic blocked content', 422, {'error': 'secret_detected'})
+    config = {**CONFIG, 'checks': [check], 'judge': {'model': 'opencode:judge'}}
+    with pytest.raises(APIError) as caught:
+        run(config, [answer(), error])
+    assert caught.value.status_code == 422
+    assert len(context[1]) == 2
+
+
+def test_notes_persist_with_escalation_and_stream_replay(context):
+    config = {**CONFIG, 'checks': ['agreement', 'judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [answer(), RuntimeError('synthetic agreement failure'), answer('{"score":0}'), answer('final')], {**PAYLOAD, 'stream': True})
+    assert response.headers['X-MultiLLM-Cascade'] == 'tier=2/2; model=opencode:strong; skipped=1:judge; notes=1:agreement_error'
+    assert b'data: [DONE]' in b''.join(response.iter_encoded())
+    response.close()
+    assert len(calls) == len(context[1]) == 4
+
+
+def test_multiple_advisory_notes_with_streaming_answer(context):
+    config = {**CONFIG, 'checks': ['agreement', 'judge'], 'judge': {'model': 'opencode:judge'}}
+    response, calls = run(config, [answer(), RuntimeError('synthetic agreement failure'), answer('')], {**PAYLOAD, 'stream': True})
+    assert response.headers['X-MultiLLM-Cascade'] == 'tier=1/2; model=opencode:cheap; skipped=; notes=1:agreement_error,1:judge_error'
+    assert b'data: [DONE]' in b''.join(response.iter_encoded())
+    response.close()
+    assert len(calls) == len(context[1]) == 3
+
+
+
+def test_judge_skips_unbounded_content_block_list(context):
+    config = {**CONFIG, 'checks': ['judge'], 'judge': {'model': 'opencode:judge'}}
+    payload = {**PAYLOAD, 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'x'}] * 4097}]}
+    response, calls = run(config, [answer()], payload)
+    assert len(calls) == len(context[1]) == 1
+    assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
