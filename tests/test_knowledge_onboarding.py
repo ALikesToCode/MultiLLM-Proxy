@@ -49,12 +49,15 @@ def test_discovery_and_skill_download_agree(client):
     config = client.get("/agent-onboarding/config.json", base_url="https://gateway.example").json
     assert config["url"] == "https://gateway.example/mcp"
     assert config["authentication"] == {"type": "bearer", "env": "MULTILLM_KNOWLEDGE_API_KEY"}
-    assert len(config["tools"]) == 38
-    assert len({tool["name"] for tool in config["tools"]}) == 38
+    assert len(config["tools"]) == 41
+    assert len({tool["name"] for tool in config["tools"]}) == 41
     assert {"knowledge_exa_search", "knowledge_firecrawl_crawl", "knowledge_context7_docs",
             "knowledge_deepwiki_ask", "knowledge_mintlify_context",
             "knowledge_product_sites_get", "knowledge_product_sites_update"} <= {tool["name"] for tool in config["tools"]}
-    assert sum(tool["scope"] == "knowledge:manage" for tool in config["tools"]) == 10
+    assert sum(tool["scope"] == "knowledge:manage" for tool in config["tools"]) == 11
+    assert {tool["name"]: tool["scope"] for tool in config["tools"] if tool["name"].startswith("knowledge_skills_")} == {
+        "knowledge_skills_find": "knowledge:read", "knowledge_skills_get": "knowledge:read", "knowledge_skills_sync": "knowledge:manage",
+    }
     assert {tool["name"]: tool["scope"] for tool in config["tools"] if tool["name"].startswith("knowledge_memos_")} == {
         "knowledge_memos_stats": "knowledge:manage", "knowledge_memos_purge": "knowledge:manage",
     }
