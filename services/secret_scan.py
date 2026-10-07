@@ -29,6 +29,10 @@ _INTEGRITY_PATTERN = r"(?<![A-Za-z0-9_-])sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}
 _INTEGRITY = re.compile(_INTEGRITY_PATTERN, re.ASCII)
 _IGNORED_SPAN = re.compile(_DATA_URL_PATTERN + "|" + _INTEGRITY_PATTERN, re.ASCII)
 _BASE64 = re.compile(r"[A-Za-z0-9+/=\r\n]+\Z")
+# Documentation connection strings (postgres:postgres, user:pass, host:8080) are not credentials.
+_PLACEHOLDER_PASSWORDS = frozenset({"pass", "password", "passwd", "pwd", "pw", "secret", "test", "testing", "postgres", "root", "admin", "user", "guest", "demo", "mysql", "redis", "rabbitmq", "mongo", "mongodb", "sa", "letmein", "qwerty", "foobar", "foo", "bar", "123456"})
+_PRINTABLE_ASCII = re.compile(r"[\x21-\x7e]+\Z")
+_PORT = re.compile(r"[0-9]{1,5}\Z")
 
 
 def _example(value):
@@ -36,6 +40,12 @@ def _example(value):
                     for begin, end in (("<", ">"), ("${", "}"), ("{{", "}}")))
     return bool(delimited or _EXAMPLE.search(value) or _UUID.fullmatch(value)
                 or len(set(value)) < 2 or _INTEGRITY.fullmatch(value))
+
+
+def _placeholder_password(value):
+    user, _, password = value.split("://", 1)[1].split("@", 1)[0].partition(":")
+    return (bool(_PRINTABLE_ASCII.fullmatch(password)) and password.lower() in _PLACEHOLDER_PASSWORDS
+            or password == user or bool(_PORT.fullmatch(password)) or password.startswith(("$", "%")))
 
 
 def _entropy(value):
@@ -89,6 +99,8 @@ def scan_text(text):
                 final = match[0].rsplit("-", 1)[-1]
                 if not re.search(r"[0-9]", final) or not re.search(r"[A-Za-z]", final):
                     continue
+            if name == "password_url" and _placeholder_password(match[0]):
+                continue
             if not _example(match[0]):
                 candidates.append((match.start(), match.end(), name, "high"))
             if len(candidates) >= MAX_FINDINGS:

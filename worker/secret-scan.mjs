@@ -20,6 +20,15 @@ const INTEGRITY = new RegExp(`^(?:${INTEGRITY_PATTERN})$(?![\\s\\S])`);
 const IGNORED_SPAN = new RegExp(`${DATA_URL_PATTERN}|${INTEGRITY_PATTERN}`, "g");
 const encoder = new TextEncoder();
 const empty = () => ({ high: 0, heuristic: 0, types: {}, paths: [], truncated: false });
+// Documentation connection strings (postgres:postgres, user:pass, host:8080) are not credentials.
+const PLACEHOLDER_PASSWORDS = new Set(["pass", "password", "passwd", "pwd", "pw", "secret", "test", "testing", "postgres", "root", "admin", "user", "guest", "demo", "mysql", "redis", "rabbitmq", "mongo", "mongodb", "sa", "letmein", "qwerty", "foobar", "foo", "bar", "123456"]);
+function placeholderPassword(value) {
+  const credentials = value.slice(value.indexOf("://") + 3).split("@", 1)[0];
+  const colon = credentials.indexOf(":");
+  const user = credentials.slice(0, colon), password = credentials.slice(colon + 1);
+  return /^[\x21-\x7e]+$/.test(password) && PLACEHOLDER_PASSWORDS.has(password.toLowerCase())
+    || password === user || /^[0-9]{1,5}$/.test(password) || password.startsWith("$") || password.startsWith("%");
+}
 function example(value) {
   const delimited = [["<", ">"], ["${", "}"], ["{{", "}}"]].some(([begin, end]) => {
     const start = value.indexOf(begin);
@@ -72,6 +81,7 @@ export function scanText(text) {
         const final = match[0].slice(match[0].lastIndexOf("-") + 1);
         if (!/[0-9]/.test(final) || !/[A-Za-z]/.test(final)) continue;
       }
+      if (type === "password_url" && placeholderPassword(match[0])) continue;
       if (!example(match[0])) candidates.push({ type, confidence: "high", start: match.index, end: pattern.lastIndex });
       if (candidates.length >= MAX_FINDINGS) break;
     }

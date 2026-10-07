@@ -40,6 +40,9 @@ URLs and image/audio base64 leaves are excluded only when the entire leaf matche
 the binary format. Text scanning excludes findings inside embedded base64 data URLs
 and whole sha256/sha384/sha512 integrity tokens. Pasted SSE `data:` and integrity
 prefixes do not exempt the rest of a log; malformed data URLs are scanned as text.
+Password URLs whose password is a documentation placeholder (pass, password, postgres,
+guest and similar), equals the user name, is a port number of at most five digits or
+is a `$`/`%` reference are not findings.
 Overlapping matches prefer the high-confidence format. Heuristics are never redacted.
 
 Each payload has a 4 MiB UTF-8 string-leaf budget, 100,000 visited nodes, depth 64 and
