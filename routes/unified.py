@@ -884,24 +884,12 @@ def dispatch_unified_image_generation(
 ):
     """Shared generation path for individual requests, batches and quality checks."""
     from routes.image_quality import dispatch_image_quality
-    from routes.unified_images import dispatch_image_generation_raw
+    from routes.unified_images import dispatch_image_generation_raw, generation_headers
 
     headers = dict(request.headers if request_headers is None else request_headers)
-    quality_enabled = "quality_check" in payload or any(name.lower() == "x-multillm-image-qa" for name in headers)
-    generation_number = 0
 
-    def generate(body):
-        nonlocal generation_number
-        call_headers = {name: value for name, value in headers.items() if name.lower() != "x-multillm-image-qa"}
-        if quality_enabled and generation_number:
-            from hashlib import sha256
-
-            for name, value in list(call_headers.items()):
-                if name.lower() == "idempotency-key":
-                    # Each new take must be distinct from a replay of the first image.
-                    digest = sha256(f"{value}:{generation_number}:{body.get('prompt')}".encode()).hexdigest()
-                    call_headers[name] = f"image-qa-{digest}"
-        generation_number += 1
+    def generate(body, *, image_index=None, attempt_number=0):
+        call_headers = generation_headers(headers, image_index, attempt_number)
         if has_reference_images(body):
             return dispatch_reference_generation(
                 app, auth_service_cls, metrics_service_cls, proxy_service_cls, body, request_headers=call_headers)

@@ -34,6 +34,9 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
         kind=kind, models=[model], provider=None, user=user, started=time.perf_counter(), start_ns=time.time_ns(),
         input_tokens=input_tokens, output_tokens=output_tokens, units=units,
         trace=telemetry_export.trace_context(request.headers.get("traceparent")))
+    request_id = getattr(g, "request_id", None)
+    context.request_id = (request_id if isinstance(request_id, str)
+                          and request_accounting.REQUEST_ID.fullmatch(request_id) else None)
     context.path = "/v1/chat/completions" if kind == "chat" else "/v1/images/generations"
     if budgeted(user):
         decision = BudgetService.check_and_reserve(

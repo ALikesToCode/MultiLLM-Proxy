@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import os
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -128,9 +129,18 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
             forwarded.append((kwargs["url"], payload, kwargs["headers"]))
             if kwargs["url"].endswith("images/generations"):
                 generations.append(payload)
-                return upstream({"created": 1, "data": [image(len(generations))]})
+                number = len(generations)
+                if isinstance(scores, dict):
+                    number = (3 if "Avoid:" in payload["prompt"] else
+                              1 if kwargs["headers"].get("Idempotency-Key") == "synthetic-order" else 2)
+                return upstream({"created": 1, "data": [image(number)]})
             judges.append(payload)
-            value = next(values)
+            if isinstance(scores, dict):
+                source = payload["messages"][1]["content"][1]["image_url"]["url"]
+                number = int(base64.b64decode(source.split(",", 1)[1])[-1:])
+                value = scores[number]
+            else:
+                value = next(values)
             if isinstance(value, Exception):
                 raise value
             return upstream(completion(grade(value) if isinstance(value, (int, float)) else value))
@@ -184,7 +194,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         self.assertEqual((len(generations), len(judges)), (1, 1))
 
     def test_multiple_images_retry_only_the_failing_image(self):
-        response, generations, judges, _ = self.generate([9, 3, 8], n=2)
+        response, generations, judges, _ = self.generate({1: 9, 2: 3, 3: 8}, n=2, headers={"Idempotency-Key": "synthetic-order"})
         entries = response.get_json()["data"]
         self.assertEqual([entry["quality"]["attempts"] for entry in entries], [1, 2])
         self.assertEqual([entry["b64_json"] for entry in entries], [image(1)["b64_json"], image(3)["b64_json"]])
@@ -267,14 +277,30 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         self.assertFalse(generations)
 
     def test_budget_stop_reports_partial_multi_image_result(self):
+        import importlib
+
+        qa_routes = importlib.import_module("routes.image_quality")
+
+        completed = threading.Event()
+        original = qa_routes._one_image
+        def ordered(*args):
+            if args[-1]:
+                self.assertTrue(completed.wait(timeout=5))
+            result = original(*args)
+            if not args[-1]:
+                completed.set()
+            return result
         decisions = iter([BudgetDecision(True)] * 3 + [
             BudgetDecision(False, error="budget_exceeded", status_code=429, message="Synthetic budget spent")])
         with patch("services.accounted_dispatch.budgeted", return_value=True), \
              patch("services.request_accounting.budgeted", return_value=True), \
+             patch.object(qa_routes, "_one_image", side_effect=ordered), \
              patch.object(BudgetService, "check_and_reserve", side_effect=lambda *args: next(decisions)):
             response, generations, judges, _ = self.generate([9], n=2)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["data"][0]["quality"]["stopped_reason"], "budget_exceeded")
+        self.assertNotIn("stopped_reason", response.get_json()["data"][0]["quality"])
+        self.assertEqual(response.get_json()["errors"][0]["index"], 1)
+        self.assertEqual(response.get_json()["errors"][0]["stopped_reason"], "budget_exceeded")
         self.assertEqual(response.headers["X-MultiLLM-Images-Returned"], "1")
         self.assertEqual((len(generations), len(judges)), (1, 1))
 

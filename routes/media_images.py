@@ -88,16 +88,17 @@ def _read(response: Response) -> dict:
             "headers": {name: response.headers[name] for name in _FORWARDED_HEADERS if name in response.headers}}
 
 
-def run_image_tasks(tasks: list[Callable[[], Response]]) -> list[dict]:
+def run_image_tasks(tasks: list[Callable], *, read_response: bool = True) -> list[dict]:
     """Run image requests in parallel, each in a copy of the caller's request context."""
-    principal = {name: getattr(g, name, None) for name in ("authenticated_user", "request_id", "rate_limit")}
+    principal = dict(g.__dict__)
 
     def finish(task):
         # A copied request context gets a new g; carry the owner's controls into it.
         for name, value in principal.items():
             setattr(g, name, value)
         try:
-            return _read(task())
+            result = task()
+            return _read(result) if read_response else result
         except APIError as error:
             body = {"error": {"message": error.message}}
             if (error.payload or {}).get("error") == "secret_detected":
@@ -217,6 +218,8 @@ def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
             images = result["body"].get("data") or []
             entry.update(status="succeeded", model=model,
                          images=persist(images, requests_by_item[index], model) if persist else images)
+            if result["body"].get("errors"):
+                entry["errors"] = result["body"]["errors"]
         else:
             entry.update(status="failed", error=_error(result))
         data.append(entry)

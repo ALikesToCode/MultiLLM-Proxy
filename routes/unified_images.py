@@ -16,6 +16,19 @@ from services.auto_route_service import AutoRouteService
 from services.media_catalog import TRANSPORT_FAILURE_HEADER
 
 
+def generation_headers(headers, image_index=None, attempt_number=0):
+    """Keep transport replays stable while separating independent image takes."""
+    from hashlib import sha256
+
+    result = {name: value for name, value in headers.items() if name.lower() != "x-multillm-image-qa"}
+    if image_index is not None and (image_index or attempt_number):
+        for name, value in list(result.items()):
+            if name.lower() == "idempotency-key":
+                digest = sha256(f"{value}:image:{image_index}:attempt:{attempt_number}".encode()).hexdigest()
+                result[name] = f"image-qa-{digest}"
+    return result
+
+
 def dispatch_image_generation_raw(
     app,
     auth_service_cls,

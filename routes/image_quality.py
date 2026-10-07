@@ -2,11 +2,12 @@
 
 import json
 import logging
+from functools import partial
 
 from flask import Response, g, request
 
 from error_handlers import APIError
-from routes.media_images import _image_count, _read
+from routes.media_images import _image_count, _read, run_image_tasks
 from services import key_controls
 from services.accounted_dispatch import accounted_dispatch, release_outer_accounting
 from services.auto_route_service import AutoRouteService
@@ -76,8 +77,9 @@ def _retry_payload(payload, model, prompt, fixes):
     return retry
 
 
-def _one_image(payload, options, generate, judge, skip_rate):
-    first = _read(accounted_dispatch(payload, generate, kind="images", skip_rate=skip_rate))
+def _one_image(payload, options, generate, judge, skip_rate, image_index):
+    first = _read(accounted_dispatch(payload, partial(generate, image_index=image_index, attempt_number=0),
+                                      kind="images", skip_rate=skip_rate))
     if first["status"] >= 400 or not first["body"]:
         return first
     entries = first["body"].get("data") or []
@@ -92,7 +94,9 @@ def _one_image(payload, options, generate, judge, skip_rate):
             quality["stopped_reason"] = "selected_model_unavailable"
             break
         try:
-            retry = _read(accounted_dispatch(_retry_payload(payload, model, prompt, fixes), generate, kind="images"))
+            retry = _read(accounted_dispatch(
+                _retry_payload(payload, model, prompt, fixes),
+                partial(generate, image_index=image_index, attempt_number=attempts), kind="images"))
         except APIError as error:
             quality["stopped_reason"] = (error.payload or {}).get("error", "generation_refused")
             break
@@ -141,23 +145,27 @@ def dispatch_image_quality(payload, generate, judge, validate_target, *, request
         clean.setdefault("quality", DEFAULT_IMAGE_QUALITY)
     skip_first_rate = getattr(g, "usage_context", None) is not None
     release_outer_accounting()
-    results = []
-    for index in range(count):
+    def pipeline(index):
         try:
-            results.append(_one_image({**clean, "n": 1}, options, generate, judge, skip_first_rate and index == 0))
+            return _one_image({**clean, "n": 1}, options, generate, judge, skip_first_rate and index == 0, index)
         except APIError as error:
-            results.append({"status": error.status_code, "body": {"error": error.to_dict()}, "headers": {}})
-            if error.status_code in (402, 429, 503):
-                results[-1]["stopped_reason"] = (error.payload or {}).get("error", "generation_refused")
-                break
+            result = {"status": error.status_code, "body": {"error": error.to_dict()}, "headers": {}}
+            if error.status_code in (402, 403, 429, 503):
+                result["stopped_reason"] = (error.payload or {}).get("error", "generation_refused")
+            return result
+
+    results = run_image_tasks([partial(pipeline, index) for index in range(count)], read_response=False)
     succeeded = [result for result in results if result["status"] < 400 and result["body"]]
     if not succeeded:
         result = results[-1]
         return Response(json.dumps(result["body"]), status=result["status"], content_type="application/json")
     body = dict(succeeded[0]["body"])
     body["data"] = [image for result in succeeded for image in result["body"].get("data", [])]
-    if results[-1].get("stopped_reason") and body["data"]:
-        body["data"][-1]["quality"]["stopped_reason"] = results[-1]["stopped_reason"]
+    errors = [{"index": index, "error": result["body"].get("error"),
+               **({"stopped_reason": result["stopped_reason"]} if "stopped_reason" in result else {})}
+              for index, result in enumerate(results) if result["status"] >= 400]
+    if errors:
+        body["errors"] = errors
     response = Response(json.dumps(body), content_type="application/json")
     for name, value in succeeded[0]["headers"].items():
         response.headers[name] = value
