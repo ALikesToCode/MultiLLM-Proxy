@@ -23,20 +23,32 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def connection(args):
+def private_key(env_name, path, label):
+    key = os.environ.get(env_name, "")
+    if path:
+        with Path(path).open() as stream:
+            key = stream.read(4097).strip()
+    if key and (len(key) > 4096 or "\n" in key or "\r" in key):
+        raise ValueError(f"Invalid private {label} credential")
+    return key
+
+
+def gateway_origin(args):
     base = args.base_url or os.environ.get("MULTILLM_BASE_URL", "")
     parsed = urllib.parse.urlsplit(base)
     if (parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password
             or parsed.query or parsed.fragment or parsed.path not in {"", "/"}
             or parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}):
         raise ValueError("Use an HTTPS gateway origin (HTTP is allowed only on loopback)")
-    key = os.environ.get("MULTILLM_KNOWLEDGE_API_KEY", "")
-    if args.key_file:
-        with Path(args.key_file).open() as stream:
-            key = stream.read(4097).strip()
-    if not key or len(key) > 4096 or "\n" in key or "\r" in key:
+    return base.rstrip("/")
+
+
+def connection(args):
+    base = gateway_origin(args)
+    key = private_key("MULTILLM_KNOWLEDGE_API_KEY", args.key_file, "Knowledge")
+    if not key:
         raise ValueError("A private Knowledge credential is required")
-    return base.rstrip("/"), key
+    return base, key
 
 
 def request_json(base, key, path, payload=None, timeout=10):
@@ -45,7 +57,7 @@ def request_json(base, key, path, payload=None, timeout=10):
         raise ValueError("Request exceeds handoff transport bounds")
     req = urllib.request.Request(base + path, data=body, method="POST" if body is not None else "GET",
                                  headers={"Authorization": "Bearer " + key, "Accept": "application/json",
-                                          "Content-Type": "application/json"})
+                                          "Content-Type": "application/json", "User-Agent": "multillm-handoff/1"})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     with opener.open(req, timeout=timeout) as response:
         if response.headers.get_content_type() != "application/json":
@@ -63,8 +75,12 @@ def summarize(args, payload):
     if not args.summarize:
         return payload
     try:
-        base, key = connection(args)
-        facts = json.dumps(sanitized(payload["sections"]), ensure_ascii=False)
+        key = private_key("MULTILLM_API_KEY", args.chat_key_file, "chat")
+        if not key:
+            print("summarize skipped: no chat key", file=sys.stderr)
+            return payload
+        base = gateway_origin(args)
+        facts = json.dumps(sanitized({"sections": payload["sections"], "summary": payload["summary"]}), ensure_ascii=False)
         # Maximal deterministic sections must still fit the 30,000-character input cap.
         if len(facts) > 30000:
             return payload
@@ -129,6 +145,7 @@ def parser():
             child.add_argument("--agent", choices=("claude", "codex", "opencode", "other"))
             child.add_argument("--title")
             child.add_argument("--ttl-days", type=int, default=14)
+            child.add_argument("--chat-key-file", help="Private chat key path for optional summarization")
             child.add_argument("--summarize", metavar="MODEL", help="Optional gateway summary; failures keep deterministic sections")
             if name in {"save", "print"}:
                 child.add_argument("--input", help="Previously built handoff JSON path, or - for stdin")

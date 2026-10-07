@@ -25,7 +25,7 @@ spec.loader.exec_module(hook)
 
 
 def args(**extra):
-    return SimpleNamespace(cwd="/synthetic/project", base_url=None, key_file=None, summarize=None,
+    return SimpleNamespace(cwd="/synthetic/project", base_url=None, key_file=None, chat_key_file=None, summarize=None,
                            **extra)
 
 
@@ -43,7 +43,7 @@ def record(now=None):
 
 @pytest.fixture
 def server():
-    state = {"calls": [], "summary": {"goal": "Summarized fixture", "next_steps": ["Review"]},
+    state = {"calls": [], "user_agents": [], "summary": {"goal": "Summarized fixture", "next_steps": ["Review"]},
              "record": record(), "delay": 0, "status": 200, "redirect": None}
 
     class Handler(BaseHTTPRequestHandler):
@@ -63,10 +63,12 @@ def server():
                 pass
 
         def do_GET(self):
+            state["user_agents"].append(self.headers.get("User-Agent"))
             state["calls"].append((self.path, self.headers.get("Authorization"), None))
             self.send({"record": state["record"], "trust": "operator"})
 
         def do_POST(self):
+            state["user_agents"].append(self.headers.get("User-Agent"))
             value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             state["calls"].append((self.path, self.headers.get("Authorization"), value))
             if self.path == "/v1/chat/completions":
@@ -206,6 +208,7 @@ def test_transcript_line_and_scan_bounds_fail_closed(tmp_path, monkeypatch):
 
 
 def test_summarize_validation_and_transport_failures_keep_deterministic_sections(server, monkeypatch):
+    monkeypatch.setenv("MULTILLM_API_KEY", "synthetic-chat-credential")
     monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-private-credential")
     options = args()
     options.base_url = server["base"]
@@ -301,6 +304,60 @@ def test_hook_process_outputs_context_and_stays_silent_on_timeout_error(server, 
         assert result.returncode == 0 and not result.stdout and not result.stderr
     result = subprocess.run([sys.executable, "-I", str(HOOK_PATH), "--unknown"], input="invalid", text=True, capture_output=True, timeout=3)
     assert result.returncode == 0 and not result.stdout and not result.stderr
+
+
+def test_summary_and_save_use_distinct_keys_and_every_request_has_user_agent(server, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-knowledge-credential")
+    monkeypatch.setenv("MULTILLM_API_KEY", "synthetic-chat-credential")
+    transcript = ROOT / "tests/fixtures/handoff_codex.jsonl"
+    command = ["save", "--cwd", str(tmp_path), "--base-url", server["base"],
+               "--transcript", str(transcript), "--summarize", "synthetic-model"]
+    assert handoff.main(command) == 0
+    assert [(path, key) for path, key, _ in server["calls"]] == [
+        ("/v1/chat/completions", "Bearer synthetic-chat-credential"),
+        ("/v1/knowledge/handoffs", "Bearer synthetic-knowledge-credential")]
+    assert handoff.main(["load", "--cwd", str(tmp_path), "--base-url", server["base"]]) == 0
+    assert server["calls"][-1][1] == "Bearer synthetic-knowledge-credential"
+    assert server["user_agents"] == ["multillm-handoff/1"] * 3
+    output = capsys.readouterr()
+    assert "credential" not in output.out + output.err
+
+
+def test_missing_chat_key_skips_summary_without_using_knowledge_key(server, monkeypatch, capsys):
+    monkeypatch.delenv("MULTILLM_API_KEY", raising=False)
+    monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-knowledge-credential")
+    options = args()
+    options.base_url, options.summarize = server["base"], "synthetic-model"
+    value = contracts.validate_payload(payload())
+    assert handoff.summarize(options, value) == value
+    assert server["calls"] == []
+    assert capsys.readouterr().err == "summarize skipped: no chat key\n"
+
+
+def test_summary_includes_long_closing_report(server, monkeypatch):
+    monkeypatch.setenv("MULTILLM_API_KEY", "synthetic-chat-credential")
+    options = args()
+    options.base_url, options.summarize = server["base"], "synthetic-model"
+    value = contracts.validate_payload(payload(summary="closing report " * 200))
+    handoff.summarize(options, value)
+    facts = json.loads(server["calls"][-1][2]["messages"][1]["content"])
+    assert facts["summary"] == value["summary"]
+
+
+@pytest.mark.parametrize("key", ["x" * 4097, "fake\nvalue", "fake\rvalue"])
+def test_chat_key_validation_matches_knowledge_key(monkeypatch, key):
+    for env, label in [("MULTILLM_API_KEY", "chat"), ("MULTILLM_KNOWLEDGE_API_KEY", "Knowledge")]:
+        monkeypatch.setenv(env, key)
+        with pytest.raises(ValueError):
+            handoff.private_key(env, None, label)
+
+
+def test_chat_key_file_uses_same_private_loader_without_reading_operator_files(monkeypatch):
+    monkeypatch.setenv("MULTILLM_API_KEY", "synthetic-environment-credential")
+    with patch.object(Path, "open", return_value=io.StringIO("synthetic-file-credential\n")) as opened:
+        assert handoff.private_key("MULTILLM_API_KEY", "/synthetic/chat-key", "chat") == "synthetic-file-credential"
+    opened.assert_called_once()
+    assert handoff.parser().parse_args(["build", "--chat-key-file", "/synthetic/chat-key"]).chat_key_file == "/synthetic/chat-key"
 
 
 @pytest.mark.parametrize("cwd", ["/synthetic/dotted.repo", "/synthetic/under_scored repo"])
