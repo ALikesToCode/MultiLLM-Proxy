@@ -92,7 +92,9 @@ def test_claude_fact_extraction_ignores_outputs_and_keeps_last_three_users():
     assert result["branch"] == "feature"
     s = result["sections"]
     assert [item["path"] for item in s["files"]] == ["src/a.py", "src/b.py", "src/c.py", "analysis.ipynb"]
-    assert s["goal"] == "Ship fixture four"
+    assert s["goal"] == "Build the first fixture"
+    assert result["summary"] == s["state"]
+    assert "FAKE_INJECTED" not in json.dumps(result)
     assert s["decisions"] == ["User: Review fixture two", "User: Review fixture three", "User: Ship fixture four"]
     assert s["state"] == "Fixture complete; review is pending."
     assert s["commands"][0] == {"command": "synthetic-test --fail", "outcome": "Exit 3"}
@@ -105,6 +107,8 @@ def test_codex_fact_extraction_handles_patch_and_json_arguments():
     with patch.object(transcripts, "git", return_value="feature"):
         result = transcripts.extract(ROOT / "tests/fixtures/handoff_codex.jsonl", "/synthetic/project")
     assert result["source"]["agent"] == "codex"
+    assert result["sections"]["goal"] == "Add the synthetic parser"
+    assert "FAKE_INJECTED" not in json.dumps(result)
     assert [item["path"] for item in result["sections"]["files"]] == ["src/parser.py", "src/old.py", "src/new.py", "src/gone.py"]
     assert result["sections"]["state"] == "Parser written; one check failed."
     assert result["sections"]["commands"][0] == {"command": "synthetic-check", "outcome": "Exit 2"}
@@ -297,3 +301,88 @@ def test_hook_process_outputs_context_and_stays_silent_on_timeout_error(server, 
         assert result.returncode == 0 and not result.stdout and not result.stderr
     result = subprocess.run([sys.executable, "-I", str(HOOK_PATH), "--unknown"], input="invalid", text=True, capture_output=True, timeout=3)
     assert result.returncode == 0 and not result.stdout and not result.stderr
+
+
+@pytest.mark.parametrize("cwd", ["/synthetic/dotted.repo", "/synthetic/under_scored repo"])
+def test_claude_discovery_encodes_every_non_alphanumeric_character(tmp_path, cwd):
+    import re
+    path = tmp_path / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd) / "fixture.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text("{}\n")
+    assert transcripts.discover(cwd, tmp_path, "claude") == (path, "claude")
+
+
+def test_claude_discovery_falls_back_to_bounded_cwd_prefix(tmp_path, monkeypatch):
+    cwd = "/synthetic/long.dotted_repo"
+    directory = tmp_path / ".claude/projects/shortened"
+    directory.mkdir(parents=True)
+    unrelated = directory / "unrelated.jsonl"
+    unrelated.write_text(json.dumps({"cwd": "/other"}))
+    path = directory / "matching.jsonl"
+    path.write_text("{}\n" * 19 + json.dumps({"type": "user", "cwd": cwd}))
+    assert transcripts.discover(cwd, tmp_path, "claude") == (path, "claude")
+    path.write_text("{}\n" * 20 + json.dumps({"cwd": cwd}))
+    with pytest.raises(ValueError):
+        transcripts.discover(cwd, tmp_path, "claude")
+    path.write_text("x" * (transcripts.MAX_LINE_BYTES + 1) + "\n" + json.dumps({"cwd": cwd}))
+    with pytest.raises(ValueError):
+        transcripts.discover(cwd, tmp_path, "claude")
+    monkeypatch.setattr(transcripts, "MAX_FILES_DISCOVERED", 1)
+    with patch.object(Path, "glob", return_value=iter([unrelated, path])):
+        with pytest.raises(ValueError):
+            transcripts.discover(cwd, tmp_path, "claude")
+
+
+def test_codex_discovery_visits_newest_dates_and_sessions_before_file_cap(tmp_path, monkeypatch):
+    cwd = "/synthetic/project"
+    paths = []
+    for date, name in [("2025/12/31", "old"), ("2026/09/30", "old"),
+                       ("2026/10/06", "old"), ("2026/10/07", "01"), ("2026/10/07", "02")]:
+        path = tmp_path / ".codex/sessions" / date / f"rollout-{name}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"type": "session_meta", "payload": {"cwd": cwd}}))
+        paths.append(path)
+    monkeypatch.setattr(transcripts, "MAX_FILES_DISCOVERED", 4)
+    with patch.object(transcripts, "prefix_matches", wraps=transcripts.prefix_matches) as inspected:
+        assert transcripts.discover(cwd, tmp_path, "codex") == (paths[-1], "codex")
+    assert inspected.call_count == 1
+    assert inspected.call_args.args[0] == paths[-1]
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_extract_retains_first_goal_and_long_redacted_closing_summary(tmp_path, agent):
+    secret = "AK" + "IA" + "AB12CD34EF56GH78"
+    final = "Closing synthetic report " * 220 + secret
+    def message(role, text):
+        return ({"type": role, "message": {"content": text}} if agent == "claude" else
+                {"type": "response_item", "payload": {"type": "message", "role": role, "content": text}})
+    items = [message("user", "First task " + "x" * 600)]
+    items += [message("user", f"Follow up {i}") for i in range(5)]
+    items += [message("assistant", final)]
+    path = tmp_path / "synthetic.jsonl"
+    path.write_text("\n".join(json.dumps(item) for item in items))
+    with patch.object(transcripts, "git", return_value=""):
+        result = transcripts.extract(path, tmp_path, agent)
+    assert result["sections"]["goal"] == ("First task " + "x" * 600)[:500]
+    assert result["sections"]["decisions"] == [f"User: Follow up {i}" for i in (2, 3, 4)]
+    assert result["sections"]["state"] == result["summary"][:500]
+    assert len(result["summary"]) == 4000
+    assert secret not in json.dumps(result)
+    # The redacted closing report remains available beyond the 500-character state.
+    items[-1] = message("assistant", "closing " * 100 + secret)
+    path.write_text("\n".join(json.dumps(item) for item in items))
+    with patch.object(transcripts, "git", return_value=""):
+        assert "[REDACTED:" in transcripts.extract(path, tmp_path, agent)["summary"]
+
+
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_no_operator_user_facts_uses_default_goal(tmp_path, agent):
+    path = tmp_path / "synthetic.jsonl"
+    value = {"type": "user", "message": {"content": "<task-notification>Fake</task-notification>"}}
+    if agent == "codex":
+        value = {"type": "response_item", "payload": {"type": "message", "role": "developer", "content": "Fake"}}
+    path.write_text(json.dumps(value))
+    with patch.object(transcripts, "git", return_value=""):
+        result = transcripts.extract(path, tmp_path, agent)
+    assert result["sections"]["goal"] == "Continue the task"
+    assert result["sections"]["decisions"] == []

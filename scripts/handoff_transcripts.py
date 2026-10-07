@@ -50,29 +50,58 @@ def records(path):
             raise ValueError("Transcript exceeds extraction bounds")
 
 
+def prefix_matches(path, cwd, count, *, codex=False):
+    try:
+        with path.open("rb") as stream:
+            for _ in range(count):
+                line = stream.readline(MAX_LINE_BYTES + 1)
+                if not line or len(line) > MAX_LINE_BYTES:
+                    break
+                try:
+                    item = json.loads(line)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                value = item.get("payload") if codex and item.get("type") == "session_meta" else item if not codex else None
+                if isinstance(value, dict) and value.get("cwd") == cwd:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def newest_codex(directory, cwd):
+    examined = 0
+    dates = sorted(itertools.islice(directory.glob("*/*/*"), MAX_FILES_DISCOVERED), reverse=True)
+    for date in dates:
+        paths = sorted(itertools.islice(date.glob("rollout-*.jsonl"), MAX_FILES_DISCOVERED - examined), reverse=True)
+        for path in paths:
+            examined += 1
+            if prefix_matches(path, cwd, 5, codex=True):
+                return path
+        if examined >= MAX_FILES_DISCOVERED:
+            break
+    return None
+
+
 def discover(cwd, home=None, agent=None):
     home = Path(home or Path.home())
     cwd = str(Path(cwd).resolve())
     candidates = []
     if agent in (None, "claude"):
-        directory = home / ".claude/projects" / cwd.replace("/", "-")
-        candidates.extend((path, "claude") for path in itertools.islice(directory.glob("*.jsonl"), MAX_FILES_DISCOVERED))
+        projects = home / ".claude/projects"
+        directory = projects / re.sub(r"[^A-Za-z0-9]", "-", cwd)
+        if directory.is_dir():
+            candidates.extend((path, "claude") for path in itertools.islice(directory.glob("*.jsonl"), MAX_FILES_DISCOVERED))
+        else:
+            for path in itertools.islice(projects.glob("*/*.jsonl"), MAX_FILES_DISCOVERED):
+                if prefix_matches(path, cwd, 20):
+                    candidates.append((path, "claude"))
     if agent in (None, "codex"):
-        directory = home / ".codex/sessions"
-        for path in itertools.islice(directory.glob("*/*/*/rollout-*.jsonl"), MAX_FILES_DISCOVERED):
-            # Session metadata comes first; inspect no more than a bounded prefix.
-            with path.open("rb") as stream:
-                for _ in range(5):
-                    line = stream.readline(65537)
-                    if not line or len(line) > 65536:
-                        break
-                    try:
-                        item = json.loads(line)
-                    except ValueError:
-                        continue
-                    if item.get("type") == "session_meta" and item.get("payload", {}).get("cwd") == cwd:
-                        candidates.append((path, "codex"))
-                        break
+        path = newest_codex(home / ".codex/sessions", cwd)
+        if path:
+            candidates.append((path, "codex"))
     if not candidates:
         raise ValueError("No matching transcript")
     return max(candidates, key=lambda pair: pair[0].stat().st_mtime)
@@ -124,6 +153,7 @@ class Facts:
         self.sessions = {}
         self.failures = deque(maxlen=30)
         self.users = deque(maxlen=3)
+        self.goal = ""
         self.final = ""
         self.thread_id = ""
         self.agent = "other"
@@ -179,6 +209,16 @@ class Facts:
         elif failed:
             self.failures.append({"command": command, "outcome": "Tool reported failure"})
 
+    def user(self, text):
+        start = text.lstrip()
+        if (not start or re.match(r"<[A-Za-z0-9_-]+(?:>| )", start)
+                or start.startswith(("# AGENTS.md instructions", "[Request interrupted"))):
+            return
+        value = clean(text)
+        if not self.goal:
+            self.goal = value
+        self.users.append(value)
+
     def claude(self, record):
         self.agent = "claude"
         self.thread_id = clean(record.get("sessionId", self.thread_id), 200)
@@ -186,11 +226,11 @@ class Facts:
         if not isinstance(message, dict):
             return
         content = message.get("content", [])
-        text = clean(message_text(content))
-        if record.get("type") == "user" and text:
-            self.users.append(text)
+        text = message_text(content)
+        if record.get("type") == "user" and not any(record.get(flag) is True for flag in ("isMeta", "isCompactSummary", "isSidechain")):
+            self.user(text)
         elif record.get("type") == "assistant" and text:
-            self.final = text
+            self.final = clean(text, 4000)
         if not isinstance(content, list):
             return
         for item in content[:100]:
@@ -212,11 +252,11 @@ class Facts:
             return
         kind = value.get("type")
         if kind == "message":
-            text = clean(message_text(value.get("content")))
-            if value.get("role") == "user" and text:
-                self.users.append(text)
+            text = message_text(value.get("content"))
+            if value.get("role") == "user":
+                self.user(text)
             elif value.get("role") == "assistant" and value.get("phase") in (None, "final_answer", "final") and text:
-                self.final = text
+                self.final = clean(text, 4000)
         if kind in {"function_call", "custom_tool_call"}:
             if value.get("name", "").split(".")[-1] == "apply_patch":
                 self.patch(value.get("input", value.get("arguments")))
@@ -236,8 +276,8 @@ def extract(path, cwd, agent=None):
     branch = git(cwd, "branch", "--show-current")[:200]
     head = git(cwd, "rev-parse", "HEAD")
     status = git(cwd, "status", "--short")
-    section = {"goal": facts.users[-1] if facts.users else "Continue the task",
-               "state": facts.final or "Transcript ended without a final response",
+    section = {"goal": facts.goal or "Continue the task",
+               "state": clean(facts.final) or "Transcript ended without a final response",
                "files": [{"path": path, "change": change} for path, change in facts.files.items()],
                "decisions": [clean("User: " + text) for text in facts.users],
                "failed_attempts": [clean(item["command"] + ": " + item["outcome"]) for item in facts.failures],
@@ -247,4 +287,4 @@ def extract(path, cwd, agent=None):
     source = {"agent": agent or facts.agent}
     if facts.thread_id:
         source["thread_id"] = facts.thread_id
-    return sanitized({"branch": branch, "source": source, "sections": section})
+    return sanitized({"branch": branch, "source": source, "sections": section, "summary": facts.final})

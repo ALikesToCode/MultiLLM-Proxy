@@ -1,3 +1,17 @@
+{"type": "user", "message": {"content": "  <task-notification>FAKE_INJECTED task</task-notification>"}}
+{"type": "user", "message": {"content": "  <command-name>FAKE_INJECTED command</command-name>"}}
+{"type": "user", "message": {"content": "  <local-command-caveat>FAKE_INJECTED caveat</local-command-caveat>"}}
+{"type": "user", "message": {"content": "  <environment_context>FAKE_INJECTED environment</environment_context>"}}
+{"type": "user", "message": {"content": "  <user_instructions fake='yes'>FAKE_INJECTED instructions</user_instructions>"}}
+{"type": "user", "message": {"content": "  <tag_1-name fake='yes'>FAKE_INJECTED tag</tag_1-name>"}}
+{"type": "user", "message": {"content": "  # AGENTS.md instructions\\nFAKE_INJECTED instructions"}}
+{"type": "user", "message": {"content": "  [Request interrupted by user] FAKE_INJECTED interruption"}}
+{"type": "developer", "message": {"content": "FAKE_INJECTED developer"}}
+{"type": "system", "message": {"content": "FAKE_INJECTED system"}}
+{"type": "user", "message": {"content": "FAKE_INJECTED isMeta"}, "isMeta": true}
+{"type": "user", "message": {"content": "FAKE_INJECTED isCompactSummary"}, "isCompactSummary": true}
+{"type": "user", "message": {"content": "FAKE_INJECTED isSidechain"}, "isSidechain": true}
+{"type": "user", "message": {"content": "<local-command-caveat>FAKE_INJECTED caveat</local-command-caveat>"}, "isMeta": true}
 {"type": "user", "cwd": "/synthetic/project", "sessionId": "synthetic-claude", "message": {"content": [{"type": "text", "text": "Build the first fixture"}]}}
 {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Edit", "id": "Edit", "input": {"file_path": "src/a.py"}}, {"type": "tool_use", "name": "Write", "id": "Write", "input": {"file_path": "src/b.py"}}, {"type": "tool_use", "name": "MultiEdit", "id": "MultiEdit", "input": {"file_path": "src/c.py"}}, {"type": "tool_use", "name": "NotebookEdit", "id": "NotebookEdit", "input": {"notebook_path": "analysis.ipynb"}}]}}
 {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "id": "shell-fail", "input": {"command": "synthetic-test --fail"}}]}}
@@ -6,3 +20,17 @@
 {"type": "user", "message": {"content": "Review fixture three"}}
 {"type": "user", "message": {"content": "Ship fixture four"}}
 {"type": "assistant", "message": {"content": [{"type": "text", "text": "Fixture complete; review is pending."}]}}
+{"type": "user", "message": {"content": "  <task-notification>FAKE_INJECTED task</task-notification>"}}
+{"type": "user", "message": {"content": "  <command-name>FAKE_INJECTED command</command-name>"}}
+{"type": "user", "message": {"content": "  <local-command-caveat>FAKE_INJECTED caveat</local-command-caveat>"}}
+{"type": "user", "message": {"content": "  <environment_context>FAKE_INJECTED environment</environment_context>"}}
+{"type": "user", "message": {"content": "  <user_instructions fake='yes'>FAKE_INJECTED instructions</user_instructions>"}}
+{"type": "user", "message": {"content": "  <tag_1-name fake='yes'>FAKE_INJECTED tag</tag_1-name>"}}
+{"type": "user", "message": {"content": "  # AGENTS.md instructions\\nFAKE_INJECTED instructions"}}
+{"type": "user", "message": {"content": "  [Request interrupted by user] FAKE_INJECTED interruption"}}
+{"type": "developer", "message": {"content": "FAKE_INJECTED developer"}}
+{"type": "system", "message": {"content": "FAKE_INJECTED system"}}
+{"type": "user", "message": {"content": "FAKE_INJECTED isMeta"}, "isMeta": true}
+{"type": "user", "message": {"content": "FAKE_INJECTED isCompactSummary"}, "isCompactSummary": true}
+{"type": "user", "message": {"content": "FAKE_INJECTED isSidechain"}, "isSidechain": true}
+{"type": "user", "message": {"content": "<local-command-caveat>FAKE_INJECTED caveat</local-command-caveat>"}, "isMeta": true}
