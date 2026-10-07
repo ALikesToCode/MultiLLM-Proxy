@@ -93,18 +93,21 @@ Useful initial tasks:
 
 Upload the local library once, then search a few skills per prompt instead of
 listing every skill. `knowledge_skills_find` defaults to hybrid search and three
-results; `mode: "fast"` uses only BM25. `knowledge_skills_get` loads `SKILL.md` or a
+results; `mode: "fast"` uses only BM25. Results carry high/low confidence;
+`min_confidence: "high"` filters weak matches before limits and suggestion counts. `knowledge_skills_get` loads `SKILL.md` or a
 referenced relative path. These are operator instructions (`trust: "operator"`);
 provider evidence remains untrusted data. `/mcp?toolsets=skills` lists only these
 three tools, subject to the key's scopes.
 
 From the repository, use Python 3.11+ and an existing private environment containing
 `MULTILLM_BASE_URL` and `MULTILLM_KNOWLEDGE_API_KEY`. Sync requires
-`knowledge:manage`; hooks and retrieval require `knowledge:read`.
+`knowledge:manage` on the operator key; hooks and retrieval need only `knowledge:read`.
+An explicit `--key-file` wins over the environment key, and `--base-url` wins over
+the environment URL. Both clients send `User-Agent: multillm-skills/1`.
 
 ```sh
-python3 scripts/skills_sync.py --dry-run --state-file /private/path/skills-receipts.json
-python3 scripts/skills_sync.py --state-file /private/path/skills-receipts.json
+python3 scripts/skills_sync.py --dry-run
+python3 scripts/skills_sync.py --key-file /private/path/operator-key --base-url https://gateway.example
 ```
 
 The defaults are `~/.claude/skills`, `~/.claude/skills-library`, `~/.codex/skills`
@@ -113,17 +116,39 @@ and `~/.agents/skills`. Override them with repeated `--root LABEL=PATH`, and set
 plan; it never reads the key or contacts the service. Keep the receipt file:
 only previously successful uploads from the selected root labels are eligible
 for deletion. An unavailable root or invalid local skill disables pruning for
-that root. Duplicate slugs retain the first root's skill. High-confidence secrets
-reject the containing skill without printing the secret. Links must stay inside
-the skill folder; only referenced files and explicitly referenced directories
-are uploaded, with a bounded scan.
+that root. The default state is `~/.config/multillm/skills-sync-state.json` (0600,
+parent created 0700), overridable with `--state-file`. Duplicate slugs retain the
+first root's skill: identical SKILL.md hashes count as `duplicates`; differing
+hashes report `duplicate_conflict` with both root labels, not a rejection.
+High-confidence secrets reject the containing skill without printing the secret.
+Absolute, tilde-prefixed, `..` and external references are ignored; escaping
+collected symlinks are skipped and counted as `skipped_files`. Missing files are
+ignored. Only local referenced files/directories are uploaded in bounded batches
+of at most 16 skills and 8 MiB, retaining the 5 MiB per-skill cap. Summaries give
+counts and each rejected/conflicting slug with its safe reason, never content.
 
-The optional prompt hook uses fast search, limit three, and a total 800 ms budget.
+Confidence tokenization lowercases Unicode letters/numbers, drops single letters
+and fixed English stopwords, and lightly stems plurals except `ss`, `us`, `is`.
+High confidence means all name tokens match (multi-token names need distinctive
+`nidf >= 3.5`; single-token names need full-text frequency at most `max(3, 0.03*N)`),
+or at least three name/description matches with at least `2 + floor(query_tokens/20)`
+distinctive terms. These named constants and corpus statistics are documented in
+the [design](plans/2026-10-07-knowledge-skills-hub-design.md). Ranking still uses
+BM25, optional semantic cosine and the helpful prior. `SKILLS_CONFIDENT_COSINE`
+is disabled when unset; calibrate it using labeled prompts and deployed embeddings
+before enabling it. The fast hook does not use semantic confidence.
+
+The optional prompt hook uses POST `/v1/knowledge/skills/find` with JSON
+`{query, mode: "fast", limit: 3, min_confidence: "high"}` and a total 800 ms budget.
+The GET search mirror remains for manual use; its query URL may be logged by
+Cloudflare, Worker observability and Flask. POST keeps hook prompts out of URLs.
 It adds at most 600 UTF-8 bytes of context (about 150 tokens), and emits nothing on
-errors, timeouts, prompts shorter than 12 characters or no score of at least 0.2.
+errors, timeouts, prompts shorter than 12 characters or no high-confidence match.
+Key-file reading is included in the total time budget.
 Install these snippets yourself, merging with existing hooks. Replace the absolute
-repository path and supply the two environment variables through your client's
-private environment; do not put credential values in JSON.
+repository path, private read-key path and base URL. File paths belong in the
+command; do not put credential values in JSON. Flags take precedence over the
+client's inherited environment.
 
 Claude Code `settings.json`:
 
@@ -133,7 +158,7 @@ Claude Code `settings.json`:
     "UserPromptSubmit": [{
       "hooks": [{
         "type": "command",
-        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent claude",
+        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent claude --key-file /private/path/read-key --base-url https://gateway.example",
         "timeout": 1
       }]
     }]
@@ -149,7 +174,7 @@ Codex `hooks.json` (user or trusted project configuration):
     "UserPromptSubmit": [{
       "hooks": [{
         "type": "command",
-        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent codex",
+        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent codex --key-file /private/path/read-key --base-url https://gateway.example",
         "timeout": 1
       }]
     }]
@@ -165,7 +190,7 @@ and [Codex hook reference](https://learn.chatgpt.com/docs/hooks). Whether Codex 
 fire under the T3 app-server remains unverified; retrieval through MCP works
 without a hook.
 
-A find increments `suggested`. A successful get increments `fetched`; it increments
+Only returned find results increment `suggested`. A successful get increments `fetched`; it increments
 `helpful` once if the same principal was offered the skill in the preceding
 30 minutes. Ranking adds a small `0.03 * log(1 + helpful)` prior. Counters stay in
 the private index and are omitted from compact retrieval results. Superseded,

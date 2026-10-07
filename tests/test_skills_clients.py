@@ -50,7 +50,7 @@ def test_plan_frontmatter_references_hashes_and_root_scoped_deletion(tmp_path):
     assert sync.build_plan({"agents": tmp_path / "missing"}, {"agents": ["old"]})["delete"] == []
 
 
-def test_secret_rejection_missing_files_and_symlink_escape_disable_pruning(tmp_path):
+def test_secret_rejection_disables_pruning_and_symlink_escape_is_skipped(tmp_path):
     root, directory = library(tmp_path)
     token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"
     (directory / "scripts/run.py").write_text(token)
@@ -62,7 +62,10 @@ def test_secret_rejection_missing_files_and_symlink_escape_disable_pruning(tmp_p
     outside.write_text("synthetic")
     (directory / "scripts/run.py").unlink()
     (directory / "scripts/run.py").symlink_to(outside)
-    assert sync.build_plan({"agents": root}, {})["rejected"][0]["reason"] == "path_traversal"
+    plan = sync.build_plan({"agents": root}, {})
+    assert len(plan["skills"]) == 1 and plan["rejected"] == []
+    assert plan["skipped_files"] == 1
+    assert [file["path"] for file in plan["skills"][0]["files"]] == ["SKILL.md", "references/guide.md"]
 
 
 def test_size_limits_duplicates_and_batch_bounds(tmp_path):
@@ -72,7 +75,7 @@ def test_size_limits_duplicates_and_batch_bounds(tmp_path):
     (directory / "scripts/run.py").write_text("safe")
     plan = sync.build_plan({"agents": root, "codex": root}, {})
     assert len(plan["skills"]) == 1
-    assert plan["rejected"][0]["reason"] == "duplicate_slug"
+    assert plan["rejected"] == [] and plan["duplicates"] == 1 and plan["conflicts"] == []
     batches = list(sync.batches({"skills": plan["skills"] * 33, "delete": ["old"]}))
     assert [len(batch["skills"]) for batch in batches] == [16, 16, 1, 0]
 
@@ -81,18 +84,20 @@ def test_size_limits_duplicates_and_batch_bounds(tmp_path):
 def fake_server():
     received = []
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            received.append(self.path)
-            encoded = json.dumps([{"skill_id": "testing", "name": "Testing", "description": "Test behavior", "score": 1}]).encode()
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(encoded)
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             received.append(body)
-            results = [{"skill_id": skill["skill_id"], "status": "created"} for skill in body["skills"]]
-            results += [{"skill_id": identity, "status": "deleted"} for identity in body.get("delete", [])]
-            encoded = json.dumps({"results": results}).encode()
+            assert self.headers["User-Agent"] == "multillm-skills/1"
+            if self.path == "/v1/knowledge/skills/find":
+                assert body == {"query": "Test regression behavior", "mode": "fast", "limit": 3, "min_confidence": "high"}
+                assert "query" not in self.path
+                result = [{"skill_id": "testing", "name": "Testing", "description": "Test behavior", "confidence": "high", "score": 0.01}]
+            else:
+                assert self.path == "/v1/knowledge/skills"
+                results = [{"skill_id": skill["skill_id"], "status": "created"} for skill in body["skills"]]
+                results += [{"skill_id": identity, "status": "deleted"} for identity in body.get("delete", [])]
+                result = {"results": results}
+            encoded = json.dumps(result).encode()
             self.send_response(200)
             self.end_headers()
             self.wfile.write(encoded)
@@ -130,7 +135,7 @@ def test_sync_dry_run_never_reads_key_or_calls_server_then_records_success(tmp_p
 def test_hook_official_json_formats_and_auto_detection(event, agent, monkeypatch):
     monkeypatch.setenv("MULTILLM_BASE_URL", "https://gateway.example")
     monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-hook-key")
-    fetcher = lambda *_args: [{"skill_id": "testing", "name": "Testing", "description": "Test behavior", "score": 1}]
+    fetcher = lambda *_args: [{"skill_id": "testing", "name": "Testing", "description": "Test behavior", "confidence": "high", "score": 1}]
     output = hook.hint(event, fetcher=fetcher)
     assert output == hook.hint(event, agent, fetcher=fetcher)
     specific = output["hookSpecificOutput"]
@@ -154,7 +159,7 @@ def test_hook_silence_timeout_total_budget_and_token_bound(monkeypatch):
     start = time.monotonic()
     assert hook.hint(event, fetcher=slow) is None
     assert time.monotonic() - start < 0.9
-    records = [{"skill_id": "testing", "name": "Testing", "description": "Testing reference guide " * 20, "score": 1}] * 3
+    records = [{"skill_id": "testing", "name": "Testing", "description": "Testing reference guide " * 20, "confidence": "high", "score": 1}] * 3
     text = hook.context(records)
     assert len(text.encode()) <= 600
     assert len(text) / 4 <= 150
@@ -169,7 +174,8 @@ def test_nested_relative_references_and_atomic_receipts(tmp_path):
     (directory / "references/guide.md").write_text("Read [script](../scripts/run.py)")
     assert len(sync.build_plan({"agents": root}, {})["skills"][0]["files"]) == 3
     (directory / "references/guide.md").write_text("Read [escape](../../outside.txt)")
-    assert sync.build_plan({"agents": root}, {"agents": ["old"]})["delete"] == []
+    plan = sync.build_plan({"agents": root}, {"agents": ["old"]})
+    assert plan["delete"] == ["old"] and len(plan["skills"]) == 1 and plan["rejected"] == []
 
 
 def test_hook_cli_invalid_arguments_are_silent():
@@ -184,7 +190,7 @@ def test_hook_real_rest_find_uses_fast_limit_three(fake_server, monkeypatch):
     monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-hook-key")
     result = hook.hint({"prompt": "Test regression behavior"})
     assert "Relevant skills: Testing" in result["hookSpecificOutput"]["additionalContext"]
-    assert received == ["/v1/knowledge/skills?query=Test+regression+behavior&mode=fast&limit=3"]
+    assert received == [{"query": "Test regression behavior", "mode": "fast", "limit": 3, "min_confidence": "high"}]
 
 
 def test_plan_never_exceeds_global_capacity_and_delete_batches(tmp_path, monkeypatch):
@@ -195,6 +201,56 @@ def test_plan_never_exceeds_global_capacity_and_delete_batches(tmp_path, monkeyp
     assert len(plan["skills"]) == 1 and plan["delete"] == []
     assert plan["rejected"][0]["reason"] == "skills_limit"
     assert [batch["delete"] for batch in sync.batches({"skills": [], "delete": ["one", "two"]})] == [["one"], ["two"]]
+
+
+def test_external_mentions_nested_mentions_and_duplicate_conflicts(tmp_path):
+    root, directory = library(tmp_path)
+    with (directory / "SKILL.md").open("a") as handle:
+        handle.write("Mention `/etc/hosts`, `~/.config/x`, and [other](../other-skill/SKILL.md).")
+    (directory / "references/guide.md").write_text("Mention `/tmp/x` and `../../outside.txt`.")
+    plan = sync.build_plan({"agents": root}, {})
+    assert len(plan["skills"]) == 1 and plan["rejected"] == [] and plan["skipped_files"] == 0
+    assert len(plan["skills"][0]["files"]) == 3
+    other, _ = library(tmp_path / "other", description="Different content")
+    plan = sync.build_plan({"agents": root, "claude": root, "codex": other}, {})
+    assert len(plan["skills"]) == 1 and plan["rejected"] == [] and plan["duplicates"] == 1
+    assert plan["conflicts"] == [{"skill_id": "testing", "reason": "duplicate_conflict", "kept_root": "agents", "skipped_root": "codex"}]
+
+
+def test_client_key_file_precedence_default_state_and_permissions(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sync.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-stale-key")
+    monkeypatch.setenv("MULTILLM_BASE_URL", "https://unused.example")
+    key_file = tmp_path / "synthetic-key-file"
+    key_file.write_text("synthetic-rotated-key\n")
+    root, _ = library(tmp_path)
+    seen = []
+    def submit(url, key, payload):
+        seen.append((url, key))
+        return [{"skill_id": item["skill_id"], "status": "created"} for item in payload["skills"]]
+    monkeypatch.setattr(sync, "sync_batch", submit)
+    assert sync.main(["--root", "agents=" + str(root), "--key-file", str(key_file), "--base-url", "https://chosen.example"]) == 0
+    assert seen == [("https://chosen.example", "synthetic-rotated-key")]
+    state = tmp_path / "home/.config/multillm/skills-sync-state.json"
+    assert json.loads(state.read_text()) == {"agents": ["testing"]}
+    assert state.stat().st_mode & 0o777 == 0o600
+    assert state.parent.stat().st_mode & 0o777 == 0o700
+    fetcher = lambda prompt, url, key: seen.append((url, key)) or []
+    assert hook.hint({"prompt": "Test regression behavior"}, key_file=key_file, base_url="https://chosen.example", fetcher=fetcher) is None
+    assert seen[-1] == ("https://chosen.example", "synthetic-rotated-key")
+    assert hook.hint({"prompt": "Test regression behavior"}, key_file=tmp_path / "missing", fetcher=fetcher) is None
+    assert "synthetic-rotated-key" not in capsys.readouterr().out
+
+
+def test_key_file_read_obeys_hook_total_deadline(tmp_path, monkeypatch):
+    monkeypatch.setenv("MULTILLM_BASE_URL", "https://unused.example")
+    def slow(*args, **kwargs):
+        time.sleep(1.5)
+        raise OSError("synthetic read error")
+    monkeypatch.setattr(hook.Path, "open", slow)
+    start = time.monotonic()
+    assert hook.hint({"prompt": "Test regression behavior"}, key_file=tmp_path / "synthetic") is None
+    assert time.monotonic() - start < 0.9
 
 
 def test_sync_batch_byte_boundary_and_maximal_binary_skill(tmp_path, monkeypatch):
@@ -213,6 +269,37 @@ def test_sync_batch_byte_boundary_and_maximal_binary_skill(tmp_path, monkeypatch
     monkeypatch.setattr(sync, "MAX_BATCH_BYTES", exact - 1)
     with pytest.raises(sync.PlanError, match="batch_bytes_limit"):
         list(sync.batches({"skills": [skill], "delete": []}))
+
+
+def test_summary_lists_safe_rejections_conflicts_and_skip_counts(tmp_path, monkeypatch, capsys):
+    root, directory = library(tmp_path)
+    other, _ = library(tmp_path / "other", description="Different")
+    library(tmp_path, name="unsafe")
+    token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"
+    (root / "unsafe/scripts/run.py").write_text(token)
+    (directory / "scripts/run.py").unlink()
+    (directory / "scripts/run.py").symlink_to(tmp_path / "outside")
+    (tmp_path / "outside").write_text("safe")
+    monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-key")
+    monkeypatch.setattr(sync, "sync_batch", lambda *_args: [{"skill_id": "testing", "status": "rejected", "reason": "root_conflict"}])
+    assert sync.main(["--root", "agents=" + str(root), "--root", "codex=" + str(other), "--base-url", "https://unused.example", "--state-file", str(tmp_path / "state")]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["synced"]["rejected"] == 1 and summary["skipped_files"] == 1
+    assert summary["conflicts"][0]["reason"] == "duplicate_conflict"
+    assert [(item["skill_id"], item["reason"]) for item in summary["rejected"]] == [("unsafe", "secret_detected:scripts/run.py:github_token"), ("testing", "root_conflict")]
+    assert token not in json.dumps(summary)
+
+
+def test_skill_entry_symlink_escape_is_never_read(tmp_path):
+    root, directory = library(tmp_path)
+    original = directory / "SKILL.md"
+    original.unlink()
+    outside = tmp_path / "outside-skill"
+    outside.write_text("invalid frontmatter must never be read")
+    original.symlink_to(outside)
+    plan = sync.build_plan({"agents": root}, {"agents": ["old"]})
+    assert plan["skills"] == [] and plan["rejected"] == [] and plan["delete"] == []
+    assert plan["skipped_files"] == 1
 
 
 def test_json_escaped_text_uses_base64_without_losing_reference_collection(tmp_path):

@@ -5,9 +5,9 @@ import argparse
 import json
 import contextlib
 import io
-import math
 import os
 import queue
+from pathlib import Path
 import re
 import sys
 import threading
@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 TIMEOUT = 0.8
-MIN_SCORE = 0.2
+USER_AGENT = "multillm-skills/1"
 MAX_CONTEXT_BYTES = 600
 
 
@@ -30,9 +30,10 @@ def fetch(prompt, base_url, key):
     if (url.username or url.password or url.query or url.fragment
             or url.scheme != "https" and not (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"})):
         return []
-    query = urllib.parse.urlencode({"query": prompt[:2000], "mode": "fast", "limit": 3})
-    request = urllib.request.Request(base_url.rstrip("/") + "/v1/knowledge/skills?" + query,
-                                     headers={"Authorization": "Bearer " + key})
+    body = json.dumps({"query": prompt[:2000], "mode": "fast", "limit": 3, "min_confidence": "high"}).encode()
+    request = urllib.request.Request(base_url.rstrip("/") + "/v1/knowledge/skills/find", data=body, method="POST",
+                                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json",
+                                              "User-Agent": USER_AGENT})
     with urllib.request.build_opener(NoRedirect).open(request, timeout=TIMEOUT) as response:
         raw = response.read(32769)
     if len(raw) > 32768:
@@ -47,10 +48,9 @@ def context(results):
     for item in results[:3]:
         if not isinstance(item, dict):
             continue
-        score = item.get("score")
         identity = item.get("skill_id", "")
         name, description = item.get("name"), item.get("description")
-        if (not isinstance(score, (float, int)) or isinstance(score, bool) or not math.isfinite(score) or score < MIN_SCORE
+        if (item.get("confidence") != "high"
                 or not isinstance(identity, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", identity) or len(identity) > 100
                 or not isinstance(name, str) or not isinstance(description, str)):
             continue
@@ -62,7 +62,7 @@ def context(results):
     return "Relevant skills: " + "; ".join(lines) if lines else ""
 
 
-def hint(event, agent=None, *, fetcher=fetch, deadline=None):
+def hint(event, agent=None, *, fetcher=fetch, deadline=None, key_file=None, base_url=None):
     deadline = deadline or time.monotonic() + TIMEOUT - 0.05
     if not isinstance(event, dict) or event.get("hook_event_name", "UserPromptSubmit") != "UserPromptSubmit":
         return None
@@ -72,13 +72,20 @@ def hint(event, agent=None, *, fetcher=fetch, deadline=None):
     agent = agent or ("codex" if "turn_id" in event else "claude")
     if agent not in {"claude", "codex"}:
         return None
-    base_url, key = os.environ.get("MULTILLM_BASE_URL"), os.environ.get("MULTILLM_KNOWLEDGE_API_KEY")
-    if not base_url or not key:
+    base_url = base_url if base_url is not None else os.environ.get("MULTILLM_BASE_URL")
+    if not base_url:
         return None
     results = queue.Queue(maxsize=1)
     def run():
         try:
-            results.put(fetcher(prompt, base_url, key))
+            # Key-file I/O is inside the total wall deadline, including blocked reads.
+            if key_file is not None:
+                with Path(key_file).open("rb") as handle:
+                    raw = handle.read(4097)
+                key = raw.decode().strip() if len(raw) <= 4096 else None
+            else:
+                key = os.environ.get("MULTILLM_KNOWLEDGE_API_KEY")
+            results.put(fetcher(prompt, base_url, key) if key else [])
         except Exception:
             results.put([])
     # Socket timeouts reset after reads and DNS may block: enforce a total wall deadline.
@@ -98,12 +105,14 @@ def main():
     try:
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--agent", choices=("claude", "codex"))
+        parser.add_argument("--key-file", type=Path)
+        parser.add_argument("--base-url")
         with contextlib.redirect_stderr(io.StringIO()):
             args = parser.parse_args()
         raw = sys.stdin.read(65537)
         if len(raw.encode()) > 65536:
             return 0
-        output = hint(json.loads(raw), args.agent, deadline=deadline)
+        output = hint(json.loads(raw), args.agent, deadline=deadline, key_file=args.key_file, base_url=args.base_url)
         if output and time.monotonic() < deadline:
             print(json.dumps(output, ensure_ascii=False))
     except BaseException:

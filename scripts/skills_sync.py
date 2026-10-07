@@ -21,6 +21,7 @@ from services.secret_scan import scan_text
 ROOTS = ("claude", "claude-library", "codex", "agents")
 DEFAULT_ROOTS = dict(zip(ROOTS, ("~/.claude/skills", "~/.claude/skills-library", "~/.codex/skills", "~/.agents/skills")))
 MAX_BATCH_BYTES = 8 * 1024 * 1024 - 4096
+USER_AGENT = "multillm-skills/1"
 MAX_SKILLS = 2000
 
 
@@ -87,7 +88,8 @@ def referenced(text):
             if not urllib.parse.urlsplit(value).scheme]
 
 
-def collect_skill(directory, root):
+def collect_skill(directory, root, skipped_files=None):
+    skipped_files = skipped_files if skipped_files is not None else []
     directory = directory.resolve()
     queue = ["SKILL.md"]
     seen, files = set(), []
@@ -107,13 +109,14 @@ def collect_skill(directory, root):
             if relative == "SKILL.md":
                 raise PlanError("missing_skill") from None
             continue
-        if not resolved.is_relative_to(directory) or any(part in {".", ".."} for part in Path(relative).parts):
-            raise PlanError("path_traversal")
+        if not resolved.is_relative_to(directory):
+            skipped_files.append(relative)
+            continue
         if resolved.is_dir():
             if relative == "SKILL.md":
                 raise PlanError("invalid_file")
             # Only directories explicitly referenced by a loaded file are explored.
-            for child in sorted(islice(resolved.iterdir(), 201)):
+            for child in sorted(islice(path.iterdir(), 201)):
                 if len(queue) + len(seen) >= 200:
                     raise PlanError("reference_limit")
                 queue.append(str(child.relative_to(directory)))
@@ -143,10 +146,13 @@ def collect_skill(directory, root):
                 encoding = binary
             # Resolve links relative to the file containing them.
             for reference in referenced(text):
-                candidate = (directory / Path(relative).parent / reference).resolve()
-                if not candidate.is_relative_to(directory):
-                    raise PlanError("path_traversal")
+                reference_path = Path(reference)
+                # Mentions of external paths are not files belonging to this skill.
+                if reference_path.is_absolute() or reference.startswith("~") or ".." in reference_path.parts:
+                    continue
+                candidate = directory / Path(relative).parent / reference_path
                 if candidate.exists():
+                    # Preserve the lexical path so collection can skip/count escaping symlinks.
                     entry = str(candidate.relative_to(directory))
                     if entry not in seen and entry not in queue:
                         if len(queue) + len(seen) >= 200:
@@ -160,6 +166,8 @@ def collect_skill(directory, root):
             if secret_types(metadata["name"] + ": " + metadata["description"]):
                 raise PlanError("secret_detected:SKILL.md:metadata")
         files.append({"path": relative, "sha256": hashlib.sha256(content).hexdigest(), **encoding})
+    if metadata is None:
+        raise PlanError("missing_skill")
     identity = slug(metadata["name"])
     if not identity or len(identity) > 100:
         raise PlanError("invalid_slug")
@@ -168,7 +176,8 @@ def collect_skill(directory, root):
 
 def build_plan(roots, previous):
     skills, rejected, present = [], [], {root: set() for root in roots}
-    available, identities = set(), set()
+    available, identities = set(), {}
+    duplicates, conflicts, skipped_files = 0, [], []
     for root, raw in roots.items():
         path = Path(raw).expanduser()
         if not path.is_dir():
@@ -181,28 +190,40 @@ def build_plan(roots, previous):
         for directory in directories:
             if not directory.is_dir() or not (directory / "SKILL.md").is_file():
                 continue
+            identity = directory.name
             try:
+                if not (directory / "SKILL.md").resolve().is_relative_to(directory.resolve()):
+                    skipped_files.append("SKILL.md")
+                    available.discard(root)
+                    continue
                 # Keep invalid or secret-bearing local skills from deleting their last safe revision.
                 with (directory / "SKILL.md").open("rb") as handle:
                     raw_skill = handle.read(65537)
                 identity = slug(frontmatter(raw_skill.decode("utf-8"))["name"])
                 present[root].add(identity)
-                skill = collect_skill(directory, root)
-                if skill["skill_id"] in identities:
-                    rejected.append({"root": root, "reason": "duplicate_slug"})
+                content_hash = hashlib.sha256(raw_skill).hexdigest()
+                if identity in identities:
+                    kept = identities[identity]
+                    if content_hash == kept["hash"]:
+                        duplicates += 1
+                    else:
+                        conflicts.append({"skill_id": identity, "reason": "duplicate_conflict",
+                                          "kept_root": kept["root"], "skipped_root": root})
                     continue
+                skill = collect_skill(directory, root, skipped_files)
                 if len(skills) >= MAX_SKILLS:
                     raise PlanError("skills_limit")
-                identities.add(skill["skill_id"])
+                identities[skill["skill_id"]] = {"root": root, "hash": content_hash}
                 skills.append(skill)
             except (OSError, UnicodeError, PlanError) as error:
                 # Any unreadable entry disables pruning for its root.
                 available.discard(root)
                 reason = str(error) if isinstance(error, PlanError) else "unreadable_skill"
-                rejected.append({"root": root, "reason": reason})
+                rejected.append({"root": root, "skill_id": identity, "reason": reason})
     deletes = sorted({identity for root in available for identity in previous.get(root, [])
                       if identity not in present[root] and identity not in identities})
-    return {"skills": skills, "delete": deletes, "rejected": rejected}
+    return {"skills": skills, "delete": deletes, "rejected": rejected, "duplicates": duplicates,
+            "conflicts": conflicts, "skipped_files": len(skipped_files)}
 
 
 def batches(plan):
@@ -233,7 +254,7 @@ def sync_batch(base_url, key, payload):
         raise PlanError("invalid_base_url")
     request = urllib.request.Request(base_url.rstrip("/") + "/v1/knowledge/skills",
                                      data=json.dumps(payload, ensure_ascii=False).encode(), method="POST",
-                                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+                                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "User-Agent": USER_AGENT})
     with urllib.request.build_opener(NoRedirect).open(request, timeout=55) as response:
         raw = response.read(1048577)
     if len(raw) > 1048576:
@@ -249,7 +270,7 @@ def main(argv=None):
     parser.add_argument("--root", action="append", metavar="LABEL=PATH")
     parser.add_argument("--base-url", default=os.environ.get("MULTILLM_BASE_URL"))
     parser.add_argument("--key-file", type=Path)
-    parser.add_argument("--state-file", type=Path, default=Path("skills-sync-state.json"))
+    parser.add_argument("--state-file", type=Path, default=Path.home() / ".config/multillm/skills-sync-state.json")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -270,15 +291,15 @@ def main(argv=None):
         plan = build_plan(roots, previous)
         if args.dry_run:
             print(json.dumps({"skills": [{"root": item["root"], "skill_id": item["skill_id"], "files": [file["path"] for file in item["files"]]} for item in plan["skills"]],
-                              "delete": plan["delete"], "rejected": plan["rejected"]}, indent=2))
+                              "delete": plan["delete"], "rejected": plan["rejected"], "duplicates": plan["duplicates"],
+                              "conflicts": plan["conflicts"], "skipped_files": plan["skipped_files"]}, indent=2))
             return 0
-        key = os.environ.get("MULTILLM_KNOWLEDGE_API_KEY")
-        if not key and args.key_file:
-            key = args.key_file.read_text().strip()
+        key = args.key_file.read_text().strip() if args.key_file else os.environ.get("MULTILLM_KNOWLEDGE_API_KEY")
         if not key or not args.base_url:
             raise PlanError("base_url_and_key_required")
         by_id = {item["skill_id"]: item for item in plan["skills"]}
-        counts = {}
+        counts = {status: 0 for status in ("created", "updated", "unchanged", "deleted", "rejected")}
+        rejected = list(plan["rejected"])
         for batch in batches(plan):
             results = sync_batch(args.base_url, key, batch)
             expected = {item["skill_id"] for item in batch["skills"]} | set(batch.get("delete", []))
@@ -287,15 +308,18 @@ def main(argv=None):
                 raise PlanError("invalid_receipts")
             for result in results:
                 status, identity = result["status"], result["skill_id"]
-                counts[status] = counts.get(status, 0) + 1
+                counts[status] += 1
+                if status == "rejected":
+                    rejected.append({"skill_id": identity, "reason": result.get("reason", "rejected")})
                 if status in {"created", "updated", "unchanged"} and identity in by_id:
                     root = by_id[identity]["root"]
                     previous[root] = sorted(set(previous.get(root, [])) | {identity})
                 elif status in {"deleted", "unchanged"} and identity in batch.get("delete", []):
                     previous = {root: [value for value in ids if value != identity] for root, ids in previous.items()}
-            args.state_file.parent.mkdir(parents=True, exist_ok=True)
+            args.state_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode="w", dir=args.state_file.parent, prefix=".skills-receipt-", delete=False) as handle:
                 temporary = Path(handle.name)
+                os.fchmod(handle.fileno(), 0o600)
                 handle.write(json.dumps(previous, indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -303,7 +327,8 @@ def main(argv=None):
                 os.replace(temporary, args.state_file)
             finally:
                 temporary.unlink(missing_ok=True)
-        print(json.dumps({"synced": counts, "local_rejected": len(plan["rejected"])}))
+        print(json.dumps({"synced": counts, "local_rejected": len(plan["rejected"]), "rejected": rejected,
+                          "duplicates": plan["duplicates"], "conflicts": plan["conflicts"], "skipped_files": plan["skipped_files"]}))
         return 0
     except Exception:
         # HTTP failures may include private request URLs or credential headers.

@@ -34,7 +34,11 @@ Base64 uploads are decoded before bounds, hashes and secret scanning.
 
 The cached in-memory inverted index uses BM25 (k1 1.2, b 0.75) over name with
 weight 3, description with weight 2, and headings plus the first 2,000 SKILL.md
-characters with weight 1. Heading extraction is additionally capped at 128
+characters with weight 1. All fields and queries use lowercase Unicode letter/number
+tokens, discard one-character tokens and a fixed English stopword list (function
+words, pronouns, auxiliaries and politeness), then strip final `s` on tokens longer
+than three characters except endings `ss`, `us`, `is`. Hyphenated names split.
+Heading extraction is additionally capped at 128
 headings/8,000 characters; query terms at 64. BM25 is normalized by the largest
 lexical score for the query. Hybrid adds cosine similarity of
 Int8-quantized `@cf/baai/bge-m3` vectors, then `0.03 * log(1 + helpful)`.
@@ -42,7 +46,30 @@ No lexical or positive semantic match means no result, regardless of prior.
 Ties sort by skill_id. Hybrid is the default; fast bypasses Workers AI. A failed,
 invalid or slower-than-350 ms embedding silently falls back to lexical search.
 
-Successful find results increment suggested and retain a principal-digest
+Ranking and confidence are separate. Each result carries `confidence: "high" | "low"`.
+The index retains name-only and name/description token sets, name/description
+document frequency (`ndf`) and full-text frequency (`fdf`). For N skills,
+`nidf(t) = ln(1 + (N - ndf(t) + 0.5) / (ndf(t) + 0.5))`.
+High lexical confidence requires either:
+
+- Every name token appears in the query. Multi-token names need a name token with
+  `nidf >= DISTINCTIVE_IDF` (3.5); single-token names need `fdf <= max(3, 0.03 * N)`
+  (`SINGLE_NAME_MIN_DOCUMENTS`, `SINGLE_NAME_DOCUMENT_RATIO`).
+- `MIN_MATCHES` (3) distinct query tokens match name/description, including at least
+  `MIN_DISTINCTIVE` (2) plus `floor(query_token_count / LONG_QUERY_TERMS)` distinctive
+  matches. `LONG_QUERY_TERMS` is 20. Confidence uses the entire token set even when
+  ranking uses its first 64 tokens.
+
+`min_confidence: "high"` filters before the limit and suggestion writes; omitting
+it returns both confidence levels. Hybrid may also assign high confidence when
+cosine reaches optional `SKILLS_CONFIDENT_COSINE` (a finite value in (0, 1]). It is
+disabled when unset or invalid. Before enabling after deployment, run the labeled
+evaluation set with deployed bge-m3 query/skill embeddings, sweep candidate cosine
+thresholds, inspect every false positive, and retain the silence/required/acceptable
+targets on held-out prompts. Lexical-only evaluation cannot calibrate cosine.
+Leave the variable unset until those measurements justify a threshold.
+
+Only returned find results increment suggested and retain a principal-digest
 suggestion receipt. A successful, integrity-checked get increments fetched and
 consumes that principal/skill receipt, incrementing helpful only within 30
 minutes. Receipts expire and are capped at 5,000; another principal, an expired
@@ -67,7 +94,7 @@ expiry rule to active skills.
 
 | MCP tool | Input | Output | Scope |
 | --- | --- | --- | --- |
-| knowledge_skills_find | query; limit 1–5 default 3; mode fast/hybrid default hybrid; optional roots array | Array of skill_id, name, description, score, why (matched terms), files (paths) | knowledge:read |
+| knowledge_skills_find | query; limit 1–5 default 3; mode fast/hybrid default hybrid; optional roots array; optional min_confidence high | Array of skill_id, name, description, score, confidence, why (matched terms), files (paths) | knowledge:read |
 | knowledge_skills_get | skill_id; optional path default SKILL.md | skill_id, path, text, files, content_hash, trust operator | knowledge:read |
 | knowledge_skills_sync | skills array; optional delete array and dry_run boolean | results array: skill_id, created/updated/unchanged/deleted/rejected status, safe rejection reason | knowledge:manage |
 
@@ -79,11 +106,13 @@ and no structuredContent because MCP's structuredContent is an object.
 
 The `skills` toolset narrows discovery; calls remain available according to scope.
 REST mirrors on Flask and edge are GET `/v1/knowledge/skills?query=...&mode=fast&limit=3&roots=agents,codex`,
+POST `/v1/knowledge/skills/find` with JSON `{query, limit?, mode?, roots?, min_confidence?}`,
 GET `/v1/knowledge/skills/<skill_id>?path=references/guide.md`, and POST
-`/v1/knowledge/skills` for sync. Duplicate/unknown query parameters fail closed.
-All three dispatch privately through `skills.find/get/sync` to the Skills DO.
+`/v1/knowledge/skills` for sync. GET search URLs may be logged by Cloudflare, Worker
+observability and Flask access logs. The hook uses POST to keep prompts out of URLs. Duplicate/unknown query parameters fail closed.
+All routes dispatch privately through `skills.find/get/sync` to the Skills DO.
 
-Sync batches are capped at 16 skills/32 MiB encoded request, deletion lists at
+Sync batches are capped at 16 skills/8 MiB encoded request, deletion lists at
 2,000 unique IDs. This additional transport bound accommodates the documented
 file sizes without changing the 64 KiB cap on other public Knowledge calls.
 Flask and edge use the existing private `secret_scan_checked` marker for sync,
@@ -92,7 +121,7 @@ high-confidence secret detector. Metadata is also checked before embedding.
 An unsafe skill returns rejected, secret_detected, relative file and finding
 types only; other safe skills in the batch continue. Invalid skill IDs or duplicate
 batch identities reject the batch before storage. Find/get retain the normal
-outbound firewall. Frozen inventories include both new Flask routes and all
+outbound firewall. Frozen inventories include the three skills Flask routes and all
 four skills Worker modules. The catalogue is regenerated from Python contracts.
 
 ## Sync client
@@ -101,36 +130,52 @@ four skills Worker modules. The catalogue is regenerated from Python contracts.
 `services.secret_scan` detector, without importing application configuration.
 It defaults to the four labeled skill roots. Repeated `--root LABEL=PATH`
 selects roots; `--base-url` or MULTILLM_BASE_URL supplies the gateway URL; the key
-comes from MULTILLM_KNOWLEDGE_API_KEY or explicit `--key-file PATH`.
+comes from explicit `--key-file PATH`, taking precedence over
+MULTILLM_KNOWLEDGE_API_KEY so rotated-out parent environments cannot win.
+Both clients send `User-Agent: multillm-skills/1`, avoiding the Cloudflare rule
+that rejects urllib's default user agent. Sync needs an operator key with
+`knowledge:manage`; the hook needs only `knowledge:read`.
 Only HTTPS or local test HTTP is accepted; redirects are refused.
 
 The bounded frontmatter reader supports scalar strings (plain, single-quoted,
 JSON double-quoted) and YAML literal/folded blocks for name/description. It does
 not claim to implement arbitrary YAML. Markdown links, inline paths and standard
 scripts/references/assets/templates/examples paths collect files recursively
-within the folder; unreferenced files are omitted. Each root scan is capped at
+within the folder; unreferenced files are omitted. Absolute paths, `~` prefixes,
+any `..` segment and references resolving outside the skill are mentions and
+ignored, including in nested files. Missing references remain ignored. Collected
+symlinks resolving outside are skipped and counted in `skipped_files`, without
+rejecting the skill. A SKILL.md escape leaves no uploadable instructions; skip it
+and disable pruning for that root without reading its target. Each root scan is capped at
 10,000 entries and each skill at 200 discovered references, in addition to the
-server's file/byte caps. Duplicate slugs use the first selected root and report
-rejection for later duplicates.
+server's file/byte caps. Duplicate slugs use the first selected root. Matching
+SKILL.md SHA-256 hashes increment `duplicates` only; differing hashes yield
+`duplicate_conflict` records with slug, kept root and skipped root, not rejections.
+The client reserves 4 KiB below the 8 MiB transport cap for the private envelope;
+large JSON-escaped text uses base64 so one maximal 5 MiB skill fits a batch.
 
 Dry run reads only the selected library and bounded local receipts, prints the
 plan, and does not read a key or contact the service. A receipt file (default
-skills-sync-state.json, overridable with --state-file) tracks only confirmed
+`~/.config/multillm/skills-sync-state.json`, overridable with --state-file) tracks only confirmed
 successful uploads by root label. Pruning only considers selected, available
 roots and previously synced IDs missing locally. Any invalid/unreadable skill
 disables pruning for its root, preserving the last safe revision. Atomically
-replace receipts after each verified batch; remote failure does not clear them.
-Summary output reports remote statuses and local rejections without credentials.
+replace receipts after each verified batch with mode 0600; the parent directory
+is created with mode 0700. Remote failure does not clear them. Summary output gives
+counts by status, duplicates and skipped files, plus every rejected/conflicting
+slug and safe reason/root labels, never content or credentials.
 
 ## Optional prompt hook
 
 `scripts/hooks/skill_hint.py` reads bounded JSON stdin, selects the prompt and
 agent (`turn_id` identifies Codex, or --agent claude/codex), and requests REST
-find with mode fast/limit 3. A daemon worker plus an absolute deadline bounds DNS,
+POST find with `mode: "fast"`, `limit: 3`, `min_confidence: "high"`. A daemon worker plus an absolute deadline bounds DNS,
 read and decode time; 50 ms of the 800 ms budget is reserved for formatting and
 process overhead. All errors, invalid arguments, timeouts, short prompts below
-12 characters, missing configuration and results below score 0.2 emit nothing
-and exit zero. The environment supplies base URL and key; no key-file reads.
+12 characters, missing configuration and no high-confidence results emit nothing
+and exit zero. There is no normalized-score threshold. `--base-url` wins over
+MULTILLM_BASE_URL; `--key-file` wins over MULTILLM_KNOWLEDGE_API_KEY. Key-file reads
+run inside the same total deadline, and any read/parse error stays silent.
 
 Context is capped at 600 UTF-8 bytes (approximately 150 tokens), uses name,
 description's first 100 characters and the get tool/skill_id, and never loads
@@ -164,7 +209,10 @@ REST/MCP parity and toolsets, decoded-secret isolation, immutable revision failu
 cleanup backpressure, SQLite/R2 restart, and the 2,000-skill fast path including
 suggestion writes and JSON encoding. Client tests use only temporary skill trees
 and a fake loopback HTTP server. Existing Knowledge/Worker and touched Python
-suites plus catalogue --check validate integration. No deployed service is tested.
+suites plus catalogue --check validate integration. No deployed service is tested. The external evaluation uses 495 real-library
+records and 39 labeled prompts, kept outside the repository. The implemented
+fast index reached none silent 17/17, required first 9/11, acceptable only 10/11.
+No skill-specific or prompt-specific rules were introduced.
 
 Before deployment, include the appended DO migration and KNOWLEDGE_SKILLS binding,
 retain the existing R2/AI bindings, review resource costs and avoid expiring active
