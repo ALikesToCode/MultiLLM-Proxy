@@ -15,6 +15,10 @@ _ALLOCATION = {
         "units_per_call": {"type": "integer", "minimum": 1, "maximum": 100000},
     },
 }
+_PRODUCT = {"type": "string", "minLength": 1, "maxLength": 100}
+_SITES = {"type": "array", "maxItems": 64, "uniqueItems": True,
+          "items": {"type": "string", "maxLength": 253,
+                    "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"}}
 _PROVIDERS = ("context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria")
 
 
@@ -32,6 +36,11 @@ TOOLS = [
           {"id": _ID}, ("id",), read_only=True),
     _tool("knowledge_status", "Inspect source, job, allowance and configuration status. Requires knowledge:manage; configuration is not a connectivity test.",
           {}, read_only=True),
+    _tool("knowledge_product_sites_get", "Read learned, pinned and blocked documentation sites for a product. Requires knowledge:manage.",
+          {"product": _PRODUCT}, ("product",), read_only=True),
+    _tool("knowledge_product_sites_update", "Pin, unpin, block, unblock or rebuild a product's learned documentation sites from retained artifacts. Requires knowledge:manage.",
+          {"product": _PRODUCT, "pin": _SITES, "unpin": _SITES, "block": _SITES, "unblock": _SITES,
+           "note": {"type": "string", "maxLength": 500}, "rebuild": _BOOLEAN}, ("product",)),
     _tool("knowledge_source_register", "Register an approved public documentation URL without fetching it. Requires knowledge:manage.", {
         "url": {"type": "string", "maxLength": 2048},
         "title": {"type": "string", "maxLength": 200},
@@ -51,6 +60,7 @@ TOOLS = [
           {"id": _ID}, ("id",)),
     _tool("knowledge_policy_update", "Save the complete allowance and retention policy with its current revision. Requires knowledge:manage. Obtain operator confirmation of billing controls and retention rights; never invent acknowledgements or raise limits to retry unknown work.", {
         "expected_revision": _REVISION, "enabled": _BOOLEAN,
+        "product_sites_mode": {"type": "string", "enum": ["off", "observe", "enforce"], "default": "observe"},
         "cache_ttl_seconds": {"type": "integer", "minimum": 0, "maximum": 3600},
         "retention_hours": {"type": "integer", "minimum": 1, "maximum": 720},
         "unreviewed_retention_hours": {"type": "integer", "minimum": 1, "maximum": 720, "default": 24,
@@ -64,7 +74,7 @@ TOOLS = [
 ]
 
 OPERATIONS = dict(zip((tool["name"] for tool in TOOLS), (
-    "artifact", "status", "sources.create", "sources.update", "sources.refresh", "jobs.cancel", "policy.update",
+    "artifact", "status", "product_sites.get", "product_sites.update", "sources.create", "sources.update", "sources.refresh", "jobs.cancel", "policy.update",
 )))
 
 

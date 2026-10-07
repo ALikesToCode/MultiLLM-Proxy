@@ -416,6 +416,10 @@ function restRoute(method, pathname) {
   }
   if (path.length === 1 && method === "GET" && first === "status") return { operation: "status", scope: "knowledge:manage" };
   if (path.length === 1 && method === "PUT" && first === "policy") return { operation: "policy.update", scope: "knowledge:manage", body: true };
+  if (first === "product-sites" && path.length === 2 && ["GET", "PATCH"].includes(method)) {
+    return { operation: method === "GET" ? "product_sites.get" : "product_sites.update",
+      scope: "knowledge:manage", body: method === "PATCH", product: second };
+  }
   if (first === "sources") {
     if (path.length === 1 && method === "POST") return { operation: "sources.create", scope: "knowledge:manage", body: true };
     if (path.length === 2 && method === "PATCH") return { operation: "sources.update", scope: "knowledge:manage", body: true, id: second };
@@ -433,6 +437,11 @@ async function handleRest(request, env, principal, route) {
   }
   try {
     const payload = route.body ? await readBody(request) : {};
+    if (route.product !== undefined) {
+      if (Object.hasOwn(payload, "product")) throw new KnowledgeEdgeError("invalid_request", "The product belongs in the URL.", 400);
+      try { payload.product = decodeURIComponent(route.product); }
+      catch { throw new KnowledgeEdgeError("invalid_request", "Invalid product URL encoding.", 400); }
+    }
     if (route.id !== undefined) {
       if (Object.hasOwn(payload, "id")) throw new KnowledgeEdgeError("invalid_request", "Source and job ids belong in the URL.", 400);
       if (!IDENTIFIER.test(route.id)) throw new KnowledgeEdgeError("invalid_identifier", "Invalid Knowledge identifier.", 400);

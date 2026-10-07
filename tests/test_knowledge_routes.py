@@ -156,10 +156,10 @@ def test_mcp_initialize_and_discovery(app, keys):
 def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app, keys):
     client = app.test_client()
     tools = mcp(client, keys["manager"], "tools/list").json["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_source_register",
+    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_source_register",
         "knowledge_source_update", "knowledge_source_refresh", "knowledge_job_cancel", "knowledge_policy_update"]
-    assert tools[0]["annotations"]["readOnlyHint"] is True
-    assert all(not tool["annotations"]["readOnlyHint"] for tool in tools[1:])
+    assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_status", "knowledge_product_sites_get"})
+               for tool in tools)
     with patch.object(knowledge, "dispatch") as remote:
         for key, tool in ((keys["reader"], "knowledge_policy_update"), (keys["manager"], "knowledge_context")):
             response = mcp(client, key, "tools/call", {"name": tool, "arguments": {}})
@@ -477,3 +477,47 @@ def test_container_transport_accepts_every_provider_operation():
 
     assert set(NATIVE_OPERATIONS) <= knowledge_client._OPERATIONS
     assert knowledge_client.DEADLINE_SECONDS >= 50
+
+
+@pytest.mark.parametrize("method,operation,tool,payload", [
+    ("get", "product_sites.get", "knowledge_product_sites_get", {}),
+    ("patch", "product_sites.update", "knowledge_product_sites_update",
+     {"pin": ["developer.mozilla.org"], "block": ["overflow.co"], "note": "Different product", "rebuild": True}),
+])
+def test_product_sites_rest_and_mcp_parity_with_scopes(app, keys, method, operation, tool, payload):
+    client = app.test_client()
+    product = "css overflow-clip-margin"
+    path = "/v1/knowledge/product-sites/css%20overflow-clip-margin"
+    call = getattr(client, method)
+    options = {"json": payload} if method == "patch" else {}
+    assert call(path, headers=bearer(keys["reader"]), **options).status_code == 403
+    assert call(path, **options).status_code == 401
+    result = {"product": product, "sites": {}, "blocked": {}, "revision": 0}
+    with patch.object(knowledge, "dispatch", return_value=result) as remote:
+        rest = call(path, headers=bearer(keys["manager"]), **options)
+        assert remote.call_args.args[0] == operation
+        assert remote.call_args.args[2] == {**payload, "product": product}
+        rpc = mcp(client, keys["manager"], "tools/call", {"name": tool, "arguments": {**payload, "product": product}})
+        assert rpc.json["result"]["structuredContent"] == rest.json == result
+        assert remote.call_args.args[0] == operation
+        assert remote.call_args.args[2] == {**payload, "product": product}
+
+
+def test_product_sites_validation_errors_surface_without_retry(app, keys):
+    client = app.test_client()
+    with patch.object(knowledge, "dispatch") as remote:
+        assert client.patch("/v1/knowledge/product-sites/codex", json={"product": "other"},
+                            headers=bearer(keys["manager"])).status_code == 400
+        remote.assert_not_called()
+    with patch.object(knowledge, "dispatch", side_effect=knowledge_client.KnowledgeError(
+            "invalid_request", "Use lowercase hostnames.", 400)) as remote:
+        response = client.patch("/v1/knowledge/product-sites/codex", json={"pin": ["UPPER.dev"]},
+                                headers=bearer(keys["manager"]))
+        assert response.status_code == 400
+        assert response.json["error"]["code"] == "invalid_request"
+        rpc = mcp(client, keys["manager"], "tools/call", {
+            "name": "knowledge_product_sites_update", "arguments": {"product": "codex", "pin": ["UPPER.dev"]},
+        })
+        assert rpc.json["result"]["isError"] is True
+        assert "invalid_request" in rpc.json["result"]["content"][0]["text"]
+        assert remote.call_count == 2

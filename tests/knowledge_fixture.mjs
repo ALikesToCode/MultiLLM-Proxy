@@ -6,7 +6,10 @@ import { parseQuery } from "../worker/knowledge/contracts.mjs";
 class Storage {
   constructor() { this.values = new Map(); this.pending = Promise.resolve(); }
   async get(key) { return structuredClone(this.values.get(key)); }
-  async put(key, value) { this.values.set(key, structuredClone(value)); }
+  async put(key, value) {
+    if (typeof key === "string") this.values.set(key, structuredClone(value));
+    else for (const [name, entry] of Object.entries(key)) this.values.set(name, structuredClone(entry));
+  }
   async delete(key) { this.values.delete(key); }
   async list({ prefix }) { return new Map([...this.values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)])); }
   transaction(callback) {

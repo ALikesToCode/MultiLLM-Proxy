@@ -1324,6 +1324,107 @@
       }
     },
     {
+      "operation": "product_sites.get",
+      "scope": "knowledge:manage",
+      "toolset": "manage",
+      "definition": {
+        "name": "knowledge_product_sites_get",
+        "description": "Read learned, pinned and blocked documentation sites for a product. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
+      "operation": "product_sites.update",
+      "scope": "knowledge:manage",
+      "toolset": "manage",
+      "definition": {
+        "name": "knowledge_product_sites_update",
+        "description": "Pin, unpin, block, unblock or rebuild a product's learned documentation sites from retained artifacts. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "pin": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+              }
+            },
+            "unpin": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+              }
+            },
+            "block": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+              }
+            },
+            "unblock": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+              }
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "rebuild": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      }
+    },
+    {
       "operation": "sources.create",
       "scope": "knowledge:manage",
       "toolset": "manage",
@@ -1493,6 +1594,15 @@
             },
             "enabled": {
               "type": "boolean"
+            },
+            "product_sites_mode": {
+              "type": "string",
+              "enum": [
+                "off",
+                "observe",
+                "enforce"
+              ],
+              "default": "observe"
             },
             "cache_ttl_seconds": {
               "type": "integer",

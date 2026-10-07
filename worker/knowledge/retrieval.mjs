@@ -1,9 +1,10 @@
 import { fail, KnowledgeError, publicUrl } from "./contracts.mjs";
-import { createArtifact, dropForeignProviderSections, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
+import { createArtifact, site, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
 import { confirmSnapshot, metered } from "./operations.mjs";
-import { cacheKey, readCache, writeCache } from "./cache.mjs";
+import { cacheKey, productSitesCacheState, readCache, writeCache } from "./cache.mjs";
+import { filterProviderSites } from "./provider-site-filter.mjs";
 import { retentionHours, sourceReviewed } from "./policy.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
@@ -165,6 +166,8 @@ async function storeObservation(state, observation, sequence) {
   const artifact = await confirmSnapshot(authority, corpus, candidate, written);
   const excerpt = validateChunk(artifact, text, selectPassage(text, request.query));
   if (excerpt && (request.freshness !== "fresh" || originIsFresh(artifact))) {
+    await untilDeadline(() => authority.call("product_sites.learn", { id: artifact.id }),
+      AbortSignal.any([state.signal, AbortSignal.timeout(250)])).catch(() => {});
     state.candidates.push({ ...excerpt, target_match: evidenceMatch(artifact, request), score: 0.75,
       source_review: reviewOf(source, snapshot.policy) });
   } else if (request.freshness === "fresh") {
@@ -264,14 +267,16 @@ async function revalidateCandidates(state, snapshot, candidates) {
 async function cacheHit(cache, key, state) {
   const bundle = await untilDeadline(() => readCache(cache, key), state.signal);
   if (!bundle) return null;
-  const latest = await state.authority.call("catalogue.state");
+  const latest = await state.authority.call("catalogue.state", { product: state.request.product });
   assertPolicy(state.snapshot, latest);
-  if (latest.generation !== state.snapshot.generation) return null;
+  if (latest.generation !== state.snapshot.generation
+    || productSitesCacheState(latest) !== productSitesCacheState(state.snapshot)) return null;
   const candidates = [...bundle.excerpts, ...(bundle.related_evidence || [])];
   const valid = await revalidateCandidates(state, latest, candidates);
-  const confirmed = await state.authority.call("catalogue.state");
+  const confirmed = await state.authority.call("catalogue.state", { product: state.request.product });
   assertPolicy(state.snapshot, confirmed);
-  if (confirmed.generation !== latest.generation || valid.length !== candidates.length) return null;
+  if (confirmed.generation !== latest.generation || productSitesCacheState(confirmed) !== productSitesCacheState(latest)
+    || valid.length !== candidates.length) return null;
   return { ...bundle, path: "cache", providers_used: [], evidence_providers: [...new Set(valid.map(item => item.provider))],
     usage: [], elapsed_ms: Math.round(performance.now() - state.started), served_at: nowIso() };
 }
@@ -286,12 +291,12 @@ function assertPolicy(previous, latest) {
 // of failing a query whose providers were already paid because unrelated work published.
 async function currentCandidates(state) {
   for (let attempt = 1; ; attempt += 1) {
-    const latest = await state.authority.call("catalogue.state");
+    const latest = await state.authority.call("catalogue.state", { product: state.request.product });
     assertPolicy(state.snapshot, latest);
     const candidates = await revalidateCandidates(state, latest, state.candidates);
-    const confirmed = await state.authority.call("catalogue.state");
+    const confirmed = await state.authority.call("catalogue.state", { product: state.request.product });
     assertPolicy(state.snapshot, confirmed);
-    if (confirmed.generation === latest.generation) return { latest, candidates };
+    if (confirmed.generation === latest.generation) return { latest: confirmed, candidates };
     if (attempt >= MAX_REVALIDATIONS) {
       fail("corpus_changed", "The corpus kept changing during retrieval. Submit the query again.", 409);
     }
@@ -299,7 +304,7 @@ async function currentCandidates(state) {
 }
 
 async function runRetrieval(env, authority, principal, request, options, signal, started, meterAuthority) {
-  const snapshot = await authority.call("catalogue.state");
+  const snapshot = await authority.call("catalogue.state", { product: request.product });
   if (!snapshot.policy.enabled) fail("knowledge_disabled", "Enable Knowledge and configure provider allowances before querying.", 503);
   if (!env.KNOWLEDGE_SNAPSHOTS || !env.KNOWLEDGE_INDEX) fail("storage_unavailable", "Configure the Knowledge snapshot and index bindings.", 503);
   const state = { authority, corpus: options.corpus || new KnowledgeCorpus(env), request, snapshot, signal,
@@ -341,22 +346,27 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   }
   const { latest, candidates } = await currentCandidates(state);
   state.candidates = candidates;
-  const relevant = dropForeignProviderSections(state.providerContext, request, state.candidates.map(item => item.url));
+  const relevant = filterProviderSites(state.providerContext, request, state.candidates.map(item => item.url),
+    latest.product_sites, latest.policy.product_sites_mode);
+  const contextBudget = Math.floor(request.token_budget * (state.candidates.length ? 0.4 : 1));
+  const baselineContext = packProviderContext(relevant.baselineItems, contextBudget);
   // Verified excerpts keep most of the budget; provider context gets up to 40% of it,
   // or all of it when no source excerpt was found.
   const providerContext = packProviderContext(relevant.items,
-    Math.floor(request.token_budget * (state.candidates.length ? 0.4 : 1)));
+    contextBudget);
   const packed = packEvidence(state.candidates, { ...request, token_budget: request.token_budget - providerContext.token_count });
   if (!packed.excerpts.length) state.gaps.push({ code: request.version ? "version_not_verified" : "insufficient_evidence",
     message: request.version ? `No retained source verifies the requested version ${request.version}. Related versions are separated.`
       : "No matching source excerpts were available." });
   const bundle = { ...packed, token_count: packed.token_count + providerContext.token_count, provider_context: providerContext.items,
-    status: !packed.excerpts.length ? (providerContext.items.length ? "partial" : "insufficient_evidence") : state.gaps.length ? "partial" : "ok",
-    query: request.query, requested_version: request.version || null, discoveries: state.discoveries,
+    status: !packed.excerpts.length ? (baselineContext.items.length ? "partial" : "insufficient_evidence") : state.gaps.length ? "partial" : "ok",
+    query: request.query, requested_version: request.version || null, discoveries: latest.policy.product_sites_mode === "off" ? state.discoveries
+      : state.discoveries.filter(item => !relevant.droppedSites.has(site(item.url))),
     gaps: state.gaps, providers_used: [...state.providersUsed], evidence_providers: [...new Set(state.candidates.map(item => item.provider))],
     path: state.paths.size > 1 ? "mixed" : [...state.paths][0] || "live", elapsed_ms: Math.round(performance.now() - state.started),
     index_diagnostics: state.indexDiagnostics ?? null,
     ...(Object.keys(relevant.dropped).length ? { provider_sections_dropped: relevant.dropped } : {}),
+    ...(latest.policy.product_sites_mode === "observe" && relevant.flagged.length ? { provider_sections_flagged: relevant.flagged } : {}),
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {
@@ -371,7 +381,8 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   // the same query and corpus, so they do not prevent caching. Publication/policy races
   // never create cache entries for an obsolete generation.
   if (latest.generation === snapshot.generation && !state.failed) {
-    await untilDeadline(() => writeCache(cache, key, bundle, snapshot.policy.cache_ttl_seconds), signal);
+    const finalKey = await cacheKey(principal, request, latest);
+    await untilDeadline(() => writeCache(cache, finalKey, bundle, snapshot.policy.cache_ttl_seconds), signal);
   }
   checkAbort(signal);
   return bundle;

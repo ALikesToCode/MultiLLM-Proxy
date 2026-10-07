@@ -242,3 +242,25 @@ test("source spans use exact UTF-8 bytes and version requests are never treated 
   assert.ok(clipped.token_count <= 256);
   assert.equal(clipped.excerpts[0].locator.end_byte, Buffer.byteLength(clipped.excerpts[0].text));
 });
+
+
+test("product-site learning and overrides survive Durable Object reopen and rebuild", async t => {
+  const f = await fixture(t);
+  await f.call("policy.update", enabledPolicy());
+  const source = (await f.call("source.create", { product: "flask", provider: "firecrawl",
+    url: "https://flask.palletsprojects.com/en/3.1.3/limits/" })).result;
+  const artifact = await createArtifact(source, "Retained request size limits.", "firecrawl", Date.parse("2026-09-23T00:00:00Z"));
+  await f.call("artifact.save", { artifact });
+  const job = (await f.call("job.enqueue", { source_id: source.id })).result;
+  await f.call("job.publish", { id: job.id, artifact_id: artifact.id, item_id: "fixture-site-item", index_key: artifact.index_key });
+  const overrides = (await f.call("product_sites.update", { product: "Flask", pin: ["docs.python.org"],
+    block: ["overflow.co"], note: "Different product" })).result;
+  await f.reopen();
+  assert.deepEqual((await f.call("product_sites.get", { product: "flask" })).result, overrides);
+  await f.call("product_sites.learn", { id: artifact.id });
+  assert.equal((await f.call("product_sites.get", { product: "flask" })).result.sites["palletsprojects.com"].verified, 1);
+  const rebuilt = (await f.call("product_sites.update", { product: "flask", rebuild: true })).result;
+  assert.equal(rebuilt.sites["palletsprojects.com"].verified, 1);
+  assert.ok(rebuilt.sites["python.org"].pinned);
+  assert.deepEqual(rebuilt.blocked, overrides.blocked);
+});

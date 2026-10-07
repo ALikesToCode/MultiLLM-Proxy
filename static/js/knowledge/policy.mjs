@@ -21,6 +21,7 @@ export function renderPolicy(policy) {
   element("knowledge-policy-fields").disabled = !policy;
   if (!policy) return;
   form.dataset.revision = String(policy.revision);
+  form.dataset.productSitesMode = policy.product_sites_mode ?? "observe";
   form.elements.namedItem("enabled").checked = policy.enabled;
   for (const name of ["cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours"]) form.elements.namedItem(name).value = policy[name] ?? 24;
   form.elements.namedItem("allowed_hosts").value = (policy.allowed_hosts || []).join("\n");
@@ -44,7 +45,7 @@ export function renderPolicy(policy) {
   element("knowledge-policy-status").textContent = `Policy revision ${policy.revision}. Changes apply only when saved.`;
 }
 
-export function policyPayload(values, revision) {
+export function policyPayload(values, revision, productSitesMode = "observe") {
   const providers = {};
   for (const id of PROVIDERS) {
     const allocation = {};
@@ -52,7 +53,7 @@ export function policyPayload(values, revision) {
     for (const name of ["limit", "background_limit", "interactive_reserve", "units_per_call"]) allocation[name] = Number(values.get(`${id}.${name}`));
     providers[id] = allocation;
   }
-  return { expected_revision: Number(revision), enabled: values.get("enabled") === "on",
+  return { product_sites_mode: productSitesMode, expected_revision: Number(revision), enabled: values.get("enabled") === "on",
     cache_ttl_seconds: Number(values.get("cache_ttl_seconds")), retention_hours: Number(values.get("retention_hours")),
     unreviewed_retention_hours: Number(values.get("unreviewed_retention_hours")),
     allowed_hosts: String(values.get("allowed_hosts") || "").split(/\s+/).filter(Boolean), providers };

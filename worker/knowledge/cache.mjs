@@ -1,8 +1,12 @@
 import { digest } from "./evidence.mjs";
+import { productSitesDecision } from "./product-sites.mjs";
+
+export const productSitesCacheState = snapshot => JSON.stringify(snapshot.policy.product_sites_mode === "off"
+  ? null : productSitesDecision(snapshot.product_sites));
 
 export async function cacheKey(principal, request, snapshot) {
   const identity = JSON.stringify({ principal: principal.id, scopes: [...principal.scopes].sort(), request,
-    generation: snapshot.generation, policy_revision: snapshot.policy.revision });
+    generation: snapshot.generation, product_sites: productSitesCacheState(snapshot), policy_revision: snapshot.policy.revision });
   return new Request(`https://knowledge-cache.internal/evidence/${await digest(identity)}`);
 }
 

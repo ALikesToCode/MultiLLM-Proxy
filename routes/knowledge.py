@@ -334,6 +334,18 @@ def register_knowledge_routes(app, csrf):
                              csrf.exempt(api_authenticate_only(required_scope="knowledge:manage")(public_handle)),
                              methods=methods + ["OPTIONS"])
 
+    def product_sites_route(product):
+        payload = _body() if request.method == "PATCH" else {}
+        if "product" in payload:
+            raise KnowledgeError("invalid_request", "The product belongs in the URL.", 400)
+        payload["product"] = product
+        operation = "product_sites.update" if request.method == "PATCH" else "product_sites.get"
+        return jsonify(dispatch(operation, g.authenticated_user, payload))
+
+    app.add_url_rule("/v1/knowledge/product-sites/<product>", "knowledge_product_sites",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:manage")(product_sites_route)),
+                     methods=["GET", "PATCH", "OPTIONS"])
+
     admin_operation("status", "/admin/knowledge/status", ["GET"])
     admin_operation("context", "/admin/knowledge/query", ["POST"], parse_body=True, query=True)
     admin_operation("sources.create", "/admin/knowledge/sources", ["POST"], parse_body=True)

@@ -5,7 +5,7 @@ export const UNREVIEWED_RETENTION_HOURS = 24;
 
 export function defaultPolicy() {
   return {
-    revision: 1, enabled: false, cache_ttl_seconds: 300, retention_hours: 168,
+    product_sites_mode: "observe", revision: 1, enabled: false, cache_ttl_seconds: 300, retention_hours: 168,
     unreviewed_retention_hours: UNREVIEWED_RETENTION_HOURS,
     allowed_hosts: ["developers.cloudflare.com", "flask.palletsprojects.com", "werkzeug.palletsprojects.com",
       "docs.python.org", "github.com", "raw.githubusercontent.com", "nextjs.org", "react.dev"],
@@ -17,7 +17,7 @@ export function defaultPolicy() {
 }
 
 export function withProviderDefaults(policy) {
-  return { ...policy, unreviewed_retention_hours: policy.unreviewed_retention_hours ?? UNREVIEWED_RETENTION_HOURS,
+  return { ...policy, product_sites_mode: policy.product_sites_mode ?? "observe", unreviewed_retention_hours: policy.unreviewed_retention_hours ?? UNREVIEWED_RETENTION_HOURS,
     providers: { ...defaultPolicy().providers, ...policy.providers } };
 }
 
@@ -37,8 +37,11 @@ export function retentionHours(source, policy) {
 }
 
 export function validatePolicy(body) {
-  fields(body, ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours", "allowed_hosts", "providers"],
+  fields(body, ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "unreviewed_retention_hours", "product_sites_mode", "allowed_hosts", "providers"],
     ["expected_revision", "enabled", "cache_ttl_seconds", "retention_hours", "allowed_hosts", "providers"]);
+  if (body.product_sites_mode !== undefined && !["off", "observe", "enforce"].includes(body.product_sites_mode)) {
+    fail("invalid_policy", "Choose off, observe or enforce for product_sites_mode.");
+  }
   integer(body.expected_revision, 1, Number.MAX_SAFE_INTEGER - 1, "expected_revision");
   if (typeof body.enabled !== "boolean" || !Array.isArray(body.allowed_hosts)
     || !body.allowed_hosts.length || body.allowed_hosts.length > 100

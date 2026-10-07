@@ -90,7 +90,7 @@ export function isProviderContext(observation) {
 }
 
 // Mintlify searches one index of many products and separates the pages it returns this way.
-const SECTION_SEPARATOR = "\n--------------------------------";
+export const SECTION_SEPARATOR = "\n--------------------------------";
 const FUNCTION_WORDS = new Set(("what when where which while with without within that this these those there their them "
   + "then than have does doing done should would could will shall must into onto from about after before over under "
   + "between through each every some same other such only also just more most very much many your yours they been "
@@ -98,7 +98,7 @@ const FUNCTION_WORDS = new Set(("what when where which while with without within
 
 const words = text => text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
 
-function site(url) {
+export function site(url) {
   try { return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join("."); }
   catch { return null; }
 }

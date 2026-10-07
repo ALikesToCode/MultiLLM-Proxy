@@ -10,7 +10,7 @@ import { dispatchNative, NATIVE_OPERATIONS, nativeToolsHash } from "./native.mjs
 import { logFailure } from "../log.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 const READ = new Set(["context", "search", "artifact", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 
 export function setupStatus(env) {
@@ -109,6 +109,7 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
     });
   }
   if (operation === "artifact") { fields(payload, ["id"], ["id"]); return artifactResult(env, authority, payload.id, options.corpus); }
+  if (operation === "product_sites.get" || operation === "product_sites.update") return authority.call(operation, payload);
   if (operation === "policy.update") return { policy: await authority.call("policy.update", payload) };
   if (operation === "sources.create") return { source: await authority.call("source.create", payload), job: null };
   if (operation === "sources.update") return { source: await authority.call("source.update", payload) };

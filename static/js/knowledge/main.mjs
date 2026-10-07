@@ -79,7 +79,7 @@ formAction("knowledge-source-form", "knowledge-source-status", async (form) => {
 });
 
 formAction("knowledge-policy-form", "knowledge-policy-status", async (form) => {
-  await api("policy", { method: "PUT", body: policyPayload(new FormData(form), form.dataset.revision) });
+  await api("policy", { method: "PUT", body: policyPayload(new FormData(form), form.dataset.revision, form.dataset.productSitesMode) });
   policyDirty = false;
   await loadStatus({ replacePolicy: true });
   element("knowledge-policy-status").textContent = `Policy saved at revision ${form.dataset.revision}. Provider acknowledgements have not been checked live.`;

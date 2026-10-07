@@ -158,3 +158,10 @@ test("Alexandria execution uses only the selected quote and preserves its receip
     assert.throws(() => executionPayload(form, { quote_id: "q" }));
   }
 });
+
+
+test("dashboard policy saves preserve an API-selected product-site mode", () => {
+  const values = new Map();
+  assert.equal(policyPayload(values, "1").product_sites_mode, "observe");
+  for (const mode of ["off", "observe", "enforce"]) assert.equal(policyPayload(values, "1", mode).product_sites_mode, mode);
+});

@@ -9,7 +9,10 @@ import { runIngestion, VERIFY_DELAYS } from "../worker/knowledge/ingestion.mjs";
 class Storage {
   constructor() { this.values = new Map(); }
   async get(key) { return structuredClone(this.values.get(key)); }
-  async put(key, value) { this.values.set(key, structuredClone(value)); }
+  async put(key, value) {
+    if (typeof key === "string") this.values.set(key, structuredClone(value));
+    else for (const [name, item] of Object.entries(key)) this.values.set(name, structuredClone(item));
+  }
   async delete(key) { this.values.delete(key); }
   async list({ prefix }) { return new Map([...this.values].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)])); }
   transaction(callback) { return callback(this); }

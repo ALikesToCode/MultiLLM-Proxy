@@ -381,3 +381,39 @@ test("toolsets narrow MCP discovery without hiding tools from calls", async () =
     body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "knowledge_firecrawl_map", arguments: { url: "https://docs.python.org/3/" } } }) }));
   assert.equal(dispatched.at(-1).operation, "native.firecrawl_map");
 });
+
+
+test("product-site REST and MCP share management scope, product names and private operations", async () => {
+  const { env, dispatched } = environment({ result: { product: "css overflow-clip-margin", sites: {}, blocked: {}, revision: 0 } });
+  const product = "css overflow-clip-margin";
+  for (const [method, operation, tool, payload] of [["GET", "product_sites.get", "knowledge_product_sites_get", {}],
+    ["PATCH", "product_sites.update", "knowledge_product_sites_update", { pin: ["developer.mozilla.org"], rebuild: true }]]) {
+    const requestFor = key => new Request(`${ORIGIN}/v1/knowledge/product-sites/${encodeURIComponent(product)}`, {
+      method, headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      ...(method === "PATCH" ? { body: JSON.stringify(payload) } : {}),
+    });
+    assert.equal((await call(env, requestFor(reader.key))).status, 403);
+    const rest = await (await call(env, requestFor(manager.key))).json();
+    assert.deepEqual(dispatched.at(-1).payload, { ...payload, product });
+    assert.equal(dispatched.at(-1).operation, operation);
+    const rpc = await (await call(env, mcpRequest(manager.key, "tools/call", { name: tool, arguments: { ...payload, product } }))).json();
+    assert.deepEqual(rpc.result.structuredContent, rest);
+    assert.equal(dispatched.at(-1).operation, operation);
+    const denied = await (await call(env, mcpRequest(reader.key, "tools/call", { name: tool, arguments: { product } }))).json();
+    assert.equal(denied.result.isError, true);
+  }
+  const listed = await (await call(env, new Request(`${ORIGIN}/mcp?toolsets=manage`, {
+    method: "POST", headers: { authorization: `Bearer ${manager.key}`, "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }))).json();
+  assert.ok(listed.result.tools.some(tool => tool.name === "knowledge_product_sites_get"));
+  const before = dispatched.length;
+  for (const path of ["codex", "%E0%A4%A"]) {
+    const rejected = await call(env, new Request(`${ORIGIN}/v1/knowledge/product-sites/${path}`, {
+      method: "PATCH", headers: { authorization: `Bearer ${manager.key}`, "content-type": "application/json" },
+      body: JSON.stringify(path === "codex" ? { product: "other" } : {}),
+    }));
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal(dispatched.length, before);
+});

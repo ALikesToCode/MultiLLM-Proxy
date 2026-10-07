@@ -3,6 +3,7 @@ import { digest } from "./evidence.mjs";
 import { defaultPolicy, retentionHours, validatePolicy, withProviderDefaults } from "./policy.mjs";
 import { ledgerStats, reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
 import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
+import { getProductSites, learnProductSite, parseProductSites, productSitesSummary, updateProductSites } from "./product-sites.mjs";
 import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
@@ -253,7 +254,11 @@ async function saveArtifact(tx, artifact) {
 async function publish(tx, input, now) {
   const job = await jobFor(tx, input.id);
   const source = await sourceFor(tx, job.source_id);
-  if (job.status === "completed") return job;
+  if (job.status === "completed") {
+    await tx.get(`artifact:${job.artifact_id}`)
+      .then(artifact => artifact && learnProductSite(tx, artifact, now)).catch(() => {});
+    return job;
+  }
   if (!source.enabled || source.fence !== job.fence || job.status === "cancelled") {
     fail("publication_superseded", "A cancelled or superseded job cannot publish.", 409);
   }
@@ -267,6 +272,7 @@ async function publish(tx, input, now) {
   const completed = { ...job, status: "completed", reason: null, artifact_id: artifact.id, item_id: input.item_id,
     index_key: input.index_key, updated_at: timestamp };
   await tx.put(`job:${job.id}`, completed);
+  await learnProductSite(tx, artifact, now).catch(() => {});
   await bump(tx);
   return completed;
 }
@@ -281,7 +287,17 @@ export class KnowledgeAuthority {
       if (operation.startsWith("alexandria.")) return alexandriaCatalogue(tx, operation, input, await policyOf(tx), now);
       // Queries and provider tools read only what admission needs, not every job and receipt.
       if (operation === "catalogue.state") {
-        return { generation: await generationOf(tx), policy: await policyOf(tx), sources: await values(tx, "source:") };
+        const productSites = input.product ? await getProductSites(tx, input.product).catch(() => null) : null;
+        return { generation: await generationOf(tx), policy: await policyOf(tx), sources: await values(tx, "source:"),
+          ...(input.product ? { product_sites: productSites } : {}) };
+      }
+      if (operation === "product_sites.get") return getProductSites(tx, parseProductSites(input).product);
+      if (operation === "product_sites.update") return updateProductSites(tx, input, now);
+      if (operation === "product_sites.learn") {
+        fields(input, ["id"], ["id"]);
+        const artifact = await tx.get(`artifact:${input.id}`);
+        if (!artifact || artifact.status === "expiring") return false;
+        return learnProductSite(tx, artifact, now);
       }
       if (operation === "snapshot") {
         const policy = await policyOf(tx);
@@ -291,6 +307,7 @@ export class KnowledgeAuthority {
         for (const job of jobs) jobCounts[job.status] = (jobCounts[job.status] ?? 0) + 1;
         return { generation: await generationOf(tx), policy, sources: await values(tx, "source:"),
           jobs: jobs.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100), job_counts: jobCounts,
+          product_sites: await productSitesSummary(tx).catch(() => null),
           ledger: ledgerStats(receipts, now),
           usage: PROVIDER_IDS.map(provider => ({ ...usageFor(receipts, provider, now), limit: policy.providers[provider].limit })) };
       }
