@@ -6,7 +6,10 @@ import { logFailure } from "../log.mjs";
 
 const NO_RETRY = { retries: { limit: 0, delay: "1 second" }, timeout: "2 minutes" };
 const READ_RETRY = { retries: { limit: 2, delay: "2 seconds", backoff: "constant" }, timeout: "30 seconds" };
-const MAX_POLLS = 6;
+// AI Search usually needs more than a minute to index an upload. Waiting about twelve minutes
+// publishes most revisions here instead of leaving them for hourly reconciliation.
+export const VERIFY_DELAYS = ["10 seconds", "20 seconds", "30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes"];
+const MAX_POLLS = VERIFY_DELAYS.length + 1;
 const TERMINAL = new Set(["completed", "cancelled", "failed"]);
 const UNKNOWN_ERRORS = new Set(["acquisition_outcome_unknown", "snapshot_outcome_unknown",
   "operation_already_submitted", "operation_outcome_unknown"]);
@@ -210,7 +213,7 @@ export async function runIngestion(env, step, jobId, supplied = {}) {
       const result = await durableStep(step, `verify-index-${attempt}`, READ_RETRY, () => inspect(context, reference, submission));
       if (result.done) return result.job;
       uncertain = result.uncertain;
-      if (attempt + 1 < MAX_POLLS) await step.sleep(`wait-for-index-${attempt}`, "10 seconds");
+      if (attempt + 1 < MAX_POLLS) await step.sleep(`wait-for-index-${attempt}`, VERIFY_DELAYS[attempt]);
     }
     return await update(context, {
       status: uncertain ? "unknown" : "pending_index",

@@ -10,6 +10,8 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const RECONCILE_AFTER_MS = 10 * 60000;
 // Hourly maintenance re-polls an unresolved upload for a day before giving up on it.
 const RECONCILE_ATTEMPTS = 24;
+// Each hourly run re-polls this many stuck uploads; busy days create more than five an hour.
+export const RECONCILE_BATCH = 20;
 const STATES = new Set([...ACTIVE, ...TERMINAL]);
 const JOB_LIMIT = 1000;
 const REGISTERED_SOURCE_LIMIT = 200;
@@ -177,7 +179,7 @@ async function reconcilableJobs(tx, now) {
   const cursor = await tx.get("reconcile_cursor") ?? "";
   const next = jobs.findIndex(job => job.id > cursor);
   const offset = next < 0 ? 0 : next;
-  const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, 5);
+  const selected = [...jobs.slice(offset), ...jobs.slice(0, offset)].slice(0, RECONCILE_BATCH);
   if (selected.length) await tx.put("reconcile_cursor", selected.at(-1).id);
   for (const job of selected) await tx.put(`job:${job.id}`, { ...job, reconcile_attempts: (job.reconcile_attempts ?? 0) + 1 });
   return selected.map(job => ({ id: job.id, source_id: job.source_id, artifact_id: job.artifact_id }));

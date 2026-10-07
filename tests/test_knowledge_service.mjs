@@ -3,7 +3,7 @@ import test from "node:test";
 import { build } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { dispatchKnowledge, maintainKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
-import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
+import { KnowledgeAuthority, RECONCILE_BATCH } from "../worker/knowledge/authority.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
@@ -94,7 +94,7 @@ test("maintenance re-polls stuck index jobs in bounded rotation without new uplo
   let now = Date.parse("2026-09-24T00:00:00Z");
   const authority = new KnowledgeAuthority(f.storage, () => now);
   const jobs = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < RECONCILE_BATCH + 2; i++) {
     const source = await authority.call("source.discover", { url: `https://flask.palletsprojects.com/en/3.1.3/page-${i}/`, product: "flask", provider: "exa" });
     const artifact = await authority.call("artifact.save", { artifact: await createArtifact({ ...source, origin_checked: true }, `${f.text} ${i}`, "exa", now) });
     const job = await authority.call("job.enqueue", { source_id: source.id, artifact_id: artifact.id });
@@ -113,7 +113,7 @@ test("maintenance re-polls stuck index jobs in bounded rotation without new uplo
   await maintainKnowledge(f.env, { authority, corpus });
   await maintainKnowledge(f.env, { authority, corpus });
   const ids = jobs.map(job => job.id).sort();
-  assert.equal(restarted.length, 10);
+  assert.equal(restarted.length, 2 * RECONCILE_BATCH);
   assert.deepEqual([...new Set(restarted)].sort(), ids, "every stuck job is reached across runs");
   const reserved = [...(await f.storage.list({ prefix: "reservation:" })).values()];
   assert.ok(reserved.every(item => !stuck.has(item.job_id)), "reconciliation spends no allowance");

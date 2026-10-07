@@ -4,7 +4,7 @@ import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { defaultPolicy } from "../worker/knowledge/policy.mjs";
 import { metered } from "../worker/knowledge/operations.mjs";
 import { retrieve } from "../worker/knowledge/providers/index.mjs";
-import { runIngestion } from "../worker/knowledge/ingestion.mjs";
+import { runIngestion, VERIFY_DELAYS } from "../worker/knowledge/ingestion.mjs";
 
 class Storage {
   constructor() { this.values = new Map(); }
@@ -262,7 +262,7 @@ test("unresolved uploads remain unknown through bounded polls and process replac
   f.corpus.uploadRevision = async () => { f.counts.upload += 1; throw new Error("timeout"); };
   const step = workflow();
   assert.equal((await f.run(step)).status, "unknown");
-  assert.equal(step.sleeps.length, 5);
+  assert.deepEqual(step.sleeps.map(sleep => sleep.duration), VERIFY_DELAYS);
   f.deps.authority = new KnowledgeAuthority(f.storage);
   assert.equal((await f.run()).status, "unknown");
   assert.equal(f.counts.acquire, 1);
