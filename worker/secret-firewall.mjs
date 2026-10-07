@@ -6,7 +6,7 @@ const blockedResponses = new WeakSet();
 export const isSecretScanBlock = response => blockedResponses.has(response);
 const MODES = new Set(["off", "observe", "redact", "block"]);
 const MAX_BUFFER_BYTES = 32 * 1024 * 1024;
-const READ_TIMEOUT_MS = 1000;
+const READ_TIMEOUT_MS = 15000;
 const AUDIT_WINDOW_MS = 10 * 60 * 1000;
 const MAX_AUDIT_EVENTS = 1024;
 const auditEvents = new Map();
@@ -155,7 +155,10 @@ export async function firewallFetch(request, env, options = {}, fetchImpl = fetc
       headers.delete("content-length");
       protectedRequest = new Request(request, { headers, body: rebuild(decision.value), duplex: "half" });
     }
-  } catch { console.warn("secret_scan_body_unavailable"); }
+  } catch (error) {
+    const reason = error?.message;
+    console.warn(reason === "scan_timeout" || reason === "scan_body_limit" ? reason : "secret_scan_body_unavailable");
+  }
   const upstream = await fetchImpl(protectedRequest);
   if (!decision?.header || !upstream.ok) return upstream;
   const response = new Response(upstream.body, upstream);

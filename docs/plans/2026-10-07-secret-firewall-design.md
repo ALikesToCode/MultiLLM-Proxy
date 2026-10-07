@@ -45,9 +45,10 @@ Overlapping matches prefer the high-confidence format. Heuristics are never reda
 Each payload has a 4 MiB UTF-8 string-leaf budget, 100,000 visited nodes, depth 64 and
 4,096 candidate findings per leaf. Reports mark budget/depth/node limits as truncated.
 Multipart and URL-encoded form inspection considers at most 256 text parts; binary file parts remain untouched.
-The edge buffers at most 32 MiB and waits at most one second for body consumption. Larger,
+The edge buffers at most 32 MiB and waits at most 15 seconds for body consumption. Larger,
 stalled, malformed-binary or otherwise uninspectable bodies follow the original dispatch
-path. Detector/audit failures fail open and log only a fixed message or exception type.
+path. Body timeout and buffer overflow log only `scan_timeout` or `scan_body_limit`.
+Other detector/audit failures fail open and log only a fixed message or exception type.
 Scanning a bounded prefix cannot guarantee secrets beyond that prefix are caught.
 
 ### Format evidence

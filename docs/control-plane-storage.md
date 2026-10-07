@@ -222,4 +222,6 @@ events get one audit attempt per 10 minutes per process or edge isolate, in an
 in-memory map capped at 1,024 entries with oldest eviction. Failed attempts consume
 the window; restarts and eviction reset suppression. Response counts remain per
 request. See [the design](plans/2026-10-07-secret-firewall-design.md)
-for dispatch coverage, bounded inspection and rollout requirements.
+for dispatch coverage, bounded inspection and rollout requirements. Edge inspection
+waits up to 15 seconds and buffers at most 32 MiB; fail-open logs contain only the
+`scan_timeout` / `scan_body_limit` reason code or a fixed unavailable message.

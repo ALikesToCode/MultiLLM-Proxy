@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setImmediate } from "node:timers";
 import { firewallFetch, protectPayload } from "../worker/secret-firewall.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 const TOKEN = "AK" + "IA" + "AB12CD34EF56GH78";
@@ -172,4 +173,75 @@ test("parallel audit reservations and failed writes remain bounded", async t => 
   assert.equal((await protect(TOKEN, env)).blocked.status, 422);
   assert.equal(calls, 2);
   assert.ok(!JSON.stringify(logs).includes(TOKEN));
+});
+
+
+test("uploads taking more than one second are still scanned", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let controller, calls = 0;
+  const stream = new ReadableStream({ start(value) { controller = value; } });
+  const pending = firewallFetch(new Request("https://provider.invalid", { method: "POST", body: stream, duplex: "half" }), {}, {}, async req => {
+    calls += 1;
+    assert.ok(!(await req.text()).includes(TOKEN));
+    return Response.json({ ok: true });
+  });
+  t.mock.timers.tick(2000);
+  await new Promise(setImmediate);
+  assert.equal(calls, 0);
+  controller.enqueue(new TextEncoder().encode(TOKEN));
+  controller.close();
+  const response = await pending;
+  assert.equal(calls, 1);
+  assert.equal(response.headers.get("X-MultiLLM-Secret-Scan"), "redacted=1; observed=0");
+});
+
+test("edge read deadline fails open at 15 seconds with a content-free reason", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs = [];
+  t.mock.method(console, "warn", (...args) => logs.push(args));
+  let controller, calls = 0;
+  const stream = new ReadableStream({ start(value) { controller = value; } });
+  const request = new Request("https://provider.invalid", { method: "POST", body: stream, duplex: "half" });
+  const pending = firewallFetch(request, {}, {}, async req => {
+    calls += 1; assert.equal(req, request); return Response.json({ ok: true });
+  });
+  t.mock.timers.tick(14999);
+  await new Promise(setImmediate);
+  assert.equal(calls, 0);
+  t.mock.timers.tick(1);
+  const response = await pending;
+  controller.enqueue(new TextEncoder().encode(TOKEN));
+  controller.close();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-MultiLLM-Secret-Scan"), null);
+  assert.equal(calls, 1);
+  assert.deepEqual(logs, [["scan_timeout"]]);
+});
+
+test("edge 32 MiB body cap fails open with a content-free reason", async t => {
+  const logs = [];
+  t.mock.method(console, "warn", (...args) => logs.push(args));
+  const bytes = new Uint8Array(32 * 1024 * 1024 + 1);
+  bytes.set(new TextEncoder().encode(TOKEN));
+  const request = new Request("https://provider.invalid", { method: "POST", body: bytes });
+  let calls = 0;
+  const response = await firewallFetch(request, {}, {}, async req => {
+    calls += 1; assert.equal(req, request); return Response.json({ ok: true });
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-MultiLLM-Secret-Scan"), null);
+  assert.equal(calls, 1);
+  assert.deepEqual(logs, [["scan_body_limit"]]);
+});
+
+test("unexpected body errors do not log exception content", async t => {
+  const logs = [];
+  t.mock.method(console, "warn", (...args) => logs.push(args));
+  const request = new Request("https://provider.invalid", { method: "POST", duplex: "half",
+    body: new ReadableStream({ start(controller) { controller.error(new Error(TOKEN)); } }) });
+  const response = await firewallFetch(request, {}, {}, async req => {
+    assert.equal(req, request); return Response.json({ ok: true });
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(logs, [["secret_scan_body_unavailable"]]);
 });
