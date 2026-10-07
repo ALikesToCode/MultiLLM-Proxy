@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from flask import Response, jsonify, request
 
 from error_handlers import APIError
-from providers.aihubmix import build_aihubmix_image_request
 from providers.codex_everywhere import with_codex_instructions
-from providers.gpt_image_moderation import apply_gpt_image_moderation_default
 from providers.nanogpt import (
     apply_nanogpt_speed_routing,
     nanogpt_model_has_speed_suffix,
@@ -51,18 +49,12 @@ from routes.protocol_bridge import (
 )
 from routes.tool_repair import with_chat_tool_repair, with_native_tool_repair
 from routes.unified_messages import register_unified_messages_routes
-from routes.media_images import dispatch_auto_image_generation
 from routes.media_edits import dispatch_reference_generation, has_reference_images
-from routes.unified_transport import (
-    normalized_aihubmix_image_response,
-    send_configured_unified_provider_request,
-    send_unified_image_request,
-)
+from routes.unified_transport import send_configured_unified_provider_request
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services import cloudflare_ai
 from services.media_catalog import (
-    TRANSPORT_FAILURE_HEADER,
     image_profile,
     is_video_model,
 )
@@ -883,136 +875,46 @@ def _validate_image_candidate(app, auth_service_cls, proxy_service_cls, model_id
 
 
 def dispatch_unified_image_generation(
-    app,
-    auth_service_cls,
-    metrics_service_cls,
-    proxy_service_cls,
-    payload: dict,
-    *,
-    request_headers=None,
-    request_args=None,
+    app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload: dict,
+    *, request_headers=None, request_args=None,
 ):
-    """Dispatch an OpenAI Images request, translating provider-native models."""
-    if AutoRouteService.is_auto_route(payload.get("model")):
-        return dispatch_auto_image_generation(
-            payload,
-            validate_candidate=lambda candidate: _validate_image_candidate(
-                app, auth_service_cls, proxy_service_cls, candidate
-            ),
-            dispatch_candidate=lambda candidate_payload: dispatch_unified_image_generation(
-                app,
-                auth_service_cls,
-                metrics_service_cls,
-                proxy_service_cls,
-                candidate_payload,
-                request_headers=request_headers,
-                request_args=request_args,
-            ),
-        )
+    """Shared generation path for individual requests, batches and quality checks."""
+    from routes.image_quality import dispatch_image_quality
+    from routes.unified_images import dispatch_image_generation_raw
 
-    if cloudflare_ai.is_cloudflare_model(payload.get("model")):
-        start_time = time.time()
-        response = cloudflare_ai.generate_image(payload)
-        metrics_service_cls.get_instance().track_request(
-            provider="cloudflare",
-            status_code=response.status_code,
-            response_time=(time.time() - start_time) * 1000,
-        )
-        return response
+    headers = dict(request.headers if request_headers is None else request_headers)
+    quality_enabled = "quality_check" in payload or any(name.lower() == "x-multillm-image-qa" for name in headers)
+    generation_number = 0
 
-    start_time = time.time()
-    provider = "unknown"
-    headers_source = request.headers if request_headers is None else request_headers
-    args_source = request.args if request_args is None else request_args
-    try:
-        provider, provider_model, adapter = _resolve_enabled_model(
-            app,
-            payload.get("model"),
-        )
-        if not adapter.capabilities().supports_images:
-            raise APIError(
-                f"Image generation is not supported for provider: {provider}",
-                status_code=400,
-            )
+    def generate(body):
+        nonlocal generation_number
+        call_headers = {name: value for name, value in headers.items() if name.lower() != "x-multillm-image-qa"}
+        if quality_enabled and generation_number:
+            from hashlib import sha256
 
-        payload, _ = apply_gpt_image_moderation_default(payload, model_id=provider_model)
+            for name, value in list(call_headers.items()):
+                if name.lower() == "idempotency-key":
+                    # Each new take must be distinct from a replay of the first image.
+                    digest = sha256(f"{value}:{generation_number}:{body.get('prompt')}".encode()).hexdigest()
+                    call_headers[name] = f"image-qa-{digest}"
+        generation_number += 1
+        if has_reference_images(body):
+            return dispatch_reference_generation(
+                app, auth_service_cls, metrics_service_cls, proxy_service_cls, body, request_headers=call_headers)
+        return dispatch_image_generation_raw(
+            app, auth_service_cls, metrics_service_cls, proxy_service_cls, body,
+            resolve_model=lambda model: _resolve_enabled_model(app, model),
+            validate_candidate=lambda model: _validate_image_candidate(app, auth_service_cls, proxy_service_cls, model),
+            serialize_payload=serialize_unified_chat_payload,
+            request_headers=call_headers, request_args=request_args)
 
-        response_kind = "openai"
-        if provider == "aihubmix":
-            image_request = build_aihubmix_image_request(
-                provider_model,
-                payload,
-            )
-            upstream_path = image_request.path
-            upstream_payload = image_request.payload
-            response_kind = image_request.response_kind
-        else:
-            upstream_path = "v1/images/generations"
-            upstream_payload = _copy_request_payload(payload, provider_model)
-        raw_body = serialize_unified_chat_payload(upstream_payload)
-        operation_base_url = (
-            app.config["NANOGPT_STANDARD_BASE_URL"]
-            if provider == "nanogpt"
-            else app.config["API_BASE_URLS"][provider]
-        )
-
-        def send_request(token: str):
-            return send_unified_image_request(
-                proxy_service_cls,
-                provider=provider,
-                token=token,
-                request_headers=headers_source,
-                request_args=args_source,
-                upstream_path=upstream_path,
-                raw_body=raw_body,
-                primary_origin=operation_base_url,
-                secondary_origin=(
-                    app.config["AIHUBMIX_BACKUP_BASE_URL"]
-                    if provider == "aihubmix"
-                    else None
-                ),
-            )
-
-        response, credential_attempts = _request_with_provider_token_rotation(
-            app,
-            auth_service_cls,
-            proxy_service_cls,
-            provider,
-            send_request,
-        )
-
-        metrics_service_cls.get_instance().track_request(
-            provider=provider,
-            status_code=response.status_code,
-            response_time=(time.time() - start_time) * 1000,
-        )
-
-        if isinstance(response, Response):
-            downstream_response = response
-        else:
-            downstream_response = (
-                normalized_aihubmix_image_response(response, response_kind)
-                if provider == "aihubmix"
-                else None
-            ) or stream_upstream_response(response)
-            transport_failure = getattr(response, "multillm_transport_failure", None)
-            if transport_failure:
-                downstream_response.headers[TRANSPORT_FAILURE_HEADER] = transport_failure
-        return _add_credential_attempt_headers(
-            downstream_response,
-            provider,
-            credential_attempts,
-        )
-    except ValueError as error:
-        raise APIError(str(error), status_code=400) from error
-    except Exception as error:
-        status_code = error.status_code if isinstance(error, APIError) else 502
-        metrics_service_cls.get_instance().track_request(
-            provider=provider,
-            status_code=status_code,
-            response_time=(time.time() - start_time) * 1000,
-        )
-        raise
+    judge = lambda body: dispatch_unified_chat_completion(
+        app, auth_service_cls, metrics_service_cls, proxy_service_cls, body,
+        request_headers={}, request_args={}, request_timeout=120, adaptive_context=False)
+    return dispatch_image_quality(
+        payload, generate, judge,
+        lambda model: validate_unified_chat_target(app, auth_service_cls, model, proxy_service_cls),
+        request_headers=request_headers)
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
@@ -1059,18 +961,8 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @api_auth_required
     def unified_image_generations():
         payload = json_object_body()
-        if has_reference_images(payload):
-            response = dispatch_reference_generation(
-                app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
-            )
-        else:
-            response = dispatch_unified_image_generation(
-                app,
-                auth_service_cls,
-                metrics_service_cls,
-                proxy_service_cls,
-                payload,
-            )
+        response = dispatch_unified_image_generation(
+            app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload)
         # With an R2 bucket bound, images are returned as durable gateway links.
         return persist_image_response(response, payload)
 

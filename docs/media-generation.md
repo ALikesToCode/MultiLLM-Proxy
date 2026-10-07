@@ -52,6 +52,48 @@ group with batch generation enabled.
 - Image requests allow ten minutes per provider, because `max` quality at 4K can take
   several minutes.
 
+### Quality checks
+
+Image generations, `/v1/images/batch` and asynchronous `/v1/images/batches` accept
+`quality_check: true` or an object:
+
+```json
+{"quality_check": {"judge_model": "free:vision", "min_score": 7, "max_attempts": 2,
+                   "criteria": ["The title must be spelled correctly"]}}
+```
+
+Clients can instead send `X-MultiLLM-Image-QA: on`. `min_score` is 0–10;
+`max_attempts` is 1–3, including the first image; `criteria` allows five strings of
+200 characters each. Batch options can appear at the top level, in `defaults`, or
+on an item; item values take precedence. Invalid options are refused before generation.
+The gateway removes `quality_check` and the QA header before forwarding upstream.
+
+The default judge is `IMAGE_QA_JUDGE_MODEL`, or `free:vision` when unset. Configure
+eligible free vision providers, or set an approved vision chat model explicitly.
+The judge uses normal chat routing and failover, with the key's model allowlist,
+budget, rate limits and usage ledger. Gemini is not the default judge. Each generation
+and judge call is recorded separately. Extra takes cost the same as ordinary generation.
+
+Every image receives `quality` with `score`, `passed`, `attempts`, `issues` and
+`judge_model`. Quoted text in the original prompt (straight or curly quotes) is
+compared with the judge's transcription using normalized Levenshtein similarity;
+`text_similarity` is included and limits the final score. A failing image is retried
+on the exact provider/model that produced it, with targeted fixes appended to the
+original prompt. The best scored image wins; passing images are not retried.
+New takes derive distinct upstream idempotency keys when one was supplied.
+`X-MultiLLM-Image-QA` reports `attempts=<total> best=<score>` on synchronous replies.
+
+Judge failures return the generated image with `quality.judge_error`; a budget or
+allowance refusal stops further takes and adds `quality.stopped_reason`. Images are
+judged from their bytes, using a data URL capped at 4 MiB of decoded image data.
+Larger images are reduced with Pillow. When reduction fails, owned R2 storage supplies
+a signed link and `quality.judge_image_source: "signed_url"`. Provider URL results
+need media storage to import the image; otherwise QA reports a judge error. Responses
+without a usable score report `best=unknown`. Asynchronous results retain the same
+per-image quality metadata. QA processes images sequentially within an item; batch
+items still run up to four at a time. Large QA requests may take substantially longer
+than a single image; prefer asynchronous batches for those requests.
+
 ### Failover
 
 Any HTTP error from a provider means it delivered no image, so the next candidate runs,

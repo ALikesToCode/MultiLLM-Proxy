@@ -41,7 +41,7 @@ PRINCIPAL_SCHEME = "MultiLLM-Principal "
 BATCH_ID = re.compile(r"imgbatch_[a-f0-9]{32}\Z")
 CUSTOM_ID = re.compile(r"[A-Za-z0-9_.:-]{1,64}\Z")
 ITEM_FIELDS = frozenset({"model", "prompt", "n", "size", "quality", "background", "output_format", "output_compression",
-                         "moderation", "user", "aspect_ratio", "resolution", "style"})
+                         "moderation", "user", "aspect_ratio", "resolution", "style", "quality_check"})
 _REFUSALS = {
     "idempotency_conflict": (409, "This Idempotency-Key was already used for a different batch"),
     "too_many_active_batches": (429, "Too many of your batches are queued or running; wait for one to finish"),
@@ -102,9 +102,11 @@ def _item_images(files: list) -> list:
     images = []
     for file in files if isinstance(files, list) else []:
         if isinstance(file, dict) and isinstance(file.get("id"), str):
-            images.append({"url": media_storage.file_url(file["id"]), "file_id": file["id"]})
+            images.append({"url": media_storage.file_url(file["id"]), "file_id": file["id"],
+                           **({"quality": file["quality"]} if isinstance(file.get("quality"), dict) else {})})
         elif isinstance(file, dict) and isinstance(file.get("url"), str):
-            images.append({"url": file["url"]})
+            images.append({"url": file["url"],
+                           **({"quality": file["quality"]} if isinstance(file.get("quality"), dict) else {})})
     return images
 
 
@@ -128,7 +130,8 @@ def read_request_principal(kind: str) -> dict:
     return read_principal(header[len(PRINCIPAL_SCHEME):].strip(), kind)
 
 
-def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_model, generate_image) -> None:
+def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_model, generate_image,
+                               validate_quality=None) -> None:
     def batch_items(body: dict) -> list[dict]:
         items, defaults = body.get("items"), body.get("defaults", {})
         if not isinstance(items, list) or not 1 <= len(items) <= MAX_ITEMS or not isinstance(defaults, dict):
@@ -143,7 +146,9 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
                 raise APIError(f"items[{index}].id must be unique and use at most 64 letters, digits or ._:-",
                                status_code=400)
             seen.add(custom_id)
-            merged = {"model": DEFAULT_MODEL, **defaults, **{key: value for key, value in item.items() if key != "id"}}
+            merged = {"model": DEFAULT_MODEL,
+                      **({"quality_check": body["quality_check"]} if "quality_check" in body else {}), **defaults,
+                      **{key: value for key, value in item.items() if key != "id"}}
             merged.pop("response_format", None)
             unknown = set(merged) - ITEM_FIELDS
             if unknown:
@@ -151,6 +156,8 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
             prompt = merged.get("prompt")
             if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
                 raise APIError(f"items[{index}] needs a prompt of at most {MAX_PROMPT_CHARS} characters", status_code=400)
+            if validate_quality:
+                validate_quality(merged)
             images += _image_count(merged)
             model = merged["model"]
             if not isinstance(model, str):
@@ -177,8 +184,8 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
         if (request.content_length or 0) > MAX_BODY_BYTES:
             raise APIError("A batch request may be at most 2 MiB", status_code=413)
         body = json_object_body()
-        if set(body) - {"items", "defaults", "webhook_url", "metadata"}:
-            raise APIError("A batch accepts items, defaults, webhook_url and metadata", status_code=400)
+        if set(body) - {"items", "defaults", "webhook_url", "metadata", "quality_check"}:
+            raise APIError("A batch accepts items, defaults, webhook_url, metadata and quality_check", status_code=400)
         items = batch_items(body)
         webhook_url = public_https_url(body["webhook_url"], "webhook_url") if body.get("webhook_url") is not None else None
         metadata = validated_metadata(body.get("metadata"))
@@ -294,7 +301,8 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
         admitted, refused, reservations = [], {}, {}
         for item in items:
             model = item["request"].get("model") or DEFAULT_MODEL
-            error, reservation = request_accounting.admit_item(user, model, _requested_images(item["request"]))
+            error, reservation = (None, None) if "quality_check" in item["request"] else request_accounting.admit_item(
+                user, model, _requested_images(item["request"]))
             if error is None:
                 admitted.append(item)
                 reservations[item["index"]] = reservation
@@ -314,11 +322,12 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
             result = outcomes[item["index"]]
             requested = item["request"].get("model") or DEFAULT_MODEL
             selected = result["headers"].get("X-MultiLLM-Auto-Selected-Model") if result["status"] < 400 else None
-            request_accounting.record_item(
-                user, endpoint="/v1/images/batches", requested=requested,
-                selected=selected or (requested if ":" in requested and not requested.startswith("auto:") else None),
-                status=result["status"], started=started, reservation=reservations[item["index"]],
-                units=len((result["body"] or {}).get("data") or []) if result["status"] < 400 else 1)
+            if "quality_check" not in item["request"]:
+                request_accounting.record_item(
+                    user, endpoint="/v1/images/batches", requested=requested,
+                    selected=selected or (requested if ":" in requested and not requested.startswith("auto:") else None),
+                    status=result["status"], started=started, reservation=reservations[item["index"]],
+                    units=len((result["body"] or {}).get("data") or []) if result["status"] < 400 else 1)
             if result["status"] < 400 and result["body"]:
                 model = result["headers"].get("X-MultiLLM-Auto-Selected-Model") or item["request"].get("model")
                 images = result["body"].get("data") or []
@@ -327,7 +336,8 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
                     images, owner=claims["o"], want_url=True, model=model,
                     file_ids=[f"{prefix}{number}" for number in range(len(images))])
                 # An image that could not be stored keeps its provider URL, which may expire.
-                files += [{"url": image["url"]} for image in stored if isinstance(image, dict) and "file_id" not in image
+                files += [{"url": image["url"], **({"quality": image["quality"]} if "quality" in image else {})}
+                          for image in stored if isinstance(image, dict) and "file_id" not in image
                           and isinstance(image.get("url"), str) and image["url"].startswith("https://")]
                 entry.update(status="succeeded" if files else "failed", model=model, files=files)
                 if not files:

@@ -69,6 +69,17 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
     def generate_image(body: dict):
         return dispatch_unified_image_generation(app, auth_service_cls, metrics_service_cls, proxy_service_cls, body)
 
+    def validate_quality(body):
+        from routes.image_quality import validate_judge
+        from routes.unified import validate_unified_chat_target
+        from services.image_quality import QA_HEADER, parse_options
+
+        options = parse_options(body, request.headers.get(QA_HEADER))
+        if options is not None:
+            validate_judge(options, lambda model: validate_unified_chat_target(
+                app, auth_service_cls, model, proxy_service_cls))
+            body.setdefault("quality_check", True)
+
     def video_credentials(provider: str) -> tuple[str | None, str]:
         return auth_service_cls.get_api_key(provider), app.config["API_BASE_URLS"].get(provider, "")
 
@@ -139,7 +150,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
         return rewritten
 
     register_media_file_routes(app, csrf)
-    register_media_batch_routes(app, csrf, auth_service_cls, validate_image_candidate, generate_image)
+    register_media_batch_routes(app, csrf, auth_service_cls, validate_image_candidate, generate_image, validate_quality)
     register_media_narration_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls, _owner)
 
     @app.route("/v1/images/batch", methods=["POST", "OPTIONS"])
@@ -153,7 +164,15 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                                                           want_url=item.get("response_format") == "url")
             return stored
 
-        return jsonify(run_image_batch(json_object_body(), generate_image, persist))
+        from routes.image_quality import qa_header
+        from services.image_quality import QA_HEADER
+
+        body = run_image_batch(json_object_body(), generate_image, persist, validate_quality)
+        response = jsonify(body)
+        header = qa_header([image for item in body["data"] for image in item.get("images", [])])
+        if header:
+            response.headers[QA_HEADER] = header
+        return response
 
     @app.route("/v1/images/edits", methods=["POST", "OPTIONS"])
     @csrf.exempt

@@ -90,7 +90,12 @@ def _read(response: Response) -> dict:
 
 def run_image_tasks(tasks: list[Callable[[], Response]]) -> list[dict]:
     """Run image requests in parallel, each in a copy of the caller's request context."""
+    principal = {name: getattr(g, name, None) for name in ("authenticated_user", "request_id", "rate_limit")}
+
     def finish(task):
+        # A copied request context gets a new g; carry the owner's controls into it.
+        for name, value in principal.items():
+            setattr(g, name, value)
         try:
             return _read(task())
         except APIError as error:
@@ -161,7 +166,8 @@ def dispatch_auto_image_generation(payload: dict, *, validate_candidate: Callabl
 
 
 def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
-                    persist: Callable[[list, dict, str], list] | None = None) -> dict:
+                    persist: Callable[[list, dict, str], list] | None = None,
+                    validate_quality: Callable[[dict], None] | None = None) -> dict:
     """Different prompts, sizes and models in one call; each item reports its own outcome.
 
     `persist` may replace an item's images (for example with stored gateway links).
@@ -169,15 +175,19 @@ def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
     items, defaults = body.get("items"), body.get("defaults", {})
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_BATCH_ITEMS or not isinstance(defaults, dict):
         raise APIError(f"items must be a list of 1 to {MAX_BATCH_ITEMS} objects; defaults must be an object", status_code=400)
-    if set(body) - {"items", "defaults"}:
-        raise APIError("A batch accepts only items and defaults", status_code=400)
+    if set(body) - {"items", "defaults", "quality_check"}:
+        raise APIError("A batch accepts only items, defaults and quality_check", status_code=400)
     requests_by_item, total = [], 0
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise APIError(f"items[{index}] must be an object", status_code=400)
-        request_body = {"model": "auto:image", **defaults, **{key: value for key, value in item.items() if key != "id"}}
+        request_body = {"model": "auto:image",
+                        **({"quality_check": body["quality_check"]} if "quality_check" in body else {}), **defaults,
+                        **{key: value for key, value in item.items() if key != "id"}}
         if not isinstance(request_body.get("prompt"), str) or not request_body["prompt"].strip():
             raise APIError(f"items[{index}] needs a prompt", status_code=400)
+        if validate_quality:
+            validate_quality(request_body)
         total += _image_count(request_body)
         requests_by_item.append(request_body)
     inline = any(request_body.get("response_format", "b64_json") != "url" for request_body in requests_by_item)
@@ -185,7 +195,18 @@ def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
     if total > limit:
         raise APIError(f"A batch can return at most {limit} images"
                        + ("; request response_format url for up to 32" if inline else ""), status_code=400)
-    results = run_image_tasks([partial(dispatch, request_body) for request_body in requests_by_item])
+    if any("quality_check" in item for item in requests_by_item):
+        from services.accounted_dispatch import accounted_dispatch, release_outer_accounting
+
+        release_outer_accounting()
+
+        def dispatch_item(item):
+            if "quality_check" in item:
+                return dispatch(item)
+            return accounted_dispatch(item, dispatch, kind="images")
+    else:
+        dispatch_item = dispatch
+    results = run_image_tasks([partial(dispatch_item, request_body) for request_body in requests_by_item])
     data = []
     for index, (item, result) in enumerate(zip(items, results)):
         entry = {"index": index, "id": item.get("id", str(index))}

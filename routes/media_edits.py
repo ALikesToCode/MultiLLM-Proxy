@@ -244,7 +244,7 @@ def _edit_body(provider_model: str, payload: dict, inputs: EditInputs, transport
 
 
 def dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload: dict,
-                            inputs: EditInputs) -> Response:
+                            inputs: EditInputs, *, request_headers=None) -> Response:
     """Send one prepared edit to one provider:model."""
     provider, provider_model = ModelRegistry.parse_model_id(payload["model"])
     support = image_edit_support(provider, provider_model)
@@ -258,8 +258,9 @@ def dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_se
             return response
         raw_body, content_type = _edit_body(provider_model, payload, inputs, support.transport)
         headers = {"Content-Type": content_type}
-        if has_request_context() and request.headers.get("Idempotency-Key"):
-            headers["Idempotency-Key"] = request.headers["Idempotency-Key"]
+        source_headers = request.headers if request_headers is None else request_headers
+        if has_request_context() and source_headers.get("Idempotency-Key"):
+            headers["Idempotency-Key"] = source_headers["Idempotency-Key"]
         origin = (app.config["NANOGPT_STANDARD_BASE_URL"] if provider == "nanogpt"
                   else app.config["API_BASE_URLS"][provider])
 
@@ -285,7 +286,7 @@ def dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_se
 
 
 def dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload: dict,
-                        inputs: EditInputs, *, default_route: str = DEFAULT_EDIT_ROUTE) -> Response:
+                        inputs: EditInputs, *, default_route: str = DEFAULT_EDIT_ROUTE, request_headers=None) -> Response:
     """An edit on an automatic route (with failover) or on one provider:model."""
     payload = dict(payload)
     prompt = payload.get("prompt")
@@ -304,7 +305,8 @@ def dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_servic
         validate_edit_candidate(app, auth_service_cls, proxy_service_cls, candidate, inputs)
 
     def dispatch(prepared: dict) -> Response:
-        return dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_service_cls, prepared, inputs)
+        return dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_service_cls, prepared, inputs,
+                                       request_headers=request_headers)
 
     if AutoRouteService.is_auto_route(model):
         return dispatch_auto_image_generation(payload, validate_candidate=validate, dispatch_candidate=dispatch,
@@ -320,8 +322,8 @@ def dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_servic
 
 
 def dispatch_reference_generation(app, auth_service_cls, metrics_service_cls, proxy_service_cls,
-                                  body: dict) -> Response:
+                                  body: dict, *, request_headers=None) -> Response:
     """A generation request with reference images runs on candidates that accept them."""
     payload, inputs = parse_json_edit(body)
     return dispatch_image_edit(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, inputs,
-                               default_route=DEFAULT_REFERENCE_ROUTE)
+                               default_route=DEFAULT_REFERENCE_ROUTE, request_headers=request_headers)

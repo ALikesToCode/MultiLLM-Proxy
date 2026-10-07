@@ -84,6 +84,12 @@ default. `auto:image` and `auto:image-fast` also try
 `gguu-grok:grok-imagine-image-2.0` after the GPT Image models, which receives
 `aspect_ratio`, `resolution` and a `low` or `medium` quality instead of `size`.
 
+Opt-in `quality_check` on the unified endpoint grades the generated image and can
+request up to two further takes. Each take stays on the selected GGUU model/provider;
+QA never switches a generated GGUU image to another provider. The judge defaults to
+`free:vision`, subject to key controls, and does not default to Gemini. See
+[quality checks](media-generation.md#quality-checks) for fields, costs and failure behavior.
+
 ## Native endpoints
 
 | Method | MultiLLM path | Purpose |

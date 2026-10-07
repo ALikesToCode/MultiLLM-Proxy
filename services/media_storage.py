@@ -320,7 +320,8 @@ def store_image_entries(entries: list, *, owner: str, want_url: bool, model: str
             continue
         kept = {name: value for name, value in entry.items() if name not in ("url", "b64_json")}
         result.append({**kept, "url": file_url(file_id), "file_id": file_id})
-        stored.append({"id": file_id, "size": info["size"], "content_type": info["content_type"]})
+        stored.append({"id": file_id, "size": info["size"], "content_type": info["content_type"],
+                       **({"quality": entry["quality"]} if isinstance(entry.get("quality"), dict) else {})})
     return result, stored
 
 
