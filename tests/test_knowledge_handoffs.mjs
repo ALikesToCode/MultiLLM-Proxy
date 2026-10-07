@@ -159,7 +159,9 @@ test("catalogue scopes, annotations, toolset and appended SQLite migration match
     assert.equal(entry.definition.annotations.readOnlyHint, ["handoffs.get", "handoffs.list"].includes(entry.operation));
   }
   const config = JSON.parse(readFileSync(new URL("../wrangler.knowledge.jsonc", import.meta.url)));
-  assert.deepEqual(config.migrations.at(-1), { tag: "add-knowledge-handoffs", new_sqlite_classes: ["KnowledgeHandoffs"] });
+  const tags = config.migrations.map(item => item.tag);
+  assert.deepEqual(config.migrations.find(item => item.tag === "add-knowledge-handoffs"), { tag: "add-knowledge-handoffs", new_sqlite_classes: ["KnowledgeHandoffs"] });
+  assert.ok(tags.indexOf("add-knowledge-handoffs") > tags.indexOf("knowledge-memos-v1"));
   assert.ok(config.durable_objects.bindings.some(item => item.name === "KNOWLEDGE_HANDOFFS"));
 });
 
