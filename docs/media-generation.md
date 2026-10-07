@@ -62,7 +62,9 @@ Image generations, `/v1/images/batch` and asynchronous `/v1/images/batches` acce
                    "criteria": ["The title must be spelled correctly"]}}
 ```
 
-Clients can instead send `X-MultiLLM-Image-QA: on`. `min_score` is 0–10;
+Clients can instead send `X-MultiLLM-Image-QA: on`. Set `quality_check: false` or
+`X-MultiLLM-Image-QA: off` to disable QA; header case and surrounding whitespace
+are ignored. The field wins when controls disagree. `min_score` is 0–10;
 `max_attempts` is 1–3, including the first image; `criteria` allows five strings of
 200 characters each. Batch options can appear at the top level, in `defaults`, or
 on an item; item values take precedence. Invalid options are refused before generation.
@@ -71,27 +73,46 @@ The gateway removes `quality_check` and the QA header before forwarding upstream
 The default judge is `IMAGE_QA_JUDGE_MODEL`, or `free:vision` when unset. Configure
 eligible free vision providers, or set an approved vision chat model explicitly.
 The judge uses normal chat routing and failover, with the key's model allowlist,
-budget, rate limits and usage ledger. Gemini is not the default judge. Each generation
-and judge call is recorded separately. Extra takes cost the same as ordinary generation.
+budget, rate limits and usage ledger. Any `free:*` or `auto:*` judge excludes the
+Gemini provider and model IDs containing `gemini` (case-insensitive). Opaque provider
+routers (`openrouter/free`, `openrouter/auto`, `orcarouter/free`) are also excluded
+because they cannot guarantee that exclusion. Only a concrete Gemini model explicitly
+named in the request or `IMAGE_QA_JUDGE_MODEL` may use Gemini. This restriction applies
+only during judge dispatch; ordinary chat is unchanged. With no eligible candidate,
+QA returns the image with `judge_error`. Each generation and judge call is recorded
+separately. Extra takes cost the same as ordinary generation.
 
 Every image receives `quality` with `score`, `passed`, `attempts`, `issues` and
 `judge_model`. Quoted text in the original prompt (straight or curly quotes) is
 compared with the judge's transcription using normalized Levenshtein similarity;
 `text_similarity` is included and limits the final score. A failing image is retried
 on the exact provider/model that produced it, with targeted fixes appended to the
-original prompt. The best scored image wins; passing images are not retried.
-New takes derive distinct upstream idempotency keys when one was supplied.
+original prompt. Empty fixes fall back to joined issues (up to 300 characters);
+with no fixes or issues the prompt is unchanged. The best scored image wins; passing images are not retried.
+Images run through independent generate/judge/retry pipelines, up to four at once,
+with results kept in image-index order. When supplied, the original idempotency key
+is retained for image 0's first take; other takes derive distinct, deterministic keys
+from the original key, image index and attempt number.
 `X-MultiLLM-Image-QA` reports `attempts=<total> best=<score>` on synchronous replies.
 
-Judge failures return the generated image with `quality.judge_error`; a budget or
-allowance refusal stops further takes and adds `quality.stopped_reason`. Images are
+Judge failures return an ungraded image with `quality.judge_error`; a failed judge
+on a retry keeps the prior best grade and reports `stopped_reason: "judge_error"`. A budget or
+allowance refusal stops each affected image's further takes and adds
+`quality.stopped_reason`. If admission or generation fails before an image exists,
+a partial success includes `errors` entries with the original `index`, `error` and,
+when applicable, `stopped_reason`; batch items preserve these entries. If every
+image fails to generate, the request
+returns the generation error. Images are
 judged from their bytes, using a data URL capped at 4 MiB of decoded image data.
 Larger images are reduced with Pillow. When reduction fails, owned R2 storage supplies
 a signed link and `quality.judge_image_source: "signed_url"`. Provider URL results
-need media storage to import the image; otherwise QA reports a judge error. Responses
+are fetched in memory through the SSRF-safe Worker fetch (up to 50 MiB);
+only signed-URL fallback requires a storage write. Responses
 without a usable score report `best=unknown`. Asynchronous results retain the same
-per-image quality metadata. QA processes images sequentially within an item; batch
-items still run up to four at a time. Large QA requests may take substantially longer
+per-image quality metadata. Judge parsing accepts one JSON markdown fence, extra keys,
+missing text_accuracy and finite numeric score strings, and truncates bounded text
+fields; duplicate keys and content over 8 KiB are rejected. Batch items also run up
+to four at a time, each with its own image-pipeline bound. Large QA requests may take substantially longer
 than a single image; prefer asynchronous batches for those requests.
 
 ### Failover
