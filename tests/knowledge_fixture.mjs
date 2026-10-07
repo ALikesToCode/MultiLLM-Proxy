@@ -12,8 +12,9 @@ class Storage {
   }
   async delete(key) { this.values.delete(key); }
   async list({ prefix, limit = Infinity, startAfter }) {
-    return new Map([...this.values].filter(([key]) => key.startsWith(prefix) && (!startAfter || key > startAfter))
-      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).slice(0, limit).map(([key, value]) => [key, structuredClone(value)]));
+    const records = [...this.values].filter(([key]) => key.startsWith(prefix) && (!startAfter || key > startAfter));
+    if (Number.isFinite(limit) || startAfter) records.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    return new Map(records.slice(0, limit).map(([key, value]) => [key, structuredClone(value)]));
   }
   transaction(callback) {
     const result = this.pending.then(() => callback(this));

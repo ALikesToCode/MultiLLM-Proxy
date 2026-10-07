@@ -83,10 +83,12 @@ async function listAll(tx, prefix, maximum) {
   const records = new Map();
   let startAfter;
   while (records.size < maximum) {
-    const page = await tx.list({ prefix, limit: Math.min(PAGE_SIZE, maximum - records.size),
+    const limit = Math.min(PAGE_SIZE, maximum - records.size);
+    const page = await tx.list({ prefix, limit,
       ...(startAfter ? { startAfter } : {}) });
     if (!page.size) return records;
     for (const [key, value] of page) records.set(key, value);
+    if (page.size < limit) return records;
     startAfter = [...page.keys()].at(-1);
   }
   if ((await tx.list({ prefix, startAfter, limit: 1 })).size) {
