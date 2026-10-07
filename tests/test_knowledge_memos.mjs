@@ -108,6 +108,16 @@ test("live-only answers are memoized and served before their source publishes", 
   assert.equal(f.counts.providers, 1);
 });
 
+test("unpublished memo backing follows retrieval's published-only current-revision rule", async t => {
+  const f = await liveSetup(t);
+  const first = await f.run();
+  await f.published();
+  const artifact = await f.authority.call("artifact.get", { id: first.excerpts[0].artifact_id });
+  assert.equal(artifact.status, "live");
+  assert.notEqual((await f.storage.get(`source:${artifact.source_id}`)).current_artifact, artifact.id);
+  assert.equal((await f.run()).path, "memo");
+});
+
 test("publishing a memo's live backing preserves it; a later published revision invalidates it", async t => {
   const f = await liveSetup(t);
   const first = await f.run();
@@ -199,7 +209,7 @@ test("memo matches require identical product, version, repository and mode, and 
   assert.equal(f.local.find({ kind: "semantic", request: request({ ...f.query, token_budget: 256 }), embedding: quantizeEmbedding([1, 0, 0]), similarity: 0.92 }), null);
 });
 
-for (const reason of ["hash", "superseded", "expired", "missing", "ttl", "source_disabled", "provider_disabled", "host_revoked"]) {
+for (const reason of ["hash", "superseded", "expired", "missing", "ttl", "source_disabled", "provider_disabled", "retention_disabled", "expiring", "citation_expired", "host_revoked"]) {
   test(`invalid ${reason} memo is deleted and retrieval continues`, async t => {
     const f = await setup(t);
     await f.run();
@@ -209,12 +219,20 @@ for (const reason of ["hash", "superseded", "expired", "missing", "ttl", "source
     if (reason === "hash") await f.storage.put(key, { ...artifact, content_hash: "c".repeat(64) });
     if (reason === "missing") await f.storage.delete(key);
     if (reason === "expired") await f.storage.put(key, { ...artifact, expires_at: new Date(Date.now() - 1000).toISOString() });
+    if (reason === "expiring") await f.storage.put(key, { ...artifact, status: "expiring" });
+    if (reason === "citation_expired") {
+      const time = new Date(Date.now() - 1000).toISOString();
+      saved.citations[0].expires_at = time;
+      saved.bundle.excerpts[0].expires_at = time;
+      f.local.put(saved);
+    }
     if (["superseded", "source_disabled"].includes(reason)) {
       const source = await f.storage.get(`source:${f.source.id}`);
       await f.storage.put(`source:${source.id}`, reason === "superseded" ? { ...source, current_artifact: "c".repeat(64) } : { ...source, enabled: false });
     }
     if (reason === "ttl") { saved.created_at = new Date(Date.now() - 73 * 3600000).toISOString(); f.local.put(saved); }
     if (reason === "provider_disabled") { f.policy.providers.firecrawl.enabled = false; await f.storage.put("policy", f.policy); }
+    if (reason === "retention_disabled") { f.policy.providers.firecrawl.retention_allowed = false; await f.storage.put("policy", f.policy); }
     if (reason === "host_revoked") { f.policy.allowed_hosts = ["react.dev"]; await f.storage.put("policy", f.policy); }
     const deleted = [];
     const memos = { call: (operation, payload) => {
@@ -408,4 +426,14 @@ test("slow optional memo stages are bounded and do not fail successful retrieval
   f.env.KNOWLEDGE_MEMOS = { idFromName: () => { throw new Error("synthetic binding fault"); } };
   const unavailable = await f.run(f.query, { memos: undefined });
   assert.equal(unavailable.status, "ok");
+});
+
+test("memo validation fences the request's policy revision", async t => {
+  const f = await setup(t);
+  await f.run();
+  const { citations } = f.local.find({ request: f.query, kind: "exact" }).record;
+  const policy_revision = f.policy.revision;
+  assert.equal((await f.authority.call("memos.validate", { citations, policy_revision })).valid, true);
+  await f.storage.put("policy", { ...f.policy, revision: policy_revision + 1 });
+  assert.equal((await f.authority.call("memos.validate", { citations, policy_revision })).valid, false);
 });

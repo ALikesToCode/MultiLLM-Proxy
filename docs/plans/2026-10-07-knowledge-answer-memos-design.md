@@ -84,7 +84,9 @@ failures cannot. Provider-context-only answers cannot create memos.
 Before storing, validate the cited manifests with the same batched authority
 operation. Retained live artifacts can back memos before publication under the
 same rule as cached answers. Publishing that artifact preserves eligibility;
-a later published replacement invalidates its memo backing.
+a later published replacement invalidates its memo backing. An artifact that
+remains unpublished is still eligible even if another revision publishes; the
+shared retrieval rule checks current revision only for published artifacts.
 
 A small replaceable local function rejects private-key headers and common key
 prefixes. Such queries perform neither memo lookup, embedding nor writes.
