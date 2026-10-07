@@ -53,6 +53,14 @@ Scanning a bounded prefix cannot guarantee secrets beyond that prefix are caught
 | `firewallFetch` in the edge | Direct OpenCode, LinkAPI and Codex-easy handlers; roleplay generation, retries and compaction dispatched outside the Container |
 | Knowledge client / edge / private service ingress | `/v1/knowledge/*`, `/mcp` tool arguments, native provider tools and retrieval/Alexandria fan-out |
 
+Direct OpenCode, LinkAPI, Codex-easy and roleplay authenticate environment keys without
+resolving dashboard account metadata, so they use the global scan mode. The Knowledge
+bootstrap-admin shortcut and integration credentials also use the global mode; D1
+dashboard-account authentication carries its per-key override. Flask account routes
+honor stored overrides, including the stored bootstrap-admin account. Applying that
+override to environment-key edge shortcuts requires a shared, bounded account-policy
+lookup and remains a follow-up.
+
 Kimi Code uses the Container; it has no direct edge provider dispatch. Container-forwarded
 requests are not scanned at the edge. Cloudflare AI requests use the Container check
 before the private AI binding; the binding does not repeat it. Media downloads/uploads,
