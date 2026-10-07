@@ -6,8 +6,10 @@ export const MAX_BYTES = 4_194_304;
 const MAX_FINDINGS = 4096, MAX_NODES = 100_000, MAX_DEPTH = 64;
 const PATTERNS = Object.entries(patterns).map(([type, pattern]) => [type, new RegExp(pattern, "g")]);
 const KEY_MARKER = /-----(BEGIN|END) ([A-Z0-9 ]{0,32}PRIVATE KEY)-----/g;
-const ASSIGN = /(?<![A-Za-z0-9_.-])["']?([A-Za-z_][A-Za-z0-9_.-]{0,127})["']?[ \t]*[=:][ \t]*["']?([^\s"',;}{]{12,4096})/g;
-const FIELD = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH/i;
+const ASSIGN = /(?<![A-Za-z0-9_.-])["']?([A-Za-z_][A-Za-z0-9_.-]{0,127})["']?[ \t]*[=:][ \t]*(?:["']([^"'\r\n]{0,4096})["']|([^\s"',;}{]{12,4096}))/g;
+const FIELD_SEGMENTS = new Set(["key", "apikey", "token", "secret", "password", "passwd", "pwd", "credential", "credentials", "auth", "bearer"]);
+const LITERAL = /^[A-Za-z0-9+/=_.~:@!#$%^&*-]+$(?![\s\S])/;
+const REFERENCE_PREFIXES = ["process.env", "os.environ", "env(", "getenv", "$", "%"];
 const EXAMPLE = /xxx|your_|example|placeholder|changeme|\*\*\*|REDACTED|dummy/i;
 const UUID = /^[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$/;
 const BINARY_FIELDS = new Set(["b64_json", "audio", "data", "image", "images"]);
@@ -32,9 +34,15 @@ function validDataUrl(value) {
 const skipped = (value, field = "") => (DATA_URL.test(value) && validDataUrl(value))
   || (BINARY_FIELDS.has(field) && value.length >= 128 && /^[A-Za-z0-9+/=\r\n]+$/.test(value));
 
+function secretField(name) {
+  return name.replace(/([A-Z])([A-Z][a-z])/g, "$1_$2").replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .split(/[_.-]/).some(part => FIELD_SEGMENTS.has(part.toLowerCase()));
+}
+
 function heuristic(value) {
   const chars = Array.from(value);
-  if (chars.length < 12 || example(value)) return false;
+  if (chars.length < 12 || !LITERAL.test(value) || !/[0-9]/.test(value) || !/[A-Za-z]/.test(value)
+    || REFERENCE_PREFIXES.some(prefix => value.startsWith(prefix)) || example(value)) return false;
   const counts = new Map();
   for (const char of chars) counts.set(char, (counts.get(char) ?? 0) + 1);
   let entropy = 0;
@@ -71,8 +79,9 @@ export function scanText(text) {
   }
   ASSIGN.lastIndex = 0;
   while ((match = ASSIGN.exec(text))) {
-    if (FIELD.test(match[1]) && heuristic(match[2])) candidates.push({ type: "secret_assignment", confidence: "heuristic",
-      start: ASSIGN.lastIndex - match[2].length, end: ASSIGN.lastIndex });
+    const value = match[2] ?? match[3], end = ASSIGN.lastIndex - (match[2] === undefined ? 0 : 1);
+    if (secretField(match[1]) && heuristic(value)) candidates.push({ type: "secret_assignment", confidence: "heuristic",
+      start: end - value.length, end });
     if (candidates.length >= MAX_FINDINGS) break;
   }
   const order = (a, b) => a.start - b.start || (a.confidence !== "high") - (b.confidence !== "high") || b.end - a.end;
@@ -145,7 +154,7 @@ function walk(value, maxBytes, redact = false) {
       remaining -= encoder.encode(prefix).length;
       if (prefix.length !== item.length) report.truncated = true;
       let findings = scanText(prefix);
-      if (!findings.length && FIELD.test(field) && heuristic(prefix) && prefix === item) {
+      if (!findings.length && secretField(field) && heuristic(prefix) && prefix === item) {
         findings = [{ type: "secret_field", confidence: "heuristic", start: 0, end: Array.from(prefix).length }];
       }
       for (const finding of findings) {

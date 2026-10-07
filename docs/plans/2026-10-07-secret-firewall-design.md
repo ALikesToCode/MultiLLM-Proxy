@@ -30,8 +30,12 @@ are unprefixed random 32-character alphanumeric strings, so no precise standalon
 can distinguish them from ordinary text. They are detected heuristically in secret fields
 or assignments, rather than redacting arbitrary random prose.
 
-Assignments and JSON/YAML secret fields need 12 characters and Shannon entropy of at
-least 3 bits/character. Examples, placeholders, repeated-character values, UUIDs, data
+Assignments and JSON/YAML secret fields split names on `_`, `.`, `-` and camel-case
+boundaries and require an exact segment: key, apikey, token, secret, password, passwd,
+pwd, credential, credentials, auth or bearer. Values need at least 12 characters,
+both a digit and a letter, only credential-literal punctuation and Shannon entropy
+of at least 3 bits/character. Environment references, expressions and whitespace are
+excluded; ordinary names such as author, monkey, tokenizer and max_tokens do not match. Examples, placeholders, repeated-character values, UUIDs, data
 URLs and image/audio base64 leaves are excluded only when the entire leaf matches
 the binary format. Text scanning excludes findings inside embedded base64 data URLs
 and whole sha256/sha384/sha512 integrity tokens. Pasted SSE `data:` and integrity

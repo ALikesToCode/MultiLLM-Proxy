@@ -14,8 +14,10 @@ MAX_DEPTH = 64
 _PATTERNS = [(name, re.compile(pattern, re.ASCII)) for name, pattern in json.loads(
     (Path(__file__).resolve().parents[1] / "worker/secret-patterns.json").read_text()).items()]
 _KEY_MARKER = re.compile(r"-----(BEGIN|END) ([A-Z0-9 ]{0,32}PRIVATE KEY)-----")
-_ASSIGN = re.compile(r"(?<![A-Za-z0-9_.-])[\"']?([A-Za-z_][A-Za-z0-9_.-]{0,127})[\"']?[ \t]*[=:][ \t]*[\"']?([^\s\"',;}{]{12,4096})")
-_FIELD = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH", re.I)
+_ASSIGN = re.compile('(?<![A-Za-z0-9_.-])["\']?([A-Za-z_][A-Za-z0-9_.-]{0,127})["\']?[ \\t]*[=:][ \\t]*(?:["\']([^"\'\\r\\n]{0,4096})["\']|([^\\s"\',;}{]{12,4096}))')
+_FIELD_SEGMENTS = frozenset({"key", "apikey", "token", "secret", "password", "passwd", "pwd", "credential", "credentials", "auth", "bearer"})
+_LITERAL = re.compile(r"[A-Za-z0-9+/=_.~:@!#$%^&*-]+\Z", re.ASCII)
+_REFERENCE_PREFIXES = ("process.env", "os.environ", "env(", "getenv", "$", "%")
 _EXAMPLE = re.compile(r"xxx|your_|example|placeholder|changeme|\*\*\*|REDACTED|dummy", re.I)
 _UUID = re.compile(r"[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
 _BINARY_FIELDS = frozenset({"b64_json", "audio", "data", "image", "images"})
@@ -41,8 +43,17 @@ def _entropy(value):
     return -sum((n / len(value)) * math.log2(n / len(value)) for n in counts.values())
 
 
+def _secret_field(name):
+    separated = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", name)
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", separated)
+    return any(part.lower() in _FIELD_SEGMENTS for part in re.split(r"[_.-]", separated))
+
+
 def _heuristic(value):
-    return len(value) >= 12 and not _example(value) and _entropy(value) >= 3.0
+    return (len(value) >= 12 and bool(_LITERAL.fullmatch(value))
+            and bool(re.search(r"[0-9]", value)) and bool(re.search(r"[A-Za-z]", value))
+            and not value.startswith(_REFERENCE_PREFIXES) and not _example(value)
+            and _entropy(value) >= 3.0)
 
 
 def _valid_data_url(value):
@@ -85,8 +96,9 @@ def scan_text(text):
         if len(candidates) >= MAX_FINDINGS:
             break
     for match in _ASSIGN.finditer(text):
-        if _FIELD.search(match[1]) and _heuristic(match[2]):
-            candidates.append((match.start(2), match.end(2), "secret_assignment", "heuristic"))
+        group = 2 if match[2] is not None else 3
+        if _secret_field(match[1]) and _heuristic(match[group]):
+            candidates.append((match.start(group), match.end(group), "secret_assignment", "heuristic"))
         if len(candidates) >= MAX_FINDINGS:
             break
     # Walk ordered spans once; only candidates wholly inside binary/integrity text
@@ -158,7 +170,7 @@ def _walk(value, max_bytes, redact=False):
             if len(prefix) != len(item):
                 report["truncated"] = True
             findings = scan_text(prefix)
-            if not findings and _FIELD.search(field) and _heuristic(prefix) and prefix == item:
+            if not findings and _secret_field(field) and _heuristic(prefix) and prefix == item:
                 findings = [{"type": "secret_field", "confidence": "heuristic", "start": 0, "end": len(prefix)}]
             for finding in findings:
                 report[finding["confidence"]] += 1
