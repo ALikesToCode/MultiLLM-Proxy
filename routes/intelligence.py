@@ -130,6 +130,10 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
     try:
         reject_idempotency()
         policy = load_policy()
+        from services.judge_routing import judge_candidate_allowed
+
+        policy = {**policy, "candidates": [candidate for candidate in policy["candidates"]
+                                           if judge_candidate_allowed(candidate["model"])]}
         if len(request.get_data(cache=True)) > policy["max_request_bytes"]:
             raise GatewayError(
                 "request_too_large",

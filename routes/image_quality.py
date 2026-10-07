@@ -37,6 +37,8 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
     if expected:
         quality["text_similarity"] = None
     response = None
+    previous_exclusion = getattr(g, "image_qa_exclude_gemini", False)
+    g.image_qa_exclude_gemini = options.judge_model.startswith(("free:", "auto:"))
     try:
         source, signed_url = image_source(entry, model)
         if signed_url:
@@ -61,6 +63,7 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
         logger.warning("Image judge failed (%s)", type(error).__name__)
         return quality, ""
     finally:
+        g.image_qa_exclude_gemini = previous_exclusion
         if response is not None:
             response.close()
 

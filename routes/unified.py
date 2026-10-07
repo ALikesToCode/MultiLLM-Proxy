@@ -235,6 +235,10 @@ def _validate_direct_chat_target(
     proxy_service_cls,
     model_id: str,
 ) -> str:
+    from services.judge_routing import judge_candidate_allowed
+
+    if not judge_candidate_allowed(model_id):
+        raise APIError("Model is excluded from routed image judging", status_code=503)
     provider, _, _ = _resolve_enabled_model(app, model_id)
     _provider_token(app, auth_service_cls, proxy_service_cls, provider)
     return provider

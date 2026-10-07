@@ -240,7 +240,10 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
         raise APIError("Free routes do not accept query parameters", status_code=400)
     model = payload["model"]
     tools = tool_request(payload)
-    candidates = free_candidates(app.config, vision=FREE_MODELS[model], tools=tools)
+    from services.judge_routing import judge_candidate_allowed
+
+    candidates = [candidate for candidate in free_candidates(app.config, vision=FREE_MODELS[model], tools=tools)
+                  if judge_candidate_allowed(candidate.id)]
     # Look up credentials only through the existing server-side store. Caller
     # headers are never forwarded, and keys are never included in pool status.
     configured = [
