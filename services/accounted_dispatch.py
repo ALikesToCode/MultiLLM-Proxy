@@ -1,4 +1,4 @@
-"""Admission and usage accounting for gateway-owned, non-streaming subrequests."""
+"""Admission and usage accounting for gateway-owned subrequests."""
 
 import json
 import time
@@ -25,7 +25,7 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
     user = getattr(g, "authenticated_user", None) or {}
     model = payload["model"]
     if not key_controls.model_allowed(user, model):
-        raise APIError("This API key is not allowed to use the QA model", 403,
+        raise APIError("This API key is not allowed to use the subrequest model", 403,
                        payload={"error": "model_not_allowed"})
     input_tokens = RateLimitService.estimate_input_tokens(payload)
     output_tokens = RateLimitService.requested_output_tokens(payload) or (700 if kind == "chat" else 0)
@@ -57,9 +57,23 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
                 raise APIError(decision.message, decision.status_code, payload={"error": decision.error})
         response = dispatch(payload)
         body = request_accounting._json_body(response)
-        context.selected = response.headers.get("X-MultiLLM-Auto-Selected-Model") or getattr(g, "multillm_model", None)
-        request_accounting._record(context, response.status_code, request_accounting._usage_from(body),
-                                   request_accounting._image_count(body) if kind == "images" else None)
+        context.selected = (response.headers.get("X-MultiLLM-Auto-Selected-Model") or response.headers.get("X-MultiLLM-Model")
+                            or getattr(g, "multillm_model", None) or request_accounting._reported_model(body))
+        if getattr(g, "cascade_deadline", None) is not None and context.selected:
+            response.headers.setdefault("X-MultiLLM-Model", context.selected)
+        if response.is_streamed:
+            # Reuse terminal-usage sniffing and close-time settlement for final tiers.
+            outer = getattr(g, "usage_context", None)
+            try:
+                g.usage_context = context
+                if context.selected:
+                    g.multillm_model = context.selected
+                response = request_accounting.finish(response)
+            finally:
+                g.usage_context = outer
+        else:
+            request_accounting._record(context, response.status_code, request_accounting._usage_from(body),
+                                       request_accounting._image_count(body) if kind == "images" else None)
         return response
     except Exception as error:
         if response is not None:

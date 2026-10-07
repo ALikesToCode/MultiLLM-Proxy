@@ -95,7 +95,7 @@ def with_chat_tool_repair(dispatch):
         model = payload.get("model", "unknown")
         provider = model.split(":", 1)[0] if isinstance(model, str) else "unknown"
         def reask(body):
-            if getattr(g, "tool_repair_reasked", False):
+            if getattr(g, "cascade_deadline", None) is not None or getattr(g, "tool_repair_reasked", False):
                 return SKIP_REASK
             g.tool_repair_reasked = True
             return dispatch(app, auth, metrics, proxy, body, **kwargs)
@@ -154,7 +154,7 @@ def with_native_tool_repair(dispatch):
             return response
 
         def reask(body):
-            if getattr(g, "tool_repair_reasked", False):
+            if getattr(g, "cascade_deadline", None) is not None or getattr(g, "tool_repair_reasked", False):
                 return SKIP_REASK
             conversation = translate_request(payload, source, CHAT)
             conversation["messages"] = [*conversation.get("messages", []), *body["messages"]]

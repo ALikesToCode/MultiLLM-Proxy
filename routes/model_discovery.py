@@ -6,6 +6,7 @@ from error_handlers import APIError
 from route_helpers import api_auth_required, login_required
 from routes.auto_routes import openai_auto_route_models
 from services.auto_route_service import AutoRouteService
+from services.cascade_service import CascadeService
 from services.free_model_policy import free_model_aliases
 from services.intelligence_policy import DEFAULT_POLICY, model_advertisement
 from services.intelligence_store import IntelligenceStore
@@ -33,6 +34,8 @@ def register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cl
             if model["status"] != "disabled"
         ]
         models.extend(openai_auto_route_models(catalog))
+        models.extend({"id": config["name"], "object": "model", "created": 0, "owned_by": "multillm-cascade"}
+                      for config in CascadeService.list_routes())
         models.extend(free_model_aliases())
         models = [model for model in models if model["id"] != "auto:intelligence"]
         try:

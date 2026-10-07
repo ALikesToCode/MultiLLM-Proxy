@@ -44,6 +44,7 @@ AUDITED_SETTINGS = {
     "manage_users": ("account.create", frozenset({"POST"}), ("body", "username")),
     "delete_user": ("account.delete", frozenset({"DELETE"}), ("view", "username")),
     "rotate_api_key": ("account.rotate_key", frozenset({"POST"}), ("view", "username")),
+    "admin_cascades": ("cascade.update", frozenset({"PUT"}), ("body", "name")),
     "admin_auto_routes": ("auto_route.update", frozenset({"PUT"}), ("body", "route_id")),
     "admin_auto_route_catalog": ("model_catalog.refresh", frozenset({"POST"}), None),
     "disable_admin_model": ("model.disable", frozenset({"POST"}), ("view", "model_id")),

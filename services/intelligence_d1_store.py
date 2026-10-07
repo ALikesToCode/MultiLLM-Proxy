@@ -22,6 +22,7 @@ _ENDPOINTS = {
     "auth": "http://intelligence.internal/v1/auth",
     "users": "http://intelligence.internal/v1/users",
     "auto_routes": "http://intelligence.internal/v1/auto-routes",
+    "cascades": "http://intelligence.internal/v1/cascades",
     # Control-plane state; see services/control_state_d1.py.
     "rate_limits": "http://intelligence.internal/v1/state/limits",
     "login_attempts": "http://intelligence.internal/v1/state/login",
@@ -57,6 +58,7 @@ _ENDPOINT_SLOTS.update({
     "workbench": _ADMIN_STATE_SLOTS,
     "provider_catalog": _ADMIN_STATE_SLOTS,
     "route_health": threading.BoundedSemaphore(2),
+    "cascades": threading.BoundedSemaphore(4),
     "usage": threading.BoundedSemaphore(4),
 })
 _SLOW_CALL_SECONDS = 2.0
@@ -128,10 +130,10 @@ def _reject_constant(value):
     raise ValueError("Invalid JSON constant")
 
 
-def _decode_response(response, stopped, deadline, success_statuses):
+def _decode_response(response, stopped, deadline, success_statuses, max_bytes=_MAX_BYTES):
     length = response.headers.get("Content-Length")
     if length is not None and (
-        not length.isascii() or not length.isdecimal() or int(length) > _MAX_BYTES
+        not length.isascii() or not length.isdecimal() or int(length) > max_bytes
     ):
         raise storage_unavailable()
     if response.headers.get("Content-Encoding", "identity").lower() != "identity":
@@ -145,7 +147,7 @@ def _decode_response(response, stopped, deadline, success_statuses):
     for chunk in response.iter_content(chunk_size=4096):
         if stopped.is_set() or time.monotonic() >= deadline:
             raise storage_unavailable()
-        if len(body) + len(chunk) > _MAX_BYTES:
+        if len(body) + len(chunk) > max_bytes:
             raise storage_unavailable()
         body.extend(chunk)
     payload = json.loads(
@@ -192,7 +194,8 @@ def _submit(url, body, stopped, deadline, results, slots, success_statuses, time
                 allow_redirects=False,
                 stream=True,
             ) as response:
-                result = _decode_response(response, stopped, deadline, success_statuses)
+                result = _decode_response(response, stopped, deadline, success_statuses,
+                                          524288 if url == _ENDPOINTS["cascades"] else _MAX_BYTES)
         results.put_nowait((True, result))
     except Exception as error:
         failure = (

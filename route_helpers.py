@@ -29,7 +29,7 @@ CORS_DEFAULT_HEADERS = (
     "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, "
     "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
     "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
-    "Idempotency-Key, X-MultiLLM-Image-QA, OpenAI-Beta, OpenAI-Organization, "
+    "Idempotency-Key, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
     "OpenAI-Project, Moderation, Moderation-Model, Redaction, X-App-Name, "
     "X-Billing-Mode, X-BYOK-Provider, X-Client-Request-ID, X-Encryption-Key, "
     "X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, "
@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, "
+    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "

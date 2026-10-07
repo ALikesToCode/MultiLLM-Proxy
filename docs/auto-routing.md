@@ -38,6 +38,12 @@ included ([protocol translation](protocol-translation.md)). Features that need
 server-side state, such as `previous_response_id` or built-in `web_search`,
 return `400` on automatic routes.
 
+## Verification-gated cascades
+
+For escalation after a poor successful answer, use the separate
+[`cascade:<name>` routes](cascades.md). Cascades verify non-final tiers and share
+automatic routing, key controls, accounting, protocol translation and failover.
+
 ## Image generation
 
 `POST /v1/images/generations` accepts an `auto:<name>` model; `auto:image`,

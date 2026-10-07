@@ -164,6 +164,21 @@
 
     {% if user and user.is_admin %}
     <div class="operator-grid">
+        <article class="panel span-12" id="cascade-panel" data-endpoint="{{ url_for('admin_cascades') }}">
+            <header class="panel__header"><div><h2>Verification-gated cascades</h2>
+                <p>Try cheaper chat models first and advance when an answer fails a check. The final tier always answers.</p></div></header>
+            <div class="panel__body">
+                <label class="field-label" for="cascade-select">Saved cascade</label>
+                <select id="cascade-select" class="field-select"><option value="">New cascade</option></select>
+                <form id="cascade-form">
+                    <label class="field-label" for="cascade-config">Cascade configuration (JSON)</label>
+                    <textarea id="cascade-config" class="field-input" rows="14" spellcheck="false" aria-describedby="cascade-help" required></textarea>
+                    <p id="cascade-help" class="field-help">Use 2–4 tiers in cost order. Checks: complete, json, tools, no_refusal, agreement, judge. Agreement adds a call; judge requires a model and defaults to a minimum score of 7.</p>
+                    <button type="submit" class="button button--primary">Save cascade</button>
+                </form>
+                <p id="cascade-status" role="status" aria-live="polite"></p>
+            </div>
+        </article>
         <article class="panel span-12" id="auto-route-panel">
             <header class="panel__header">
                 <div>
@@ -434,5 +449,6 @@ NAVYAI_API_KEY=your-key</code></pre>
 {% if user and user.is_admin %}
 <script src="{{ url_for('static', filename='js/auto-route-catalog.js', v='9') }}"></script>
 <script src="{{ url_for('static', filename='js/auto-routes.js', v='7') }}"></script>
+<script src="{{ url_for('static', filename='js/cascades.js', v='1') }}"></script>
 {% endif %}
 {% endblock %}

@@ -4,6 +4,8 @@ import json
 import logging
 import queue
 import threading
+import time
+from itertools import chain
 
 from flask import Response, g, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -125,6 +127,29 @@ def stream_response(gateway):
     return response
 
 
+def _cascade_stream(gateway, deadline):
+    """Resolve the streaming candidate before headers without changing event bytes."""
+    response = stream_response(gateway)
+    source = response.response
+    prefix, size = [], 0
+    for _ in range(4096):
+        if time.monotonic() >= deadline or size >= 65536:
+            break
+        try:
+            event = next(source)
+        except StopIteration:
+            break
+        prefix.append(event)
+        size += len(event.encode("utf-8"))
+        if gateway.emitted:
+            break
+    response.response = chain(prefix, source)
+    response.call_on_close(source.close)
+    if gateway.emitted and gateway.selected:
+        response.headers["X-MultiLLM-Model"] = gateway.selected["model"]
+    return response
+
+
 def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
     gateway = None
     try:
@@ -134,6 +159,11 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
 
         policy = {**policy, "candidates": [candidate for candidate in policy["candidates"]
                                            if judge_candidate_allowed(candidate["model"])]}
+        cascade_deadline = getattr(g, "cascade_deadline", None)
+        if cascade_deadline is not None:
+            from services.key_controls import model_allowed
+            policy["candidates"] = [candidate for candidate in policy["candidates"]
+                                    if model_allowed(g.authenticated_user, candidate["model"])]
         if len(request.get_data(cache=True)) > policy["max_request_bytes"]:
             raise GatewayError(
                 "request_too_large",
@@ -156,9 +186,13 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
             metrics,
             cancelled=CallerCancellation(request.environ),
         )
-        gateway.tool_repair.mode = repair_mode(request.headers, app.config)
+        if cascade_deadline is not None:
+            gateway.deadline = min(gateway.deadline, cascade_deadline)
+            gateway.tool_repair.mode = "repair"
+        else:
+            gateway.tool_repair.mode = repair_mode(request.headers, app.config)
         if parsed.payload.get("stream"):
-            return stream_response(gateway)
+            return _cascade_stream(gateway, cascade_deadline) if cascade_deadline is not None else stream_response(gateway)
         result = list(gateway.events())
         response = Response(json.dumps(result[-1]), content_type="application/json")
         if parsed.payload.get("tools"):

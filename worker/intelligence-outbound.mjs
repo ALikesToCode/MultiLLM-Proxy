@@ -2,6 +2,7 @@ import { handleIntelligenceStoreRequest } from "./intelligence-d1.mjs";
 import { handleIntelligenceAuthRequest } from "./intelligence-auth-d1.mjs";
 import { handleControlUsersRequest } from "./control-users-d1.mjs";
 import { handleAutoRoutesRequest } from "./auto-routes-d1.mjs";
+import { handleCascadesRequest } from "./cascades-d1.mjs";
 import { handleControlStateRequest } from "./control-state-d1.mjs";
 import { handleRouteHealthRequest } from "./route-health-d1.mjs";
 import { handleUsageLedgerRequest } from "./usage-ledger-d1.mjs";
@@ -21,6 +22,7 @@ export function handleIntelligenceOutbound(request, env) {
   if (url.pathname === "/v1/auth") return handleIntelligenceAuthRequest(request, env);
   if (url.pathname === "/v1/users") return handleControlUsersRequest(request, env);
   if (url.pathname === "/v1/auto-routes") return handleAutoRoutesRequest(request, env);
+  if (url.pathname === "/v1/cascades") return handleCascadesRequest(request, env);
   if (url.pathname.startsWith("/v1/state/")) return handleControlStateRequest(request, env);
   if (url.pathname === "/v1/route-health") return handleRouteHealthRequest(request, env);
   if (url.pathname === "/v1/usage") return handleUsageLedgerRequest(request, env);

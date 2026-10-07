@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Mapping
 
-from flask import Response, jsonify, request
+from flask import Response, g, jsonify, request
 
 from error_handlers import APIError
 from providers.codex_everywhere import with_codex_instructions
@@ -61,6 +61,9 @@ from services.media_catalog import (
 from services.media_storage import persist_image_response
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
+from services.cascade_config import is_cascade
+from routes.cascade_deadline import bounded_timeout, check_candidate
+from routes.cascades import dispatch_unified_cascade, register_cascade_admin_routes, validate_cascade_target
 from services.context_optimizer import ContextOptimizationResult
 from services.model_registry import ModelRegistry
 from routes.provider_credentials import (
@@ -91,6 +94,7 @@ RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 
 
 def _resolve_enabled_model(app, model_id: str):
+    check_candidate(model_id)
     provider, provider_model = ModelRegistry.parse_model_id(model_id)
     adapter = get_adapter(provider, app.config["API_BASE_URLS"])
     if not adapter:
@@ -256,6 +260,8 @@ def validate_unified_chat_target(
 
         proxy_service_cls = ProxyService
 
+    if is_cascade(model_id):
+        return validate_cascade_target(app, auth_service_cls, model_id, proxy_service_cls)
     if not AutoRouteService.is_auto_route(model_id):
         return _validate_direct_chat_target(
             app,
@@ -329,7 +335,7 @@ def _send_native_request(
             # only the raw transport keeps a native event stream intact.
             request_kwargs["force_raw_passthrough"] = True
         if request_timeout is not None:
-            request_kwargs["timeout_override"] = request_timeout
+            request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
         return proxy_service_cls.make_request(**request_kwargs)
 
     return _request_with_provider_token_rotation(
@@ -541,7 +547,7 @@ def _dispatch_unified_chat_candidate(
                 "use_cache": False,
             }
             if request_timeout is not None:
-                request_kwargs["timeout_override"] = request_timeout
+                request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
             return send_configured_unified_provider_request(
                 proxy_service_cls,
                 request_kwargs,
@@ -640,6 +646,10 @@ def dispatch_unified_chat_completion(
 ):
     """Dispatch an explicit model or a server-owned chat routing alias."""
     model = payload.get("model")
+    if is_cascade(model):
+        return dispatch_unified_cascade(app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload,
+            request_headers=request_headers, request_args=request_args, request_timeout=request_timeout,
+            adaptive_context=adaptive_context)
     if model == "auto:intelligence" or "routing" in payload:
         return dispatch_intelligence_chat(
             app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload
@@ -701,7 +711,7 @@ def _is_routed_chat_model(payload: dict) -> bool:
         model == "auto:intelligence"
         or "routing" in payload
         or (isinstance(model, str) and model.startswith("free:"))
-        or AutoRouteService.is_auto_route(model)
+        or AutoRouteService.is_auto_route(model) or is_cascade(model)
     )
 
 
@@ -912,6 +922,7 @@ def dispatch_unified_image_generation(
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
     register_intelligence_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls)
     register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls)
+    register_cascade_admin_routes(app, login_required, auth_service_cls)
     register_auto_route_admin_routes(
         app,
         login_required,

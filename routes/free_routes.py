@@ -74,6 +74,8 @@ def _close_upstream(upstream):
 
 
 def _request_candidate(config, auth, proxy, payload, candidate, remaining):
+    from routes.cascade_deadline import bounded_timeout
+    candidate_timeout = bounded_timeout((min(5, remaining), min(60, remaining)))
     token = auth.get_api_key(candidate.provider)
     url = free_chat_url(config, candidate.provider)
     if not token or not url:
@@ -100,7 +102,7 @@ def _request_candidate(config, auth, proxy, payload, candidate, remaining):
         data=json.dumps(upstream_payload, ensure_ascii=False).encode("utf-8"),
         api_provider=candidate.provider,
         use_cache=False,
-        timeout_override=(min(5, remaining), min(60, remaining)),
+        timeout_override=candidate_timeout,
         force_raw_passthrough=True,
     )
 
@@ -165,7 +167,7 @@ def _try_candidate(
         FreeQuotaService.observe(candidate.provider, headers)
         def reask(body):
             seconds = int(deadline - time.monotonic())
-            if seconds < 2 or repair_state["used"] or repair_state["attempts"] >= MAX_ATTEMPTS:
+            if getattr(g, "cascade_deadline", None) is not None or seconds < 2 or repair_state["used"] or repair_state["attempts"] >= MAX_ATTEMPTS:
                 return SKIP_REASK
             repair_state["used"] = True
             repair_state["attempts"] += 1
@@ -244,6 +246,9 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
 
     candidates = [candidate for candidate in free_candidates(app.config, vision=FREE_MODELS[model], tools=tools)
                   if judge_candidate_allowed(candidate.id)]
+    if getattr(g, "cascade_deadline", None) is not None:
+        from services.key_controls import model_allowed
+        candidates = [candidate for candidate in candidates if model_allowed(getattr(g, "authenticated_user", {}) or {}, candidate.id)]
     # Look up credentials only through the existing server-side store. Caller
     # headers are never forwarded, and keys are never included in pool status.
     configured = [
@@ -267,7 +272,8 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
                 }
             }
         ), 503
-    deadline = time.monotonic() + REQUEST_DEADLINE_SECONDS
+    deadline = min(time.monotonic() + REQUEST_DEADLINE_SECONDS,
+                   getattr(g, "cascade_deadline", None) or float("inf"))
     attempts = 0
     repair_state = {"used": False, "attempts": 0}
     failures = []
