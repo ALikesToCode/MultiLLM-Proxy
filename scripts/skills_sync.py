@@ -21,6 +21,8 @@ from services.secret_scan import scan_text
 ROOTS = ("claude", "claude-library", "codex", "agents")
 DEFAULT_ROOTS = dict(zip(ROOTS, ("~/.claude/skills", "~/.claude/skills-library", "~/.codex/skills", "~/.agents/skills")))
 MAX_BATCH_BYTES = 8 * 1024 * 1024 - 4096
+# R2 writes are sequential within a 45-second server deadline.
+MAX_BATCH_FILES = 40
 USER_AGENT = "multillm-skills/1"
 MAX_SKILLS = 2000
 # Mirrors worker/knowledge/skills-validation.mjs. Only SKILL.md limits reject a skill;
@@ -248,14 +250,18 @@ def build_plan(roots, previous):
 
 def batches(plan):
     current = []
+    current_files = 0
     for skill in plan["skills"]:
         candidate = {"skills": current + [skill]}
-        if current and (len(current) >= 16 or len(json.dumps(candidate, ensure_ascii=False).encode()) > MAX_BATCH_BYTES):
+        if current and (len(current) >= 16 or current_files + len(skill["files"]) > MAX_BATCH_FILES
+                        or len(json.dumps(candidate, ensure_ascii=False).encode()) > MAX_BATCH_BYTES):
             yield {"skills": current}
             current = []
+            current_files = 0
         if len(json.dumps({"skills": [skill]}, ensure_ascii=False).encode()) > MAX_BATCH_BYTES:
             raise PlanError("batch_bytes_limit")
         current.append(skill)
+        current_files += len(skill["files"])
     if current:
         yield {"skills": current}
     for offset in range(0, len(plan["delete"]), MAX_SKILLS):

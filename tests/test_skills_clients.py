@@ -106,7 +106,25 @@ def test_size_limits_duplicates_and_batch_bounds(tmp_path):
     assert len(plan["skills"]) == 1
     assert plan["rejected"] == [] and plan["duplicates"] == 1 and plan["conflicts"] == []
     batches = list(sync.batches({"skills": plan["skills"] * 33, "delete": ["old"]}))
-    assert [len(batch["skills"]) for batch in batches] == [16, 16, 1, 0]
+    assert [len(batch["skills"]) for batch in batches] == [13, 13, 7, 0]
+
+
+def test_batch_file_budget_keeps_large_skills_whole(tmp_path):
+    root, _directory = library(tmp_path)
+    skill = sync.build_plan({"agents": root}, {})["skills"][0]
+    skills = [{**skill, "skill_id": str(index), "files": [skill["files"][0]] * count}
+              for index, count in enumerate([40, 1, 39, 2])]
+    batches = list(sync.batches({"skills": skills, "delete": []}))
+    assert [[item["skill_id"] for item in batch["skills"]] for batch in batches] == [["0"], ["1", "2"], ["3"]]
+    assert [sum(len(item["files"]) for item in batch["skills"]) for batch in batches] == [40, 40, 2]
+    assert [item for batch in batches for item in batch["skills"]] == skills
+
+
+def test_batch_skill_limit_still_applies_to_single_file_skills(tmp_path):
+    root, _directory = library(tmp_path)
+    skill = sync.build_plan({"agents": root}, {})["skills"][0]
+    skill["files"] = skill["files"][:1]
+    assert [len(batch["skills"]) for batch in sync.batches({"skills": [skill] * 33, "delete": []})] == [16, 16, 1]
 
 
 @pytest.fixture

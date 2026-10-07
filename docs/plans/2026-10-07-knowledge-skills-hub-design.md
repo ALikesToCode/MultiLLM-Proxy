@@ -158,6 +158,9 @@ SKILL.md SHA-256 hashes increment `duplicates` only; differing hashes yield
 `duplicate_conflict` records with slug, kept root and skipped root, not rejections.
 The client reserves 4 KiB below the 8 MiB transport cap for the private envelope;
 large JSON-escaped text uses base64 so one maximal 5 MiB skill fits a batch.
+Batches contain at most 16 skills and 40 files to reduce deadline rejections
+during sequential R2 uploads. The server allows 45 seconds per request, and each
+skill stays in one batch.
 
 Dry run reads only the selected library and bounded local receipts, prints the
 plan, and does not read a key or contact the service. A receipt file (default
