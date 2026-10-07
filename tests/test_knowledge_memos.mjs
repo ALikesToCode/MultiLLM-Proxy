@@ -437,3 +437,19 @@ test("memo validation fences the request's policy revision", async t => {
   await f.storage.put("policy", { ...f.policy, revision: policy_revision + 1 });
   assert.equal((await f.authority.call("memos.validate", { citations, policy_revision })).valid, false);
 });
+
+test("policy changes and product-site blocks retire memos assembled under the old rules", async t => {
+  const f = await setup(t);
+  await f.run();
+  assert.match(f.local.find({ request: f.query, kind: "exact" }).record.state, /^[a-f0-9]{64}$/);
+  assert.equal((await f.run()).path, "memo");
+  await f.authority.call("product_sites.update", { product: "flask", block: ["unrelated-docs.com"] });
+  assert.notEqual((await f.run()).path, "memo");
+  assert.equal((await f.run()).path, "memo");
+  const policy = await f.storage.get("policy");
+  await f.storage.put("policy", { ...policy, revision: policy.revision + 1 });
+  assert.notEqual((await f.run()).path, "memo");
+  assert.equal((await f.run()).path, "memo");
+  assert.doesNotThrow(() => f.local.put(record(7)));
+  assert.throws(() => f.local.put({ ...record(8), state: "not-a-digest" }), { code: "invalid_memo" });
+});

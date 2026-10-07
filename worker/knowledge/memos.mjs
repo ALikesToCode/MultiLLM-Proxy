@@ -70,7 +70,8 @@ class MemoSession {
     if (!match) return null;
     const { record } = match;
     const age = (Date.now() - Date.parse(record.created_at)) / 1000;
-    let valid = Number.isFinite(age) && age >= 0 && age < (this.policy.memo_ttl_hours ?? 72) * 3600;
+    let valid = Number.isFinite(age) && age >= 0 && age < (this.policy.memo_ttl_hours ?? 72) * 3600
+      && (record.state ?? null) === (this.options.memoState ?? null);
     if (valid) valid = (await bounded(() => this.authority.call("memos.validate", {
       citations: record.citations, policy_revision: this.policy.revision,
     }), deadline)).valid;
@@ -159,7 +160,8 @@ class MemoSession {
     const time = nowIso();
     const record = { id: await digest(JSON.stringify([key, queryNorm, this.request.mode, bundle.token_count])), created_at: time,
       last_hit_at: time, hits: 0, key, query: this.request.query, query_norm: queryNorm, mode: this.request.mode,
-      token_budget: this.request.token_budget, embedding: vector, bundle: saved, citations };
+      token_budget: this.request.token_budget, embedding: vector, bundle: saved, citations,
+      ...(this.options.memoState ? { state: this.options.memoState } : {}) };
     await bounded(() => this.store.call("put", { record }), deadline);
   }
 

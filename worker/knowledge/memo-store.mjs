@@ -50,9 +50,10 @@ export function parseMemoPurge(payload) {
 }
 
 function validateMemo(record) {
-  fields(record, ["id", "created_at", "last_hit_at", "hits", "key", "query", "query_norm", "mode", "token_budget", "embedding", "bundle", "citations"],
+  fields(record, ["id", "created_at", "last_hit_at", "hits", "key", "query", "query_norm", "mode", "token_budget", "embedding", "bundle", "citations", "state"],
     ["id", "created_at", "last_hit_at", "hits", "key", "query", "query_norm", "mode", "token_budget", "embedding", "bundle", "citations"]);
   if (!/^[a-f0-9]{64}$/.test(record.id ?? "")) fail("invalid_memo", "Invalid memo identity.");
+  if (record.state !== undefined && !/^[a-f0-9]{64}$/.test(record.state)) fail("invalid_memo", "Invalid memo policy state.");
   fields(record.key, ["product", "version", "repository"], ["product", "version", "repository"]);
   const request = parseQuery({ ...record.key, query: record.query, mode: record.mode, token_budget: record.token_budget });
   if (memoSecretQuery(record.query) || record.query_norm !== memoQueryNorm(record.query)

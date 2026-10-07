@@ -1,5 +1,5 @@
 import { fail, KnowledgeError, publicUrl } from "./contracts.mjs";
-import { createArtifact, site, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
+import { createArtifact, digest, site, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
 import { confirmSnapshot, metered } from "./operations.mjs";
@@ -7,6 +7,7 @@ import { cacheKey, productSitesCacheState, readCache, writeCache } from "./cache
 import { filterProviderSites } from "./provider-site-filter.mjs";
 import { retentionHours, sourceReviewed } from "./policy.mjs";
 import { memoSession } from "./memos.mjs";
+import { productSitesDecision } from "./product-sites.mjs";
 import { eligibleArtifact, eligibleCandidate } from "./artifact-eligibility.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
@@ -318,9 +319,12 @@ async function runRetrieval(env, authority, principal, request, options, signal,
         outcome: confirmed ? "completed" : "unconfirmed", measurement: "configured_operation_bound" });
     }
   };
+  // A policy change or a product-site block retires memos assembled under the old rules.
+  const memoState = await digest(JSON.stringify([snapshot.policy.revision, snapshot.policy.product_sites_mode,
+    snapshot.policy.product_sites_mode === "off" ? [] : productSitesDecision(snapshot.product_sites).blocked]));
   // Memo stages have their own bounds; background writes can outlive this request.
   const memos = memoSession(env, meterAuthority, request, snapshot.policy,
-    { ...options, memoWriteDeadlineAt: started + RETRIEVAL_DEADLINE_MS - 100 }, started, state.usage);
+    { ...options, memoState, memoWriteDeadlineAt: started + RETRIEVAL_DEADLINE_MS - 100 }, started, state.usage);
   const memoLookup = await memos.lookup();
   if (memoLookup.bundle) return memoLookup.bundle;
   const cache = options.cache ?? globalThis.caches?.default;
