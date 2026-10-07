@@ -192,8 +192,7 @@ Verified against public official documentation on 2026-10-07:
 
 - [Claude Code hooks](https://code.claude.com/docs/en/hooks): UserPromptSubmit
   input includes prompt; hookSpecificOutput.additionalContext adds prompt context.
-- [Codex hooks](https://learn.chatgpt.com/docs/hooks), reached through
-  [the official developer reference](https://developers.openai.com/codex/hooks):
+- [Codex hooks](https://developers.openai.com/codex/hooks):
   UserPromptSubmit input adds turn_id and prompt; the same JSON context format
   is accepted. Codex discovers hooks.json next to active config layers and
   requires review/trust for non-managed hooks. Each model-visible hook output

@@ -187,7 +187,7 @@ Review and trust a new Codex hook through `/hooks`. Both clients accept
 `hookSpecificOutput.additionalContext` for UserPromptSubmit. Codex defaults to
 approximately 2,500 tokens per model-visible hook message; this hook stays well
 below it. See the official [Claude Code hook reference](https://code.claude.com/docs/en/hooks)
-and [Codex hook reference](https://learn.chatgpt.com/docs/hooks). Whether Codex hooks
+and [Codex hook reference](https://developers.openai.com/codex/hooks). Whether Codex hooks
 fire under the T3 app-server remains unverified; retrieval through MCP works
 without a hook.
 
