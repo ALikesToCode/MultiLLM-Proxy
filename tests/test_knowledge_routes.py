@@ -144,7 +144,7 @@ def test_mcp_initialize_and_discovery(app, keys):
 
     assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search",
         "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt",
-        *(f"knowledge_{name}" for name in NATIVE_TOOLS), "knowledge_artifact",
+        *(f"knowledge_{name}" for name in NATIVE_TOOLS), "knowledge_skills_find", "knowledge_skills_get", "knowledge_artifact",
         "knowledge_handoff_save", "knowledge_handoff_get", "knowledge_handoff_list", "knowledge_handoff_delete"]
     assert tools[4]["annotations"]["readOnlyHint"] is False
     mutating = {tool["name"] for tool in tools if not tool["annotations"]["readOnlyHint"]}
@@ -159,7 +159,7 @@ def test_mcp_initialize_and_discovery(app, keys):
 def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app, keys):
     client = app.test_client()
     tools = mcp(client, keys["manager"], "tools/list").json["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_memos_stats", "knowledge_memos_purge", "knowledge_source_register",
+    assert [tool["name"] for tool in tools] == ["knowledge_skills_sync", "knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_memos_stats", "knowledge_memos_purge", "knowledge_source_register",
         "knowledge_source_update", "knowledge_source_refresh", "knowledge_job_cancel", "knowledge_policy_update"]
     assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_status", "knowledge_product_sites_get", "knowledge_memos_stats"})
                for tool in tools)
@@ -634,3 +634,50 @@ def test_handoff_flask_firewall_blocks_before_private_transport(app, keys, path)
     assert response.status_code == 422
     assert secret not in response.get_data(as_text=True)
     transport.assert_not_called()
+
+
+def test_skills_rest_mcp_scope_toolset_and_list_parity(app, keys):
+    client = app.test_client()
+    result = [{"skill_id": "testing", "name": "Testing", "description": "Test guide", "score": 1,
+               "why": ["test"], "files": ["SKILL.md"]}]
+    with patch.object(knowledge, "dispatch", return_value=result) as remote:
+        rest = client.get("/v1/knowledge/skills?query=test&mode=fast&limit=3&roots=agents,codex", headers=bearer(keys["reader"]))
+        assert remote.call_args.args[0] == "skills.find"
+        assert remote.call_args.args[2] == {"query": "test", "mode": "fast", "limit": 3, "roots": ["agents", "codex"]}
+        rpc = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_find", "arguments": {"query": "test", "mode": "fast"}})
+        assert rest.json == json.loads(rpc.json["result"]["content"][0]["text"])
+        assert "structuredContent" not in rpc.json["result"]
+    with patch.object(knowledge, "dispatch", return_value={"text": "Guide", "trust": "operator"}) as remote:
+        response = client.get("/v1/knowledge/skills/testing?path=references/guide.md", headers=bearer(keys["reader"]))
+        assert response.json["trust"] == "operator"
+        assert remote.call_args.args[2] == {"skill_id": "testing", "path": "references/guide.md"}
+    assert client.post("/v1/knowledge/skills", json={"skills": []}, headers=bearer(keys["reader"])).status_code == 403
+    with patch.object(knowledge, "dispatch", return_value={"results": []}) as remote:
+        assert client.post("/v1/knowledge/skills", json={"skills": []}, headers=bearer(keys["manager"])).status_code == 200
+        assert remote.call_args.args[0] == "skills.sync"
+        large = {"skills": [{"files": [{"content": "x" * 100000}]}]}
+        assert client.post("/v1/knowledge/skills", json=large, headers=bearer(keys["manager"])).status_code == 200
+        assert mcp(client, keys["manager"], "tools/call", {"name": "knowledge_skills_sync", "arguments": large}).status_code == 200
+    with patch.object(knowledge, "dispatch") as remote:
+        assert client.get("/v1/knowledge/skills?query=test&query=again", headers=bearer(keys["reader"])).status_code == 400
+        assert client.get("/v1/knowledge/skills?query=test&limit=bad", headers=bearer(keys["reader"])).status_code == 400
+        remote.assert_not_called()
+    listed = client.post("/mcp?toolsets=skills", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=bearer(keys["reader"]))
+    assert [tool["name"] for tool in listed.json["result"]["tools"]] == ["knowledge_skills_find", "knowledge_skills_get"]
+
+
+def test_skills_client_delegates_sync_scan_to_handler_and_retains_normal_scans(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_SERVICE_ENABLED", "true")
+    user = {"username": "synthetic-operator", "scopes": ["knowledge:read", "knowledge:manage"]}
+    token = "gh" + "p_" + "aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5"
+    received = []
+    def submit(body, stopped, deadline, results):
+        received.append(json.loads(body))
+        results.put(({"results": []}, None))
+        knowledge_client._SLOTS.release()
+    with patch.object(knowledge_client, "_submit", side_effect=submit), patch.object(knowledge_client, "protect_payload", side_effect=AssertionError("sync must use handler scanning")):
+        assert knowledge_client.dispatch("skills.sync", user, {"skills": [{"content": token}]}) == {"results": []}
+    assert received[0]["secret_scan_checked"] is True
+    with patch.object(knowledge_client, "protect_payload", return_value={"query": "testing"}) as scan, patch.object(knowledge_client, "_submit", side_effect=submit):
+        knowledge_client.dispatch("skills.find", user, {"query": "testing"})
+        scan.assert_called_once()

@@ -5,6 +5,8 @@ import { runIngestion } from "./ingestion.mjs";
 import { errorReply, fail, fields, KnowledgeError, readJson, reply } from "./contracts.mjs";
 import { logFailure } from "../log.mjs";
 import { HandoffStore } from "./handoff-store.mjs";
+import { SkillsStore } from "./skills-store.mjs";
+import { SYNC_REQUEST_BYTES } from "./skills-validation.mjs";
 import { MemoStore } from "./memo-store.mjs";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 
@@ -63,6 +65,22 @@ export class KnowledgeHandoffs extends DurableObject {
   }
 }
 
+export class KnowledgeSkills extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.skills = new SkillsStore(ctx.storage, env);
+  }
+  async fetch(request) {
+    try {
+      if (request.method !== "POST" || new URL(request.url).pathname !== "/dispatch") fail("not_found", "Unknown skills route.", 404);
+      const body = await readJson(request, SYNC_REQUEST_BYTES);
+      fields(body, ["operation", "payload", "principal"], ["operation", "payload", "principal"]);
+      if (typeof body.principal !== "string" || !body.principal || body.principal.length > 256) fail("invalid_principal", "Invalid skills principal.", 403);
+      return reply(await this.skills.call(body.operation, body.payload, body.principal));
+    } catch (error) { return failure("knowledge_skills_failed", error); }
+  }
+}
+
 export class KnowledgeIngestion extends WorkflowEntrypoint {
   async run(event, step) { return runIngestion(this.env, step, event.payload.job_id); }
 }
@@ -73,7 +91,8 @@ export default {
       const url = new URL(request.url);
       if (request.method !== "POST" || url.origin !== "http://knowledge.internal" || url.pathname !== "/v1/dispatch"
         || url.search || url.hash || url.username || url.password) fail("not_found", "Unknown Knowledge route.", 404);
-      const body = await readJson(request);
+      const body = await readJson(request, SYNC_REQUEST_BYTES);
+      if (body.operation !== "skills.sync" && new TextEncoder().encode(JSON.stringify(body)).length > 65536) fail("request_too_large", "Request is too large.", 413);
       let decision;
       const result = await dispatchKnowledge(env, body, { signal: request.signal, waitUntil: promise => ctx.waitUntil(promise), onSecretScan: value => { decision = value; } });
       const response = reply(result);

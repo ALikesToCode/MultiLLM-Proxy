@@ -11,11 +11,12 @@ from route_helpers import api_authenticate_only, login_required
 from routes import knowledge_alexandria as alexandria
 from routes import knowledge_management as management
 from routes import knowledge_mcp as mcp
+from routes import knowledge_skills as skills
 from routes.knowledge_memos import purge_query
 from routes.knowledge_handoffs import register_handoff_routes
 from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
-from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch as _dispatch
+from services.knowledge_client import MAX_REQUEST_BYTES, SYNC_REQUEST_BYTES, KnowledgeError, dispatch as _dispatch
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _CATALOGUE = mcp.catalogue()
@@ -39,18 +40,24 @@ def _invalid_number(_value):
     raise ValueError("Invalid JSON number")
 
 
-def _body():
+def _body(max_bytes=MAX_REQUEST_BYTES, *, mcp_body=False):
+    limit_message = f"The Knowledge request exceeds {max_bytes // 1024} KiB."
     if not request.is_json:
         raise KnowledgeError("invalid_request", "Use an application/json request body.", 415)
-    if request.content_length is not None and request.content_length > MAX_REQUEST_BYTES:
-        raise KnowledgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413)
-    raw = request.stream.read(MAX_REQUEST_BYTES + 1)
-    if len(raw) > MAX_REQUEST_BYTES:
-        raise KnowledgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413)
+    if request.content_length is not None and request.content_length > max_bytes:
+        raise KnowledgeError("request_too_large", limit_message, 413)
+    raw = request.stream.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise KnowledgeError("request_too_large", limit_message, 413)
     try:
         payload = json.loads(raw, object_pairs_hook=_strict_fields, parse_constant=_invalid_number)
     except (ValueError, UnicodeDecodeError):
         raise KnowledgeError("invalid_json", "The request body is not valid JSON.", 400) from None
+    if (mcp_body and len(raw) > MAX_REQUEST_BYTES
+            and not (isinstance(payload, dict) and payload.get("method") == "tools/call"
+                     and isinstance(payload.get("params"), dict)
+                     and payload["params"].get("name") == "knowledge_skills_sync")):
+        raise KnowledgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413)
     if not isinstance(payload, dict):
         raise KnowledgeError("invalid_request", "The request body must be an object.", 400)
     return payload
@@ -193,15 +200,17 @@ def _mcp_tool(identifier, params):
         elif operation in mcp.NATIVE_OPERATIONS:
             # The Knowledge service validates provider tools against their shared contract.
             payload = arguments
-        elif tool_name in management.OPERATIONS or operation.startswith("handoffs."):
+        elif tool_name in management.OPERATIONS or operation.startswith("handoffs.") or tool_name in skills.OPERATIONS:
             # The private service validates these contracts identically for REST and MCP.
             payload = arguments
         else:
             payload = _query(arguments)
         result = dispatch(operation, g.authenticated_user, payload)
         shown = _agent_evidence(result) if operation in ("context", "search") else result
-        tool_result = {"content": [{"type": "text", "text": shown["markdown"] if operation == "handoffs.get" and shown.get("record") else json.dumps(shown, ensure_ascii=False)}], "isError": bool(result.get("error")),
-                       "structuredContent": shown}
+        text = shown["markdown"] if operation == "handoffs.get" and isinstance(shown, dict) and shown.get("record") else json.dumps(shown, ensure_ascii=False)
+        tool_result = {"content": [{"type": "text", "text": text}], "isError": bool(result.get("error")) if isinstance(result, dict) else False}
+        if isinstance(shown, dict):
+            tool_result["structuredContent"] = shown
         return _rpc_result(identifier, tool_result)
     except KnowledgeError as error:
         return _rpc_result(identifier, {"isError": True, "content": [{"type": "text",
@@ -220,7 +229,7 @@ def _mcp():
     if protocol is not None and protocol not in mcp.PROTOCOL_VERSIONS:
         return _rpc_error(None, -32600, "Unsupported MCP protocol version.", 400)
     try:
-        body = _body()
+        body = _body(SYNC_REQUEST_BYTES, mcp_body=True)
     except KnowledgeError as error:
         return _rpc_error(None, -32700 if error.code == "invalid_json" else -32600,
                           error.message, error.status)
@@ -293,6 +302,20 @@ def register_knowledge_routes(app, csrf):
     @api_authenticate_only(required_scope="knowledge:read")
     def knowledge_artifact(artifact_id):
         return jsonify(dispatch("artifact", g.authenticated_user, {"id": _identifier(artifact_id)}))
+
+    def skills_api(skill_id=None):
+        if request.method == "POST":
+            return jsonify(dispatch("skills.sync", g.authenticated_user, _body(SYNC_REQUEST_BYTES)))
+        payload = skills.query(request.args, skill_id)
+        return jsonify(dispatch("skills.get" if skill_id is not None else "skills.find", g.authenticated_user, payload))
+
+    app.add_url_rule("/v1/knowledge/skills", "knowledge_skills",
+                     csrf.exempt(api_authenticate_only(required_scope=lambda:
+                         "knowledge:manage" if request.method == "POST" else "knowledge:read")(skills_api)),
+                     methods=["GET", "POST", "OPTIONS"])
+    app.add_url_rule("/v1/knowledge/skills/<skill_id>", "knowledge_skills_get",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(skills_api)),
+                     methods=["GET", "OPTIONS"])
 
     @app.route("/v1/knowledge/memos", methods=["GET", "DELETE", "OPTIONS"])
     @csrf.exempt

@@ -15,6 +15,7 @@ from services.secret_firewall import protect_payload, scan_mode
 
 ENDPOINT = "http://knowledge.internal/v1/dispatch"
 MAX_REQUEST_BYTES = 65536
+SYNC_REQUEST_BYTES = 32 * 1024 * 1024
 # Provider and Alexandria transports accept at most 1 MiB of upstream JSON. The Worker
 # re-encodes it inside {version, result} with receipt fields: strings never grow, but a
 # number such as 1e20 becomes 21 digits (at most 5.25x). Rejecting that envelope here
@@ -26,7 +27,7 @@ DEADLINE_SECONDS = 55
 _SLOTS = threading.BoundedSemaphore(8)
 _OPERATIONS = frozenset({
     "context", "search", "artifact", "status", "sources.create", "sources.update",
-    "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge",
+    "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync",
     "alexandria.search", "alexandria.inspect", "alexandria.execute", "alexandria.receipt",
     "handoffs.save", "handoffs.get", "handoffs.list", "handoffs.delete",
     *NATIVE_OPERATIONS,
@@ -151,13 +152,15 @@ def dispatch(operation, user, payload=None):
         if operation == "status":
             return setup_status()
         raise KnowledgeError("setup_needed", "The private Knowledge service has not been connected.")
-    payload = protect_payload(payload or {}, provider="knowledge", user=user, knowledge=True)
+    # Sync is scanned per file by the private Skills handler, including decoded base64.
+    if operation != "skills.sync":
+        payload = protect_payload(payload or {}, provider="knowledge", user=user, knowledge=True)
     envelope = {"version": 1, "operation": operation,
                 "principal": principal_for(user), "payload": payload,
                 "secret_scan_mode": scan_mode(user, knowledge=True), "secret_scan_checked": True}
     body = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    if len(body) > MAX_REQUEST_BYTES:
-        raise KnowledgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413)
+    if len(body) > (SYNC_REQUEST_BYTES if operation == "skills.sync" else MAX_REQUEST_BYTES):
+        raise KnowledgeError("request_too_large", "The Knowledge sync request exceeds 32 MiB." if operation == "skills.sync" else "The Knowledge request exceeds 64 KiB.", 413)
     if not _SLOTS.acquire(blocking=False):
         raise KnowledgeError("knowledge_busy", "Knowledge requests are at capacity. Try again later.", 503)
     stopped = threading.Event()

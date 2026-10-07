@@ -12,7 +12,8 @@ import { authStorageBackend } from "./container-env.mjs";
 import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { logFailure } from "./log.mjs";
-import { protectPayload, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
+import { SYNC_REQUEST_BYTES } from "./knowledge/skills-validation.mjs";
+import { protectPayload, secretScanMode, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
 const KEY_NAMESPACE = "mllm_intelligence_";
@@ -206,14 +207,14 @@ async function resolvePrincipal(request, env) {
 
 const permits = (principal, scope) => principal.scopes.includes(scope);
 
-async function readBody(request) {
+async function readBody(request, maximum = MAX_REQUEST_BYTES, mcp = false) {
   const type = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
   if (type !== "application/json" && !/^application\/[^/]+\+json$/.test(type)) {
     throw new KnowledgeEdgeError("invalid_request", "Use an application/json request body.", 415);
   }
-  const tooLarge = () => new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
+  const tooLarge = () => new KnowledgeEdgeError("request_too_large", `The Knowledge request exceeds ${maximum / 1024} KiB.`, 413);
   const length = request.headers.get("content-length");
-  if (length !== null && Number(length) > MAX_REQUEST_BYTES) throw tooLarge();
+  if (length !== null && Number(length) > maximum) throw tooLarge();
   const chunks = [];
   let size = 0;
   if (request.body) {
@@ -223,7 +224,7 @@ async function readBody(request) {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > MAX_REQUEST_BYTES) { void reader.cancel().catch(() => {}); throw tooLarge(); }
+        if (size > maximum) { void reader.cancel().catch(() => {}); throw tooLarge(); }
         chunks.push(value);
       }
     } finally { reader.releaseLock(); }
@@ -231,6 +232,7 @@ async function readBody(request) {
   let payload;
   try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, size))); }
   catch { throw new KnowledgeEdgeError("invalid_json", "The request body is not valid JSON.", 400); }
+  if (mcp && size > MAX_REQUEST_BYTES && !(payload?.method === "tools/call" && payload?.params?.name === "knowledge_skills_sync")) throw tooLarge();
   if (!isRecord(payload)) throw new KnowledgeEdgeError("invalid_request", "The request body must be an object.", 400);
   return payload;
 }
@@ -245,7 +247,9 @@ function contractCheck(status) {
 }
 
 async function dispatch(env, operation, principal, payload, signal) {
-  const decision = await protectPayload(payload, env, { principal, knowledge: true, provider: "knowledge", route: `/v1/knowledge/${operation}` });
+  // The private Skills handler scans individual files rather than rejecting the batch.
+  const decision = operation === "skills.sync" ? { mode: secretScanMode(env, principal, true) }
+    : await protectPayload(payload, env, { principal, knowledge: true, provider: "knowledge", route: `/v1/knowledge/${operation}` });
   if (decision.blocked) {
     const error = new KnowledgeEdgeError("secret_detected", "High-confidence secrets detected in outbound content", 422);
     error.blockedResponse = decision.blocked;
@@ -254,7 +258,7 @@ async function dispatch(env, operation, principal, payload, signal) {
   if (decision.header) principal.secretScanHeader = decision.header;
   const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes }, payload,
     secret_scan_mode: decision.mode, secret_scan_checked: true });
-  if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) {
+  if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
   const deadline = AbortSignal.timeout(DEADLINE_MS);
@@ -367,7 +371,7 @@ async function handleMcp(request, env, principal) {
     return rpcError(null, -32600, "Unsupported MCP protocol version.", 400);
   }
   let body;
-  try { body = await readBody(request); }
+  try { body = await readBody(request, SYNC_REQUEST_BYTES, true); }
   catch (error) {
     if (!(error instanceof KnowledgeEdgeError)) throw error;
     return rpcError(null, error.code === "invalid_json" ? -32700 : -32600, error.message, error.status);
@@ -431,6 +435,13 @@ function restRoute(method, pathname) {
       operation: method === "GET" ? "handoffs.get" : "handoffs.delete", scope: "knowledge:read", handoff: true,
       ...(method === "GET" && second === "latest" ? {} : { id: second }) };
   }
+  if (first === "skills" && path.length === 1 && ["GET", "POST"].includes(method)) {
+    return { operation: method === "GET" ? "skills.find" : "skills.sync",
+      scope: method === "GET" ? "knowledge:read" : "knowledge:manage", body: method === "POST", skills: true };
+  }
+  if (first === "skills" && path.length === 2 && method === "GET") {
+    return { operation: "skills.get", scope: "knowledge:read", skills: true, skill: second };
+  }
   if (path.length === 1 && first === "memos" && ["GET", "DELETE"].includes(method)) {
     return { operation: method === "GET" ? "memos.stats" : "memos.purge", scope: "knowledge:manage", memo: true };
   }
@@ -456,7 +467,7 @@ async function handleRest(request, env, principal, route) {
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${route.scope} scope` }, 403);
   }
   try {
-    let payload = route.body ? await readBody(request) : {};
+    let payload = route.body ? await readBody(request, route.operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES) : {};
     if (route.handoff) {
       const params = new URL(request.url).searchParams;
       if (route.body && params.size) throw new KnowledgeEdgeError("invalid_request", "Save accepts no query fields.", 400);
@@ -468,6 +479,18 @@ async function handleRest(request, env, principal, route) {
           if (key === "limit" && !/^[0-9]{1,2}$/.test(value)) throw new KnowledgeEdgeError("invalid_request", "limit must be an integer from 1 to 20.", 400);
           payload[key] = key === "limit" ? Number(value) : value;
         }
+      }
+    }
+    if (route.skills && !route.body) {
+      const allowed = route.skill !== undefined ? ["path"] : ["query", "limit", "mode", "roots"];
+      for (const [key, value] of new URL(request.url).searchParams) {
+        if (!allowed.includes(key) || Object.hasOwn(payload, key)) throw new KnowledgeEdgeError("invalid_request", "Unsupported or duplicate skills query fields.", 400);
+        if (key === "limit" && !/^\d+$/.test(value)) throw new KnowledgeEdgeError("invalid_request", "limit must be an integer.", 400);
+        payload[key] = key === "limit" ? Number(value) : key === "roots" ? value.split(",") : value;
+      }
+      if (route.skill !== undefined) {
+        try { payload.skill_id = decodeURIComponent(route.skill); }
+        catch { throw new KnowledgeEdgeError("invalid_request", "Invalid skill URL encoding.", 400); }
       }
     }
     if (route.product !== undefined) {

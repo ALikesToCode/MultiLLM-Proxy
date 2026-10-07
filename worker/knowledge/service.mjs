@@ -9,14 +9,15 @@ import { configuredKeys } from "./providers/keys.mjs";
 import { dispatchNative, NATIVE_OPERATIONS, nativeToolsHash } from "./native.mjs";
 import { HANDOFF_OPERATIONS } from "./handoff-contracts.mjs";
 import { dispatchHandoff } from "./handoffs.mjs";
+import { dispatchSkills } from "./skills.mjs";
 import { getMemos } from "./memos.mjs";
 import { parseMemoPurge } from "./memo-store.mjs";
 import { logFailure } from "../log.mjs";
 import { protectPayload } from "../secret-firewall.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", ...HANDOFF_OPERATIONS, ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
-const READ = new Set([...HANDOFF_OPERATIONS, "context", "search", "artifact", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync", ...HANDOFF_OPERATIONS, ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+const READ = new Set([...HANDOFF_OPERATIONS, "context", "search", "artifact", "skills.find", "skills.get", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 
 export function setupStatus(env) {
   return [
@@ -108,13 +109,14 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
   if (envelope.secret_scan_checked !== undefined && typeof envelope.secret_scan_checked !== "boolean") fail("invalid_request", "Invalid secret scan marker.");
   // Only the private service binding accepts this marker from authenticated ingress.
   // Scan arguments once before fan-out, caches, receipts or generated provider wrappers.
-  if (!envelope.secret_scan_checked) {
+  if (!envelope.secret_scan_checked && operation !== "skills.sync") {
     const decision = await protectPayload(payload, env, { knowledge: true,
       principal: { ...principal, secret_scan_mode: envelope.secret_scan_mode }, route: `/v1/knowledge/${operation}`, provider: "knowledge" });
     options.onSecretScan?.(decision);
     if (decision.blocked) fail("secret_detected", `High-confidence secrets detected: ${JSON.stringify(decision.report.types)}`, 422);
   }
   if (HANDOFF_OPERATIONS.includes(operation)) return dispatchHandoff(env, principal, operation, payload);
+  if (operation.startsWith("skills.")) return dispatchSkills(env, operation, principal, payload, options);
   const authority = options.authority || getAuthority(env);
   if (ALEXANDRIA_OPERATIONS.includes(operation)) return dispatchAlexandria(env, authority, principal, operation, payload, options);
   if (NATIVE_OPERATIONS.includes(operation)) return dispatchNative(env, authority, principal, operation, payload, options);
