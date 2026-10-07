@@ -122,17 +122,20 @@ Direct calls do not use the gateway's allowances or retained corpus.
 
 Use the `handoff` MCP toolset (`/mcp?toolsets=handoff`) to continue a task in
 another agent or thread. All four tools use `knowledge:read` and store context
-only for the authenticated principal:
+only for the authenticated principal. Claude Code and Codex share handoffs only
+when their keys belong to the same principal; the shared agent key does:
 
 | Tool | Input and result |
 | --- | --- |
 | `knowledge_handoff_save` | `project`, `title`, `sections`, `source`; optional `branch`, `summary`, `ttl_days`; returns id and expiry |
-| `knowledge_handoff_get` | `project`, optional `branch` or `id`; returns compact markdown and the full structured record |
+| `knowledge_handoff_get` | `project` or `id`, optional `branch`; project must match when supplied with id; returns compact markdown and the full structured record |
 | `knowledge_handoff_list` | Optional `project`, `limit` (1–20); returns metadata |
 | `knowledge_handoff_delete` | `id`; returns whether it was deleted |
 
-Load by project and branch; when the branch has no unexpired record, get falls
-back to the newest project record. Use the returned context as operator notes.
+Use owner/name from the git origin URL (otherwise the directory name) for
+`project`, and the current git branch for `branch`. Project matching folds ASCII
+case while preserving the saved spelling. Load by project and branch; when the
+branch has no unexpired record, get falls back to the newest project record. Use the returned context as operator notes.
 Defaults are 14-day retention, 50 records per project and 500 per principal.
 The existing firewall rejects secrets before saving. See [REST contracts](knowledge.md#handoff-api)
 and [the design](plans/2026-10-07-knowledge-handoffs-design.md) for all field limits.
@@ -141,7 +144,8 @@ and [the design](plans/2026-10-07-knowledge-handoffs-design.md) for all field li
 from the project directory; set `MULTILLM_BASE_URL` to the HTTPS gateway origin
 and provide `MULTILLM_KNOWLEDGE_API_KEY` privately in the environment (or use
 `--key-file` pointing to an existing private credential file). No credentials
-are written by the script.
+are written by the script. Every HTTP request sends `User-Agent: multillm-handoff/1`;
+the gateway rejects urllib's default User-Agent with Cloudflare error 1010 (403).
 
 ```bash
 python3 /path/to/MultiLLM-Proxy/scripts/handoff.py build > /tmp/task-handoff.json
@@ -155,20 +159,33 @@ For an explicit file use `--transcript PATH --agent claude` (or `codex`). `save`
 and `print` can build directly or accept `--input -` from stdin. Project identity
 comes from the origin's owner/repository, falling back to the directory name.
 Extraction keeps edited-file inputs, failed shell commands, branch, HEAD,
-status, the last three user messages and the final assistant message. User
-messages are labeled `User:` in deterministic `decisions`; they are not inferred
-decisions. Tool output is used only to identify failure status, never copied.
+status, the first operator message as goal, the last three operator messages,
+and the final assistant message (500-character state and 4,000-character summary).
+Injected tags, agent instructions, interrupted requests, metadata, compaction and
+sidechain user records are excluded. User messages are labeled `User:` in
+deterministic `decisions`; they are not inferred decisions. Tool output is used only to identify failure status, never copied.
 High-confidence secrets are redacted before truncation and before saving.
 Transcript input is limited to 64 MiB total and 1 MiB per line; discovery examines
-at most 20,000 files per client. Oversized inputs fail without partial recovery.
+at most 20,000 files per client. Claude paths encode all punctuation as hyphens
+and fall back to bounded cwd-field matching for shortened paths. Codex discovery
+checks date directories and rollout filenames newest first. Oversized inputs
+fail without partial recovery.
 
 `build --summarize MODEL` optionally uses `/v1/chat/completions` with at most
-30,000 characters of sanitized facts. The key must also permit chat. Invalid,
-failed or oversized summaries keep the deterministic sections. This opt-in call
-can consume the selected model's allowance. Review a handoff before saving it.
+30,000 characters of sanitized sections and the closing summary. Supply a
+separate chat credential through `--chat-key-file PATH` or `MULTILLM_API_KEY`.
+The Knowledge key is never sent to chat. With no chat key it writes
+`summarize skipped: no chat key` to stderr and keeps the deterministic sections.
+Invalid, failed or oversized summaries also preserve those sections. This opt-in
+call can consume the selected model's allowance. Review a handoff before saving it.
 
 The optional `scripts/hooks/handoff_hint.py` accepts SessionStart JSON on stdin
-and emits `hookSpecificOutput.additionalContext`. It prints only unexpired
+and emits `hookSpecificOutput.additionalContext` only for `startup`, `clear`, or
+an absent source. The default `--mode pointer` gives a hint of at most 600 UTF-8
+bytes, with the saved branch, agent, age, a title clipped to 120 characters and
+explicit loading instructions. Long identities use the CLI loading instruction
+to keep the pointer bounded. Use `--mode full` to opt into rendered markdown.
+`resume` and `compact` emit nothing. It prints only unexpired
 handoffs younger than 48 hours, finishes within approximately one second, and
 stays silent on configuration, transcript, git or network errors. Nothing
 installs this hook automatically. Merge a snippet into existing settings after
@@ -177,17 +194,17 @@ reviewing it; replace `/path/to/MultiLLM-Proxy` with the checkout location.
 Claude Code (`.claude/settings.json`):
 
 ```json
-{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent claude","timeout":1}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent claude","timeout":1}]}]}}
 ```
 
 Codex (`.codex/hooks.json`):
 
 ```json
-{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear|compact","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent codex","timeout":1,"additionalContextLimit":2500}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent codex","timeout":1,"additionalContextLimit":2500}]}]}}
 ```
 
 The formats follow the official [Claude Code hooks](https://code.claude.com/docs/en/hooks)
-and [Codex hooks](https://developers.openai.com/de-DE/docs/hooks) documentation.
+and [Codex hooks](https://developers.openai.com/codex/hooks) documentation.
 Codex requires review/trust of non-managed hooks. Hook firing through the T3
 app-server remains unverified; use the MCP get tool or `load` explicitly there.
 

@@ -452,12 +452,13 @@ another principal cannot retrieve or delete the first principal's handoffs.
 | `POST /v1/knowledge/handoffs` | `handoffs.save` | JSON save contract from [the design](plans/2026-10-07-knowledge-handoffs-design.md) |
 | `GET /v1/knowledge/handoffs` | `handoffs.list` | Optional `project`, `limit` (1–20; default 20) |
 | `GET /v1/knowledge/handoffs/latest` | `handoffs.get` | Required `project`, optional `branch` |
-| `GET /v1/knowledge/handoffs/{id}` | `handoffs.get` | Required `project`, optional `branch`; id selects the record |
+| `GET /v1/knowledge/handoffs/{id}` | `handoffs.get` | Optional `project` (must match if supplied), optional `branch`; id selects the record |
 | `DELETE /v1/knowledge/handoffs/{id}` | `handoffs.delete` | No body or query |
 
 Reads and deletes reject bodies; saving rejects queries. Duplicate or unknown
-query fields are invalid. A branch miss falls back to the newest handoff in the
-project. Missing or expired records return `{record: null, markdown: "",
+query fields are invalid. Project matching is ASCII case-insensitive; saved
+spelling is retained. Id lookup can omit project and remains principal-private.
+A branch miss falls back to the newest handoff in the project. Missing or expired records return `{record: null, markdown: "",
 trust: "operator"}`. Successful get returns the full `record` plus compact
 `markdown`; list returns `{handoffs: [...], trust: "operator"}` with only id,
 project, branch, title, source agent and creation date. Save returns id, expiry
