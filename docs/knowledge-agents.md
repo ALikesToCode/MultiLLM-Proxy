@@ -167,7 +167,8 @@ deterministic `decisions`; they are not inferred decisions. Tool output is used 
 High-confidence secrets are redacted before truncation and before saving.
 Transcript input is limited to 64 MiB total and 1 MiB per line; discovery examines
 at most 20,000 files per client. Claude paths encode all punctuation as hyphens
-and fall back to bounded cwd-field matching for shortened paths. Codex discovery
+and fall back to bounded cwd-field matching for shortened paths. Recorded cwd
+paths are resolved before matching in both clients so symlink aliases agree. Codex discovery
 checks date directories and rollout filenames newest first. Oversized inputs
 fail without partial recovery.
 

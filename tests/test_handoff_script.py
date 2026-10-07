@@ -180,6 +180,47 @@ def test_discovers_newest_matching_transcript_across_agents(tmp_path):
         transcripts.discover("/missing", tmp_path)
 
 
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+@pytest.mark.parametrize("record_symlink", [False, True])
+def test_discovery_matches_resolved_cwd_and_selects_newest(tmp_path, agent, record_symlink):
+    project = tmp_path / "project"
+    project.mkdir()
+    alias = tmp_path / "project-link"
+    alias.symlink_to(project, target_is_directory=True)
+    recorded, cwd = (alias, project) if record_symlink else (project, alias)
+    directory = (tmp_path / ".claude/projects/shortened" if agent == "claude" else
+                 tmp_path / ".codex/sessions/2026/10/07")
+    directory.mkdir(parents=True)
+    def metadata(path):
+        return ({"cwd": str(path)} if agent == "claude" else
+                {"type": "session_meta", "payload": {"cwd": str(path)}})
+    older = directory / "rollout-01.jsonl"
+    newest = directory / "rollout-02.jsonl"
+    older.write_text(json.dumps(metadata(cwd)))
+    newest.write_text(json.dumps(metadata(recorded)))
+    import os
+    os.utime(older, (1, 1))
+    os.utime(newest, (2, 2))
+    assert transcripts.discover(cwd, tmp_path, agent) == (newest, agent)
+
+
+@pytest.mark.parametrize("recorded", [None, 17, [], {}, "", "bad\x00path"])
+@pytest.mark.parametrize("codex", [False, True])
+def test_discovery_ignores_malformed_recorded_cwd(tmp_path, recorded, codex):
+    path = tmp_path / "synthetic.jsonl"
+    item = {"cwd": recorded}
+    if codex:
+        item = {"type": "session_meta", "payload": item}
+    path.write_text(json.dumps(item) + "\n")
+    assert not transcripts.prefix_matches(path, tmp_path, 5, codex=codex)
+
+
+def test_discovery_ignores_unresolvable_recorded_cwd(tmp_path):
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    assert not transcripts.cwd_matches(str(loop), tmp_path)
+
+
 @pytest.mark.parametrize("extra", [{"ttl_days": True}, {"ttl_days": 0}, {"title": "x" * 201}, {"summary": "x" * 4001},
                                   {"branch": None}, {"source": {"agent": "unknown"}},
                                   {"sections": {"goal": None}}, {"sections": {"files": None}},

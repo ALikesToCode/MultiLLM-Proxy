@@ -99,6 +99,8 @@ Claude directory names replace every non-alphanumeric cwd character with a
 hyphen. If absent, discovery scans project JSONL files for a matching cwd in the
 first 20 bounded lines. Codex date directories and rollout filenames are checked
 newest first, stopping at the first metadata match in the first five lines.
+Both metadata scans compare resolved cwd paths, including symlink aliases, and
+ignore malformed or unresolvable recorded paths.
 Discovery examines up to 20,000 files per client; lines use the 1 MiB parse cap
 and date-directory enumeration is also bounded to 20,000 entries. Parsing accepts
 at most 64 MiB total and 1 MiB per line, skips malformed JSON lines, and fails if byte limits are exceeded. These operational

@@ -50,6 +50,15 @@ def records(path):
             raise ValueError("Transcript exceeds extraction bounds")
 
 
+def cwd_matches(recorded, cwd):
+    if not isinstance(recorded, str) or not recorded:
+        return False
+    try:
+        return Path(recorded).resolve(strict=False) == Path(cwd).resolve()
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+
+
 def prefix_matches(path, cwd, count, *, codex=False):
     try:
         with path.open("rb") as stream:
@@ -64,7 +73,7 @@ def prefix_matches(path, cwd, count, *, codex=False):
                 if not isinstance(item, dict):
                     continue
                 value = item.get("payload") if codex and item.get("type") == "session_meta" else item if not codex else None
-                if isinstance(value, dict) and value.get("cwd") == cwd:
+                if isinstance(value, dict) and cwd_matches(value.get("cwd"), cwd):
                     return True
     except OSError:
         pass
