@@ -280,8 +280,12 @@ class Facts:
             elif value.get("role") == "assistant" and value.get("phase") in (None, "final_answer", "final") and text:
                 self.final = clean(text, 4000)
         if kind in {"function_call", "custom_tool_call"}:
-            if value.get("name", "").split(".")[-1] == "apply_patch":
+            name = value.get("name", "").split(".")[-1]
+            if name == "apply_patch":
                 self.patch(value.get("input", value.get("arguments")))
+            elif name == "exec" and isinstance(value.get("input"), str):
+                # Code mode wraps tool calls in JavaScript; patch bodies keep their file markers.
+                self.patch(value["input"].replace("\\n", "\n"))
             else:
                 self.tool(value.get("name", "").split(".")[-1], parse_arguments(value.get("arguments")), value.get("call_id"))
         elif kind in {"function_call_output", "custom_tool_call_output"}:

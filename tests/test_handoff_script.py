@@ -119,6 +119,20 @@ def test_codex_fact_extraction_handles_patch_and_json_arguments():
     assert "TOOL_OUTPUT_MUST_NOT_LEAK" not in json.dumps(result)
 
 
+def test_codex_code_mode_exec_patches_are_recovered(tmp_path):
+    escaped = 'await tools.apply_patch("*** Begin Patch\\n*** Update File: src/app.py\\n@@\\n-a\\n+b\\n*** End Patch")'
+    template = "await tools.apply_patch(`*** Begin Patch\n*** Add File: src/new.py\n+x\n*** End Patch`)"
+    lines = [{"type": "session_meta", "payload": {"id": "synthetic", "cwd": "/synthetic/project"}},
+             *({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "exec", "call_id": f"exec-{index}",
+                                                      "input": source}} for index, source in enumerate((escaped, template)))]
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("\n".join(json.dumps(line) for line in lines) + "\n")
+    with patch.object(transcripts, "git", return_value=""):
+        result = transcripts.extract(transcript, "/synthetic/project")
+    assert result["sections"]["files"] == [{"path": "src/app.py", "change": "Update File"},
+                                           {"path": "src/new.py", "change": "Add File"}]
+
+
 def test_codex_shell_sessions_preserve_failures_and_use_structured_exit_status():
     facts = transcripts.Facts()
     facts.tool("exec_command", {"cmd": "synthetic-long-check"}, "start")
