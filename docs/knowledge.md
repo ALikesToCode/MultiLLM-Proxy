@@ -148,6 +148,8 @@ dry run, conflicts and uncertain outcomes.
 | `PATCH /v1/knowledge/sources/<id>` | `knowledge:manage` | Change enabled/pinned/refresh state with `expected_revision` |
 | `POST /v1/knowledge/sources/<id>/refresh` | `knowledge:manage` | Create or reconcile its durable indexing job |
 | `POST /v1/knowledge/jobs/<id>/cancel` | `knowledge:manage` | Fence future work/publication |
+| `GET /v1/knowledge/product-sites/<product>` | `knowledge:manage` | Learned, pinned and blocked sites for one product |
+| `PATCH /v1/knowledge/product-sites/<product>` | `knowledge:manage` | Edit overrides or rebuild counts from retained artifacts |
 | `PUT /v1/knowledge/policy` | `knowledge:manage` | Save complete policy with `expected_revision` |
 
 Send the proxy key as a bearer credential. Example JSON body for either query
@@ -210,6 +212,50 @@ its site supplied no verified evidence, it matches fewer than two distinctive qu
 and it does not name the product (payment docs from overflow.co for a CSS `overflow`
 question, for example). `provider_sections_dropped` counts the dropped sections per
 provider; it is absent when nothing was dropped, and the status is unaffected.
+
+The product-site registry learns one verification per immutable artifact when ingestion
+publishes it or retrieval confirms its retained live excerpt. The site key is the
+hostname without `www`, reduced to its last two labels; this is an approximation,
+so separate products sharing a registrable domain still need operator review.
+`product_sites_mode` in the complete Knowledge policy defaults to `observe`:
+
+- `off` keeps the original section filter and discovery list.
+- `observe` keeps the original section filter and adds up to ten
+  `provider_sections_flagged` entries `{provider, site, reason}` for registry decisions.
+- `enforce` drops blocked sites first, keeps learned/pinned sites and sites supplying
+  evidence or provider documentation in this answer, and drops unknown sites once
+  two learned sites or five verified artifacts establish the product. Earlier products
+  use the original heuristic. URL-less sections are kept.
+
+Registry drops are counted in `provider_sections_dropped`. Outside `off`, discoveries
+from dropped sites are removed. Status and coverage gaps retain their original meaning,
+even if enforcement removes the last provider section. Registry failures fall back to
+the original filter and never invalidate verified evidence. Cache identities track site
+membership, blocks and the establishment threshold, rather than each count increment.
+
+`knowledge_product_sites_get` and `knowledge_product_sites_update` are in the `manage`
+toolset, require `knowledge:manage`, and mirror `GET` and `PATCH`
+`/v1/knowledge/product-sites/<product>`. PATCH accepts `pin`, `unpin`, `block`, `unblock`
+(each up to 64 unique lowercase public hostnames), an optional 500-character `note`,
+and `rebuild: true`. The product belongs in the URL for REST and in arguments for MCP;
+product names follow source validation (nonempty, at most 100 characters, lowercased).
+Hostnames are normalized to site keys, and conflicting actions for a site are rejected.
+Blocked overrides pinned; unblocking preserves any learned/pinned entry.
+
+Each product keeps at most 64 sites and 64 blocks. Learning evicts the least-verified,
+oldest unpinned site; a full pinned registry quietly declines new sites. Global bounds
+are 400 products and 10,000 durable artifact identities. Identity markers survive
+snapshot expiry so retries cannot inflate counts. At either bound, automatic learning
+stops without failing publication or retrieval. Status exposes only aggregate sizes and
+limits. A per-product rebuild recomputes counts from all retained manifests (at most
+1,000), preserves pins/blocks, and replaces that product's identity markers; it can
+recover capacity from expired history. An explicit rebuild starts a new history from
+retained manifests, including manifests whose ingestion has not completed yet.
+
+After deploying, backfill each relevant product with a management update using
+`rebuild: true`, inspect observed flags, and choose `enforce` through a complete policy
+update when appropriate. The existing catalogue Durable Object stores the registry;
+no new bindings, D1 migrations, variables or Durable Object migration are needed.
 
 Provider tools (`knowledge_<provider>_<tool>`, or `POST /v1/knowledge/native/<tool>`)
 expose each provider's own features with its native parameters. Their contracts live in
