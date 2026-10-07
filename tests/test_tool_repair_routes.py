@@ -8,7 +8,7 @@ from flask import Response
 from services.tool_repair_runtime import HEADER
 from tests.intelligence_fixtures import IntelligenceApiTestCase, completion, upstream, frames
 from tests.test_free_tool_calling import FreeToolCallingTest, tool_call_response
-from tests.test_protocol_routes import ANTHROPIC_MESSAGE, RESPONSES_BODY, json_upstream
+from tests.test_protocol_routes import ANTHROPIC_MESSAGE, ANTHROPIC_STREAM, CHAT_STREAM, RESPONSES_BODY, json_upstream, sse_upstream
 from tests.test_tool_call_repair import TOOLS
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -125,6 +125,44 @@ class ToolRepairRouteTests(UnifiedApiTestCase):
         assert text.index("Checking.") < text.index('"name":"lookup"') < text.index('"finish_reason":"tool_calls"') < text.index('[DONE]')
         assert '"arguments":"{\\"q\\":\\"5\\"}"' in text
         assert '"total_tokens": 6' in text
+        assert response.headers[HEADER] == "mode=full; streaming=1"
+
+    def test_stream_headers_across_native_and_translated_surfaces(self):
+        from tests.test_protocol_translation import sse
+        native_response = sse(
+            ("response.created", {"type":"response.created","response":{"id":"resp_synthetic"}}),
+            ("response.completed", {"type":"response.completed","response":{"id":"resp_synthetic","status":"completed"}}),
+        )
+        message_tools = [{"name":"lookup","input_schema":TOOLS[0]["function"]["parameters"]}]
+        response_tools = [{"type":"function", **TOOLS[0]["function"]}]
+        inputs = [
+            ("/v1/chat/completions", self.payload(stream=True), CHAT_STREAM),
+            ("/v1/messages", {"model":"mimo:mimo-v2.5","messages":[{"role":"user","content":"test"}],
+                              "max_tokens":50,"tools":message_tools,"stream":True}, CHAT_STREAM),
+            ("/v1/responses", {"model":"mimo:mimo-v2.5","input":"test","tools":response_tools,"stream":True}, CHAT_STREAM),
+            ("/v1/messages", {"model":"opencode:minimax-m3","messages":[{"role":"user","content":"test"}],
+                              "max_tokens":50,"tools":message_tools,"stream":True}, ANTHROPIC_STREAM),
+            ("/v1/responses", {"model":"opencode:grok-4.6","input":"test","tools":response_tools,"stream":True}, native_response),
+        ]
+        for mode in ("off", "repair", "full"):
+            for path, payload, stream in inputs:
+                with self.subTest(mode=mode, path=path, model=payload["model"]):
+                    response, send = self.send(path, payload, [sse_upstream(stream)], mode)
+                    assert response.status_code == 200 and send.call_count == 1
+                    assert response.mimetype == "text/event-stream"
+                    assert response.headers[HEADER] == f"mode={mode}; streaming=1"
+
+    def test_stream_logs_final_counts_while_header_only_identifies_mode(self):
+        values = [
+            {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0, **call('{q:5}', 'LOOKUP')}]}}]},
+            {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]},
+        ]
+        with patch("services.tool_repair_runtime.logger.info") as log:
+            response, _ = self.send("/v1/chat/completions", self.payload(stream=True),
+                                    [Response(b"".join(frames(*values, "[DONE]")), content_type="text/event-stream")])
+        assert response.headers[HEADER] == "mode=repair; streaming=1"
+        assert log.call_count == 1
+        assert log.call_args.args[-1] == "checked=1 repaired=1 extracted=0 invalid=0 reasked=0"
 
     def test_logs_contain_counts_only(self):
         value = "private-argument-canary"
@@ -138,6 +176,23 @@ class ToolRepairRouteTests(UnifiedApiTestCase):
 
 
 class FreeToolRepairTests(FreeToolCallingTest):
+    def test_free_stream_headers_identify_mode(self):
+        values = [
+            {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0, **call('{"city":"Paris"}', 'get_weather')}]}}]},
+            {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]},
+        ]
+        for mode in ("off", "repair", "full"):
+            with self.subTest(mode=mode):
+                self.headers[HEADER] = mode
+                with patch("app.ProxyService.make_request", return_value=Response(
+                    b"".join(frames(*values, "[DONE]")), content_type="text/event-stream"
+                )) as send:
+                    response = self.post(self.payload(stream=True))
+                    text = response.get_data(as_text=True)
+                assert response.status_code == 200 and send.call_count == 1
+                assert response.headers[HEADER] == f"mode={mode}; streaming=1"
+                assert "[DONE]" in text and '"tool_calls"' in text
+
     def test_free_deterministic_repair_before_existing_output_gate(self):
         with patch("app.ProxyService.make_request", return_value=tool_call_response(name="GET_WEATHER",arguments="{city:'Paris',}")) as send:
             response = self.post(self.payload())
@@ -174,7 +229,7 @@ class IntelligenceToolRepairTests(IntelligenceApiTestCase):
             output = events(response)
         assert output[0]["choices"][0]["delta"]["tool_calls"] == [first]
         assert output[1]["choices"][0]["delta"]["tool_calls"] == [second]
-        assert response.headers[HEADER] == "checked=0 repaired=0 extracted=0 invalid=0 reasked=0"
+        assert response.headers[HEADER] == "mode=off; streaming=1"
 
     def test_stream_error_flushes_calls_before_terminal_error(self):
         self.seed()
@@ -184,6 +239,7 @@ class IntelligenceToolRepairTests(IntelligenceApiTestCase):
             text = response.get_data(as_text=True)
         assert text.index('"name":"lookup"') < text.index('"error"')
         assert 'stream_interrupted' in text
+        assert response.headers[HEADER] == "mode=repair; streaming=1"
 
     def test_intelligence_deterministic_before_schema_gate(self):
         self.seed()
@@ -228,3 +284,4 @@ class IntelligenceToolRepairTests(IntelligenceApiTestCase):
         assert text.index("Checking.") < text.index('"name":"lookup"') < text.index('"finish_reason":"tool_calls"')
         assert 'stream_interrupted' not in text and 'output_validation_failed' not in text
         assert '"usage_complete":true' in text
+        assert response.headers[HEADER] == "mode=full; streaming=1"

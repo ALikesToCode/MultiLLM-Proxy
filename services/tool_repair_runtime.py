@@ -21,7 +21,9 @@ def repair_mode(headers=None, config=None):
     return override if override in MODES else default
 
 
-def summary_header(report):
+def summary_header(report, *, streaming=False, mode="repair"):
+    if streaming:
+        return f"mode={mode}; streaming=1"
     return " ".join(f"{key}={report.get(key, 0)}" for key in ("checked", "repaired", "extracted", "invalid", "reasked"))
 
 

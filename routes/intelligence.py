@@ -121,7 +121,7 @@ def stream_response(gateway):
     )
     response.call_on_close(close)
     if gateway.request.payload.get("tools"):
-        response.headers[HEADER] = summary_header({})
+        response.headers[HEADER] = summary_header({}, streaming=True, mode=gateway.tool_repair.mode)
     return response
 
 

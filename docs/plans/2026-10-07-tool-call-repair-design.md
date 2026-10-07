@@ -91,17 +91,18 @@ No stream text extraction occurs because the text has already reached the client
 
 Limits are 128 declared tools/calls/choices, 64 KiB per argument string, 32 levels
 of JSON nesting, 4,096 schema/value nodes, 32 validation errors, 256 KiB extraction
-text, 128 scanned tagged calls and 128 fenced candidates, 1 MiB SSE frames, and
-8 MiB response/tool buffers. Names/IDs in stream buffers are capped at 256
+text, 128 scanned tagged calls and one standalone fenced/bare candidate,
+1 MiB SSE frames, and 8 MiB response/tool buffers. Names/IDs in stream buffers are capped at 256
 characters. Invalid shapes or exhausted limits retain original calls; oversized
 SSE frames disable repair and forward remaining bytes. No unbounded repair store
 or persistent state is introduced.
 
 With declared tools, the response header is
-`checked=<n> repaired=<n> extracted=<n> invalid=<n> reasked=<n>`. A stream's header
-contains initial zero counts: HTTP headers cannot report final tool counts while
-also sending content immediately. Counts-only `tool_call_repair` logs carry
-model/provider and final counts. There are no custom body fields or SSE events.
+`checked=<n> repaired=<n> extracted=<n> invalid=<n> reasked=<n>` for non-streaming
+responses. Streamed responses instead send `mode=<mode>; streaming=1`, including
+`off`, because final counts are unavailable when headers are sent. Counts-only
+`tool_call_repair` logs carry model/provider and final counts. There are no custom
+body fields or SSE events.
 
 ## Verification and operation
 

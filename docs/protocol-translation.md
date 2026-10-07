@@ -71,19 +71,25 @@ Function tools on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
 are checked at the Container's Chat pivot, including native endpoints, free
 pools, and intelligence routing. `X-MultiLLM-Tool-Repair: repair` repairs JSON
 syntax, unambiguous names and schema primitive types, and extracts declared
-calls from known text formats. Missing arguments remain invalid.
+calls from known text formats. Tagged calls may occur within prose; fenced/bare
+JSON requires standalone content or a preamble of at most 200 characters, unless
+a tool is forced.
+Multiple fences are left as content. Invalid extraction candidates preserve the
+entire original message and report `extraction_rejected`. Missing arguments
+remain invalid.
 
 `off` preserves the existing response bytes. `full` allows one non-streaming
 follow-up to the same model, includes its usage, and respects free-pool and
 intelligence attempt limits. `TOOL_CALL_REPAIR_DEFAULT` defaults to `repair`;
 the request header overrides it. Browser CORS permits and exposes the header.
 
-When tools are declared, the response header reports `checked`, `repaired`,
-`extracted`, `invalid`, and `reasked`. Streaming sends text immediately and
-buffers each tool call until completion; it neither extracts text calls nor
-re-asks. Stream headers contain initial zero counts because headers precede
-the final calls; the `tool_call_repair` log records final counts without output
-or argument values. Existing validation in free and intelligence routes still
+When tools are declared, non-streaming response headers report `checked`,
+`repaired`, `extracted`, `invalid`, and `reasked`. Streamed responses send
+`X-MultiLLM-Tool-Repair: mode=<mode>; streaming=1`, including mode `off`.
+Streaming sends text immediately and buffers each tool call until completion;
+it neither extracts text calls nor re-asks. The `tool_call_repair` log records
+final counts without output or argument values. Existing validation in free and
+intelligence routes still
 rejects calls that remain invalid. See the [implementation design](plans/2026-10-07-tool-call-repair-design.md)
 for limits and protocol caveats.
 

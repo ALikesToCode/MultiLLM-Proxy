@@ -38,7 +38,7 @@ def repair_response(upstream, payload, *, mode, provider, model, reask=None):
         return upstream
     response = as_flask_response(upstream)
     if mode == "off" or response.status_code >= 400:
-        response.headers[HEADER] = summary_header({})
+        response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
         return response
     if response.mimetype == "text/event-stream":
         buffer = ToolCallBuffer(payload["tools"], payload.get("tool_choice"), mode)
@@ -52,12 +52,12 @@ def repair_response(upstream, payload, *, mode, provider, model, reask=None):
 
         headers = [(k, v) for k, v in response.headers.items() if k.lower() not in ("content-length", "content-type")]
         downstream = Response(generate(), status=response.status_code, headers=headers, content_type="text/event-stream")
-        downstream.headers[HEADER] = summary_header(buffer.report)
+        downstream.headers[HEADER] = summary_header(buffer.report, streaming=True, mode=mode)
         downstream.call_on_close(response.close)
         return downstream
     decoded = _decode_response(response)
     if decoded is None:
-        response.headers[HEADER] = summary_header({})
+        response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
         return response
     if provider == "cline-pass":
         decoded = cline_completion_payload(decoded)
@@ -137,20 +137,20 @@ def with_native_tool_repair(dispatch):
         response = dispatch(app, auth, metrics, proxy, payload, **kwargs)
         if not payload.get("tools") or mode == "off":
             if payload.get("tools"):
-                response.headers[HEADER] = summary_header({})
+                response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
             return response
         source = ENDPOINT_PROTOCOLS[kwargs["endpoint"]]
         chat_payload = _native_chat_payload(payload, source)
         if not chat_payload["tools"]:
-            response.headers[HEADER] = summary_header({})
+            response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
             return response
         if response.mimetype != "text/event-stream" and _decode_response(response) is None:
-            response.headers[HEADER] = summary_header({})
+            response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
             return response
         chat = translate_downstream_response(response, source=source, target=CHAT,
                                              stream=bool(payload.get("stream")), request_payload=payload)
         if chat.status_code >= 400 and response.status_code < 400:
-            response.headers[HEADER] = summary_header({})
+            response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
             return response
 
         def reask(body):
