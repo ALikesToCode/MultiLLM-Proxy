@@ -158,6 +158,8 @@ def _text_call(text, name=None):
     fence = _FENCE.fullmatch(text)
     if name is not None and fence:
         text = fence.group(1).strip()
+    if name is not None:
+        return {"name": name, "arguments": text}
     try:
         value = tolerant_loads(text)
     except (ValueError, RecursionError):
@@ -166,8 +168,6 @@ def _text_call(text, name=None):
             if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,255}", name.strip()):
                 return _text_call(arguments, name.strip())
         return None
-    if name is not None:
-        return {"name": name, "arguments": text.strip()} if isinstance(value, dict) else None
     if not isinstance(value, dict):
         return None
     function = value.get("function", value)
@@ -181,28 +181,64 @@ def _text_call(text, name=None):
     return {"name": function["name"], "arguments": arguments}
 
 
+def _json_candidates(content, tool_choice):
+    forced = tool_choice == "required" or (
+        isinstance(tool_choice, dict) and isinstance(tool_choice.get("function"), dict)
+        and bool(tool_choice["function"].get("name"))
+    )
+    if "```" in content:
+        # Multiple fences are examples or ambiguous alternatives, even when forced.
+        if content.count("```") != 2:
+            return
+        match = _FENCE.search(content)
+        if match is None:
+            return
+        text, span = match.group(1), match.span()
+    else:
+        try:
+            text = single_object(content)
+        except (ValueError, RecursionError):
+            return
+        start = content.find(text)
+        span = (start, start + len(text))
+    preamble, suffix = content[:span[0]].strip(), content[span[1]:].strip()
+    if forced or (len(preamble) <= 200 and not suffix):
+        candidate = _text_call(text)
+        if candidate is not None:
+            yield candidate, span
+
+
 def _extract(message, functions, tool_choice):
     content = message.get("content")
     if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_CONTENT_BYTES:
-        return message, 0
-    spans, calls = [], []
-    for candidate, span in _tagged_candidates(content):
-        if len(calls) >= MAX_CALLS:
+        return message, 0, None
+    candidates = list(_tagged_candidates(content))
+    for candidate, span in _json_candidates(content, tool_choice):
+        if len(candidates) >= MAX_CALLS:
             break
-        _add_extraction(candidate, span, functions, tool_choice, calls, spans)
-    for scanned, match in enumerate(_FENCE.finditer(content)):
-        if scanned >= MAX_CALLS:
-            break
-        if len(calls) >= MAX_CALLS:
-            break
-        if any(start <= match.start() < end for start, end in spans):
-            continue
-        _add_extraction(_text_call(match.group(1)), match.span(), functions, tool_choice, calls, spans)
-    if not calls:
-        return message, 0
-    ordered = sorted(zip(spans, calls))
+        if not any(start <= span[0] < end for _, (start, end) in candidates):
+            candidates.append((candidate, span))
+    if not candidates:
+        return message, 0, None
+    calls, rejected = [], empty_report()
+    for index, (candidate, _) in enumerate(candidates):
+        call = {"type": "function", "function": candidate}
+        try:
+            _, _, errors = _repair_call(call, functions, tool_choice)
+        except (ValueError, TypeError, RecursionError, OverflowError, UnicodeError):
+            errors = ["$: repair limit or invalid shape"]
+        rejected["checked"] += 1
+        if errors:
+            rejected["invalid"] += 1
+            rejected["errors"].append({"index": index, "reason": "extraction_rejected", "errors": errors})
+        calls.append(call)
+    if rejected["invalid"]:
+        # Extraction is atomic: no text or valid sibling call is consumed on failure.
+        return message, 0, rejected
+    ordered = sorted(zip((span for _, span in candidates), calls))
     pieces, last = [], 0
-    for (start, end), _ in ordered:
+    for (start, end), call in ordered:
+        call["id"] = safe_tool_id(None, prefix="call")
         pieces.append(content[last:start])
         last = end
     pieces.append(content[last:])
@@ -210,17 +246,7 @@ def _extract(message, functions, tool_choice):
     for start, end in (("<｜tool▁calls▁begin｜>", "<｜tool▁calls▁end｜>"),
                        ("<|tool_calls_section_begin|>", "<|tool_calls_section_end|>")):
         remaining = remaining.removeprefix(start).removesuffix(end).strip()
-    return {**message, "content": remaining or None, "tool_calls": [call for _, call in ordered]}, len(calls)
-
-
-def _add_extraction(candidate, span, functions, tool_choice, calls, spans):
-    if candidate is None:
-        return
-    function = matching_function(candidate["name"], functions)
-    if function is None or _choice_errors(function["name"], tool_choice):
-        return
-    calls.append({"id": safe_tool_id(None, prefix="call"), "type": "function", "function": candidate})
-    spans.append(span)
+    return {**message, "content": remaining or None, "tool_calls": [call for _, call in ordered]}, len(calls), None
 
 
 def repair_tool_calls(message, tools, *, tool_choice=None, mode="repair", allow_extraction=True):
@@ -234,7 +260,9 @@ def repair_tool_calls(message, tools, *, tool_choice=None, mode="repair", allow_
     try:
         result = message
         if not message.get("tool_calls") and allow_extraction and tool_choice != "none":
-            result, report["extracted"] = _extract(message, functions, tool_choice)
+            result, report["extracted"], rejected = _extract(message, functions, tool_choice)
+            if rejected is not None:
+                return message, rejected
         calls = result.get("tool_calls")
         if calls is None or calls == []:
             return result, report

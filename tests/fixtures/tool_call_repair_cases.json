@@ -2206,23 +2206,13 @@
     },
     "expected_message": {
       "role": "assistant",
-      "content": "Before  After",
-      "tool_calls": [
-        {
-          "id": "call_fixture",
-          "type": "function",
-          "function": {
-            "name": "lookup",
-            "arguments": "{\"q\":\"a\"}"
-          }
-        }
-      ]
+      "content": "Before ```json\n{\"name\":\"lookup\",\"parameters\":{\"q\":\"a\"}}\n``` After"
     },
     "expected_report": {
-      "checked": 1,
+      "checked": 0,
       "repaired": 0,
       "invalid": 0,
-      "extracted": 1,
+      "extracted": 0,
       "fixes": [],
       "errors": []
     }
@@ -2366,12 +2356,20 @@
       "content": "<tool_call>{\"name\":\"unknown\",\"arguments\":{}}</tool_call>"
     },
     "expected_report": {
-      "checked": 0,
+      "checked": 1,
       "repaired": 0,
-      "invalid": 0,
+      "invalid": 1,
       "extracted": 0,
       "fixes": [],
-      "errors": []
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
     }
   },
   {
@@ -2471,6 +2469,1141 @@
       "invalid": 0,
       "extracted": 1,
       "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "explanation_fenced_example",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "For example, this call looks up a value:\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nUse it in your application."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "For example, this call looks up a value:\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nUse it in your application."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "explanation_name_fenced_example",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "For example:\n```\nlookup\n{\"q\":\"a\"}\n```\nThis illustrates the syntax."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "For example:\n```\nlookup\n{\"q\":\"a\"}\n```\nThis illustrates the syntax."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "two_fences",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nAn alternative:\n```\nlookup\n{\"q\":\"a\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nAn alternative:\n```\nlookup\n{\"q\":\"a\"}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "two_fences_forced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\n```\nlookup\n{\"q\":\"a\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\n```\nlookup\n{\"q\":\"a\"}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "whole_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "  \n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\n  "
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "short_preamble_single_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Calling lookup:\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Calling lookup:",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "preamble_200_characters",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "preamble_201_characters",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "long_explanation_forced_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nDone."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \n\nDone.",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "specific_tool_forced_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "function",
+      "function": {
+        "name": "lookup"
+      }
+    },
+    "message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation.",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "whole_bare_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "short_preamble_bare_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Calling lookup:\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Calling lookup:",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "bare_json_in_explanation",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Example: {\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}} is only an example."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Example: {\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}} is only an example."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "long_preamble_bare_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "forced_bare_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "tag_mid_text_and_example_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call> After\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nExample only."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After\n```json\n{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}\n```\nExample only.",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "invalid_tagged_missing_required",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":{}}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":{}}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.q: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid_fenced_missing_required",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"lookup\",\"arguments\":{}}\n```"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.q: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid_bare_missing_required",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\"name\":\"lookup\",\"arguments\":{}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "{\"name\":\"lookup\",\"arguments\":{}}"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.q: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid_function_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <function=lookup>{q:???}</function> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before <function=lookup>{q:???}</function> After"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: arguments are not valid JSON"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid_tagged_arguments_type",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":5}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":5}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: invalid function call"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "invalid_forced_tool",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "function",
+      "function": {
+        "name": "other"
+      }
+    },
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: requested tool was not selected"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "mixed_valid_invalid_tags",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call> Between <function=lookup>{}</function> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before <tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call> Between <function=lookup>{}</function> After"
+    },
+    "expected_report": {
+      "checked": 2,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 1,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.q: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "extraction_repairs_before_validation",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<function=functions.LOOKUP>{q:5,}</function>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"5\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json",
+            "coerce_primitives",
+            "tool_name"
+          ]
+        }
+      ],
       "errors": []
     }
   }

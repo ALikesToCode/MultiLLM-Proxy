@@ -42,7 +42,14 @@ It recognizes Hermes/Qwen `<tool_call>` objects, GLM name-plus-object tags,
 `<function=name>` blocks, fenced name/arguments or name/parameters objects,
 ASCII tool-call tokens, and DeepSeek's Unicode function/separator tokens.
 Only spans for declared names are removed. IDs use `safe_tool_id`; remaining
-prose is retained. Extracted calls still undergo the same validation.
+prose is retained. Tagged calls may occur within prose. Fenced or bare JSON must
+be the whole trimmed content, optionally preceded by at most 200 characters of
+preamble without a fence. A forced tool choice permits longer or surrounding
+prose; multiple fences remain ambiguous and are not extracted. Every candidate
+must validate after deterministic repair before any text is removed. If any
+candidate fails, the entire message is retained and each failure has
+`reason: "extraction_rejected"` in the report's errors. Rejected candidates count
+as checked/invalid, with no extraction or committed repairs.
 
 ## Modes and integration
 

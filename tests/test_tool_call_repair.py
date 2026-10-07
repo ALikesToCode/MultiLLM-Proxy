@@ -19,11 +19,14 @@ TOOLS = CASES[0]["tools"]
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
 def test_corpus(case):
     original = copy.deepcopy(case["message"])
-    with patch("services.tool_call_repair.safe_tool_id", return_value="call_fixture"):
+    with patch("services.tool_call_repair.safe_tool_id", return_value="call_fixture") as make_id:
         message, report = repair_tool_calls(case["message"], case["tools"], tool_choice=case["tool_choice"])
     assert message == case["expected_message"]
     assert report == case["expected_report"]
     assert case["message"] == original
+    if any(error.get("reason") == "extraction_rejected" for error in report["errors"]):
+        assert message is case["message"]
+        make_id.assert_not_called()
 
 
 @pytest.mark.parametrize("schema,value,valid", [
