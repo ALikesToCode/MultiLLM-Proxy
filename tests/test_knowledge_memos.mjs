@@ -297,6 +297,11 @@ test("secret-shaped queries bypass memo reads, embeddings and writes", async t =
     assert.equal(memoSecretQuery(query), true);
     await f.run(request({ ...f.query, query }));
   }
+  // The Knowledge firewall only records heuristic findings, so the shared memo store must skip them.
+  const heuristic = `Why does API_` + `KEY=q8Vt2mX9pL4rN7sK1wZ3 fail?`;
+  assert.equal(memoSecretQuery(heuristic), true);
+  await f.run(request({ ...f.query, query: heuristic }));
+  assert.equal(memoSecretQuery(f.query.query), false);
   assert.equal(f.embeddings(), 0);
   assert.equal((await f.memos.call("stats")).totals.count, 0);
 });

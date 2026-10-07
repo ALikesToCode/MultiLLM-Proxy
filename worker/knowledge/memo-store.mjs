@@ -1,4 +1,5 @@
 import { fields, fail, integer, parseQuery, string } from "./contracts.mjs";
+import { scanText } from "../secret-scan.mjs";
 
 export const MEMO_SHARD_LIMIT = 2000;
 export const MEMO_TOTAL_LIMIT = 20000;
@@ -8,9 +9,9 @@ export const memoKey = request => ({ product: request.product || "", version: re
 const target = request => JSON.stringify([request.product || "", request.version || "", request.repository || "", request.mode]);
 const bytes = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
-// Replace this local guard when the shared detector is available.
+// Memos are shared across principals, so even a heuristic finding keeps a query out.
 export function memoSecretQuery(query) {
-  return /-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----|\b(?:sk-|AIza|ghp_|xox)/.test(query);
+  return /-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----|\b(?:sk-|AIza|ghp_|xox)/.test(query) || scanText(query).length > 0;
 }
 
 export function quantizeEmbedding(vector) {
