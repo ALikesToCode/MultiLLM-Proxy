@@ -303,8 +303,11 @@ Normal queries try a shared memo before the principal-specific evidence cache.
 Exact lookup normalizes case, whitespace and trailing punctuation; product, exact
 version, repository and mode must match, and the stored excerpt token count must
 fit the new budget. An unrelated corpus publication does not invalidate a memo.
-Every hit checks all cited hashes, current published revisions, expiry, source
-permissions and current provider/host policy in one authority transaction.
+Every hit checks all cited hashes, expiry, source permissions and current
+provider/host policy in one authority transaction, fenced by policy revision.
+Retained live (unpublished) citations are valid backing under the same shared
+eligibility rule as retrieval and cached answers. Published artifacts must still
+be their source's current revision.
 
 Policy defaults are `memo_exact: "on"`, `memo_semantic: "observe"`,
 `memo_similarity: 0.92` and `memo_ttl_hours: 72`. Similarity accepts 0.85–0.99;
@@ -317,8 +320,8 @@ zero reserved units as an `unmetered_platform_operation`, not a free operation.
 Cloudflare platform billing still applies.
 
 Only successful or partial answers with excerpts and no retrieval failures are
-stored, and every cited revision must already be current and published. A small
-local secret-shape guard skips memo work. Optional memo failures and timeouts
+stored; both retained live citations and current published citations are eligible.
+A small local secret-shape guard skips memo work. Optional memo failures and timeouts
 fall through to ordinary retrieval. The bundle limit is 256 KiB. One SQLite
 Durable Object holds logical product shards, with atomic eviction at 2,000 memos
 per product and 20,000 total; it retains only the active product's Int8 vectors

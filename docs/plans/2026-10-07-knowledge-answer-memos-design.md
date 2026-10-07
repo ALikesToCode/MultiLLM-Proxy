@@ -51,10 +51,13 @@ timestamps persist across object restarts. Stats group at most 20,000 products.
    product/version/repository/mode and fitting budget. Cosine must meet the
    configured threshold. Invalid or unavailable embeddings are a miss.
 3. A candidate must be younger than the memo TTL. One batched authority
-   transaction verifies every citation: artifact exists and is published, hash
-   matches, both citation and artifact are unexpired, source is enabled and points
-   to that artifact, provider is enabled with retention allowed, and canonical URL
-   remains allowed. The transaction also fences the current policy revision.
+   transaction verifies every citation using the same shared eligibility predicate
+   as retrieval and cached answers: artifact exists and is not expiring, source
+   is enabled, provider is enabled with retention allowed, and canonical URL remains
+   allowed. Retained live (unpublished) artifacts are eligible; only published
+   artifacts must be the source's current revision. Hashes must match and both
+   citation and artifact must be unexpired. The transaction also fences the current
+   policy revision.
    Invalid candidates are deleted and normal retrieval continues.
 4. Exact or enabled semantic hits update hit statistics and serve a cloned bundle
    with the new query, fresh `served_at`, `elapsed_ms`, `path: "memo"`, no newly
@@ -72,8 +75,9 @@ Store only `ok`, or `partial` with excerpts and no failure flagged by retrieval.
 Stable coverage limitations can be retained; provider, source, index or scheduling
 failures cannot. Provider-context-only answers cannot create memos.
 Before storing, validate the cited manifests with the same batched authority
-operation. Live artifacts that have not published are intentionally not eligible:
-storing them would immediately fail current-revision validation.
+operation. Retained live artifacts can back memos before publication under the
+same rule as cached answers. Publishing that artifact preserves eligibility;
+a later published replacement invalidates its memo backing.
 
 A small replaceable local function rejects private-key headers and common key
 prefixes. Such queries perform neither memo lookup, embedding nor writes.

@@ -7,6 +7,7 @@ import { cacheKey, productSitesCacheState, readCache, writeCache } from "./cache
 import { filterProviderSites } from "./provider-site-filter.mjs";
 import { retentionHours, sourceReviewed } from "./policy.mjs";
 import { memoSession } from "./memos.mjs";
+import { eligibleArtifact, eligibleCandidate } from "./artifact-eligibility.mjs";
 
 const safeCode = error => /^[a-z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : "upstream_unavailable";
 // Economy asks one provider; smart and deep ask every eligible provider in parallel.
@@ -23,15 +24,6 @@ const RETRIEVAL_DEADLINE_MS = 24000;
 // Publication or expiry elsewhere can change the corpus while a query runs.
 const MAX_REVALIDATIONS = 3;
 const nowIso = () => new Date().toISOString();
-
-function eligibleArtifact(artifact, snapshot, now) {
-  const source = snapshot.sources.find(item => item.id === artifact?.source_id);
-  if (!artifact || artifact.status === "expiring" || !source?.enabled || Date.parse(artifact.expires_at) <= now
-    || !snapshot.policy.providers[artifact.provider]?.enabled || !snapshot.policy.providers[artifact.provider]?.retention_allowed) return false;
-  try { publicUrl(artifact.canonical_url, snapshot.policy.allowed_hosts); }
-  catch { return false; }
-  return true;
-}
 
 function candidateProviders(env, request, policy) {
   const configured = new Set(providerStatus(env).filter(item => item.configured && policy.providers[item.id]?.enabled).map(item => item.id));
@@ -116,10 +108,10 @@ async function indexedEvidence(state) {
     const resolved = await settledInOrder(rows, row => row.index_key, async row => {
       const artifact = await authority.call("artifact.for_key", { key: row.index_key });
       if (!artifact) return { skipped: "unknown_revision" };
-      if (!eligibleArtifact(artifact, snapshot, Date.now())) return { skipped: "ineligible" };
+      const source = snapshot.sources.find(item => item.id === artifact.source_id);
+      if (!eligibleArtifact(artifact, source, snapshot.policy, Date.now())) return { skipped: "ineligible" };
       if (artifact.status !== "published") return { skipped: "unpublished" };
       // Each version has its own source record, so older revisions of this source are obsolete.
-      const source = snapshot.sources.find(item => item.id === artifact.source_id);
       if (source.current_artifact !== artifact.id) return { skipped: "superseded" };
       return { artifact, text: await untilDeadline(() => corpus.getSnapshot(artifact), state.signal) };
     });
@@ -254,10 +246,9 @@ async function revalidateCandidates(state, snapshot, candidates) {
   for (const [index, candidate] of candidates.entries()) {
     if (artifacts[index].status === "rejected") throw artifacts[index].reason;
     const artifact = artifacts[index].value;
-    if (!eligibleArtifact(artifact, snapshot, Date.now())) continue;
+    const source = snapshot.sources.find(item => item.id === artifact?.source_id);
+    if (!eligibleCandidate(artifact, source, snapshot.policy, Date.now())) continue;
     if (state.request.freshness === "fresh" && !originIsFresh(artifact)) continue;
-    const source = snapshot.sources.find(item => item.id === artifact.source_id);
-    if (artifact.status === "published" && source.current_artifact !== artifact.id) continue;
     result.push(candidate);
   }
   return result;

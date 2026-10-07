@@ -1,4 +1,5 @@
-import { fields, fail, integer, publicUrl } from "./contracts.mjs";
+import { fields, fail, integer } from "./contracts.mjs";
+import { eligibleCandidate } from "./artifact-eligibility.mjs";
 
 // One transaction validates all citations against the same policy and source revisions.
 export async function validateMemoCitations(tx, input, policy, now) {
@@ -12,14 +13,9 @@ export async function validateMemoCitations(tx, input, policy, now) {
     if (!/^[a-f0-9]{64}$/.test(citation.artifact_id ?? "") || !/^[a-f0-9]{64}$/.test(citation.content_hash ?? "")
       || !Number.isFinite(Date.parse(citation.expires_at))) fail("invalid_memo", "Invalid citation manifest.");
     const artifact = await tx.get(`artifact:${citation.artifact_id}`);
-    if (!artifact || artifact.status !== "published" || artifact.content_hash !== citation.content_hash
-      || !(Date.parse(artifact.expires_at) > now) || !(Date.parse(citation.expires_at) > now)
-      || !policy.providers[artifact.provider]?.enabled || !policy.providers[artifact.provider]?.retention_allowed) return { valid: false };
+    if (!artifact || artifact.content_hash !== citation.content_hash || !(Date.parse(citation.expires_at) > now)) return { valid: false };
     if (!sources.has(artifact.source_id)) sources.set(artifact.source_id, await tx.get(`source:${artifact.source_id}`));
-    const source = sources.get(artifact.source_id);
-    if (!source?.enabled || source.current_artifact !== artifact.id) return { valid: false };
-    try { publicUrl(artifact.canonical_url, policy.allowed_hosts); }
-    catch { return { valid: false }; }
+    if (!eligibleCandidate(artifact, sources.get(artifact.source_id), policy, now)) return { valid: false };
   }
   return { valid: true };
 }

@@ -104,7 +104,7 @@ export function memoSession(env, authority, request, policy, options, started, u
         if (new TextEncoder().encode(JSON.stringify(saved)).byteLength > MEMO_BUNDLE_BYTES) return;
         const citations = [...new Map([...saved.excerpts, ...(saved.related_evidence || [])].map(item => [item.artifact_id,
           { artifact_id: item.artifact_id, content_hash: item.content_hash, expires_at: item.expires_at }])).values()];
-        // Live revisions may not be published yet; only current revisions can back a memo.
+        // Memo backing follows the same live and published eligibility rules as retrieval.
         if (!(await optional(() => authority.call("memos.validate", { citations, policy_revision: policy.revision }))).valid) return;
         const vector = semantic !== "off" ? await embedding() : null;
         const key = memoKey(request);

@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoStore, memoQueryNorm, memoSecretQuery, quantizeEmbedding, embeddingCosine, MEMO_SHARD_LIMIT, MEMO_TOTAL_LIMIT } from "../worker/knowledge/memo-store.mjs";
+import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { memoSession } from "../worker/knowledge/memos.mjs";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
@@ -81,6 +82,66 @@ test("exact memo serves across principals and unrelated generation changes witho
   const saved = f.local.find({ request: f.query, kind: "exact" }).record;
   assert.equal(saved.bundle.usage, undefined);
   assert.equal(saved.bundle.served_at, undefined);
+});
+
+async function liveSetup(t) {
+  const f = await fixture();
+  const { memos, local } = store(t);
+  const query = request({ version: "3.1.3" });
+  const options = { corpus: f.corpus, retrieve: f.retrieve, cache: null, memos, embed: async () => [1, 0, 0] };
+  const run = () => retrieveKnowledge(f.env, f.authority, principal, query, options);
+  return { ...f, memos, local, query, run };
+}
+
+test("live-only answers are memoized and served before their source publishes", async t => {
+  const f = await liveSetup(t);
+  const first = await f.run();
+  assert.equal(first.path, "live");
+  assert.equal(first.status, "ok");
+  const artifact = await f.authority.call("artifact.get", { id: first.excerpts[0].artifact_id });
+  assert.equal(artifact.status, "live");
+  assert.equal((await f.storage.get(`source:${artifact.source_id}`)).current_artifact, null);
+  assert.equal((await f.memos.call("stats")).totals.count, 1);
+  const hit = await f.run();
+  assert.equal(hit.path, "memo");
+  assert.equal(hit.memo.kind, "exact");
+  assert.equal(f.counts.providers, 1);
+});
+
+test("publishing a memo's live backing preserves it; a later published revision invalidates it", async t => {
+  const f = await liveSetup(t);
+  const first = await f.run();
+  const old = await f.authority.call("artifact.get", { id: first.excerpts[0].artifact_id });
+  const publish = async artifact => {
+    const job = await f.authority.call("job.enqueue", { source_id: artifact.source_id });
+    await f.authority.call("job.publish", { id: job.id, artifact_id: artifact.id, item_id: "fixture-item", index_key: artifact.index_key });
+  };
+  await publish(old);
+  assert.equal((await f.run()).path, "memo");
+  const replacement = await createArtifact({ ...f.source, origin_checked: true }, `${f.text} New limits.`, "firecrawl");
+  await f.authority.call("artifact.save", { artifact: replacement });
+  await publish(replacement);
+  assert.equal((await f.authority.call("memos.validate", {
+    citations: f.local.find({ request: f.query, kind: "exact" }).record.citations, policy_revision: f.policy.revision,
+  })).valid, false);
+  let deleted = false;
+  const call = f.memos.call;
+  f.memos.call = (...args) => { if (args[0] === "delete") deleted = true; return call(...args); };
+  assert.notEqual((await f.run()).path, "memo");
+  assert.equal(deleted, true);
+});
+
+test("expired live backing is rejected both when writing and when serving a memo", async t => {
+  const f = await liveSetup(t);
+  const first = await f.run();
+  const id = first.excerpts[0].artifact_id;
+  const artifact = await f.authority.call("artifact.get", { id });
+  await f.storage.put(`artifact:${id}`, { ...artifact, expires_at: new Date(Date.now() - 1000).toISOString() });
+  const session = memoSession(f.env, f.authority, f.query, f.policy, { memos: f.memos }, performance.now(), []);
+  assert.deepEqual(await session.lookup(), {});
+  assert.equal((await f.memos.call("stats")).totals.count, 0);
+  await session.write(first, false);
+  assert.equal((await f.memos.call("stats")).totals.count, 0);
 });
 
 test("semantic on serves a rephrased query; observe reports a candidate and performs normal retrieval", async t => {
