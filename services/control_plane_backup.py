@@ -27,7 +27,7 @@ TABLES = {
 }
 ADDITIVE_TABLES = {"intelligence_policy", "intelligence_reservations"}
 # Columns added later; older backups omit them and restore them as NULL.
-OPTIONAL_FIELDS = {"users": ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")}
+OPTIONAL_FIELDS = {"users": ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate")}
 STORES = {
     "auth": ("AUTH_DB_PATH", "auth.sqlite3"),
     "models": ("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3"),

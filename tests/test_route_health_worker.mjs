@@ -233,7 +233,9 @@ test("the Worker's scheduled handler runs the health schedule in waitUntil", asy
   await worker.scheduled({ cron: "*/5 * * * *", scheduledTime: HALF_PAST }, workerEnv(null, container),
     { waitUntil: promise => waited.push(promise) });
   await Promise.all(waited);
-  assert.equal(container.calls.fetchIfRunning.length, 1);
+  assert.equal(waited.length, 2);
+  assert.equal(container.calls.fetchIfRunning.length, 2);
+  assert.ok(container.calls.fetchIfRunning.some(call => call.path === "/admin/shadow-eval/run"));
 });
 
 test("fetchIfRunning reaches the port directly and never starts a stopped Container", async () => {

@@ -12,7 +12,7 @@ const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "knowledge:read", is_admin: 0,
   created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
   created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-  allowed_models: null, allowed_ips: null, expires_at: null, secret_scan_mode: null, ...changes,
+  allowed_models: null, allowed_ips: null, expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, ...changes,
 });
 
 async function database(options) {

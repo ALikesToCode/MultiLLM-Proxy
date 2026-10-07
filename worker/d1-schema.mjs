@@ -8,7 +8,8 @@ export const REQUIRED_D1_TABLES = Object.freeze(["intelligence_policy", "intelli
   "control_free_cooldowns", "control_connection_profiles", "control_comparison_results", "control_provider_catalog",
   "route_health", "route_health_snapshot",
   "usage_events", "usage_daily", "usage_batches",
-  "media_jobs", "media_job_items"]);
+  "media_jobs", "media_job_items", "shadow_eval_samples", "shadow_eval_results",
+  "shadow_eval_config", "shadow_eval_policy_backups"]);
 
 /**
  * Readiness for the D1 schema. A deploy that skipped `wrangler d1 migrations apply` reports

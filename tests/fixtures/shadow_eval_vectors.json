@@ -1,0 +1,77 @@
+[
+  {
+    "changes": {},
+    "valid": true
+  },
+  {
+    "changes": {
+      "enabled": 1
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "max_replays_per_run": 0
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "max_replays_per_run": 21
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "daily_cap": 501
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "daily_cap": true
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "judge_model": "gemini:operator-choice"
+    },
+    "valid": true
+  },
+  {
+    "changes": {
+      "judge_model": "https://untrusted.test"
+    },
+    "valid": false
+  },
+  {
+    "changes": {
+      "candidate_models": {
+        "coding": [],
+        "extraction": [],
+        "writing": [],
+        "reasoning": [],
+        "chat": [
+          "auto:test",
+          "cascade:test"
+        ]
+      }
+    },
+    "valid": true
+  },
+  {
+    "changes": {
+      "candidate_models": {
+        "coding": [],
+        "extraction": [],
+        "writing": [],
+        "reasoning": [],
+        "chat": [
+          "free:json"
+        ]
+      }
+    },
+    "valid": false
+  }
+]

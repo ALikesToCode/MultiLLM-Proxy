@@ -95,7 +95,7 @@ function validateRequest(body) {
 
 // Python validates candidate eligibility. These are the limits the ledger itself enforces,
 // and must be checked independently before any quota calculation or policy seed.
-function validatePolicy(policy, status = 400) {
+export function validatePolicy(policy, status = 400) {
   const fail = () => { throw new StoreError(status, "invalid_intelligence_policy", "The gateway allowance policy is invalid."); };
   if (!record(policy) || policy.version !== 1 || typeof policy.enabled !== "boolean") fail();
   for (const field of ["principal_daily_tokens", "global_daily_tokens", "max_total_tokens", "max_inflight"]) {

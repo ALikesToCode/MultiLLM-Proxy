@@ -52,6 +52,29 @@
       </div>
     </section>
 
+    <section class="panel" id="shadow-panel" aria-labelledby="shadow-title">
+      <header class="panel__header"><div><h2 id="shadow-title">Model league</h2><p>Compare opted-in routed chat traffic. Prompts and answers expire after 7 days. Routing changes only after you review and confirm a proposal.</p></div></header>
+      <div class="panel__body form-stack">
+        <div class="button-row"><button id="shadow-load" class="button button--secondary" type="button">Load league and settings</button><button id="shadow-export" class="button button--secondary" type="button" disabled>Export league</button></div>
+        <div id="shadow-league" class="table-scroll" tabindex="0" aria-label="Model league table"></div>
+        <form id="shadow-config-form" class="form-stack" hidden>
+          <label class="check-field"><input id="shadow-enabled" type="checkbox"><span>Enable background evaluations (potentially billed)</span></label>
+          <label class="form-field">Judge model<input id="shadow-judge" maxlength="256" required></label>
+          <div class="form-grid form-grid--2"><label>Replays per run<input id="shadow-per-run" type="number" min="1" max="20" required></label><label>Daily replay cap<input id="shadow-daily" type="number" min="1" max="500" required></label></div>
+          <div class="form-grid form-grid--2">{% for task in ['coding', 'extraction', 'writing', 'reasoning', 'chat'] %}<label>{{ task | capitalize }} candidates<textarea id="shadow-{{ task }}" rows="2" spellcheck="false" placeholder="provider:model, auto:route or cascade:route"></textarea></label>{% endfor %}</div>
+          <p class="field-hint">Up to eight candidates per task. Free and subscription candidates run first when policy billing is known. Each comparison uses one replay and two judge calls. Per-key opt-in is edited on Users.</p>
+          <button class="button button--primary" type="submit">Save evaluation settings</button>
+        </form>
+        <div class="button-row"><button id="shadow-propose" class="button button--secondary" type="button">Propose update</button><button id="shadow-apply" class="button button--primary" type="button" disabled>Apply reviewed policy scores</button></div>
+        <label class="check-field"><input id="shadow-confirm-apply" type="checkbox"><span>I approve the displayed policy score diff. Suggested auto-route orders remain proposals.</span></label>
+        <pre id="shadow-proposal" class="code-surface">No proposal loaded.</pre>
+        <details><summary>Retained samples (admins only)</summary><button id="shadow-samples" class="button button--secondary" type="button">List recent sample metadata</button><label class="form-field">Sample<select id="shadow-sample-id"><option value="">No sample selected</option></select></label><button id="shadow-sample-text" class="button button--secondary" type="button">Load selected sample text</button><pre id="shadow-sample-detail" class="code-surface">Text loads only on demand.</pre></details>
+        <label class="check-field"><input id="shadow-confirm-purge" type="checkbox"><span>Delete all retained samples and comparison results; keep the daily replay count.</span></label>
+        <button id="shadow-purge" class="button button--secondary" type="button">Purge evaluation data</button>
+        <p id="shadow-status" class="status-note" role="status">Evaluation is disabled by default. No data loaded.</p>
+      </div>
+    </section>
+
     <section class="panel" id="lab-panel" aria-labelledby="lab-title">
       <header class="panel__header"><div><h2 id="lab-title">Blind comparison lab</h2><p>Run the same synthetic conversation on 2–4 configured routes. Answers stay in this tab; saved reports keep measurements and ratings only.</p></div></header>
       <div class="panel__body wb-lab">

@@ -3,6 +3,8 @@ import logging
 import time
 from collections.abc import Mapping
 
+from services.shadow_eval_sampling import sample_chat_dispatch
+
 from flask import Response, g, jsonify, request
 
 from error_handlers import APIError
@@ -632,6 +634,7 @@ def _dispatch_unified_chat_candidate(
         raise
 
 
+@sample_chat_dispatch
 def dispatch_unified_chat_completion(
     app,
     auth_service_cls,

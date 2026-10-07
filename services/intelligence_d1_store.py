@@ -32,6 +32,7 @@ _ENDPOINTS = {
     "provider_catalog": "http://intelligence.internal/v1/state/catalog",
     "route_health": "http://intelligence.internal/v1/route-health",
     "usage": "http://intelligence.internal/v1/usage",
+    "shadow_eval": "http://intelligence.internal/v1/shadow-eval",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)
@@ -60,6 +61,7 @@ _ENDPOINT_SLOTS.update({
     "route_health": threading.BoundedSemaphore(2),
     "cascades": threading.BoundedSemaphore(4),
     "usage": threading.BoundedSemaphore(4),
+    "shadow_eval": threading.BoundedSemaphore(2),
 })
 _SLOW_CALL_SECONDS = 2.0
 _STATS_LOCK = threading.Lock()

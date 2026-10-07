@@ -1,0 +1,56 @@
+{
+  "cleanup": [
+    "DELETE FROM shadow_eval_samples WHERE created_at <= :cutoff",
+    "DELETE FROM shadow_eval_samples WHERE id IN (SELECT id FROM shadow_eval_samples ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 2000)",
+    "DELETE FROM shadow_eval_results WHERE created_at <= :result_cutoff OR id IN (SELECT id FROM shadow_eval_results ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 10000)"
+  ],
+  "config_get": [
+    "SELECT document FROM shadow_eval_config WHERE id = 1"
+  ],
+  "config_seed": [
+    "INSERT OR IGNORE INTO shadow_eval_config (id, document) VALUES (1, :document)"
+  ],
+  "config_save": [
+    "UPDATE shadow_eval_config SET document = :document WHERE id = 1 AND document = :expected"
+  ],
+  "put": [
+    "INSERT OR IGNORE INTO shadow_eval_samples (id, created_at, document) VALUES (:id, :created_at, :document)",
+    "DELETE FROM shadow_eval_samples WHERE created_at <= :cutoff",
+    "DELETE FROM shadow_eval_samples WHERE id IN (SELECT id FROM shadow_eval_samples ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 2000)"
+  ],
+  "sample": [
+    "SELECT document FROM shadow_eval_samples WHERE id = :id AND created_at > :cutoff"
+  ],
+  "samples": [
+    "SELECT id, created_at, json_extract(document, '$.route') AS route, json_extract(document, '$.task_type') AS task_type, json_extract(document, '$.production_model') AS production_model FROM shadow_eval_samples WHERE created_at > :cutoff ORDER BY created_at DESC, id DESC LIMIT 20"
+  ],
+  "pending": [
+    "SELECT document FROM shadow_eval_samples s WHERE s.created_at > :cutoff AND json_extract(s.document, '$.task_type') = :task AND json_extract(s.document, '$.production_model') != :candidate AND NOT EXISTS (SELECT 1 FROM shadow_eval_results r WHERE r.sample_id = s.id AND r.candidate = :candidate) ORDER BY s.created_at, s.id LIMIT 1"
+  ],
+  "lease": [
+    "UPDATE shadow_eval_config SET lease_until = :until, lease_owner = :run_id WHERE id = 1 AND lease_until <= :now AND json_extract(document, '$.enabled') = 1"
+  ],
+  "release": [
+    "UPDATE shadow_eval_config SET lease_until = 0, lease_owner = NULL WHERE id = 1 AND lease_owner = :run_id"
+  ],
+  "claim": [
+    "UPDATE shadow_eval_config SET day = :day,\nreplay_count = CASE WHEN day = :day THEN replay_count + 1 ELSE 1 END\nWHERE id = 1 AND document = :config AND lease_owner = :run_id AND lease_until > :now\nAND json_extract(document, '$.enabled') = 1\nAND CASE WHEN day = :day THEN replay_count ELSE 0 END < json_extract(document, '$.daily_cap')\nAND EXISTS (SELECT 1 FROM shadow_eval_samples WHERE id = :sample_id AND created_at > :cutoff)\nAND NOT EXISTS (SELECT 1 FROM shadow_eval_results WHERE sample_id = :sample_id AND candidate = :candidate) AND EXISTS (SELECT 1 FROM shadow_eval_samples s,\njson_each(shadow_eval_config.document, '$.candidate_models.' || json_extract(s.document, '$.task_type')) m\nWHERE s.id = :sample_id AND m.value = :candidate)",
+    "INSERT INTO shadow_eval_results (id, sample_id, candidate, created_at)\nSELECT :id, :sample_id, :candidate, :now WHERE changes() = 1",
+    "DELETE FROM shadow_eval_results WHERE created_at <= :result_cutoff OR id IN (SELECT id FROM shadow_eval_results ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 10000)"
+  ],
+  "finish": [
+    "UPDATE shadow_eval_results SET document = :document WHERE id = :id AND document IS NULL AND EXISTS (SELECT 1 FROM shadow_eval_samples WHERE id = sample_id AND created_at > :cutoff)"
+  ],
+  "results": [
+    "SELECT id, created_at, document FROM shadow_eval_results WHERE id > :after AND document IS NOT NULL ORDER BY id LIMIT 50"
+  ],
+  "purge": [
+    "DELETE FROM shadow_eval_samples",
+    "DELETE FROM shadow_eval_results"
+  ],
+  "apply": [
+    "INSERT INTO shadow_eval_policy_backups (id, created_at, document)\nSELECT :id, :now, document FROM intelligence_policy WHERE id = 1 AND document = :expected",
+    "UPDATE intelligence_policy SET document = :document WHERE id = 1 AND document = :expected\nAND EXISTS (SELECT 1 FROM shadow_eval_policy_backups WHERE id = :id AND document = :expected)",
+    "DELETE FROM shadow_eval_policy_backups WHERE id IN (SELECT id FROM shadow_eval_policy_backups ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 20)"
+  ]
+}

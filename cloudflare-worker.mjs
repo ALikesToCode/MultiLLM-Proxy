@@ -10,6 +10,7 @@ import { serveSignedMediaFile, signedMediaFileId } from "./worker/media-files.mj
 import { MediaJobWorkflow } from "./worker/media-workflow.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
+import { runScheduledShadowEval } from "./worker/shadow-eval-schedule.mjs";
 import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
 import { STATUS_PATHS, handleStatusRequest } from "./worker/status-page.mjs";
 
@@ -1826,6 +1827,7 @@ MultiLLMProxyContainer.outboundByHost = {
 export default {
   async scheduled(controller, env, ctx) {
     const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+    ctx.waitUntil(runScheduledShadowEval(env, container));
     ctx.waitUntil(runScheduledHealth(controller, env, container).catch((error) => {
       logStructuredError("scheduled_health_failed", error);
     }));

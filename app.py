@@ -41,6 +41,8 @@ from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 from services import usage_ledger
 from services.secret_firewall import init_secret_firewall
+from services.shadow_eval_sampling import init_shadow_sampling
+from routes.shadow_eval import register_shadow_eval_routes
 
 _LOG_FORMAT = "%(asctime)s - %(levelname)s - [%(name)s] %(message)s"
 _LOG_LEVELS = {
@@ -119,6 +121,7 @@ def create_app() -> Flask:
 
     init_error_handlers(app)
     init_secret_firewall(app)
+    init_shadow_sampling(app)
     AuthService.initialize()
     app.extensions["image_relay_catalog_refresh"] = ImageRelayCatalogRefresh()
     app.extensions["provider_catalog_refresh"] = ProviderCatalogAutoRefresh(
@@ -136,6 +139,7 @@ def create_app() -> Flask:
     register_core_routes(app)
     register_dashboard_security_routes(app)
     register_workbench_routes(app)
+    register_shadow_eval_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_knowledge_routes(app, csrf)
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)

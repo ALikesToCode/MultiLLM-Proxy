@@ -7,7 +7,7 @@ import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode"]);
+  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate"]);
 // Migration 0007 added the per-key controls. Until it is applied, reads return the
 // older columns with no controls, so deploying before migrating cannot lock keys out.
 const CONTROL_FIELDS = USER_FIELDS.slice(12);
@@ -32,6 +32,7 @@ const reply = (value, status = 200) => Response.json(value.error
 const fields = (body, names) => Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
 
 export function validUser(user) {
+  if (user && !Object.hasOwn(user, "shadow_eval_rate")) user = { ...user, shadow_eval_rate: null };
   if (user && !Object.hasOwn(user, "secret_scan_mode")) user = { ...user, secret_scan_mode: null };
   return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS)
     && text(user.username, 128) && text(user.api_key_hash, 512) && text(user.api_key_prefix, 64)
@@ -40,6 +41,8 @@ export function validUser(user) {
     && ["last_login", "last_used_at", "rotated_at", "revoked_at"].every(name => optionalText(user[name], 64))
     && optionalText(user.last_used_ip, 128) && optionalText(user.created_by, 128)
     && (user.secret_scan_mode === null || ["off", "observe", "redact", "block"].includes(user.secret_scan_mode))
+    && (user.shadow_eval_rate === null || (typeof user.shadow_eval_rate === "number"
+      && Number.isFinite(user.shadow_eval_rate) && user.shadow_eval_rate >= 0 && user.shadow_eval_rate <= 0.2))
     && budget(user.daily_budget_usd) && budget(user.monthly_budget_usd)
     && list(user.allowed_models, MODEL_PATTERNS) && list(user.allowed_ips, IP_RANGES)
     && (user.expires_at === null || (text(user.expires_at, 64) && Number.isFinite(Date.parse(user.expires_at))));
@@ -126,18 +129,14 @@ async function read(query) {
 
 /** Run an account query with every column, or with the pre-0007 columns and no controls. */
 async function readUsers(query) {
-  try { return await read(() => query(COLUMNS)); }
-  catch (error) {
-    if (!missingColumn(error)) throw error;
-    logFailure("account_controls_unmigrated", error);
+  for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
     try {
-      const rows = await read(() => query(USER_FIELDS.slice(0, -1).join(", ")));
-      const defaults = row => row && { ...row, secret_scan_mode: null };
+      const rows = await read(() => query(USER_FIELDS.slice(0, end).join(", ")));
+      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row };
       return Array.isArray(rows) ? rows.map(defaults) : defaults(rows);
-    } catch (older) {
-      if (!missingColumn(older)) throw older;
-      const rows = await read(() => query(LEGACY_FIELDS.join(", ")));
-      return Array.isArray(rows) ? rows.map(withoutControls) : withoutControls(rows);
+    } catch (error) {
+      if (!missingColumn(error) || end === 12) throw error;
+      logFailure("account_controls_unmigrated", error);
     }
   }
 }
@@ -223,23 +222,20 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"]) || !validUser(body.user)) break;
-        const user = { secret_scan_mode: null, ...body.user };
+        const user = { shadow_eval_rate: null, secret_scan_mode: null, ...body.user };
         if (grantsAdmin(user) && !adminUsernames(env).has(user.username)) {
           logFailure("account_admin_refused", new Error("Administration is not configured for this username"));
           await audit(db, "upsert", "refused", user).run();
           return reply({ error: "admin_not_allowed" }, 403);
         }
         // The write and its audit row commit together, or neither does.
-        try {
-          await db.batch([upsertStatement(db, user, USER_FIELDS), audit(db, "upsert", "stored", user)]);
-        } catch (error) {
-          // Before migration 0007 an account without controls can still be stored; controls cannot.
-          if (!missingColumn(error) || user.secret_scan_mode !== null) throw error;
+        for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
+          if (USER_FIELDS.slice(end).some(name => user[name] !== null)) throw new Error("Account controls require migration");
           try {
-            await db.batch([upsertStatement(db, user, USER_FIELDS.slice(0, -1)), audit(db, "upsert", "stored", user)]);
-          } catch (older) {
-            if (!missingColumn(older) || CONTROL_FIELDS.slice(0, -1).some(name => user[name] !== null)) throw older;
-            await db.batch([upsertStatement(db, user, LEGACY_FIELDS), audit(db, "upsert", "stored", user)]);
+            await db.batch([upsertStatement(db, user, USER_FIELDS.slice(0, end)), audit(db, "upsert", "stored", user)]);
+            break;
+          } catch (error) {
+            if (!missingColumn(error) || end === 12) throw error;
           }
         }
         return reply({ version: 1, stored: true });

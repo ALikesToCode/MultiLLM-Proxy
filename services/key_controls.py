@@ -15,7 +15,7 @@ from typing import Any, Mapping, Optional
 
 from error_handlers import APIError
 
-CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")
+CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate")
 MAX_BUDGET_USD = 1_000_000_000
 MAX_PATTERNS = 64
 MAX_RANGES = 64
@@ -120,6 +120,18 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         mode = None
     if mode is not None and (not isinstance(mode, str) or mode not in {"off", "observe", "redact", "block"}):
         raise APIError("secret_scan_mode must be off, observe, redact or block", 400)
+    rate = payload.get("shadow_eval_rate")
+    if rate == "":
+        rate = None
+    if rate is not None:
+        if isinstance(rate, bool):
+            raise APIError("shadow_eval_rate must be between 0 and 0.2", 400)
+        try:
+            rate = float(rate)
+        except (ValueError, TypeError):
+            raise APIError("shadow_eval_rate must be between 0 and 0.2", 400) from None
+        if not 0 <= rate <= 0.2:
+            raise APIError("shadow_eval_rate must be between 0 and 0.2", 400)
     expires_at = _parse_time(payload.get("expires_at"))
     return {
         "daily_budget_usd": _budget(payload.get("daily_budget_usd"), "daily_budget_usd"),
@@ -128,6 +140,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_ips": _ranges(payload.get("allowed_ips")),
         "expires_at": expires_at.isoformat() if expires_at else None,
         "secret_scan_mode": mode,
+        "shadow_eval_rate": rate,
     }
 
 
@@ -141,6 +154,9 @@ def from_storage(row: Mapping[str, Any]) -> dict[str, Any]:
     for name in ("allowed_models", "allowed_ips", "expires_at", "secret_scan_mode"):
         value = row.get(name) if hasattr(row, "get") else row[name]
         controls[name] = value if isinstance(value, str) and value else None
+    rate = row.get("shadow_eval_rate") if hasattr(row, "get") else row_value(row, "shadow_eval_rate")
+    if type(rate) in (int, float) and 0 <= rate <= 0.2:
+        controls["shadow_eval_rate"] = float(rate)
     return controls
 
 
@@ -161,6 +177,7 @@ def public(controls: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_ips": ip_ranges(controls),
         "expires_at": controls.get("expires_at"),
         "secret_scan_mode": controls.get("secret_scan_mode"),
+        "shadow_eval_rate": controls.get("shadow_eval_rate"),
     }
 
 

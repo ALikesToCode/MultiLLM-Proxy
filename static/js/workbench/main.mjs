@@ -1,11 +1,13 @@
 import { action, api, element, status } from "./api.mjs";
 import { initProfiles } from "./profiles.mjs";
 import { initLab } from "./lab.mjs";
+import { initShadow } from "./shadow.mjs";
 import { initSessions } from "./sessions.mjs";
 
 const refreshProfiles = initProfiles();
 initLab();
 initSessions();
+initShadow();
 action("check-deployment", async () => {
   element("deployment-result").textContent = "Checking Worker, Container and preflight responses…";
   element("deployment-result").textContent = JSON.stringify(await api("deployment?probe=true"), null, 2);

@@ -135,7 +135,7 @@
                             <td role="cell" data-label="Actions">
                                 <div class="table-actions">
                                     <button class="button button--secondary button--sm" type="button" data-controls-user="{{ user.username }}"
-                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at, "secret_scan_mode": user.secret_scan_mode} | tojson }}'
+                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at, "secret_scan_mode": user.secret_scan_mode, "shadow_eval_rate": user.shadow_eval_rate} | tojson }}'
                                         aria-label="Limits for {{ user.username }}">Limits</button>
                                     <button class="button button--secondary button--sm" type="button" data-rotate-user="{{ user.username }}" aria-label="Rotate key for {{ user.username }}">Rotate key</button>
                                     <button class="button button--danger button--sm" type="button" data-delete-user="{{ user.username }}" aria-label="Delete {{ user.username }}"
@@ -186,6 +186,10 @@
                     <option value="">Global default</option><option value="redact">Redact</option>
                     <option value="observe">Observe</option><option value="block">Block</option><option value="off">Off</option>
                 </select>
+            </label>
+            <label class="form-field">Shadow evaluation rate (0–0.2; blank disables)
+                <input id="key-shadow-eval-rate" name="shadow_eval_rate" type="number" min="0" max="0.2" step="0.01">
+                <span class="field-hint">Opt in to retaining sampled chat prompts and answers for up to 7 days.</span>
             </label>
             <div class="dialog__actions">
                 <button id="key-controls-cancel" class="button button--secondary" type="button">Cancel</button>

@@ -41,6 +41,9 @@ KEYS_UNAVAILABLE = "Cloudflare Access sign-in cannot be checked right now. Try a
 # Administrator changes recorded as setting_change events:
 # endpoint -> (setting label, methods, where the changed item's name comes from).
 AUDITED_SETTINGS = {
+    "shadow_config": ("shadow.config", frozenset({"POST"}), None),
+    "shadow_apply": ("shadow.policy_apply", frozenset({"POST"}), None),
+    "shadow_purge": ("shadow.purge", frozenset({"POST"}), None),
     "manage_users": ("account.create", frozenset({"POST"}), ("body", "username")),
     "delete_user": ("account.delete", frozenset({"DELETE"}), ("view", "username")),
     "rotate_api_key": ("account.rotate_key", frozenset({"POST"}), ("view", "username")),

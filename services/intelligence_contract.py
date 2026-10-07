@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from services.free_json_contract import validate_response_format
 
 TASKS = frozenset(
-    {"general", "coding", "reasoning", "planning", "assessment", "research", "writing"}
+    {"general", "coding", "reasoning", "planning", "assessment", "research", "writing", "chat", "extraction"}
 )
 PROFILES = frozenset({"fast", "balanced", "quality"})
 CAPABILITIES = frozenset({"tools", "json", "vision", "reasoning", "streaming", "audio"})

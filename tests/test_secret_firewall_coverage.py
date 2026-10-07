@@ -9,7 +9,9 @@ def test_flask_route_inventory_requires_firewall_review():
     for path in sorted((ROOT / "routes").glob("*.py")):
         calls = [ast.unparse(node) for node in ast.walk(ast.parse(path.read_text()))
                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                 and node.func.attr in {"route", "add_url_rule"}]
+                 and (node.func.attr in {"route", "add_url_rule"}
+                      or (isinstance(node.func.value, ast.Name) and node.func.value.id == "app"
+                          and node.func.attr in {"get", "post", "put", "patch", "delete"}))]
         if calls: current[str(path.relative_to(ROOT))] = sorted(calls)
     expected = json.loads((ROOT / "tests/fixtures/secret_firewall_coverage.json").read_text())["flask_routes"]
     assert current == expected, "Review each added route's provider dispatch, then update the inventory"

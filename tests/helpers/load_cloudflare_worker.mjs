@@ -721,6 +721,7 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace('from "./worker/shadow-eval-schedule.mjs";', `from "${new URL("../../worker/shadow-eval-schedule.mjs", import.meta.url)}";`)
     .replace('from "./worker/cors-policy.mjs";', `from "${new URL("../../worker/cors-policy.mjs", import.meta.url)}";`)
     .replace('from "./worker/secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
