@@ -49,6 +49,7 @@ from routes.protocol_bridge import (
     translation_api_error,
     translation_request_headers,
 )
+from routes.tool_repair import with_chat_tool_repair, with_native_tool_repair
 from routes.unified_messages import register_unified_messages_routes
 from routes.media_images import dispatch_auto_image_generation
 from routes.media_edits import dispatch_reference_generation, has_reference_images
@@ -409,6 +410,7 @@ def _dispatch_bridged_chat(
     )
 
 
+@with_chat_tool_repair
 def _dispatch_unified_chat_candidate(
     app,
     auth_service_cls,
@@ -721,6 +723,7 @@ def _reject_media_only_route(model) -> None:
     )
 
 
+@with_native_tool_repair
 def _dispatch_native_protocol(
     app,
     auth_service_cls,

@@ -10,6 +10,8 @@ from error_handlers import APIError
 from request_validation import json_object_body
 from route_helpers import api_auth_required, stream_upstream_response
 from routes.free_response import FreeUpstreamFailure, validated_free_response
+from routes.tool_repair import repair_response
+from services.tool_repair_runtime import HEADER, SKIP_REASK, repair_mode
 from services.free_compatibility import inspect_compatibility_detail
 from services.client_headers import client_context_headers, with_client_defaults
 from services.free_json_contract import json_output_requested
@@ -134,7 +136,7 @@ def _record_attempt_failure(candidate, payload, error, status, upstream_status, 
 
 
 def _try_candidate(
-    config, auth, metrics, proxy, payload, candidate, remaining, deadline, failures
+    config, auth, metrics, proxy, payload, candidate, remaining, deadline, failures, repair_state
 ):
     start = time.monotonic()
     status = 502
@@ -161,7 +163,25 @@ def _try_candidate(
         if status != 200:
             raise FreeUpstreamFailure()
         FreeQuotaService.observe(candidate.provider, headers)
-        return validated_free_response(
+        def reask(body):
+            seconds = int(deadline - time.monotonic())
+            if seconds < 2 or repair_state["used"] or repair_state["attempts"] >= MAX_ATTEMPTS:
+                return SKIP_REASK
+            repair_state["used"] = True
+            repair_state["attempts"] += 1
+            extra = _request_candidate(config, auth, proxy, body, candidate, seconds)
+            metrics.get_instance().track_request(
+                provider=candidate.provider, status_code=extra.status_code,
+                response_time=(time.monotonic() - start) * 1000,
+                model=candidate.id, route_decision="free-tool-repair",
+            )
+            return extra
+
+        upstream = repair_response(
+            upstream, payload, mode=repair_mode(request.headers, config),
+            provider=candidate.provider, model=candidate.id, reask=reask,
+        )
+        downstream = validated_free_response(
             upstream,
             provider=candidate.provider,
             stream=payload.get("stream", False),
@@ -171,6 +191,9 @@ def _try_candidate(
             tool_names=declared_tools(payload) if tool_request(payload) else None,
             tool_choice=payload.get("tool_choice"),
         )
+        if HEADER in upstream.headers:
+            downstream.headers[HEADER] = upstream.headers[HEADER]
+        return downstream
     except (requests.RequestException, FreeUpstreamFailure, APIError) as error:
         status = (
             error.status_code
@@ -243,6 +266,7 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
         ), 503
     deadline = time.monotonic() + REQUEST_DEADLINE_SECONDS
     attempts = 0
+    repair_state = {"used": False, "attempts": 0}
     failures = []
     stop_reason = "providers_failed"
     for priority, candidate in enumerate(configured, 1):
@@ -255,6 +279,7 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
             )
             break
         attempts += 1
+        repair_state["attempts"] = attempts
         response = _try_candidate(
             app.config,
             auth,
@@ -265,7 +290,9 @@ def dispatch_free_chat(app, auth, metrics, proxy, payload, fixed_model=None):
             remaining,
             deadline,
             failures,
+            repair_state,
         )
+        attempts = repair_state["attempts"]
         if response is not None:
             return _decorate(response, candidate, model, attempts, priority)
     return _exhausted_response(configured, model, attempts, failures, stop_reason)

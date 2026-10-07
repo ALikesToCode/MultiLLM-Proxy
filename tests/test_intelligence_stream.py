@@ -113,8 +113,9 @@ class IntelligenceStreamTests(IntelligenceApiTestCase):
         ):
             response = self.post(stream=True, tools=[TOOL])
             output = events(response)
-        assert output[0]["choices"][0]["delta"]["tool_calls"] == [first]
-        assert output[1]["choices"][0]["delta"]["tool_calls"] == [second]
+        complete = {**first, "function": {"name": "lookup", "arguments": '{"q":"test"}'}}
+        assert output[0]["choices"][0]["delta"]["tool_calls"] == [complete]
+        assert output[1]["choices"][0]["finish_reason"] == "tool_calls"
         assert output[-1]["multillm"]["attempts"] == 1
 
     def test_schema_stream_is_gated_and_escalation_usage_is_aggregated(self):
@@ -328,7 +329,8 @@ class GeminiStreamTests(IntelligenceApiTestCase):
         ):
             response = self.post(stream=True, tools=[TOOL])
             output = events(response)
-        calls = output[0]["choices"][0]["delta"]["tool_calls"]
+        calls = [call for event in output for choice in event.get("choices", [])
+                 for call in choice.get("delta", {}).get("tool_calls", [])]
         assert calls[0]["extra_content"] == SIGNATURE
         assert output[-1]["multillm"]["usage_complete"]
 
@@ -355,7 +357,8 @@ class GeminiStreamTests(IntelligenceApiTestCase):
         ):
             response = self.post(stream=True, tools=[TOOL])
             output = events(response)
-        calls = output[0]["choices"][0]["delta"]["tool_calls"]
+        calls = [call for event in output for choice in event.get("choices", [])
+                 for call in choice.get("delta", {}).get("tool_calls", [])]
         assert [(call["index"], call["id"]) for call in calls] == [(0, "call-1"), (1, "call-2")]
         assert calls[0]["extra_content"] == SIGNATURE
         assert "error" not in output[-1] and output[-1]["multillm"]["usage_complete"]

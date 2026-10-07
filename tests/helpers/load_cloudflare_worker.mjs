@@ -719,6 +719,7 @@ export async function loadWorkerModule() {
     ),
   );
   const patchedSource = source
+    .replace('from "./worker/cors-policy.mjs";', `from "${new URL("../../worker/cors-policy.mjs", import.meta.url)}";`)
     .replace('from "./worker/knowledge-outbound.mjs";', `from "${new URL("../../worker/knowledge-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/d1-schema.mjs";', `from "${new URL("../../worker/d1-schema.mjs", import.meta.url)}";`)
     .replace('from "./worker/ai-outbound.mjs";', `from "${new URL("../../worker/ai-outbound.mjs", import.meta.url)}";`)

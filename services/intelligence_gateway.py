@@ -20,6 +20,7 @@ from services.intelligence_policy import input_reservation, select_candidates
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_stream import ChatStream
 from services.intelligence_transport import remaining
+from services.intelligence_tool_repair import IntelligenceToolRepair
 from services.route_health import RouteHealth
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class ChatGateway:
         self.unresolved = False
         self.emitted = False
         self.finished = False
+        self.tool_repair = IntelligenceToolRepair(self)
 
     def metadata(self):
         model = self.selected["model"] if self.selected else None
@@ -200,7 +202,7 @@ class ChatGateway:
                     if head.status_code != 200:
                         raise rejection(head)
                     try:
-                        yield from self._completion(candidate, reserved, started)
+                        yield from self._completion(candidate, reserved, started, payload, token)
                     except ValueError:
                         last_error = GatewayError(
                             "output_validation_failed",
@@ -287,14 +289,17 @@ class ChatGateway:
                 502,
             )
 
-    def _completion(self, candidate, reserved, started):
+    def _completion(self, candidate, reserved, started, payload=None, token=None):
         model = candidate["model"]
         gemini = model.split(":", 1)[0] == "gemini"
         if not self.request.payload.get("stream"):
-            payload = decode_completion(self.exchange.read())
-            usage = payload.get("usage")
+            decoded = decode_completion(self.exchange.read())
+            usage = decoded.get("usage")
             self._account(with_thinking_tokens(usage) if gemini else usage, reserved)
-            completion = visible_completion(payload, model)
+            completion = visible_completion(decoded, model)
+            completion = self.tool_repair.completion(
+                completion, candidate, payload or self.request.payload, token
+            )
             validate_completion(completion, self.request)
             self.settle()
             self.emitted = True
@@ -302,10 +307,15 @@ class ChatGateway:
             return
         parsed = ChatStream(self.exchange.chunks(), model)
         buffered = []
-        gated = bool(self.request.required & {"tools", "json"})
+        gated = "json" in self.request.required or (
+            "tools" in self.request.required and self.tool_repair.mode == "off"
+        )
         first_output = None
         try:
-            for event in parsed.events():
+            for event in (
+                repaired for original in parsed.events()
+                for repaired in self.tool_repair.events(original)
+            ):
                 if first_output is None and visible(event):
                     first_output = time.monotonic()
                 if gated:
@@ -314,6 +324,10 @@ class ChatGateway:
                     self.emitted = True
                     yield self.identify(event)
         except GatewayError:
+            if not gated:
+                for event in self.tool_repair.flush():
+                    self.emitted = True
+                    yield self.identify(event)
             if parsed.usage is not None:
                 self.usage.add(parsed.usage)
             raise
@@ -321,6 +335,7 @@ class ChatGateway:
         self._account(usage, reserved)
         if first_output is not None:
             record_speed(model, usage, started, first_output, time.monotonic())
+        self.tool_repair.finish_stream(parsed, candidate)
         validate_completion(parsed.completion(), self.request)
         for event in buffered:
             self.emitted = True

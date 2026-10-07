@@ -126,6 +126,7 @@ class Config:
     NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS = load_bounded_env_integer(
         'NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS', 60, 1, 3600
     )
+    TOOL_CALL_REPAIR_DEFAULT = os.environ.get('TOOL_CALL_REPAIR_DEFAULT', 'repair')
     PROMPT_CACHE_ENABLED = load_env_boolean('PROMPT_CACHE_ENABLED', True)
     PROMPT_CACHE_MIN_TOKENS = load_bounded_env_integer(
         'PROMPT_CACHE_MIN_TOKENS', 1024, 1, 1000000

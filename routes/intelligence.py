@@ -16,6 +16,7 @@ from services.intelligence_gateway import ChatGateway
 from services.intelligence_output import sse
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_transport import IntelligenceTransport
+from services.tool_repair_runtime import HEADER, repair_mode, summary_header
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,8 @@ def stream_response(gateway):
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
     response.call_on_close(close)
+    if gateway.request.payload.get("tools"):
+        response.headers[HEADER] = summary_header({})
     return response
 
 
@@ -149,10 +152,14 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
             metrics,
             cancelled=CallerCancellation(request.environ),
         )
+        gateway.tool_repair.mode = repair_mode(request.headers, app.config)
         if parsed.payload.get("stream"):
             return stream_response(gateway)
         result = list(gateway.events())
-        return Response(json.dumps(result[-1]), content_type="application/json")
+        response = Response(json.dumps(result[-1]), content_type="application/json")
+        if parsed.payload.get("tools"):
+            response.headers[HEADER] = summary_header(gateway.tool_repair.buffer.report)
+        return response
     except GatewayError as error:
         return error_response(error, gateway)
     except Exception:

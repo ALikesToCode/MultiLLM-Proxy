@@ -130,7 +130,7 @@ class IntelligenceHttpTests(IntelligenceApiTestCase):
 
     def test_quality_limits_and_invalid_tool_arguments(self):
         self.seed()
-        invalid = {**CALL, "function": {"name": "lookup", "arguments": '{"q":4}'}}
+        invalid = {**CALL, "function": {"name": "lookup", "arguments": '{}'}}
         with self.requests(
             return_value=upstream(completion(None, calls=[invalid]))
         ) as send:

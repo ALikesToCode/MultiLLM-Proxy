@@ -65,6 +65,28 @@ requests reach Responses- and Messages-only models too.
 
 ## Coverage
 
+### Tool-call repair
+
+Function tools on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
+are checked at the Container's Chat pivot, including native endpoints, free
+pools, and intelligence routing. `X-MultiLLM-Tool-Repair: repair` repairs JSON
+syntax, unambiguous names and schema primitive types, and extracts declared
+calls from known text formats. Missing arguments remain invalid.
+
+`off` preserves the existing response bytes. `full` allows one non-streaming
+follow-up to the same model, includes its usage, and respects free-pool and
+intelligence attempt limits. `TOOL_CALL_REPAIR_DEFAULT` defaults to `repair`;
+the request header overrides it. Browser CORS permits and exposes the header.
+
+When tools are declared, the response header reports `checked`, `repaired`,
+`extracted`, `invalid`, and `reasked`. Streaming sends text immediately and
+buffers each tool call until completion; it neither extracts text calls nor
+re-asks. Stream headers contain initial zero counts because headers precede
+the final calls; the `tool_call_repair` log records final counts without output
+or argument values. Existing validation in free and intelligence routes still
+rejects calls that remain invalid. See the [implementation design](plans/2026-10-07-tool-call-repair-design.md)
+for limits and protocol caveats.
+
 | Feature | Chat ↔ Messages | Chat ↔ Responses |
 | --- | --- | --- |
 | System prompts | `system`/`developer` messages ↔ top-level `system` (joined in order) | `system`/`developer` messages ↔ `instructions` and system input items; `developer` becomes `system` in Chat |
