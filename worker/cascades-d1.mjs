@@ -7,9 +7,8 @@ const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
 const CHECKS = ["complete", "json", "tools", "no_refusal", "agreement", "judge"];
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const fields = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.includes(key));
-const model = (value, auxiliary = false) => typeof value === "string" && MODEL.test(value)
+const model = value => typeof value === "string" && MODEL.test(value)
   && value.includes(":") && value.split(":")[1] && !value.startsWith("cascade:")
-  && (auxiliary || !value.startsWith("free:"))
   && (!value.startsWith("auto:") || /^auto:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value));
 const reply = (value, status = 200) => Response.json(value.error
   ? { version: 1, error: { code: value.error, message: "Cascade storage operation failed" } }
@@ -24,11 +23,11 @@ export function validCascade(value) {
         && tier.max_output_tokens >= 1 && tier.max_output_tokens <= 1048576)))
     || !Array.isArray(value.checks) || value.checks.length > CHECKS.length
     || !value.checks.every(check => CHECKS.includes(check)) || new Set(value.checks).size !== value.checks.length) return false;
-  if (Object.hasOwn(value, "judge") && (!fields(value.judge, ["model", "min_score"]) || !model(value.judge.model, true)
+  if (Object.hasOwn(value, "judge") && (!fields(value.judge, ["model", "min_score"]) || !model(value.judge.model)
     || (Object.hasOwn(value.judge, "min_score") && (typeof value.judge.min_score !== "number"
       || !Number.isFinite(value.judge.min_score) || value.judge.min_score < 0 || value.judge.min_score > 10)))) return false;
   if (Object.hasOwn(value, "agreement") && (!fields(value.agreement, ["model"])
-    || (Object.hasOwn(value.agreement, "model") && !model(value.agreement.model, true)))) return false;
+    || (Object.hasOwn(value.agreement, "model") && !model(value.agreement.model)))) return false;
   return (!value.checks.includes("judge") || Object.hasOwn(value, "judge"))
     && (!Object.hasOwn(value, "updated_at") || (typeof value.updated_at === "string" && /^[0-9T:.+\-Z]{10,40}$/.test(value.updated_at)));
 }

@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import requests
 
+from services import usage_ledger
+
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 ADMIN = {'Authorization': 'Bearer admin-test-key'}
@@ -113,3 +115,60 @@ class CascadeApiTests(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(upstream.call_args.kwargs['data'])['model'], 'permitted')
         self.assertIn('model=opencode:permitted', response.headers['X-MultiLLM-Cascade'])
+
+
+    def _free_config(self):
+        from services.cascade_service import CascadeService
+        from tests.test_free_routes import catalog_row
+        config = {**self.config, 'tiers': [{'model': 'free:text'}, self.config['tiers'][1]]}
+        CascadeService.save_route(config, self.app.config['API_BASE_URLS'])
+        self.app.config.update(FREE_ROUTE_FREE_TIER_PROVIDERS='', FREE_ROUTE_PROVIDER_ORDER='', REQUEST_TIMEOUT=120)
+        return [catalog_row('opencode', 'hy3-free'), catalog_row('opencode', 'mimo-v2.5-free')]
+
+    def test_free_tier_pass_and_escalation_use_normal_dispatch_and_ledger(self):
+        rows = self._free_config()
+        for text, count in [('4', 1), ('partial', 2)]:
+            ledger = []
+            with self.subTest(text=text), patch('services.free_model_policy.build_model_catalog', return_value=rows), patch.object(usage_ledger.LEDGER, 'record', side_effect=ledger.append), patch('services.route_health.RouteHealth.record') as health, patch('app.ProxyService.make_request', side_effect=[self._upstream(text, 'stop' if count == 1 else 'length'), self._upstream('final')]) as upstream:
+                response = self.client.post('/v1/chat/completions', headers=ADMIN, json={'model': 'cascade:api', 'messages': [{'role': 'user', 'content': 'hello'}]})
+                self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+                response.get_data()
+                response.close()
+            self.assertEqual(upstream.call_count, count)
+            self.assertEqual(len(ledger), count)
+            self.assertEqual(ledger[0]['requested_model'], 'free:text')
+            self.assertEqual(ledger[0]['selected_model'], 'opencode:hy3-free')
+            self.assertEqual(health.call_count, count - 1)
+            if count == 1:
+                self.assertIn('model=opencode:hy3-free', response.headers['X-MultiLLM-Cascade'])
+            else:
+                self.assertIn('tier=2/2; model=opencode:strong; skipped=1:complete', response.headers['X-MultiLLM-Cascade'])
+
+    def test_deadline_cuts_free_candidate_loop(self):
+        rows = self._free_config()
+        now, ledger = [0.0], []
+        def failed(**kwargs):
+            now[0] = 119.0
+            response = self._upstream('')
+            response.status_code = 503
+            return response
+        with patch('services.free_model_policy.build_model_catalog', return_value=rows), patch('routes.free_routes._cooldown', return_value=0), patch('routes.free_routes.time.monotonic', side_effect=lambda: now[0]), patch.object(usage_ledger.LEDGER, 'record', side_effect=ledger.append), patch('app.ProxyService.make_request', side_effect=failed) as upstream:
+            response = self.client.post('/v1/chat/completions', headers=ADMIN, json={'model': 'cascade:api', 'messages': [{'role': 'user', 'content': 'hello'}]})
+            response.get_data()
+            response.close()
+        self.assertEqual(upstream.call_count, 1)
+        self.assertEqual(len(ledger), 1)
+        self.assertEqual(response.get_json()['error']['reason'], 'deadline_exceeded')
+        self.assertIn('2:deadline', response.headers['X-MultiLLM-Cascade'])
+
+    def test_free_tier_candidate_allowlist(self):
+        rows = self._free_config()
+        from services import key_controls
+        original = key_controls.model_allowed
+        with patch('services.free_model_policy.build_model_catalog', return_value=rows), patch.object(key_controls, 'model_allowed', side_effect=lambda user, model: model != rows[0]['id'] and original(user, model)), patch('app.ProxyService.make_request', return_value=self._upstream()) as upstream:
+            response = self.client.post('/v1/chat/completions', headers=ADMIN, json={'model': 'cascade:api', 'messages': [{'role': 'user', 'content': 'hello'}]})
+            response.get_data()
+            response.close()
+        self.assertEqual(upstream.call_count, 1)
+        self.assertEqual(json.loads(upstream.call_args.kwargs['data'])['model'], 'mimo-v2.5-free')
+        self.assertIn('model=opencode:mimo-v2.5-free', response.headers['X-MultiLLM-Cascade'])

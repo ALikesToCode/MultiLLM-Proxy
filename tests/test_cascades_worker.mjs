@@ -30,7 +30,7 @@ test("cascade D1 stores, updates and normalizes check order/defaults", async t =
 
 test("cascade config rejects malformed bounds, nested cascades and fields", () => {
   for (const change of [{ name: "auto:bad" }, { tiers: [] }, { tiers: Array(5).fill({ model: "p:m" }) },
-    { tiers: [{ model: "cascade:recursive" }, { model: "p:m" }] }, { tiers: [{ model: "free:text" }, { model: "p:m" }] },
+    { tiers: [{ model: "cascade:recursive" }, { model: "p:m" }] },
     { tiers: [{ model: "p:m", max_output_tokens: true }, { model: "p:m" }] }, { checks: ["complete", "complete"] },
     { checks: ["judge"] }, { judge: { model: "p:m", min_score: 11 } }, { judge: { model: "p:m", min_score: true } },
     { judge: { model: "p:m", min_score: NaN } }, { agreement: { extra: 1 } }, { extra: true }]) {
@@ -63,4 +63,15 @@ test("cascade storage caps creations at 200 and permits edits at capacity", asyn
 
 test("cascade receipt is exposed by edge CORS", () => {
   assert.match(CORS_EXPOSE_HEADERS, /X-MultiLLM-Cascade/);
+});
+
+
+test("cascade free pools validate and persist through D1", async t => {
+  const { call } = await database(t);
+  for (const pool of ["free:text", "free:vision"]) {
+    const cascade = { ...config, tiers: [{ model: pool }, { model: "opencode:strong" }] };
+    assert.equal(validCascade(cascade), true);
+    assert.equal((await call({ operation: "put", cascade })).status, 200);
+    assert.deepEqual((await call({ operation: "list" })).body.cascades, [cascade]);
+  }
 });

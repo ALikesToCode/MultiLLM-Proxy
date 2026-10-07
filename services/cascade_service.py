@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from services import cascade_d1, intelligence_d1_store
 from services.auto_route_service import AutoRouteService
+from services.free_model_policy import FREE_MODELS
 from services.cascade_config import DEFAULT_CASCADES, MAX_CASCADES, normalize_config
 
 
@@ -42,8 +43,8 @@ class CascadeService:
                 if AutoRouteService.get_route(model) is None and model != "auto:intelligence":
                     raise ValueError(f"Automatic route not found: {model}")
             elif model.startswith("free:"):
-                if model not in {"free:text", "free:vision"}:
-                    raise ValueError("Unsupported free judge pool")
+                if model not in FREE_MODELS:
+                    raise ValueError("Unsupported free pool")
             else:
                 AutoRouteService.normalize_candidates([model], base_urls)
         config["updated_at"] = datetime.now(timezone.utc).isoformat()

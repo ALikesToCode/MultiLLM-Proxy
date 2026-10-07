@@ -17,10 +17,10 @@ def is_cascade(model):
 
 def model_id(value, *, auxiliary=False):
     if not isinstance(value, str) or not MODEL.fullmatch(value) or ":" not in value:
-        raise ValueError("Cascade models must use provider:model or auto:<name>")
+        raise ValueError("Cascade models must use provider:model, auto:<name>, or free:<pool>")
     provider, name = value.split(":", 1)
-    if not name or provider == "cascade" or (provider == "free" and not auxiliary):
-        raise ValueError("Cascade tiers cannot contain cascades or free pools")
+    if not name or provider == "cascade":
+        raise ValueError("Cascade models cannot contain nested cascades")
     if provider == "auto" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
         raise ValueError("Invalid automatic route name")
     return value

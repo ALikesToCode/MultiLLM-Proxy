@@ -65,7 +65,6 @@ def run(config, bodies, payload=None, **kwargs):
 @pytest.mark.parametrize('change', [
     {'name': 'bad'}, {'name': 'cascade:'}, {'name': 'cascade:a b'}, {'tiers': []},
     {'tiers': [{'model': 'opencode:x'}] * 5}, {'tiers': [{'model': 'cascade:x'}, {'model': 'opencode:y'}]},
-    {'tiers': [{'model': 'free:text'}, {'model': 'opencode:y'}]},
     {'tiers': [{'model': 'opencode:x', 'max_output_tokens': True}, {'model': 'opencode:y'}]},
     {'tiers': [{'model': 'opencode:x', 'max_output_tokens': 0}, {'model': 'opencode:y'}]},
     {'checks': ['judge']}, {'checks': ['complete'] * 2}, {'checks': ['unknown']},
@@ -446,3 +445,30 @@ def test_empty_chunks_cannot_make_verification_loop_unbounded(context):
     assert _body(response) is None
     assert len(seen) == 4096
     response.close()
+
+
+@pytest.mark.parametrize('pool', ['free:text', 'free:vision'])
+def test_free_tier_storage_roundtrip(pool, tmp_path, monkeypatch):
+    monkeypatch.setenv('INTELLIGENCE_STORAGE_BACKEND', '')
+    monkeypatch.setenv('MODEL_REGISTRY_DB_PATH', str(tmp_path / 'models.sqlite3'))
+    config = {**CONFIG, 'tiers': [{'model': pool}, CONFIG['tiers'][1]]}
+    saved = CascadeService.save_route(config, {'opencode': 'https://synthetic.invalid'})
+    assert CascadeService.get_route(CONFIG['name']) == saved
+
+
+@pytest.mark.parametrize('text,expected_calls', [('4', 1), ('', 2)])
+def test_free_tier_accounting_receipt_and_health_owner(context, text, expected_calls):
+    from services.route_health import RouteHealth
+    config = {**CONFIG, 'tiers': [{'model': 'free:text'}, CONFIG['tiers'][1]]}
+    free_answer = jsonify(answer(text))
+    free_answer.headers['X-MultiLLM-Auto-Selected-Model'] = 'opencode:synthetic-free'
+    with patch.object(RouteHealth, 'record') as health:
+        response, calls = run(config, [free_answer, answer('final')])
+    assert len(calls) == len(context[1]) == expected_calls
+    assert context[1][0]['requested_model'] == 'free:text'
+    assert context[1][0]['selected_model'] == 'opencode:synthetic-free'
+    assert health.call_count == expected_calls - 1
+    if expected_calls == 1:
+        assert 'model=opencode:synthetic-free' in response.headers['X-MultiLLM-Cascade']
+    else:
+        assert 'skipped=1:complete' in response.headers['X-MultiLLM-Cascade']

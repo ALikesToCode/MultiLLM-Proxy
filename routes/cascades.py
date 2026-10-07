@@ -202,7 +202,7 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
                     raise
                 continue
             selected = _selected(response, tier["model"])
-            if not tier["model"].startswith("auto:"):
+            if not tier["model"].startswith(("auto:", "free:")):
                 RouteHealth.record(selected, ok=response.status_code < 400,
                                    outcome="ok" if response.status_code < 400 else "error")
             if final:
@@ -263,6 +263,11 @@ def validate_cascade_target(app, auth, model, proxy):
                 policy = load_policy()
                 if any(model_allowed(getattr(g, "authenticated_user", {}) or {}, candidate["model"])
                        for candidate in policy["candidates"]):
+                    return "cascade"
+                continue
+            if tier["model"].startswith("free:"):
+                from services.free_model_policy import FREE_MODELS
+                if tier["model"] in FREE_MODELS:
                     return "cascade"
                 continue
             validate_unified_chat_target(app, auth, tier["model"], proxy)
