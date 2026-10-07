@@ -1,0 +1,2477 @@
+[
+  {
+    "name": "trailing_comma",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\",}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "single_quotes",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{'q':'a'}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "unquoted_keys",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{q:\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "line_comment",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{q:\"a\" // keep\n}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "block_comment",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{/* keep */q:\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "code_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "```json\n{\"q\":\"a\"}\n```"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "strip_wrapping"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "surrounding_prose",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "Arguments: {\"q\":\"a\"} End."
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "strip_wrapping"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "double_encoding",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "\"{\\\"q\\\":\\\"a\\\"}\""
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "decode_json_string"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "valid_is_identical",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{ \"q\" : \"a\" }"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{ \"q\" : \"a\" }"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "raw_control",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\nb\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\\nb\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "quoted_tokens_untouched",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"True // None, } http://example.test\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"True // None, } http://example.test\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "name_LOOKUP",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "LOOKUP",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tool_name"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "name_functions.lookup",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "functions.lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tool_name"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "name_namespace.LOOKUP",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "namespace.LOOKUP",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tool_name"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "missing_required",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$.q: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "unknown_tool",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "unknown",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "unknown",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "ambiguous_name",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "Lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "LOOKUP",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "LOOKUP",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "duplicate",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\",\"q\":\"b\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\",\"q\":\"b\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: arguments are not valid JSON"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "malicious",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{q:__import__('os')}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{q:__import__('os')}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: arguments are not valid JSON"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "two_objects",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"} {\"q\":\"b\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"} {\"q\":\"b\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: arguments are not valid JSON"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "wrong_root",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "[1]"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "[1]"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: arguments must be a JSON object"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "tool_choice_none",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "none",
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "errors": [
+            "$: tool_choice forbids calls"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "integer",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"5\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":5}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "number",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"2.5\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":2.5}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "boolean_true",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"true\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":true}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "boolean_false",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"false\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":false}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "number_to_string",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":5}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"5\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "scalar_array",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"5\"}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":[5]}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "coerce_primitives"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "python_true",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":True}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":true}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "python_false",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":False}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":false}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "python_none",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "q"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":None}"
+          }
+        }
+      ]
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":null}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "hermes_qwen",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <tool_call>{\"name\":\"lookup\",\"arguments\":{\"q\":\"a\"}}</tool_call> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "function_tag",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <function=lookup>{\"q\":\"a\"}</function> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "fenced_parameters",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before ```json\n{\"name\":\"lookup\",\"parameters\":{\"q\":\"a\"}}\n``` After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "glm_nested",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <tool_call>{\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"a\\\"}\"}}</tool_call> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "deepseek",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Before <|tool_call_begin|>functions.lookup:0<|tool_call_argument_begin|>{\"q\":\"a\"}<|tool_call_end|> After"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Before  After",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tool_name"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "unknown_not_extracted",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"unknown\",\"arguments\":{}}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"unknown\",\"arguments\":{}}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "glm_name_line",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>lookup\n{\"q\":\"a\"}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "deepseek_unicode",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "q": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "q"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>lookup\n```json\n{\"q\":\"a\"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "lookup",
+            "arguments": "{\"q\":\"a\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  }
+]
