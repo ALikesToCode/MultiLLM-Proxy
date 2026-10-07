@@ -162,12 +162,22 @@ deployment. It is excluded from the Container image.
 The Model league panel samples successful routed chat requests only for keys with
 an explicit `shadow_eval_rate` between 0 and 0.2 in Users → key controls. Blank,
 null and zero disable sampling. `auto:*`, `cascade:*` and intelligence requests
-are eligible, including the normalized `/v1/responses` chat path. Media, roleplay,
-Knowledge and direct concrete models are excluded. Retained requests are scanned
+are eligible on `/v1/chat/completions`, `/v1/responses`, `/v1/messages`,
+`/optimize/v1/chat/completions` and `/intelligence/v1/chat/completions`. Native
+protocols reach the sampling seam after chat normalization. Accounted gateway
+subrequests cannot be sampled or consume the outer request's sampling decision.
+Media, roleplay and Knowledge are excluded; ordinary routes require routed
+models. Retained requests are scanned
 with the existing secret scanner; high-confidence findings or incomplete scans
 skip the sample. Heuristic findings remain unchanged. Answers are also scanned.
-Request data is limited to 64 KiB and answer data to 32 KiB. Successful streaming
-answers require a terminal finish and `[DONE]`; partial/error streams are skipped.
+Request data is limited to 64 KiB and answer data to 32 KiB. Agent requests above
+that request limit are not sampled. Numeric coverage counters show `eligible`,
+`sampled`, `skipped_rate`, `skipped_secret`, `skipped_oversize`, `skipped_queue_full`
+and `skipped_error`. They reset on process restart and remain on purge. Eligible
+counts opted-in decisions; sampled counts queue admission. A later storage error
+can also count as skipped_error, so these are diagnostics rather than a strict
+partition. Incomplete privacy scans and partial/error streams count as errors.
+Successful streaming answers require a terminal finish and `[DONE]`; partial/error streams are skipped.
 
 Load league & settings to configure candidate IDs by coding, extraction, writing,
 reasoning and chat. Evaluation starts disabled. The judge defaults to `free:json`
@@ -182,16 +192,40 @@ The five-minute scheduled trigger uses `fetchIfRunning` and never wakes or renew
 an idle Container. Claims and a five-minute lease prevent concurrent duplicate
 runs and enforce the daily cap. Failed attempts consume their claim and are not
 retried. A run starts no more than the configured count within four minutes; calls
-use existing dispatch timeouts. Replays cap output at 2,048 tokens. Judging uses
-random A/B order followed by swapped order. Only agreeing valid judgments record
-a win/loss; disagreement is a tie and malformed output is excluded from ratings.
+use existing dispatch timeouts. Replays use
+`max(1024, min(8192, 2 * production completion_tokens))`, or 8192 when unknown,
+lowered to the original `max_tokens`/`max_completion_tokens` limit if present.
+They send `max_completion_tokens` through normal gateway translation and replay
+the full stored request. `same_model` results are counted separately from failures.
+A candidate finishing with `length` when production did not is marked
+`candidate_truncated`, counted separately and excluded from ratings; both cases
+skip judge calls.
+
+Judging uses random A/B order followed by swapped order and a 1024-token answer
+budget. Its compact view keeps at most 8 KiB of system messages, the last eight
+other messages within 24 KiB (newest retained first, then conversation order),
+tool names/descriptions and full schemas only for tools either answer called,
+response_format and intact stored answers. Drop older messages first to keep the
+complete judge payload within 64 KiB; if intact required data cannot fit, the
+comparison fails before judging. The parser accepts one markdown fence, extra
+keys and numeric-string confidence; it drops non-string reasons and keeps three
+strings truncated to 160 characters. Invalid/missing winners, invalid confidence
+and outputs over 4 KiB still fail. Only agreeing valid judgments record a win/loss;
+disagreement is a tie and malformed output is excluded from ratings.
 
 The league shows per-task wins/losses/ties, Elo (1500 initial, K=32), comparison
 count, median latency and known cost. Export league contains numeric results and
-model identifiers, never retained text. Propose update changes only task scores
-for models with at least 20 judged comparisons in that task; auto-route order
-suggestions are displayed separately. Applying requires a checked confirmation
-and the current proposal revision. Policy validation, an atomic revision guard
+model identifiers, sampling counters and comparison counts, never retained text.
+Propose update changes only task scores for models with at least 20 judged comparisons in that task; auto-route order
+suggestions are displayed separately. Scores preserve the existing absolute scale:
+for each task, anchor at the mean current scores of models with ≥20 comparisons
+(default 70 when none has a score), then use
+`clamp(round(anchor + (rating - mean_rating) * SCORE_PER_ELO), 0, 100)`.
+`SCORE_PER_ELO = 0.1` means 100 Elo adds 10 points; `MAX_STEP = 15` limits each
+change from its previous score. Example: current scores 80/90 and Elo 1550/1450
+anchor at 85 and yield 90/80, retaining the mean of 85. Unevaluated models stay
+unchanged. Rounding, clamping and step limits can constrain mean/order preservation.
+Applying requires a checked confirmation and the current proposal revision. Policy validation, an atomic revision guard
 and a retained policy backup run before replacing the policy. Auto routes never
 change automatically.
 
