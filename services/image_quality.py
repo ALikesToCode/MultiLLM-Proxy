@@ -33,15 +33,17 @@ class QualityOptions:
 
 
 def parse_options(payload: dict, header: str | None = None) -> QualityOptions | None:
-    if header is not None and header.strip().lower() != "on":
-        raise APIError(f"{QA_HEADER} must be on", 400)
+    if header is not None and header.strip().lower() not in {"on", "off"}:
+        raise APIError(f"{QA_HEADER} must be on or off", 400)
     if "quality_check" not in payload and header is None:
         return None
-    value = payload.get("quality_check", True)
+    value = payload.get("quality_check", header is None or header.strip().lower() == "on")
+    if value is False:
+        return None
     if value is True:
         value = {}
     if not isinstance(value, dict) or set(value) - {"judge_model", "min_score", "max_attempts", "criteria"}:
-        raise APIError("quality_check must be true or an object with judge_model, min_score, max_attempts and criteria", 400)
+        raise APIError("quality_check must be false, true or an object with judge_model, min_score, max_attempts and criteria", 400)
     model = value.get("judge_model", os.environ.get("IMAGE_QA_JUDGE_MODEL", "free:vision"))
     if not isinstance(model, str) or not model.strip() or len(model) > 256:
         raise APIError("quality_check.judge_model must be a model ID of at most 256 characters", 400)

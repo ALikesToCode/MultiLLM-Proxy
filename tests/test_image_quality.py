@@ -45,7 +45,7 @@ def completion(value):
             "usage": {"prompt_tokens": 13, "completion_tokens": 17}}
 
 
-@pytest.mark.parametrize("value", [False, None, "on", 1, [], {"extra": 1}, {"min_score": True},
+@pytest.mark.parametrize("value", [None, "on", 1, [], {"extra": 1}, {"min_score": True},
                                   {"min_score": float("nan")}, {"min_score": 11}, {"min_score": -1},
                                   {"max_attempts": 0}, {"max_attempts": 4}, {"max_attempts": 1.5},
                                   {"max_attempts": True}, {"criteria": ["x"] * 6}, {"criteria": ["x" * 201]},
@@ -70,8 +70,7 @@ def test_defaults_header_and_curly_quote_scoring():
     assert image_quality.text_similarity("ＦＯＯ  Bar", "foo bar") == 1
     assert len(image_quality._normalize("ﬃ" * 2000)) == image_quality.MAX_TEXT_CHARS
     assert image_quality.parse_options({"quality_check": {"criteria": [""]}}).criteria == ("",)
-    with pytest.raises(APIError):
-        image_quality.parse_options({}, "off")
+    assert image_quality.parse_options({}, "off") is None
 
 
 @pytest.mark.parametrize("content", ['```json\n{}\n```', '{}', '{"score": NaN}', '{"score":1,"score":2}', '[]'])
@@ -220,7 +219,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         self.assertEqual(judge.call_args.args[4]["model"], "free:vision")
         self.assertTrue(all(image_quality.QA_HEADER.lower() not in {key.lower() for key in headers}
                             for _, _, headers in forwarded))
-        response, generations, _, _ = self.generate([], headers={image_quality.QA_HEADER: "off"})
+        response, generations, _, _ = self.generate([], headers={image_quality.QA_HEADER: "invalid"})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(generations)
 

@@ -201,7 +201,9 @@ def run_image_batch(body: dict, dispatch: Callable[[dict], Response],
         release_outer_accounting()
 
         def dispatch_item(item):
-            if "quality_check" in item:
+            from services.image_quality import parse_options
+
+            if parse_options(item) is not None:
                 return dispatch(item)
             return accounted_dispatch(item, dispatch, kind="images")
     else:

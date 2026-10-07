@@ -47,6 +47,15 @@ def test_remaining_contract_rejections(content):
         image_quality.parse_grade(content, "")
 
 
+@pytest.mark.parametrize("header", ["off", " OFF "])
+def test_opt_out_and_field_precedence(header):
+    assert image_quality.parse_options({}, header) is None
+    assert image_quality.parse_options({"quality_check": False}, "on") is None
+    assert image_quality.parse_options({"quality_check": True}, header) is not None
+    with pytest.raises(APIError):
+        image_quality.parse_options({"quality_check": False}, "invalid")
+
+
 from tests import test_image_quality as qa_tests
 from tests.unified_api_test_case import UnifiedApiTestCase
 
@@ -112,3 +121,17 @@ class ContractRoundTwoTest(UnifiedApiTestCase):
             response, generations, _, _ = self.generate([value, 9])
             assert response.status_code == 200
             assert generations[1]["prompt"] == "A blue square" + suffix
+
+    def test_generation_and_batch_opt_out_strip_controls(self):
+        for body, header, path in [
+            ({"model": MODEL, "prompt": "square", "quality_check": False}, "on", "/v1/images/generations"),
+            ({"model": MODEL, "prompt": "square"}, " OFF ", "/v1/images/generations"),
+            ({"quality_check": False, "defaults": {"model": MODEL}, "items": [{"prompt": "square"}]}, "on", "/v1/images/batch"),
+            ({"quality_check": True, "defaults": {"model": MODEL}, "items": [{"prompt": "square", "quality_check": False}]}, "on", "/v1/images/batch"),
+            ({"defaults": {"model": MODEL}, "items": [{"prompt": "square"}]}, "off", "/v1/images/batch")]:
+            response, generations, judges, forwarded = self.generate([], body=body, path=path,
+                headers={image_quality.QA_HEADER: header})
+            assert response.status_code == 200
+            assert len(generations) == 1 and not judges
+            assert all("quality_check" not in payload and image_quality.QA_HEADER.lower() not in {key.lower() for key in headers}
+                       for _, payload, headers in forwarded)
