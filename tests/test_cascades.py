@@ -626,3 +626,22 @@ def test_judge_skips_unbounded_content_block_list(context):
     response, calls = run(config, [answer()], payload)
     assert len(calls) == len(context[1]) == 1
     assert 'notes=' not in response.headers['X-MultiLLM-Cascade']
+
+
+def test_cascade_is_sampled_once_as_the_outer_request_and_never_per_tier(context, monkeypatch):
+    from services import shadow_eval_sampling as sampling
+    submitted = []
+    monkeypatch.setattr(sampling, "submit", submitted.append)
+    monkeypatch.setattr(sampling.random, "random", lambda: 0.0)
+    g.authenticated_user = {"username": "synthetic", "is_admin": True, "shadow_eval_rate": 0.2}
+    g.shadow_eval_started = 0.0
+
+    @sampling.sample_chat_dispatch
+    def tier_dispatch(app, auth, metrics, proxy, body):
+        return jsonify(answer())
+
+    # The first tier fails `complete`, so two tier subrequests run before the outer answer.
+    response, calls = run(CONFIG, [answer(""), lambda body, remaining: tier_dispatch(None, None, None, None, body)])
+    sampling.sample_success(response, copy.deepcopy(PAYLOAD))
+    assert len(calls) == 2
+    assert [(sample["route"], sample["production_model"]) for sample in submitted] == [("cascade:test", "opencode:strong")]
