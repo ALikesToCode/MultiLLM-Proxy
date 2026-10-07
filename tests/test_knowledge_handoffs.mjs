@@ -95,7 +95,7 @@ test("strict handoff validation bounds strings, nested items, arrays, TTL and re
   assert.throws(() => s.call("save", payload({ sections: { files: Array(100).fill({ path: "x".repeat(500), change: "y".repeat(500) }) } })), /32 KB/);
   assert.equal(s.call("list", {}).handoffs.length, 0);
   for (const body of [{ limit: 0 }, { limit: 21 }, { limit: true }, { project: "" }, { extra: 1 }]) assert.throws(() => parseHandoff("list", body));
-  for (const body of [{}, { project: "p", id: "bad/id" }, { project: "p", branch: 1 }]) assert.throws(() => parseHandoff("get", body));
+  for (const body of [{}, { branch: "feature" }, { project: "p", id: "bad/id" }, { project: "p", branch: 1 }]) assert.throws(() => parseHandoff("get", body));
   const saved = s.call("save", payload({ project: "🧭".repeat(200), sections: { goal: "a\nb" } }));
   assert.ok(saved.id);
   assert.ok(s.call("save", payload({ title: "", sections: { files: [{ path: "", change: "" }], commands: [{ command: "", outcome: "" }] } })).id);
@@ -118,6 +118,7 @@ test("private dispatch is read scoped, principal isolated, independent of retrie
   assert.equal((await submit(e, "get", { project: "synthetic/repo" })).record.id, saved.id);
   const other = { ...principal, id: "synthetic-other" };
   assert.equal((await submit(e, "get", { project: "synthetic/repo", id: saved.id }, other)).record, null);
+  assert.equal((await submit(e, "get", { id: saved.id }, other)).record, null);
   assert.deepEqual((await submit(e, "list", {}, other)).handoffs, []);
   assert.equal((await submit(e, "delete", { id: saved.id }, other)).deleted, false);
   assert.ok((await submit(e, "get", { project: "synthetic/repo" })).record);
@@ -148,6 +149,13 @@ test("catalogue scopes, annotations, toolset and appended SQLite migration match
   assert.equal(entries.length, 4);
   for (const entry of entries) {
     assert.equal(entry.scope, "knowledge:read");
+    const props = entry.definition.inputSchema.properties;
+    if (props.project) assert.equal(props.project.description, "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name");
+    if (props.branch) assert.equal(props.branch.description, "current git branch (git branch --show-current)");
+    if (entry.operation === "handoffs.get") {
+      assert.deepEqual(entry.definition.inputSchema.required, []);
+      assert.deepEqual(entry.definition.inputSchema.anyOf, [{ required: ["project"] }, { required: ["id"] }]);
+    }
     assert.equal(entry.definition.annotations.readOnlyHint, ["handoffs.get", "handoffs.list"].includes(entry.operation));
   }
   const config = JSON.parse(readFileSync(new URL("../wrangler.knowledge.jsonc", import.meta.url)));
@@ -175,4 +183,22 @@ test("real SQLite handoff Durable Objects isolate principals and survive restart
   assert.equal((await call("get", { project: "synthetic/repo", id: saved.id }, "two")).record, null);
   await mf.dispose(); mf = create();
   assert.equal((await call("get", { project: "synthetic/repo", id: saved.id })).record.id, saved.id);
+});
+
+
+test("project matching and eviction fold ASCII case while preserving saved spelling", t => {
+  const s = store(t, { projectLimit: 2 }), now = Date.now();
+  const first = s.call("save", payload({ project: "Synthetic/Repo" }), now);
+  const second = s.call("save", payload({ project: "SYNTHETIC/REPO", branch: "Main" }), now);
+  assert.equal(s.call("get", { project: "synthetic/repo", branch: "feature" }, now).record.id, first.id);
+  assert.equal(s.call("get", { project: "synthetic/repo", branch: "main" }, now).record.id, second.id);
+  assert.equal(s.call("get", { id: first.id }, now).record.project, "Synthetic/Repo");
+  assert.equal(s.call("get", { id: first.id, project: "SYNTHETIC/repo" }, now).record.id, first.id);
+  assert.equal(s.call("get", { id: first.id, project: "other" }, now).record, null);
+  assert.deepEqual(s.call("list", { project: "synthetic/repo" }, now).handoffs.map(item => item.project), ["SYNTHETIC/REPO", "Synthetic/Repo"]);
+  s.call("save", payload(), now);
+  assert.equal(s.call("get", { id: first.id }, now).record, null);
+  assert.equal(s.rows("SELECT COUNT(*) AS count FROM handoffs")[0].count, 2);
+  s.call("save", payload({ project: "synthetic/Répo" }), now);
+  assert.equal(s.call("get", { project: "synthetic/RÉpo" }, now).record, null);
 });

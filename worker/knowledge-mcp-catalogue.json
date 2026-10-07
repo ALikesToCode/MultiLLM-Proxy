@@ -2063,11 +2063,13 @@
             "project": {
               "type": "string",
               "maxLength": 200,
-              "minLength": 1
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
             },
             "branch": {
               "type": "string",
-              "maxLength": 200
+              "maxLength": 200,
+              "description": "current git branch (git branch --show-current)"
             },
             "title": {
               "type": "string",
@@ -2216,7 +2218,7 @@
       "toolset": "handoff",
       "definition": {
         "name": "knowledge_handoff_get",
-        "description": "Load the newest unexpired project/branch handoff with project fallback, or a project handoff by id. Requires knowledge:read.",
+        "description": "Load the newest unexpired project/branch handoff with project fallback, or by id (optional project must match). Requires knowledge:read.",
         "inputSchema": {
           "type": "object",
           "additionalProperties": false,
@@ -2224,19 +2226,31 @@
             "project": {
               "type": "string",
               "maxLength": 200,
-              "minLength": 1
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
             },
             "branch": {
               "type": "string",
-              "maxLength": 200
+              "maxLength": 200,
+              "description": "current git branch (git branch --show-current)"
             },
             "id": {
               "type": "string",
               "pattern": "^[A-Za-z0-9_-]{1,80}$"
             }
           },
-          "required": [
-            "project"
+          "required": [],
+          "anyOf": [
+            {
+              "required": [
+                "project"
+              ]
+            },
+            {
+              "required": [
+                "id"
+              ]
+            }
           ]
         },
         "annotations": {
@@ -2259,7 +2273,8 @@
             "project": {
               "type": "string",
               "maxLength": 200,
-              "minLength": 1
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
             },
             "limit": {
               "type": "integer",

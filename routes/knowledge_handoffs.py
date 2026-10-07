@@ -22,21 +22,24 @@ SECTIONS = _object({
     )},
 })
 _ID = {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$"}
-PROJECT = _text(200, required=True)
+PROJECT = {**_text(200, required=True),
+           "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"}
+BRANCH = {**_text(200), "description": "current git branch (git branch --show-current)"}
 CONTRACTS = {
-    "save": _object({"project": PROJECT, "branch": _text(200), "title": _text(200),
+    "save": _object({"project": PROJECT, "branch": BRANCH, "title": _text(200),
                      "summary": _text(4000), "sections": SECTIONS,
                      "source": _object({"agent": {"type": "string", "enum": ["claude", "codex", "opencode", "other"]},
                                         "thread_id": _text(200)}, ("agent",)),
                      "ttl_days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 14}},
                     ("project", "title", "sections", "source")),
-    "get": _object({"project": PROJECT, "branch": _text(200), "id": _ID}, ("project",)),
+    "get": {**_object({"project": PROJECT, "branch": BRANCH, "id": _ID}),
+            "anyOf": [{"required": ["project"]}, {"required": ["id"]}]},
     "list": _object({"project": PROJECT, "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 20}}),
     "delete": _object({"id": _ID}, ("id",)),
 }
 DESCRIPTIONS = {
     "save": "Save an operator handoff for this principal; rejects secrets and records over 32 KB. Requires knowledge:read.",
-    "get": "Load the newest unexpired project/branch handoff with project fallback, or a project handoff by id. Requires knowledge:read.",
+    "get": "Load the newest unexpired project/branch handoff with project fallback, or by id (optional project must match). Requires knowledge:read.",
     "list": "List up to 20 unexpired handoffs belonging to this principal. Requires knowledge:read.",
     "delete": "Delete this principal’s handoff by id. Requires knowledge:read.",
 }

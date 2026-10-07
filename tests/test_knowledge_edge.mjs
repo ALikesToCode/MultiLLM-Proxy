@@ -484,9 +484,11 @@ test("handoff edge MCP discovery and bounded markdown with complete structured c
   const narrowed = new Request(ORIGIN + "/mcp?toolsets=handoff", req);
   const tools = (await (await call(env, narrowed)).json()).result.tools;
   assert.deepEqual(tools.map(item => item.name), ["knowledge_handoff_save", "knowledge_handoff_get", "knowledge_handoff_list", "knowledge_handoff_delete"]);
-  const called = (await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_handoff_get", arguments: { project: "synthetic/repo" } }))).json()).result;
-  assert.equal(called.content[0].text, result.markdown);
-  assert.deepEqual(called.structuredContent, result);
+  for (const args of [{ project: "synthetic/repo" }, { id: "fixture-id" }, { project: "Synthetic/Repo", id: "fixture-id" }]) {
+    const called = (await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_handoff_get", arguments: args }))).json()).result;
+    assert.equal(called.content[0].text, result.markdown);
+    assert.deepEqual(called.structuredContent, result);
+  }
 });
 test("handoff edge firewall refuses REST and MCP secrets before private dispatch", async () => {
   const secret = "AK" + "IA" + "AB12CD34EF56GH78";

@@ -51,6 +51,15 @@
     }
   },
   {
+    "method": "GET",
+    "path": "/v1/knowledge/handoffs/fixture-id",
+    "body": null,
+    "operation": "handoffs.get",
+    "payload": {
+      "id": "fixture-id"
+    }
+  },
+  {
     "method": "DELETE",
     "path": "/v1/knowledge/handoffs/fixture-id",
     "body": null,

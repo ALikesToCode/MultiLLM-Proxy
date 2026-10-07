@@ -41,8 +41,9 @@ export function parseHandoff(operation, payload) {
       sections: handoffSections(payload.sections), source, ttl_days: integer(payload.ttl_days === undefined ? 14 : payload.ttl_days, 1, 90, "ttl_days") };
   }
   if (operation === "get") {
-    fields(payload, ["project", "branch", "id"], ["project"]);
-    return { project: text(payload.project, 200, "project", true), ...(payload.branch === undefined ? {} : { branch: text(payload.branch, 200, "branch") }),
+    fields(payload, ["project", "branch", "id"]);
+    if (payload.project === undefined && payload.id === undefined) fail("invalid_request", "project or id is required.");
+    return { ...(payload.project === undefined ? {} : { project: text(payload.project, 200, "project", true) }), ...(payload.branch === undefined ? {} : { branch: text(payload.branch, 200, "branch") }),
       ...(payload.id === undefined ? {} : { id: handoffId(payload.id) }) };
   }
   if (operation === "list") {

@@ -29,16 +29,16 @@ export class HandoffStore {
       this.sql.exec("DELETE FROM handoffs WHERE expires_at <= ?", record.created_at);
       this.sql.exec("INSERT INTO handoffs (id, project, branch, created_at, expires_at, record) VALUES (?, ?, ?, ?, ?, ?)",
         record.id, record.project, record.branch, record.created_at, record.expires_at, JSON.stringify(record));
-      this.sql.exec(`DELETE FROM handoffs WHERE project = ? AND sequence NOT IN
-        (SELECT sequence FROM handoffs WHERE project = ? ORDER BY sequence DESC LIMIT ?)`, record.project, record.project, this.projectLimit);
+      this.sql.exec(`DELETE FROM handoffs WHERE project = ? COLLATE NOCASE AND sequence NOT IN
+        (SELECT sequence FROM handoffs WHERE project = ? COLLATE NOCASE ORDER BY sequence DESC LIMIT ?)`, record.project, record.project, this.projectLimit);
       this.sql.exec("DELETE FROM handoffs WHERE sequence NOT IN (SELECT sequence FROM handoffs ORDER BY sequence DESC LIMIT ?)", this.totalLimit);
     });
     return { id: record.id, expires_at: record.expires_at, trust: "operator" };
   }
 
   get(payload, time) {
-    const where = "project = ? AND expires_at > ?";
-    const args = [payload.project, time];
+    const where = payload.project === undefined ? "expires_at > ?" : "project = ? COLLATE NOCASE AND expires_at > ?";
+    const args = payload.project === undefined ? [time] : [payload.project, time];
     let row;
     if (payload.id !== undefined) row = this.rows(`SELECT record FROM handoffs WHERE ${where} AND id = ? LIMIT 1`, ...args, payload.id)[0];
     else {
@@ -50,7 +50,7 @@ export class HandoffStore {
   }
 
   list(payload, time) {
-    const where = payload.project === undefined ? "expires_at > ?" : "expires_at > ? AND project = ?";
+    const where = payload.project === undefined ? "expires_at > ?" : "expires_at > ? AND project = ? COLLATE NOCASE";
     const args = payload.project === undefined ? [time] : [time, payload.project];
     const handoffs = this.rows(`SELECT record FROM handoffs WHERE ${where} ORDER BY sequence DESC LIMIT ?`, ...args, payload.limit)
       .map(row => { const { id, project, branch, title, source, created_at } = JSON.parse(row.record);

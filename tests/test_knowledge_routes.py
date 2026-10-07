@@ -599,7 +599,8 @@ def test_handoff_rest_parity(app, keys, case):
     assert client.open(case["path"], method=case["method"], json=case["body"], headers=bearer(keys["manager"])).status_code == 403
 
 
-def test_handoff_mcp_toolset_and_markdown(app, keys):
+@pytest.mark.parametrize("arguments", [{"project": "synthetic/repo"}, {"id": "fixture-id"}, {"project": "Synthetic/Repo", "id": "fixture-id"}])
+def test_handoff_mcp_toolset_and_markdown(app, keys, arguments):
     client = app.test_client()
     headers = bearer(keys["reader"], Accept="application/json")
     tools = client.post("/mcp?toolsets=handoff", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=headers).json["result"]["tools"]
@@ -607,8 +608,9 @@ def test_handoff_mcp_toolset_and_markdown(app, keys):
     shown = {"record": {"id": "fixture-id"}, "markdown": "# Fixture", "trust": "operator"}
     with patch.object(knowledge, "dispatch", return_value=shown) as remote:
         result = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-            "name": "knowledge_handoff_get", "arguments": {"project": "synthetic/repo"}}}, headers=headers).json["result"]
+            "name": "knowledge_handoff_get", "arguments": arguments}}, headers=headers).json["result"]
     assert remote.call_args.args[0] == "handoffs.get"
+    assert remote.call_args.args[2] == arguments
     assert result["content"][0]["text"] == "# Fixture"
     assert result["structuredContent"] == shown
 
