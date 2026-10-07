@@ -74,9 +74,12 @@ syntax, unambiguous names and schema primitive types, and extracts declared
 calls from known text formats. Tagged calls may occur within prose; fenced/bare
 JSON requires standalone content or a preamble of at most 200 characters, unless
 a tool is forced.
-Multiple fences are left as content. Invalid extraction candidates preserve the
-entire original message and report `extraction_rejected`. Missing arguments
-remain invalid.
+Multiple fences are left as content. A bare name line requires JSON-object
+arguments, with one optional surrounding fence. Multiline prose and untagged
+undeclared names are left as content without invalid counts; forced choices and
+explicit tool-call tags retain unknown-name rejection. Invalid extraction
+candidates preserve the entire original message and report `extraction_rejected`.
+Missing arguments remain invalid.
 
 `off` preserves the existing response bytes. `full` allows one non-streaming
 follow-up to the same model, includes its usage, and respects free-pool and

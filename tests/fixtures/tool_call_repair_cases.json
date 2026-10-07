@@ -3606,5 +3606,1303 @@
       ],
       "errors": []
     }
+  },
+  {
+    "name": "prose_done",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Done\nI updated the file."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Done\nI updated the file."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "prose_plan",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Sure\nHere is the plan:\n1. a"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Sure\nHere is the plan:\n1. a"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "prose_done_forced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "Done\nI updated the file."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Done\nI updated the file."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "prose_plan_fenced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```\nSure\nHere is the plan:\n1. a\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```\nSure\nHere is the plan:\n1. a\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "word_then_json_not_call",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Done\n{\"status\":\"updated\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Done\n{\"status\":\"updated\"}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "undeclared_bare_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "undeclared_fenced_example",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "For example:\n```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "For example:\n```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "undeclared_fenced_name",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "For example:\n```\nother_weather\n{\"city\":\"Paris\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "For example:\n```\nother_weather\n{\"city\":\"Paris\"}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_bare_name",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather\n{\"city\": \"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_fenced_name",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n{\"city\": \"Paris\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_fenced_arguments",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather\n```json\n{\"city\": \"Paris\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_short_preamble",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Calling now:\nget_weather\n{\"city\": \"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Calling now:",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_suffix",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather\n{\"city\": \"Paris\"}\nExample only."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "get_weather\n{\"city\": \"Paris\"}\nExample only."
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_long_preamble",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \nget_weather\n{\"city\": \"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \nget_weather\n{\"city\": \"Paris\"}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_forced_surrounding",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \nget_weather\n{\"city\": \"Paris\"}\nDone."
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. Explanation. \n\nDone.",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_tolerant",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather\n{city: 'Paris',}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\":\"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 1,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [
+        {
+          "index": 0,
+          "fixes": [
+            "tolerant_json"
+          ]
+        }
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_non_object",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n[\"Paris\"]\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n[\"Paris\"]\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_invalid_json",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n{city:???}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n{city:???}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_invalid_arguments",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather\n{}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "get_weather\n{}"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.city: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_fenced_name_invalid_arguments",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n{}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```\nget_weather\n{}\n```"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$.city: required property missing"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_tagged_unknown",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_name_tagged_unknown",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<tool_call>other_weather\n{\"city\":\"Paris\"}</tool_call>"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "<tool_call>other_weather\n{\"city\":\"Paris\"}</tool_call>"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_bare_unknown_forced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_fenced_unknown_forced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "function",
+      "function": {
+        "name": "get_weather"
+      }
+    },
+    "message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_name_unknown_forced",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "message": {
+      "role": "assistant",
+      "content": "other_weather\n{\"city\":\"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "other_weather\n{\"city\":\"Paris\"}"
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 1,
+      "extracted": 0,
+      "fixes": [],
+      "errors": [
+        {
+          "index": 0,
+          "reason": "extraction_rejected",
+          "errors": [
+            "$: unknown or ambiguous tool name"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "weather_name_same_line",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather {\"city\":\"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "get_weather {\"city\":\"Paris\"}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_same_line_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get_weather ```json\n{\"city\":\"Paris\"}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "get_weather ```json\n{\"city\":\"Paris\"}\n```"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_name_invalid_identifier",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "get weather\n{\"city\":\"Paris\"}"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "get weather\n{\"city\":\"Paris\"}"
+    },
+    "expected_report": {
+      "checked": 0,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 0,
+      "fixes": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "weather_tag_and_undeclared_fence",
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "tool_choice": null,
+    "message": {
+      "role": "assistant",
+      "content": "<function=get_weather>{\"city\": \"Paris\"}</function>\n```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```"
+    },
+    "expected_message": {
+      "role": "assistant",
+      "content": "```json\n{\"name\":\"other_weather\",\"arguments\":{\"city\":\"Paris\"}}\n```",
+      "tool_calls": [
+        {
+          "id": "call_fixture",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    "expected_report": {
+      "checked": 1,
+      "repaired": 0,
+      "invalid": 0,
+      "extracted": 1,
+      "fixes": [],
+      "errors": []
+    }
   }
 ]

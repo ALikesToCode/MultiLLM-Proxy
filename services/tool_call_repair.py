@@ -11,6 +11,7 @@ MAX_CALLS = 128
 MAX_TOOLS = 128
 MAX_CONTENT_BYTES = 256 * 1024
 _FENCE = re.compile(r"```(?:json|jsonc|javascript)?\s*([\s\S]*?)```", re.IGNORECASE)
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,255}")
 _TAG_START = re.compile(r"<tool_call>|<function=([^<>\s]+)>|<\|tool_call_begin\|>|<｜tool▁call▁begin｜>", re.IGNORECASE)
 
 
@@ -165,8 +166,15 @@ def _text_call(text, name=None):
     except (ValueError, RecursionError):
         if name is None and "\n" in text:
             name, arguments = text.split("\n", 1)
-            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,255}", name.strip()):
-                return _text_call(arguments, name.strip())
+            if _NAME.fullmatch(name.strip()):
+                fence = _FENCE.fullmatch(arguments.strip())
+                arguments = fence.group(1).strip() if fence else arguments.strip()
+                try:
+                    value = tolerant_loads(arguments)
+                except (ValueError, RecursionError):
+                    return None
+                if isinstance(value, dict):
+                    return {"name": name.strip(), "arguments": arguments}
         return None
     if not isinstance(value, dict):
         return None
@@ -181,11 +189,15 @@ def _text_call(text, name=None):
     return {"name": function["name"], "arguments": arguments}
 
 
-def _json_candidates(content, tool_choice):
-    forced = tool_choice == "required" or (
+def _forced_choice(tool_choice):
+    return tool_choice == "required" or (
         isinstance(tool_choice, dict) and isinstance(tool_choice.get("function"), dict)
         and bool(tool_choice["function"].get("name"))
     )
+
+
+def _json_candidates(content, tool_choice):
+    forced = _forced_choice(tool_choice)
     if "```" in content:
         # Multiple fences are examples or ambiguous alternatives, even when forced.
         if content.count("```") != 2:
@@ -199,13 +211,23 @@ def _json_candidates(content, tool_choice):
             text = single_object(content)
         except (ValueError, RecursionError):
             return
+        if not text.startswith("{"):
+            return
         start = content.find(text)
         span = (start, start + len(text))
+    candidate = _text_call(text)
+    if candidate is None:
+        # A name line belongs to the call only when its arguments are an object.
+        prefix = content[:span[0]].rstrip()
+        start = prefix.rfind("\n") + 1
+        name = prefix[start:].strip()
+        if "\n" in content[len(prefix):span[0]] and _NAME.fullmatch(name):
+            candidate = _text_call(name + "\n" + text)
+            if candidate is not None:
+                span = (start, span[1])
     preamble, suffix = content[:span[0]].strip(), content[span[1]:].strip()
-    if forced or (len(preamble) <= 200 and not suffix):
-        candidate = _text_call(text)
-        if candidate is not None:
-            yield candidate, span
+    if candidate is not None and (forced or (len(preamble) <= 200 and not suffix)):
+        yield candidate, span
 
 
 def _extract(message, functions, tool_choice):
@@ -214,6 +236,9 @@ def _extract(message, functions, tool_choice):
         return message, 0, None
     candidates = list(_tagged_candidates(content))
     for candidate, span in _json_candidates(content, tool_choice):
+        if not _forced_choice(tool_choice) and matching_function(candidate.get("name"), functions) is None:
+            # Untagged examples of undeclared functions are ordinary content.
+            continue
         if len(candidates) >= MAX_CALLS:
             break
         if not any(start <= span[0] < end for _, (start, end) in candidates):

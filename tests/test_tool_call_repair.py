@@ -3,7 +3,7 @@
 import copy
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -85,6 +85,20 @@ def test_mode_override_and_invalid_default(monkeypatch):
 def completion(message, tokens=3):
     return {"choices":[{"index":0,"message":message,"finish_reason":"tool_calls"}],
             "usage":{"prompt_tokens":tokens,"completion_tokens":tokens,"total_tokens":tokens*2}}
+
+
+@pytest.mark.parametrize("case", [case for case in CASES if case["name"] in {"prose_done", "prose_plan"}],
+                         ids=lambda case: case["name"])
+def test_full_prose_never_reasks(case):
+    original = completion(case["message"])
+    original["choices"][0]["finish_reason"] = "stop"
+    reask = Mock(side_effect=AssertionError("Unexpected prose re-ask"))
+    with patch("services.tool_call_repair.safe_tool_id") as make_id:
+        result, report = repair_completion(original, {"tools": case["tools"]}, mode="full", reask=reask)
+    assert result is original
+    assert report == {**case["expected_report"], "reasked": 0}
+    reask.assert_not_called()
+    make_id.assert_not_called()
 
 
 def test_full_reasks_once_accounts_invalid_reply_and_keeps_original():
