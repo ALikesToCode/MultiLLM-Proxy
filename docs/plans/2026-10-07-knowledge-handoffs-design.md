@@ -154,7 +154,9 @@ record and emits only unexpired notes younger than 48 hours. Both clients receiv
 `hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: ...}`.
 Default `--mode pointer` is at most 600 UTF-8 bytes: project, saved branch, source
 agent, age, title clipped to 120 characters and explicit MCP/CLI load instructions.
-Long identities use clipped labels and the CLI instruction to preserve that bound.
+The CLI command uses `python3` and the absolute script path derived from the hook
+location, quoted for the shell. Long identities use clipped labels and reserve
+the complete CLI instruction within the byte budget.
 `--mode full` opts into the existing rendered markdown. Both example matchers are
 `startup|clear`.
 A supervised daemon worker has a 0.9-second wall deadline, with HTTP timeout

@@ -185,8 +185,9 @@ The optional `scripts/hooks/handoff_hint.py` accepts SessionStart JSON on stdin
 and emits `hookSpecificOutput.additionalContext` only for `startup`, `clear`, or
 an absent source. The default `--mode pointer` gives a hint of at most 600 UTF-8
 bytes, with the saved branch, agent, age, a title clipped to 120 characters and
-explicit loading instructions. Long identities use the CLI loading instruction
-to keep the pointer bounded. Use `--mode full` to opt into rendered markdown.
+explicit loading instructions. The CLI command uses the absolute script path
+from the hook location, so it works in the operator project directory. Long
+identities use clipped labels and the CLI instruction to keep the pointer bounded. Use `--mode full` to opt into rendered markdown.
 `resume` and `compact` emit nothing. It prints only unexpired
 handoffs younger than 48 hours, finishes within approximately one second, and
 stays silent on configuration, transcript, git or network errors. Nothing

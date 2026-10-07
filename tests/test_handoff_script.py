@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 import io
 import json
+import re
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -592,3 +594,33 @@ def test_hook_pointer_utf8_budget_and_title_clip(unicode):
     assert "t" * 121 not in text
     assert "scripts/handoff.py load" in text
     assert "�" not in text
+
+
+@pytest.mark.parametrize("clipped_pointer", [False, True])
+def test_hook_pointer_command_is_absolute_and_works_from_operator_cwd(tmp_path, clipped_pointer):
+    value = record()
+    if clipped_pointer:
+        value.update(project="🧭" * 200, branch="枝" * 200, title="Title " * 30)
+    text = hook.pointer(value, 3600)
+    command = shlex.split(re.search(r"run (python3 .+? load)\.", text).group(1))
+    assert command[0] == "python3" and command[-1] == "load"
+    script = Path(command[1])
+    assert script.is_absolute() and script == ROOT / "scripts/handoff.py" and script.is_file()
+    assert len(text.encode("utf-8")) <= 600
+    result = subprocess.run([*command, "--help"], cwd=tmp_path, text=True, capture_output=True, timeout=3)
+    assert result.returncode == 0 and "usage:" in result.stdout and not result.stderr
+
+
+def test_hook_pointer_quotes_script_paths_and_reserves_command_budget(tmp_path, monkeypatch):
+    checkout = tmp_path / ("synthetic checkout's " + "x" * 80)
+    script = checkout / "scripts/handoff.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("# Synthetic hook target\n")
+    monkeypatch.setattr(hook, "ROOT", checkout)
+    value = record()
+    value.update(project="🧭" * 200, branch="枝" * 200, title="🧭" * 200)
+    text = hook.pointer(value, 47 * 3600)
+    command = shlex.split(re.search(r"run (python3 .+? load)\.", text).group(1))
+    assert command == ["python3", str(script), "load"]
+    assert script.is_absolute() and script.is_file()
+    assert len(text.encode("utf-8")) <= 600 and "�" not in text

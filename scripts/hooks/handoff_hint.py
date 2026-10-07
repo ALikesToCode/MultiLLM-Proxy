@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import queue
+import shlex
 import sys
 import threading
 
@@ -22,17 +23,24 @@ def pointer(record, age):
     project, branch = record["project"], record.get("branch", "")
     title = " ".join(record["title"].split())[:120]
     duration = f"{int(age // 3600)} hours" if age >= 3600 else f"{int(age // 60)} minutes"
+    command = "python3 " + shlex.quote(str(ROOT / "scripts/handoff.py")) + " load"
     query = json.dumps({"project": project, "branch": branch}, ensure_ascii=False)
     action = ("If this session continues that task, load it with knowledge_handoff_get " + query
-              + " or run scripts/handoff.py load.")
+              + f" or run {command}.")
     def message(project, branch, title, action):
         return (f'Handoff available for {project} ({branch}) from {record["source"]["agent"]}, '
                 f'{duration} ago: "{title}". {action}')
     text = message(project, branch, title, action)
     if len(text.encode("utf-8")) > 600:
         # CLI loading preserves complete identities when they exceed the pointer budget.
-        text = message(clipped(project, 64), clipped(branch, 64), clipped(title, 160),
-                       "If this session continues that task, run scripts/handoff.py load.")
+        action = f"If this session continues that task, run {command}."
+        budget = max(0, 600 - len(message("", "", "", action).encode("utf-8")))
+        labels = []
+        for value, maximum in ((project, 64), (branch, 64), (title, 160)):
+            label = clipped(value, min(maximum, budget))
+            labels.append(label)
+            budget -= len(label.encode("utf-8"))
+        text = message(*labels, action)
     return text
 
 
