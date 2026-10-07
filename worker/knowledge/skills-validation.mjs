@@ -67,7 +67,7 @@ export async function validateSkill(skill) {
       bytes = Uint8Array.from(atob(file.content_base64), char => char.charCodeAt(0));
     }
     size += bytes.length;
-    if (bytes.length > (path === "SKILL.md" ? 64 * 1024 : 256 * 1024) || size > 5 * 1024 * 1024) fail("skill_limits", "Skill file or total size exceeds its limit.");
+    if (bytes.length > (path === "SKILL.md" ? 128 * 1024 : 256 * 1024) || size > 5 * 1024 * 1024) fail("skill_limits", "Skill file or total size exceeds its limit.");
     let decoded;
     try { decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
     catch { decoded = Array.from(bytes, byte => String.fromCharCode(byte)).join(""); }

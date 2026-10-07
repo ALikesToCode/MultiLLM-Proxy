@@ -71,7 +71,9 @@ def test_secret_rejection_disables_pruning_and_symlink_escape_is_skipped(tmp_pat
 def test_size_limits_duplicates_and_batch_bounds(tmp_path):
     root, directory = library(tmp_path)
     (directory / "scripts/run.py").write_bytes(b"x" * (262144 + 1))
-    assert sync.build_plan({"agents": root}, {})["rejected"][0]["reason"] == "skill_limits"
+    plan = sync.build_plan({"agents": root}, {})
+    assert plan["rejected"] == [] and plan["skipped_files"] == 1
+    assert [file["path"] for file in plan["skills"][0]["files"]] == ["SKILL.md", "references/guide.md"]
     (directory / "scripts/run.py").write_text("safe")
     plan = sync.build_plan({"agents": root, "codex": root}, {})
     assert len(plan["skills"]) == 1
@@ -251,6 +253,21 @@ def test_key_file_read_obeys_hook_total_deadline(tmp_path, monkeypatch):
     start = time.monotonic()
     assert hook.hint({"prompt": "Test regression behavior"}, key_file=tmp_path / "synthetic") is None
     assert time.monotonic() - start < 0.9
+
+
+def test_large_skills_keep_their_instructions_within_file_and_reference_budgets(tmp_path):
+    root, directory = library(tmp_path)
+    skill = directory / "SKILL.md"
+    skill.write_text(skill.read_text() + "Read `references/`.\n" + "x" * (100 * 1024))
+    for index in range(250):
+        (directory / f"references/{index:03}.md").write_text("Reference text")
+    plan = sync.build_plan({"agents": root}, {})
+    assert plan["rejected"] == []
+    paths = [file["path"] for file in plan["skills"][0]["files"]]
+    assert len(paths) == sync.MAX_FILES and "SKILL.md" in paths
+    assert plan["skipped_files"] > 200 - sync.MAX_FILES
+    skill.write_bytes(skill.read_bytes() + b"x" * sync.SKILL_FILE_BYTES)
+    assert sync.build_plan({"agents": root}, {})["rejected"][0]["reason"] == "skill_limits"
 
 
 def test_sync_batch_byte_boundary_and_maximal_binary_skill(tmp_path, monkeypatch):

@@ -119,7 +119,7 @@ test("contracts, file/hash limits and scope checks fail closed", async t => {
   assert.throws(() => parseSync({ skills: [], dry_run: "true" }));
   assert.throws(() => parseSync({ skills: [], delete: ["test", "test"] }));
   const first = await skill();
-  for (const changes of [{ files: [] }, { files: Array(41).fill(first.files[0]) }, { files: [{ ...first.files[0], content: "x".repeat(65537) }] },
+  for (const changes of [{ files: [] }, { files: Array(41).fill(first.files[0]) }, { files: [{ ...first.files[0], content: "x".repeat(128 * 1024 + 1) }] },
     { files: [{ ...first.files[0], sha256: "0".repeat(64) }] }, { name: "Different name" }]) {
     assert.equal((await f.submit("sync", { skills: [{ ...first, ...changes }] })).results[0].status, "rejected");
   }

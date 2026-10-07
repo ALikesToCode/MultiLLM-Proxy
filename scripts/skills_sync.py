@@ -23,6 +23,13 @@ DEFAULT_ROOTS = dict(zip(ROOTS, ("~/.claude/skills", "~/.claude/skills-library",
 MAX_BATCH_BYTES = 8 * 1024 * 1024 - 4096
 USER_AGENT = "multillm-skills/1"
 MAX_SKILLS = 2000
+# Mirrors worker/knowledge/skills-validation.mjs. Only SKILL.md limits reject a skill;
+# extra files over a limit are skipped and counted, so large skills still sync their instructions.
+SKILL_FILE_BYTES = 128 * 1024
+FILE_BYTES = 256 * 1024
+SKILL_BYTES = 5 * 1024 * 1024
+MAX_FILES = 40
+MAX_REFERENCES = 200
 
 
 class PlanError(ValueError):
@@ -92,16 +99,24 @@ def collect_skill(directory, root, skipped_files=None):
     skipped_files = skipped_files if skipped_files is not None else []
     directory = directory.resolve()
     queue = ["SKILL.md"]
-    seen, files = set(), []
+    seen, files, dropped = set(), [], set()
     total = 0
     metadata = None
+
+    def enqueue(entry):
+        if entry in seen or entry in queue:
+            return
+        if len(queue) + len(seen) >= MAX_REFERENCES:
+            dropped.add(entry)
+            return
+        queue.append(entry)
+
     while queue:
         relative = queue.pop(0)
         if relative in seen:
             continue
         seen.add(relative)
-        if len(seen) > 200:
-            raise PlanError("reference_limit")
+        main = relative == "SKILL.md"
         path = directory / relative
         try:
             resolved = path.resolve(strict=True)
@@ -116,21 +131,26 @@ def collect_skill(directory, root, skipped_files=None):
             if relative == "SKILL.md":
                 raise PlanError("invalid_file")
             # Only directories explicitly referenced by a loaded file are explored.
-            for child in sorted(islice(path.iterdir(), 201)):
-                if len(queue) + len(seen) >= 200:
-                    raise PlanError("reference_limit")
-                queue.append(str(child.relative_to(directory)))
+            for child in sorted(islice(path.iterdir(), MAX_REFERENCES + 1)):
+                enqueue(str(child.relative_to(directory)))
             continue
         if not resolved.is_file():
-            raise PlanError("invalid_file")
-        if len(relative) > 240 or re.search(r"[\\\x00-\x1f\x7f:%?#]", relative):
-            raise PlanError("invalid_path")
-        maximum = 65536 if relative == "SKILL.md" else 262144
+            if main:
+                raise PlanError("invalid_file")
+            skipped_files.append(relative)
+            continue
+        if len(relative) > 240 or re.search(r"[\\\x00-\x1f\x7f:%?#]", relative) or len(files) >= MAX_FILES:
+            skipped_files.append(relative)
+            continue
+        maximum = SKILL_FILE_BYTES if main else FILE_BYTES
         with resolved.open("rb") as handle:
             content = handle.read(maximum + 1)
-        total += len(content)
-        if len(content) > maximum or total > 5 * 1024 * 1024 or len(files) >= 40:
+        if main and len(content) > maximum:
             raise PlanError("skill_limits")
+        if len(content) > maximum or total + len(content) > SKILL_BYTES:
+            skipped_files.append(relative)
+            continue
+        total += len(content)
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
@@ -153,11 +173,7 @@ def collect_skill(directory, root, skipped_files=None):
                 candidate = directory / Path(relative).parent / reference_path
                 if candidate.exists():
                     # Preserve the lexical path so collection can skip/count escaping symlinks.
-                    entry = str(candidate.relative_to(directory))
-                    if entry not in seen and entry not in queue:
-                        if len(queue) + len(seen) >= 200:
-                            raise PlanError("reference_limit")
-                        queue.append(entry)
+                    enqueue(str(candidate.relative_to(directory)))
         types = secret_types(text)
         if types:
             raise PlanError("secret_detected:" + relative + ":" + ",".join(types))
@@ -166,6 +182,7 @@ def collect_skill(directory, root, skipped_files=None):
             if secret_types(metadata["name"] + ": " + metadata["description"]):
                 raise PlanError("secret_detected:SKILL.md:metadata")
         files.append({"path": relative, "sha256": hashlib.sha256(content).hexdigest(), **encoding})
+    skipped_files.extend(sorted(dropped))
     if metadata is None:
         raise PlanError("missing_skill")
     identity = slug(metadata["name"])
@@ -198,7 +215,9 @@ def build_plan(roots, previous):
                     continue
                 # Keep invalid or secret-bearing local skills from deleting their last safe revision.
                 with (directory / "SKILL.md").open("rb") as handle:
-                    raw_skill = handle.read(65537)
+                    raw_skill = handle.read(SKILL_FILE_BYTES + 1)
+                if len(raw_skill) > SKILL_FILE_BYTES:
+                    raise PlanError("skill_limits")
                 identity = slug(frontmatter(raw_skill.decode("utf-8"))["name"])
                 present[root].add(identity)
                 content_hash = hashlib.sha256(raw_skill).hexdigest()

@@ -122,8 +122,9 @@ first root's skill: identical SKILL.md hashes count as `duplicates`; differing
 hashes report `duplicate_conflict` with both root labels, not a rejection.
 High-confidence secrets reject the containing skill without printing the secret.
 Absolute, tilde-prefixed, `..` and external references are ignored; escaping
-collected symlinks are skipped and counted as `skipped_files`. Missing files are
-ignored. Only local referenced files/directories are uploaded in bounded batches
+collected symlinks are skipped and counted as `skipped_files`, as are extra files
+over the size, 40-file or reference limits; only a SKILL.md over 128 KiB rejects
+a skill. Missing files are ignored. Only local referenced files/directories are uploaded in bounded batches
 of at most 16 skills and 8 MiB, retaining the 5 MiB per-skill cap. Summaries give
 counts and each rejected/conflicting slug with its safe reason, never content.
 

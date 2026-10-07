@@ -26,7 +26,7 @@ metadata and sorted manifest is the content hash. Identical revisions skip R2,
 embedding and metadata writes. Files live under
 `skills/<skill_id>/<content_hash>/<relative path>`.
 
-Limits: 2,000 skills; 64 KiB SKILL.md; 256 KiB per file; 5 MiB total per skill;
+Limits: 2,000 skills; 128 KiB SKILL.md; 256 KiB per file; 5 MiB total per skill;
 40 files; 100-character names/slugs; 2,000-character descriptions/queries;
 240-character relative paths. Traversal, absolute paths, ambiguous encodings,
 duplicate paths, invalid UTF-8 SKILL.md and mismatched file hashes are rejected.
@@ -145,7 +145,9 @@ within the folder; unreferenced files are omitted. Absolute paths, `~` prefixes,
 any `..` segment and references resolving outside the skill are mentions and
 ignored, including in nested files. Missing references remain ignored. Collected
 symlinks resolving outside are skipped and counted in `skipped_files`, without
-rejecting the skill. A SKILL.md escape leaves no uploadable instructions; skip it
+rejecting the skill. Only SKILL.md limits reject a skill: an extra file that is
+oversized, beyond 40 files, past the 5 MiB total or past the reference budget is
+skipped and counted the same way, so large skills keep their instructions. A SKILL.md escape leaves no uploadable instructions; skip it
 and disable pruning for that root without reading its target. Each root scan is capped at
 10,000 entries and each skill at 200 discovered references, in addition to the
 server's file/byte caps. Duplicate slugs use the first selected root. Matching
