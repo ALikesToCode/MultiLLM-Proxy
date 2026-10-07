@@ -24,11 +24,19 @@ Each `product-sites:<product>` record is:
 }
 ```
 
-Product names follow source API string validation and lowercasing. `site()` reduces a
-URL hostname to its last two labels after removing `www`. Management accepts unique
-lowercase public hostnames up to 253 characters and canonicalizes them through the
-same helper. This deliberately preserves the existing approximation, including its
-multi-label public-suffix limitations.
+Product names follow source API string validation and lowercasing. `site()` strips
+`www` and usually keeps the last two hostname labels. It keeps three for a short
+built-in list: `github.io`, `vercel.app`, `netlify.app`, `pages.dev`, `workers.dev`,
+`readthedocs.io`, `gitbook.io`, `mintlify.app`, `co.uk`, `com.au`, `co.jp`. Code hosts
+use `github.com/<owner>`, `gitlab.com/<owner>`, `bitbucket.org/<owner>`; raw GitHub
+content normalizes to `github.com/<owner>`. Owners are lowercased. This deliberately
+remains an approximation, not a complete public-suffix or hosting-platform parser.
+Management accepts unique lowercase public hostnames or these owner forms (including
+the raw GitHub alias), up to 253 characters total. Owners contain 1–100 letters,
+digits, underscores, dots or hyphens, starting with a letter or digit. Arbitrary paths
+are rejected; all inputs canonicalize through the same helper. Bare code-host sites
+match only root pages, never all owners. Operators should replace broad legacy
+code-host overrides with scoped owners during their pre-enforcement review.
 
 Learning runs inside the catalogue transaction at `job.publish`, including completed
 job retries. Retrieval calls the internal `product_sites.learn` operation only after
@@ -124,7 +132,7 @@ Both require `knowledge:manage`; REST mirrors them at `GET` and `PATCH`
 `/v1/knowledge/product-sites/<product>`. Product duplication in a REST body is rejected.
 Private service validation is authoritative for both the edge and Flask transports,
 matching the existing source-management APIs. Site lists accept at most 64 unique input
-hostnames, notes at most 500 characters, and rebuild must be boolean. Opposite actions
+sites, notes at most 500 characters, and rebuild must be boolean. Opposite actions
 on a canonical site in the same request are invalid. Pins and blocks may coexist, with
 blocks taking precedence. Operations return the registry directly.
 

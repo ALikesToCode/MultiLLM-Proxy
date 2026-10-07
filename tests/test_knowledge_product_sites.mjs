@@ -316,8 +316,8 @@ test("policy defaults to observe and validates only the three documented modes",
 });
 
 for (const [product, learned, wrong] of [
-  ["css overflow-clip-margin", ["developer.mozilla.org", "caniuse.com", "github.com"], "https://overflow.co/availability"],
-  ["codex", ["openai.com", "github.com", "chatgpt.com"], "https://docs.codex.io/wallets"],
+  ["css overflow-clip-margin", ["developer.mozilla.org", "caniuse.com", "github.com/mdn"], "https://overflow.co/availability"],
+  ["codex", ["openai.com", "github.com/openai", "chatgpt.com"], "https://docs.codex.io/wallets"],
 ]) test(`enforce rejects the real ${product} homonym even with four matching query terms`, () => {
   const query = { product, query: "Availability browser support configured with feature detection?" };
   const known = registry(learned.map(host => [site(`https://${host}`), 1]));
@@ -343,14 +343,14 @@ test("enforce keeps learned, pinned and same-answer evidence, but blocked overri
   assert.deepEqual(blocked.flagged, [{ provider: "mintlify", site: "answer.dev", reason: "blocked" }]);
 });
 
-test("five artifacts establish one learned site, while pins alone never establish a product", () => {
+test("five pages establish one learned site, while pins alone never establish a product", () => {
   const items = [context(section("https://unknown.dev/hooks", "Codex hooks context events."))];
   assert.equal(filterProviderSites(items, ask, [], registry([["learned.dev", 5]]), "enforce").items.length, 0);
   assert.deepEqual(filterProviderSites(items, ask, [], registry([["pinned.dev", 0, true], ["second.dev", 0, true]]), "enforce").items, items);
 });
 
 test("off and observe preserve the legacy heuristic; observe flags at most ten enforce decisions", () => {
-  const known = registry([["openai.com", 3], ["github.com", 2]]);
+  const known = registry([["openai.com", 3], ["github.com/openai", 2]]);
   const items = [context(Array.from({ length: 12 }, (_, i) => section(`https://site${i}.dev/hooks`, "Codex hooks context events.")).join(""))];
   known.blocked["site0.dev"] = { at: "2026-10-07", note: "Wrong" };
   const baseline = dropForeignProviderSections(items, ask, ["https://openai.com/hooks"]);

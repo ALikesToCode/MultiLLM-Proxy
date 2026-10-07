@@ -18,7 +18,10 @@ _ALLOCATION = {
 _PRODUCT = {"type": "string", "minLength": 1, "maxLength": 100}
 _SITES = {"type": "array", "maxItems": 64, "uniqueItems": True,
           "items": {"type": "string", "maxLength": 253,
-                    "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"}}
+                    "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}"
+                    "|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)"
+                    "/[a-z0-9][a-z0-9_.-]{0,99})$",
+                    "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."}}
 _PROVIDERS = ("context7", "firecrawl", "exa", "mintlify", "deepwiki", "ai_search", "alexandria")
 
 

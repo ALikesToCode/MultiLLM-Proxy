@@ -1,6 +1,7 @@
 """Knowledge boundary checks use persisted keys and a synthetic private service."""
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ from flask import Flask
 from flask_wtf.csrf import CSRFError, CSRFProtect
 
 from error_handlers import APIError, init_error_handlers
-from routes import knowledge
+from routes import knowledge, knowledge_management
 from routes.csrf_errors import handle_csrf_error
 from route_helpers import api_authenticate_only
 from services import knowledge_client
@@ -482,7 +483,8 @@ def test_container_transport_accepts_every_provider_operation():
 @pytest.mark.parametrize("method,operation,tool,payload", [
     ("get", "product_sites.get", "knowledge_product_sites_get", {}),
     ("patch", "product_sites.update", "knowledge_product_sites_update",
-     {"pin": ["developer.mozilla.org"], "block": ["overflow.co"], "note": "Different product", "rebuild": True}),
+     {"pin": ["developer.mozilla.org", "github.com/mdn"], "block": ["overflow.co", "gitlab.com/unrelated"],
+      "note": "Different product", "rebuild": True}),
 ])
 def test_product_sites_rest_and_mcp_parity_with_scopes(app, keys, method, operation, tool, payload):
     client = app.test_client()
@@ -501,6 +503,20 @@ def test_product_sites_rest_and_mcp_parity_with_scopes(app, keys, method, operat
         assert rpc.json["result"]["structuredContent"] == rest.json == result
         assert remote.call_args.args[0] == operation
         assert remote.call_args.args[2] == {**payload, "product": product}
+
+
+def test_product_sites_management_schema_accepts_only_hostnames_and_code_owners():
+    tool = next(tool for tool in knowledge_management.TOOLS if tool["name"] == "knowledge_product_sites_update")
+    properties = tool["inputSchema"]["properties"]
+    for action in ("pin", "unpin", "block", "unblock"):
+        schema = properties[action]["items"]
+        assert schema["maxLength"] == 253
+        for site in ("github.com/pallets", "raw.githubusercontent.com/pallets", "gitlab.com/team.docs",
+                     "bitbucket.org/team_name", "first.readthedocs.io", "example.co.uk"):
+            assert re.fullmatch(schema["pattern"], site)
+        for site in ("github.com/Pallets", "github.com/pallets/repo", "example.org/page", "github.com/",
+                     "github.com/%70allets", "github.com/" + "x" * 101):
+            assert not re.fullmatch(schema["pattern"], site)
 
 
 def test_product_sites_validation_errors_surface_without_retry(app, keys):

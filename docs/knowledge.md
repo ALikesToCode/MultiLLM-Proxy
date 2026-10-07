@@ -215,8 +215,12 @@ provider; it is absent when nothing was dropped, and the status is unaffected.
 
 The product-site registry learns one verification per distinct (product, canonical page URL) when ingestion
 publishes it or retrieval confirms its retained live excerpt. The site key is the
-hostname without `www`, reduced to its last two labels; this is an approximation,
-so separate products sharing a registrable domain still need operator review.
+hostname without `www`, usually reduced to its last two labels. A short built-in list
+keeps a third label for `github.io`, `vercel.app`, `netlify.app`, `pages.dev`,
+`workers.dev`, `readthedocs.io`, `gitbook.io`, `mintlify.app`, `co.uk`, `com.au` and
+`co.jp`. Code hosts use `github.com/<owner>`, `gitlab.com/<owner>` and
+`bitbucket.org/<owner>`; raw.githubusercontent.com pages normalize to their GitHub
+owner. This is an approximation rather than a full public-suffix implementation.
 `product_sites_mode` in the complete Knowledge policy defaults to `observe`:
 
 - `off` keeps the original section filter and discovery list.
@@ -236,10 +240,15 @@ membership, blocks and the establishment threshold, rather than each count incre
 `knowledge_product_sites_get` and `knowledge_product_sites_update` are in the `manage`
 toolset, require `knowledge:manage`, and mirror `GET` and `PATCH`
 `/v1/knowledge/product-sites/<product>`. PATCH accepts `pin`, `unpin`, `block`, `unblock`
-(each up to 64 unique lowercase public hostnames), an optional 500-character `note`,
+(each up to 64 unique lowercase public hostnames or code-host owner sites, at most
+253 characters), an optional 500-character `note`,
 and `rebuild: true`. The product belongs in the URL for REST and in arguments for MCP;
 product names follow source validation (nonempty, at most 100 characters, lowercased).
-Hostnames are normalized to site keys, and conflicting actions for a site are rejected.
+Inputs are normalized to site keys, and conflicting actions for a site are rejected.
+For example, pin `github.com/pallets` or block `unrelated.readthedocs.io`. Owner input
+allows 1–100 lowercase letters, digits, underscores, dots or hyphens, starting with a
+letter or digit. Arbitrary page/repository paths are rejected. Bare code-host pins
+cover only the host root, never all of its owners.
 Blocked overrides pinned; unblocking preserves any learned/pinned entry.
 
 Each product keeps at most 64 sites and 64 blocks. Learning evicts the least-verified,

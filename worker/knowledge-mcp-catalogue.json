@@ -1373,7 +1373,8 @@
               "items": {
                 "type": "string",
                 "maxLength": 253,
-                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
               }
             },
             "unpin": {
@@ -1383,7 +1384,8 @@
               "items": {
                 "type": "string",
                 "maxLength": 253,
-                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
               }
             },
             "block": {
@@ -1393,7 +1395,8 @@
               "items": {
                 "type": "string",
                 "maxLength": 253,
-                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
               }
             },
             "unblock": {
@@ -1403,7 +1406,8 @@
               "items": {
                 "type": "string",
                 "maxLength": 253,
-                "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
               }
             },
             "note": {

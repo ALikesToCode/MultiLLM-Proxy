@@ -1,4 +1,4 @@
-import { fail, MAX_SNAPSHOT_BYTES, publicUrl } from "./contracts.mjs";
+import { fail, MAX_SNAPSHOT_BYTES, publicHost, publicUrl } from "./contracts.mjs";
 
 const encoder = new TextEncoder();
 
@@ -98,9 +98,31 @@ const FUNCTION_WORDS = new Set(("what when where which while with without within
 
 const words = text => text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
 
+// A deliberately short approximation, not a complete public-suffix implementation.
+const TENANT_SUFFIXES = new Set(["github.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
+  "readthedocs.io", "gitbook.io", "mintlify.app", "co.uk", "com.au", "co.jp"]);
+const CODE_HOSTS = new Set(["github.com", "gitlab.com", "bitbucket.org", "raw.githubusercontent.com"]);
+const CODE_OWNER = /^[a-z0-9][a-z0-9_.-]{0,99}$/;
+
+export function validSite(value) {
+  if (typeof value !== "string" || value.length > 253) return false;
+  const [host, owner, extra] = value.split("/");
+  return publicHost(host) && extra === undefined && (owner === undefined || CODE_HOSTS.has(host) && CODE_OWNER.test(owner));
+}
+
 export function site(url) {
-  try { return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join("."); }
-  catch { return null; }
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (CODE_HOSTS.has(host)) {
+      const owner = parsed.pathname.split("/")[1].toLowerCase();
+      const canonical = host === "raw.githubusercontent.com" ? "github.com" : host;
+      return owner ? CODE_OWNER.test(owner) ? `${canonical}/${owner}` : null : canonical;
+    }
+    const labels = host.split(".");
+    const suffix = labels.slice(-2).join(".");
+    return labels.slice(TENANT_SUFFIXES.has(suffix) ? -3 : -2).join(".");
+  } catch { return null; }
 }
 
 /**

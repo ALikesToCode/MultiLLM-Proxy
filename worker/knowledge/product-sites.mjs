@@ -1,5 +1,5 @@
-import { fail, fields, publicHost, string } from "./contracts.mjs";
-import { digest, site } from "./evidence.mjs";
+import { fail, fields, string } from "./contracts.mjs";
+import { digest, site, validSite } from "./evidence.mjs";
 
 export const SITE_LIMIT = 64;
 const PRODUCT_LIMIT = 400;
@@ -19,10 +19,10 @@ export function parseProductSites(input, update = false) {
   for (const action of ["pin", "unpin", "block", "unblock"]) {
     if (input[action] === undefined) continue;
     if (!Array.isArray(input[action]) || input[action].length > SITE_LIMIT
-      || input[action].some(host => !publicHost(host)) || new Set(input[action]).size !== input[action].length) {
-      fail("invalid_request", `${action} requires up to 64 unique lowercase public hostnames.`);
+      || input[action].some(host => !validSite(host)) || new Set(input[action]).size !== input[action].length) {
+      fail("invalid_request", `${action} requires up to 64 unique lowercase public sites or code-host owners.`);
     }
-    // Management accepts hostnames, but all decisions use the same site approximation.
+    // Management and evidence use one canonical site boundary, including code-host owners.
     parsed[action] = [...new Set(input[action].map(host => site(`https://${host}`)))];
   }
   if (input.note !== undefined) parsed.note = string(input.note, 500, "note", { optional: true });

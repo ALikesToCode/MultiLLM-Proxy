@@ -574,6 +574,17 @@ test("a provider that misses its budget becomes a gap instead of failing the ans
   assert.equal(result.status, "partial");
 });
 
+test("foreign-section evidence from raw GitHub content trusts only that code owner", () => {
+  const items = [{ kind: "derived_context", provider: "mintlify", text:
+    section("Wallets", "https://github.com/unrelated/project", "Wallet migrations.")
+    + section("Guide", "https://github.com/pallets/flask", "Documentation.") }];
+  const ask = { query: "Which hook events add context?", product: "flask" };
+  const result = dropForeignProviderSections(items, ask, ["https://raw.githubusercontent.com/pallets/flask/main/docs.rst"]);
+  assert.ok(!result.items[0].text.includes("unrelated"));
+  assert.ok(result.items[0].text.includes("pallets"));
+  assert.deepEqual(result.dropped, { mintlify: 1 });
+});
+
 test("an any-public-host policy admits every public source but never private names", async () => {
   const f = await fixture();
   const { revision, ...policy } = f.policy;
