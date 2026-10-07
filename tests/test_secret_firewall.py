@@ -138,3 +138,22 @@ def test_image_secret_block_is_not_a_fallback_candidate(monkeypatch):
         media_images._dispatch_single({"prompt": TOKEN}, lambda _: None,
             lambda value: firewall.protect_payload(value), prepare=lambda _p, _m, value: dict(value))
     assert failure.value.status_code == 422 and failure.value.payload["error"] == "secret_detected"
+
+
+def test_parallel_image_tasks_add_to_counts_recorded_before_fan_out(monkeypatch):
+    from routes.media_images import run_image_tasks
+    from services.proxy_service import ProxyService
+    app, _, bodies = application(monkeypatch, "redact")
+    @app.post("/synthetic-images")
+    def images():
+        g.authenticated_user = {"username": "synthetic-agent", "secret_scan_mode": "redact"}
+        g.secret_scan_counts = [1, 0]
+        def send():
+            ProxyService._make_base_request("POST", "https://provider.invalid/images", {"Content-Type": "application/json"}, {},
+                                           json.dumps({"prompt": TOKEN}).encode(), "gguu", use_cache=False, force_raw_passthrough=True)
+            return app.json.response({"data": []})
+        return app.json.response({"items": run_image_tasks([send, send])})
+    response = app.test_client().post("/synthetic-images", json={})
+    assert len(bodies) == 2
+    # Worker threads must not share the caller's counter list, or counts multiply.
+    assert response.headers.get(firewall.HEADER) == "redacted=3; observed=0"

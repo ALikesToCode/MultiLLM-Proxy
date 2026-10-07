@@ -90,7 +90,8 @@ def _read(response: Response) -> dict:
 
 def run_image_tasks(tasks: list[Callable], *, read_response: bool = True) -> list[dict]:
     """Run image requests in parallel, each in a copy of the caller's request context."""
-    principal = dict(g.__dict__)
+    # Each thread reports its own secret-scan counts; the caller sums them below.
+    principal = {name: value for name, value in g.__dict__.items() if name != "secret_scan_counts"}
 
     def finish(task):
         # A copied request context gets a new g; carry the owner's controls into it.
