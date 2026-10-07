@@ -19,6 +19,13 @@ _FIELD = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH", re.I)
 _EXAMPLE = re.compile(r"xxx|your_|example|placeholder|changeme|\*\*\*|REDACTED|dummy", re.I)
 _UUID = re.compile(r"[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
 _BINARY_FIELDS = frozenset({"b64_json", "audio", "data", "image", "images"})
+# Match the header in one pass, then validate parameter pairs without nested repeats.
+_DATA_URL_PATTERN = r"data:[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+;[A-Za-z0-9_.+=;-]*base64,[A-Za-z0-9+/= \t\r\n]+"
+_DATA_URL = re.compile(_DATA_URL_PATTERN, re.ASCII)
+_DATA_PARAM = re.compile(r"[A-Za-z0-9_.+-]+=[A-Za-z0-9_.+-]+\Z", re.ASCII)
+_INTEGRITY_PATTERN = r"(?<![A-Za-z0-9_-])sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}(?![A-Za-z0-9+/=_-])"
+_INTEGRITY = re.compile(_INTEGRITY_PATTERN, re.ASCII)
+_IGNORED_SPAN = re.compile(_DATA_URL_PATTERN + "|" + _INTEGRITY_PATTERN, re.ASCII)
 _BASE64 = re.compile(r"[A-Za-z0-9+/=\r\n]+\Z")
 
 
@@ -26,7 +33,7 @@ def _example(value):
     delimited = any((start := value.find(begin)) >= 0 and value.find(end, start + len(begin)) >= 0
                     for begin, end in (("<", ">"), ("${", "}"), ("{{", "}}")))
     return bool(delimited or _EXAMPLE.search(value) or _UUID.fullmatch(value)
-                or len(set(value)) < 2 or value.startswith("sha512-"))
+                or len(set(value)) < 2 or _INTEGRITY.fullmatch(value))
 
 
 def _entropy(value):
@@ -38,14 +45,19 @@ def _heuristic(value):
     return len(value) >= 12 and not _example(value) and _entropy(value) >= 3.0
 
 
+def _valid_data_url(value):
+    header = value.partition(",")[0].split(";")
+    return header[-1] == "base64" and all(_DATA_PARAM.fullmatch(part) for part in header[1:-1])
+
+
 def _skipped(value, field=""):
-    return value.startswith(("data:", "sha512-")) or (
+    return bool(_DATA_URL.fullmatch(value) and _valid_data_url(value)) or (
         field in _BINARY_FIELDS and len(value) >= 128 and bool(_BASE64.fullmatch(value)))
 
 
 def scan_text(text):
     """Code-point offsets, sorted and non-overlapping; specific formats win."""
-    if not isinstance(text, str) or _skipped(text):
+    if not isinstance(text, str):
         return []
     text = text[:MAX_BYTES]
     candidates = []
@@ -73,6 +85,18 @@ def scan_text(text):
             candidates.append((match.start(2), match.end(2), "secret_assignment", "heuristic"))
         if len(candidates) >= MAX_FINDINGS:
             break
+    # Walk ordered spans once; only candidates wholly inside binary/integrity text
+    # are excluded. A prefix on a pasted log must never exempt the rest of the leaf.
+    spans = (match for match in _IGNORED_SPAN.finditer(text)
+             if not match[0].startswith("data:") or _valid_data_url(match[0]))
+    span = next(spans, None)
+    visible = []
+    for item in sorted(candidates, key=lambda item: item[0]):
+        while span and span.end() <= item[0]:
+            span = next(spans, None)
+        if not span or item[0] < span.start() or item[1] > span.end():
+            visible.append(item)
+    candidates = visible
     high = sorted((item for item in candidates if item[3] == "high"), key=lambda item: (item[0], -item[1]))
     heuristic = sorted(item for item in candidates if item[3] == "heuristic")
     selected, last_end = [], -1

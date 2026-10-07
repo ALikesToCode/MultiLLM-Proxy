@@ -39,7 +39,7 @@ return [findings,redactText(text,findings),scanPayload(v.field ? {[v.field]:text
 def test_payload_limits_skips_and_modes():
     token = "".join(VECTORS[2]["parts"])
     payload = {"messages": [token, token], "password": "AbCdEf0123456789", "image": "ABcd0123" * 100,
-               "data": "data:image/png;base64," + token}
+               "data": "data:image/png;base64," + token + "+/="}
     updated, report = redact_payload(payload, mode="redact")
     assert report["high"] == 2 and report["heuristic"] == 1
     assert updated["messages"][0] == updated["messages"][1]

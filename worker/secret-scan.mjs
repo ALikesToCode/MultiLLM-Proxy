@@ -11,6 +11,11 @@ const FIELD = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH/i;
 const EXAMPLE = /xxx|your_|example|placeholder|changeme|\*\*\*|REDACTED|dummy/i;
 const UUID = /^[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$/;
 const BINARY_FIELDS = new Set(["b64_json", "audio", "data", "image", "images"]);
+const DATA_URL_PATTERN = String.raw`data:[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+;[A-Za-z0-9_.+=;-]*base64,[A-Za-z0-9+/= \t\r\n]+`;
+const INTEGRITY_PATTERN = String.raw`(?<![A-Za-z0-9_-])sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}(?![A-Za-z0-9+/=_-])`;
+const DATA_URL = new RegExp(`^(?:${DATA_URL_PATTERN})$(?![\\s\\S])`);
+const INTEGRITY = new RegExp(`^(?:${INTEGRITY_PATTERN})$(?![\\s\\S])`);
+const IGNORED_SPAN = new RegExp(`${DATA_URL_PATTERN}|${INTEGRITY_PATTERN}`, "g");
 const encoder = new TextEncoder();
 const empty = () => ({ high: 0, heuristic: 0, types: {}, paths: [], truncated: false });
 function example(value) {
@@ -18,9 +23,13 @@ function example(value) {
     const start = value.indexOf(begin);
     return start >= 0 && value.indexOf(end, start + begin.length) >= 0;
   });
-  return delimited || EXAMPLE.test(value) || UUID.test(value) || new Set(value).size < 2 || value.startsWith("sha512-");
+  return delimited || EXAMPLE.test(value) || UUID.test(value) || new Set(value).size < 2 || INTEGRITY.test(value);
 }
-const skipped = (value, field = "") => value.startsWith("data:") || value.startsWith("sha512-")
+function validDataUrl(value) {
+  const header = value.slice(0, value.indexOf(",")).split(";");
+  return header.at(-1) === "base64" && header.slice(1, -1).every(part => /^[A-Za-z0-9_.+-]+=[A-Za-z0-9_.+-]+$/.test(part));
+}
+const skipped = (value, field = "") => (DATA_URL.test(value) && validDataUrl(value))
   || (BINARY_FIELDS.has(field) && value.length >= 128 && /^[A-Za-z0-9+/=\r\n]+$/.test(value));
 
 function heuristic(value) {
@@ -34,7 +43,7 @@ function heuristic(value) {
 }
 
 export function scanText(text) {
-  if (typeof text !== "string" || skipped(text)) return [];
+  if (typeof text !== "string") return [];
   text = text.slice(0, MAX_BYTES);
   const candidates = [];
   KEY_MARKER.lastIndex = 0;
@@ -63,12 +72,24 @@ export function scanText(text) {
     if (candidates.length >= MAX_FINDINGS) break;
   }
   const order = (a, b) => a.start - b.start || (a.confidence !== "high") - (b.confidence !== "high") || b.end - a.end;
-  const high = candidates.filter(item => item.confidence === "high").sort(order);
+  // Exclude contained candidates, never an entire pasted log by its prefix.
+  IGNORED_SPAN.lastIndex = 0;
+  const spans = (function* () {
+    for (const match of text.matchAll(IGNORED_SPAN))
+      if (!match[0].startsWith("data:") || validDataUrl(match[0])) yield match;
+  })();
+  let span = spans.next().value;
+  const visible = [];
+  for (const item of candidates.sort((a, b) => a.start - b.start)) {
+    while (span && span.index + span[0].length <= item.start) span = spans.next().value;
+    if (!span || item.start < span.index || item.end > span.index + span[0].length) visible.push(item);
+  }
+  const high = visible.filter(item => item.confidence === "high").sort(order);
   const selected = [];
   let lastEnd = -1;
   for (const item of high) if (item.start >= lastEnd) { selected.push(item); lastEnd = item.end; }
   let cursor = 0;
-  for (const item of candidates.filter(item => item.confidence === "heuristic").sort(order)) {
+  for (const item of visible.filter(item => item.confidence === "heuristic").sort(order)) {
     while (cursor < selected.length && selected[cursor].end <= item.start) cursor += 1;
     if (cursor === selected.length || selected[cursor].start >= item.end) high.push(item);
   }
