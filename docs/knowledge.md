@@ -25,6 +25,7 @@ separate release steps. Configuration status is not a connectivity test.
 | Cloudflare R2 | Immutable source snapshots | `KNOWLEDGE_SNAPSHOTS`, private bucket `multillm-knowledge-snapshots` |
 | SQLite-backed Durable Object | Sources, jobs, publication fences and operation allowances | `KNOWLEDGE_AUTHORITY` |
 | SQLite-backed memo Durable Object | Shared verified answers with product and global LRU limits | `KNOWLEDGE_MEMOS`, class `KnowledgeMemos` |
+| SQLite-backed handoff Durable Object | Principal-private task context, TTL and oldest-first retention | `KNOWLEDGE_HANDOFFS`, class `KnowledgeHandoffs` |
 | Cloudflare Workflows | Acquisition, index submission and verification | `KNOWLEDGE_INGESTION` |
 | Private Worker service binding | Existing Flask authentication to Knowledge | Main Worker `KNOWLEDGE_SERVICE` → `multillm-knowledge` |
 | Exa | Discovery plus original source text | Knowledge Worker secret `EXA_API_KEY` |
@@ -82,7 +83,11 @@ See Cloudflare's [binding compatibility reference](https://developers.cloudflare
    npm run cf:knowledge:deploy
    ```
 
-   The configuration creates the Durable Object migration and Workflow binding.
+   The configuration creates the Durable Object migrations and Workflow binding.
+   Preserve the existing migration tags; `add-knowledge-handoffs` appends the
+   SQLite `KnowledgeHandoffs` class. Handoffs need no D1 migration, provider key
+   or paid-retrieval policy. Deploy the updated catalogue and Flask/edge routes
+   with the main Worker after updating the private Worker.
    Set the selected provider secrets on this Worker, using the platform's private
    secret entry flow:
 
@@ -434,3 +439,36 @@ Knowledge arguments reject high-confidence secrets with HTTP 422 / `secret_detec
 before provider fan-out or persistence, regardless of an effective `observe` or `redact`
 mode. An effective `off` mode bypasses inspection. Error bodies contain types and counts,
 never the matched text. See [outbound secret scanning](plans/2026-10-07-secret-firewall-design.md).
+
+## Handoff API
+
+All four operations require `knowledge:read` and pass the existing Knowledge
+secret firewall before storage. Each authenticated principal gets a separate
+`KNOWLEDGE_HANDOFFS` object named by its principal id. Switching credentials to
+another principal cannot retrieve or delete the first principal's handoffs.
+
+| REST method and path | Private operation | Parameters |
+| --- | --- | --- |
+| `POST /v1/knowledge/handoffs` | `handoffs.save` | JSON save contract from [the design](plans/2026-10-07-knowledge-handoffs-design.md) |
+| `GET /v1/knowledge/handoffs` | `handoffs.list` | Optional `project`, `limit` (1–20; default 20) |
+| `GET /v1/knowledge/handoffs/latest` | `handoffs.get` | Required `project`, optional `branch` |
+| `GET /v1/knowledge/handoffs/{id}` | `handoffs.get` | Required `project`, optional `branch`; id selects the record |
+| `DELETE /v1/knowledge/handoffs/{id}` | `handoffs.delete` | No body or query |
+
+Reads and deletes reject bodies; saving rejects queries. Duplicate or unknown
+query fields are invalid. A branch miss falls back to the newest handoff in the
+project. Missing or expired records return `{record: null, markdown: "",
+trust: "operator"}`. Successful get returns the full `record` plus compact
+`markdown`; list returns `{handoffs: [...], trust: "operator"}` with only id,
+project, branch, title, source agent and creation date. Save returns id, expiry
+and trust; delete returns a boolean `deleted` and trust (repeated deletion is safe).
+These envelopes also form the MCP structured results.
+
+Records are capped at 32 KiB, 50 per project and 500 per principal. Saves remove
+expired records and evict the oldest inserted records in the same transaction.
+Expired records are immediately hidden from reads even before the next save.
+TTL defaults to 14 days and accepts 1–90 days. Markdown is capped at 4,500 UTF-8
+bytes (about 1,500 tokens using the retrieval estimate); structured records keep
+all fields. `trust: "operator"` identifies provenance, not executable instructions.
+Missing bindings or a two-second private dispatch deadline return
+`handoffs_unavailable`; no handoff operation calls a retrieval provider.

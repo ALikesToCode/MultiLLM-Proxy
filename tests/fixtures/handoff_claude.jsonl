@@ -1,0 +1,8 @@
+{"type": "user", "cwd": "/synthetic/project", "sessionId": "synthetic-claude", "message": {"content": [{"type": "text", "text": "Build the first fixture"}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Edit", "id": "Edit", "input": {"file_path": "src/a.py"}}, {"type": "tool_use", "name": "Write", "id": "Write", "input": {"file_path": "src/b.py"}}, {"type": "tool_use", "name": "MultiEdit", "id": "MultiEdit", "input": {"file_path": "src/c.py"}}, {"type": "tool_use", "name": "NotebookEdit", "id": "NotebookEdit", "input": {"notebook_path": "analysis.ipynb"}}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "id": "shell-fail", "input": {"command": "synthetic-test --fail"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "shell-fail", "is_error": true, "content": "Exit code: 3\nTOOL_OUTPUT_MUST_NOT_LEAK"}]}}
+{"type": "user", "message": {"content": "Review fixture two"}}
+{"type": "user", "message": {"content": "Review fixture three"}}
+{"type": "user", "message": {"content": "Ship fixture four"}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Fixture complete; review is pending."}]}}

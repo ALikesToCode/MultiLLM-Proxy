@@ -1,0 +1,7 @@
+{"type": "session_meta", "payload": {"id": "synthetic-codex", "cwd": "/synthetic/project"}}
+{"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Add the synthetic parser"}]}}
+{"type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch", "call_id": "patch-1", "input": "*** Begin Patch\n*** Add File: src/parser.py\n+synthetic\n*** Update File: src/old.py\n@@\n-old\n+new\n*** Move to: src/new.py\n*** Delete File: src/gone.py\n*** End Patch"}}
+{"type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "call_id": "command-1", "arguments": "{\"cmd\": \"synthetic-check\"}"}}
+{"type": "response_item", "payload": {"type": "function_call_output", "call_id": "command-1", "output": "Process exited with code 2\nTOOL_OUTPUT_MUST_NOT_LEAK"}}
+{"type": "response_item", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Parser written; one check failed."}]}}
+{"type": "response_item", "payload": {"type": "message", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "Not the final answer"}]}}
