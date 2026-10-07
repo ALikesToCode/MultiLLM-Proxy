@@ -1,0 +1,62 @@
+[
+  {
+    "method": "POST",
+    "path": "/v1/knowledge/handoffs",
+    "body": {
+      "project": "synthetic/repo",
+      "title": "Fixture",
+      "sections": {},
+      "source": {
+        "agent": "codex"
+      }
+    },
+    "operation": "handoffs.save",
+    "payload": {
+      "project": "synthetic/repo",
+      "title": "Fixture",
+      "sections": {},
+      "source": {
+        "agent": "codex"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/knowledge/handoffs?project=synthetic%2Frepo&limit=2",
+    "body": null,
+    "operation": "handoffs.list",
+    "payload": {
+      "project": "synthetic/repo",
+      "limit": 2
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/knowledge/handoffs/latest?project=synthetic%2Frepo&branch=feature",
+    "body": null,
+    "operation": "handoffs.get",
+    "payload": {
+      "project": "synthetic/repo",
+      "branch": "feature"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/knowledge/handoffs/fixture-id?project=synthetic%2Frepo",
+    "body": null,
+    "operation": "handoffs.get",
+    "payload": {
+      "project": "synthetic/repo",
+      "id": "fixture-id"
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/v1/knowledge/handoffs/fixture-id",
+    "body": null,
+    "operation": "handoffs.delete",
+    "payload": {
+      "id": "fixture-id"
+    }
+  }
+]

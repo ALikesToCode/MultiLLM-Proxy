@@ -28,6 +28,7 @@ _OPERATIONS = frozenset({
     "context", "search", "artifact", "status", "sources.create", "sources.update",
     "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge",
     "alexandria.search", "alexandria.inspect", "alexandria.execute", "alexandria.receipt",
+    "handoffs.save", "handoffs.get", "handoffs.list", "handoffs.delete",
     *NATIVE_OPERATIONS,
 })
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")

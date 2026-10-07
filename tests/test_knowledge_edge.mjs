@@ -465,3 +465,46 @@ test("memo metadata survives edge MCP evidence trimming", async () => {
   assert.deepEqual(response.result.structuredContent.memo, memo);
   assert.equal(response.result.structuredContent.served_at, undefined);
 });
+
+const handoffRoutes = JSON.parse(await readFile(new URL("./fixtures/handoff_routes.json", import.meta.url), "utf8"));
+for (const c of handoffRoutes) test(`handoff edge REST parity ${c.method} ${c.path}`, async () => {
+  const { env, dispatched } = environment({ result: { trust: "operator" } });
+  const response = await call(env, new Request(ORIGIN + c.path, { method: c.method,
+    headers: { authorization: `Bearer ${reader.key}`, ...(c.body ? { "content-type": "application/json" } : {}) },
+    ...(c.body ? { body: JSON.stringify(c.body) } : {}) }));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(dispatched[0].operation, c.operation);
+  assert.deepEqual(dispatched[0].payload, c.payload);
+});
+test("handoff edge MCP discovery and bounded markdown with complete structured content", async () => {
+  const result = { record: { id: "fixture-id" }, markdown: "# Fixture", trust: "operator" };
+  const { env } = environment({ result });
+  const req = mcpRequest(reader.key, "tools/list");
+  const narrowed = new Request(ORIGIN + "/mcp?toolsets=handoff", req);
+  const tools = (await (await call(env, narrowed)).json()).result.tools;
+  assert.deepEqual(tools.map(item => item.name), ["knowledge_handoff_save", "knowledge_handoff_get", "knowledge_handoff_list", "knowledge_handoff_delete"]);
+  const called = (await (await call(env, mcpRequest(reader.key, "tools/call", { name: "knowledge_handoff_get", arguments: { project: "synthetic/repo" } }))).json()).result;
+  assert.equal(called.content[0].text, result.markdown);
+  assert.deepEqual(called.structuredContent, result);
+});
+test("handoff edge firewall refuses REST and MCP secrets before private dispatch", async () => {
+  const secret = "AK" + "IA" + "AB12CD34EF56GH78";
+  for (const path of ["/mcp", "/v1/knowledge/handoffs"]) {
+    const { env, dispatched } = environment();
+    const payload = { project: "synthetic/repo", title: "Fixture", source: { agent: "codex" }, sections: { goal: secret } };
+    const request = path === "/mcp" ? mcpRequest(reader.key, "tools/call", { name: "knowledge_handoff_save", arguments: payload })
+      : new Request(ORIGIN + path, { method: "POST", headers: { authorization: `Bearer ${reader.key}`, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const response = await call(env, request);
+    assert.equal(response.status, 422);
+    assert.equal(dispatched.length, 0);
+    assert.ok(!(await response.text()).includes(secret));
+  }
+});
+for (const path of ["/v1/knowledge/handoffs?limit=1&limit=2", "/v1/knowledge/handoffs?limit=1.5", "/v1/knowledge/handoffs/latest?unexpected=1", "/v1/knowledge/handoffs/fixture-id?project=p&project=q"]) {
+  test(`handoff edge rejects ambiguous query ${path}`, async () => {
+    const { env, dispatched } = environment();
+    const response = await call(env, new Request(ORIGIN + path, { headers: { authorization: `Bearer ${reader.key}` } }));
+    assert.equal(response.status, 400); assert.equal(dispatched.length, 0);
+  });
+}

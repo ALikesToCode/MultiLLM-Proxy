@@ -12,6 +12,7 @@ from routes import knowledge_alexandria as alexandria
 from routes import knowledge_management as management
 from routes import knowledge_mcp as mcp
 from routes.knowledge_memos import purge_query
+from routes.knowledge_handoffs import register_handoff_routes
 from routes.knowledge_onboarding import register_knowledge_onboarding_routes
 from routes.core import require_admin_dashboard_user
 from services.knowledge_client import MAX_REQUEST_BYTES, KnowledgeError, dispatch as _dispatch
@@ -192,14 +193,14 @@ def _mcp_tool(identifier, params):
         elif operation in mcp.NATIVE_OPERATIONS:
             # The Knowledge service validates provider tools against their shared contract.
             payload = arguments
-        elif tool_name in management.OPERATIONS:
-            # The private service validates management contracts identically for REST and MCP.
+        elif tool_name in management.OPERATIONS or operation.startswith("handoffs."):
+            # The private service validates these contracts identically for REST and MCP.
             payload = arguments
         else:
             payload = _query(arguments)
         result = dispatch(operation, g.authenticated_user, payload)
         shown = _agent_evidence(result) if operation in ("context", "search") else result
-        tool_result = {"content": [{"type": "text", "text": json.dumps(shown, ensure_ascii=False)}], "isError": bool(result.get("error")),
+        tool_result = {"content": [{"type": "text", "text": shown["markdown"] if operation == "handoffs.get" and shown.get("record") else json.dumps(shown, ensure_ascii=False)}], "isError": bool(result.get("error")),
                        "structuredContent": shown}
         return _rpc_result(identifier, tool_result)
     except KnowledgeError as error:
@@ -310,6 +311,8 @@ def register_knowledge_routes(app, csrf):
                 raise KnowledgeError("invalid_request", "Use application/json or query parameters.", 415)
             payload = purge_query(request.args)
         return jsonify(dispatch("memos.purge", g.authenticated_user, payload))
+
+    register_handoff_routes(app, csrf, lambda operation, user, payload: dispatch(operation, user, payload), _body)
 
     # Either Knowledge scope opens MCP; a key with neither is told the smaller one it needs.
     app.add_url_rule("/mcp", "knowledge_mcp",

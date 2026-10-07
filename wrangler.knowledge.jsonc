@@ -14,10 +14,12 @@
   }],
   "durable_objects": {
     "bindings": [{ "name": "KNOWLEDGE_AUTHORITY", "class_name": "KnowledgeCatalogue" },
-      { "name": "KNOWLEDGE_MEMOS", "class_name": "KnowledgeMemos" }]
+      { "name": "KNOWLEDGE_MEMOS", "class_name": "KnowledgeMemos" },
+      { "name": "KNOWLEDGE_HANDOFFS", "class_name": "KnowledgeHandoffs" }]
   },
   "migrations": [{ "tag": "knowledge-v1", "new_sqlite_classes": ["KnowledgeCatalogue"] },
-    { "tag": "knowledge-memos-v1", "new_sqlite_classes": ["KnowledgeMemos"] }],
+    { "tag": "knowledge-memos-v1", "new_sqlite_classes": ["KnowledgeMemos"] },
+    { "tag": "add-knowledge-handoffs", "new_sqlite_classes": ["KnowledgeHandoffs"] }],
   "r2_buckets": [{ "binding": "KNOWLEDGE_SNAPSHOTS", "bucket_name": "multillm-knowledge-snapshots" }],
   "ai_search": [{ "binding": "KNOWLEDGE_INDEX", "instance_name": "multillm-knowledge" }],
   "ai": { "binding": "KNOWLEDGE_SEARCH_AI" },

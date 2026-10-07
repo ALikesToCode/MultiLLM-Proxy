@@ -4,6 +4,7 @@ import { dispatchKnowledge, maintainKnowledge } from "./service.mjs";
 import { runIngestion } from "./ingestion.mjs";
 import { errorReply, fail, fields, KnowledgeError, readJson, reply } from "./contracts.mjs";
 import { logFailure } from "../log.mjs";
+import { HandoffStore } from "./handoff-store.mjs";
 import { MemoStore } from "./memo-store.mjs";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 
@@ -43,6 +44,22 @@ export class KnowledgeMemos extends DurableObject {
       fields(body, ["operation", "payload"], ["operation", "payload"]);
       return reply(this.memos.call(body.operation, body.payload));
     } catch (error) { return failure("knowledge_memos_failed", error); }
+  }
+}
+
+export class KnowledgeHandoffs extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.handoffs = new HandoffStore(ctx.storage);
+  }
+
+  async fetch(request) {
+    try {
+      if (request.method !== "POST" || new URL(request.url).pathname !== "/dispatch") fail("not_found", "Unknown handoff route.", 404);
+      const body = await readJson(request, 40 * 1024);
+      fields(body, ["operation", "payload"], ["operation", "payload"]);
+      return reply(this.handoffs.call(body.operation, body.payload));
+    } catch (error) { return failure("knowledge_handoffs_failed", error); }
   }
 }
 

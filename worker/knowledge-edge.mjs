@@ -347,7 +347,7 @@ async function callTool(env, request, principal, id, params) {
     // The private service validates every contract identically for REST and MCP.
     const result = await dispatch(env, entry.operation, principal, args, request.signal);
     const shown = ["context", "search"].includes(entry.operation) ? agentEvidence(result) : result;
-    const toolResult = { content: [{ type: "text", text: JSON.stringify(shown) }], isError: Boolean(result?.error) };
+    const toolResult = { content: [{ type: "text", text: entry.operation === "handoffs.get" && shown?.record ? shown.markdown : JSON.stringify(shown) }], isError: Boolean(result?.error) };
     if (isRecord(shown)) toolResult.structuredContent = shown;
     return rpcResult(id, toolResult);
   } catch (error) {
@@ -424,6 +424,13 @@ function restRoute(method, pathname) {
   if (path.length === 2 && method === "POST" && first === "native" && NATIVE_OPERATIONS.has(`native.${second}`)) {
     return { operation: `native.${second}`, scope: "knowledge:read", body: true };
   }
+  if (first === "handoffs") {
+    if (path.length === 1 && method === "POST") return { operation: "handoffs.save", scope: "knowledge:read", body: true, handoff: true };
+    if (path.length === 1 && method === "GET") return { operation: "handoffs.list", scope: "knowledge:read", handoff: true };
+    if (path.length === 2 && ["GET", "DELETE"].includes(method)) return {
+      operation: method === "GET" ? "handoffs.get" : "handoffs.delete", scope: "knowledge:read", handoff: true,
+      ...(method === "GET" && second === "latest" ? {} : { id: second }) };
+  }
   if (path.length === 1 && first === "memos" && ["GET", "DELETE"].includes(method)) {
     return { operation: method === "GET" ? "memos.stats" : "memos.purge", scope: "knowledge:manage", memo: true };
   }
@@ -450,6 +457,19 @@ async function handleRest(request, env, principal, route) {
   }
   try {
     let payload = route.body ? await readBody(request) : {};
+    if (route.handoff) {
+      const params = new URL(request.url).searchParams;
+      if (route.body && params.size) throw new KnowledgeEdgeError("invalid_request", "Save accepts no query fields.", 400);
+      if (!route.body) {
+        if (request.body) throw new KnowledgeEdgeError("invalid_request", "Use query parameters for handoff reads and deletes.", 400);
+        const allowed = route.operation === "handoffs.get" ? ["project", "branch"] : route.operation === "handoffs.list" ? ["project", "limit"] : [];
+        for (const [key, value] of params) {
+          if (!allowed.includes(key) || Object.hasOwn(payload, key)) throw new KnowledgeEdgeError("invalid_request", "Unsupported or duplicate handoff query fields.", 400);
+          if (key === "limit" && !/^[0-9]{1,2}$/.test(value)) throw new KnowledgeEdgeError("invalid_request", "limit must be an integer from 1 to 20.", 400);
+          payload[key] = key === "limit" ? Number(value) : value;
+        }
+      }
+    }
     if (route.product !== undefined) {
       if (Object.hasOwn(payload, "product")) throw new KnowledgeEdgeError("invalid_request", "The product belongs in the URL.", 400);
       try { payload.product = decodeURIComponent(route.product); }
