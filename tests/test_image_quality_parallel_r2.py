@@ -150,7 +150,7 @@ class ParallelRoundTwoTest(UnifiedApiTestCase):
             controls = {"authenticated_user": {"username": "synthetic"}, "rate_limit": {"limit": 1},
                         "request_id": "synthetic-context", "usage_context": None, "request_started_at": 123,
                         "multillm_model": "synthetic:model", "multillm_provider": "synthetic", "multillm_route_decision": "test",
-                        "image_qa_exclude_gemini": False}
+                        "judge_exclude_gemini": False}
             for name, value in controls.items():
                 setattr(g, name, value)
             def task(index):

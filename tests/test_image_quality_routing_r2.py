@@ -82,25 +82,25 @@ class JudgeRoutingRoundTwoTest(UnifiedApiTestCase):
         from routes.image_quality import _judge
         with self.app.test_request_context("/v1/images/generations"):
             g.authenticated_user = {"username": "admin"}
-            g.image_qa_exclude_gemini = True
+            g.judge_exclude_gemini = True
             def dispatch(payload):
-                assert g.image_qa_exclude_gemini is False
+                assert g.judge_exclude_gemini is False
                 return judge_response()
             quality, _ = _judge(qa_tests.image(), qa_tests.MODEL, "square", QualityOptions("gemini:synthetic"), dispatch)
             assert quality["score"] == 9
-            assert g.image_qa_exclude_gemini is True
-            g.image_qa_exclude_gemini = False
+            assert g.judge_exclude_gemini is True
+            g.judge_exclude_gemini = False
             def fail(payload):
-                assert g.image_qa_exclude_gemini is True
+                assert g.judge_exclude_gemini is True
                 raise ValueError("synthetic")
             quality, _ = _judge(qa_tests.image(), qa_tests.MODEL, "square", QualityOptions("auto:qa-review"), fail)
             assert quality["judge_error"] == "judge_error"
-            assert g.image_qa_exclude_gemini is False
+            assert g.judge_exclude_gemini is False
 
     def test_all_candidate_forms_are_filtered_only_with_switch(self):
         with self.app.test_request_context():
             for model in ("gemini:other", "openrouter:google/GEMINI-synthetic:free", "cline-pass:google/gemini-synthetic:free", "openrouter:openrouter/free"):
                 assert judge_candidate_allowed(model)
-                g.image_qa_exclude_gemini = True
+                g.judge_exclude_gemini = True
                 assert not judge_candidate_allowed(model)
-                g.image_qa_exclude_gemini = False
+                g.judge_exclude_gemini = False

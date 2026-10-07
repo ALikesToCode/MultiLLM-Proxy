@@ -15,6 +15,7 @@ from services.free_model_policy import validate_free_payload
 from services.image_quality import (
     MAX_PROMPT_CHARS, QA_HEADER, expected_text, image_source, judge_payload, parse_grade, parse_options,
 )
+from services.judge_routing import excluding_gemini
 from services.media_catalog import DEFAULT_IMAGE_QUALITY, prepare_image_payload
 
 logger = logging.getLogger(__name__)
@@ -38,13 +39,12 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
     if expected:
         quality["text_similarity"] = None
     response = None
-    previous_exclusion = getattr(g, "image_qa_exclude_gemini", False)
-    g.image_qa_exclude_gemini = options.judge_model.startswith(("free:", "auto:"))
     try:
         source, signed_url = image_source(entry, model)
         if signed_url:
             quality["judge_image_source"] = "signed_url"
-        response = accounted_dispatch(judge_payload(options, prompt, source), dispatch, kind="chat")
+        with excluding_gemini(options.judge_model):
+            response = accounted_dispatch(judge_payload(options, prompt, source), dispatch, kind="chat")
         if response.status_code >= 400:
             raise ValueError("judge_unavailable")
         raw = response.get_data()
@@ -64,7 +64,6 @@ def _judge(entry, model, prompt, options, dispatch) -> tuple[dict, str]:
         logger.warning("Image judge failed (%s)", type(error).__name__)
         return quality, ""
     finally:
-        g.image_qa_exclude_gemini = previous_exclusion
         if response is not None:
             response.close()
 
