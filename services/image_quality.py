@@ -83,24 +83,36 @@ def text_similarity(expected: str, visible: str | None) -> float:
 def parse_grade(content: str, expected: str) -> dict:
     if not isinstance(content, str) or len(content.encode("utf-8")) > 8192:
         raise ValueError("invalid_judge_json")
+    content = content.strip()
+    fence = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", content, re.DOTALL)
+    if fence:
+        content = fence[1].strip()
     check_json_output(content, {"type": "json_object"})
     value = json.loads(content)
-    required = {"score", "prompt_adherence", "text_accuracy", "artifacts", "visible_text", "issues", "fix_instructions"}
-    if set(value) != required:
+    required = {"score", "prompt_adherence", "artifacts", "visible_text", "issues", "fix_instructions"}
+    if not required <= set(value):
         raise ValueError("invalid_judge_contract")
+    value = {field: value.get(field) for field in required | {"text_accuracy"}}
     for field in ("score", "prompt_adherence", "text_accuracy", "artifacts"):
         number = value[field]
-        if field == "text_accuracy" and number is None and not expected:
+        if field == "text_accuracy" and number is None:
             continue
+        if isinstance(number, str):
+            try:
+                number = float(number)
+            except ValueError:
+                raise ValueError("invalid_judge_contract") from None
         if type(number) not in (int, float) or not math.isfinite(number) or not 0 <= number <= 10:
             raise ValueError("invalid_judge_contract")
+        value[field] = number
     visible = value["visible_text"]
     issues, fixes = value["issues"], value["fix_instructions"]
-    if (visible is not None and (not isinstance(visible, str) or len(visible) > MAX_TEXT_CHARS)
-            or not isinstance(issues, list) or len(issues) > 5
-            or any(not isinstance(issue, str) or len(issue) > 200 for issue in issues)
-            or not isinstance(fixes, str) or len(fixes) > 300):
+    if (visible is not None and not isinstance(visible, str)
+            or not isinstance(issues, list) or not isinstance(fixes, str)):
         raise ValueError("invalid_judge_contract")
+    visible = visible[:MAX_TEXT_CHARS] if visible is not None else None
+    value.update(visible_text=visible, issues=[issue[:200] for issue in issues if isinstance(issue, str)][:5],
+                 fix_instructions=fixes[:300])
     if expected:
         value["text_similarity"] = text_similarity(expected, visible)
         value["score"] = min(value["score"], round(10 * value["text_similarity"], 1))
