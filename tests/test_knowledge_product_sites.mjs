@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createArtifact, dropForeignProviderSections, site } from "../worker/knowledge/evidence.mjs";
-import { parseProductSites, SITE_LIMIT } from "../worker/knowledge/product-sites.mjs";
+import { parseProductSites, SITE_LIMIT, PAGE_LIMIT } from "../worker/knowledge/product-sites.mjs";
 import { filterProviderSites } from "../worker/knowledge/provider-site-filter.mjs";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
@@ -41,7 +41,8 @@ test("published artifacts learn once and live verification followed by publicati
   const jobs = (await f.authority.call("snapshot")).jobs;
   await f.authority.call("job.publish", { id: jobs[0].id, artifact_id: artifact.id });
   await f.authority.call("product_sites.learn", { id: artifact.id });
-  assert.deepEqual(await get(f), sites);
+  assert.equal((await get(f)).sites[site(f.source.url)].verified, 1);
+  assert.equal((await get(f)).revision, sites.revision);
   const live = await fixture();
   await run(live, request({ mode: "economy" }));
   sites = await get(live);
@@ -84,17 +85,12 @@ test("learning evicts the weakest oldest unpinned site and retries never inflate
   assert.equal(sites.sites[site(f.source.url)].verified, 1);
 });
 
-test("all-pinned and global storage bounds stop learning without failing publication or retrieval", async () => {
+test("all-pinned and product storage bounds decline learning without failing publication or retrieval", async () => {
   const f = await fixture();
   await update(f, { product: "flask", pin: Array.from({ length: SITE_LIMIT }, (_, i) => `pin${i}.dev`) });
   await f.published();
   assert.equal(Object.keys((await get(f)).sites).length, SITE_LIMIT);
   assert.ok(!(await get(f)).sites[site(f.source.url)]);
-  const capped = await fixture();
-  await capped.storage.put("product-site-artifact-count", 10000);
-  const result = await run(capped, request({ mode: "economy" }));
-  assert.equal(result.status, "ok");
-  assert.deepEqual((await get(capped)).sites, {});
   const products = await fixture();
   for (let i = 0; i < 400; i++) await products.storage.put(`product-sites:product-${i}`, registry([]));
   await products.published();
@@ -117,10 +113,151 @@ test("rebuild uses all retained artifacts, resets learned counts and preserves p
   assert.equal(rebuilt.sites["pinned.dev"].verified, 0);
   assert.deepEqual(rebuilt.blocked, before.blocked);
   await f.authority.call("product_sites.learn", { id: artifact.id });
-  assert.deepEqual(await get(f), rebuilt);
+  assert.equal((await get(f)).sites[site(f.source.url)].verified, 1);
+  assert.equal((await get(f)).revision, rebuilt.revision);
   await update(f, { product: "flask", unpin: ["pinned.dev"], unblock: ["overflow.co"] });
   assert.ok(!(await get(f)).sites["pinned.dev"]);
   assert.deepEqual((await get(f)).blocked, {});
+});
+
+test("page identity survives revised content, changed providers and reacquisition and refreshes recency", async () => {
+  const f = await fixture();
+  const first = await f.published();
+  const before = await get(f);
+  const now = Date.now() + 1000;
+  f.authority.now = () => now;
+  const revised = await createArtifact(f.source, `${f.text}\nRevised content.`, "exa");
+  assert.notEqual(revised.id, first.id);
+  await f.authority.call("artifact.save", { artifact: revised });
+  await f.authority.call("product_sites.learn", { id: revised.id });
+  const after = await get(f);
+  assert.equal(after.sites[site(f.source.url)].verified, 1);
+  assert.equal(after.sites[site(f.source.url)].last_seen, new Date(now).toISOString());
+  assert.equal(after.revision, before.revision);
+  assert.equal((await f.storage.list({ prefix: "product-site-page:" })).size, 1);
+});
+
+test("full page identity store evicts least recently seen pages across products and protects zero-count pins", async () => {
+  const f = await fixture();
+  await get(f); // Initialize the new schema before seeding a full store.
+  const other = registry([["old.dev", 1], ["pinned.dev", 1, true], ["recent.dev", PAGE_LIMIT - 2]]);
+  other.product = "other";
+  for (const entry of Object.values(other.sites)) entry.identity_epoch = 1;
+  await f.storage.put("product-sites:other", other);
+  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT }, (_, i) =>
+    [`product-site-page:${String(i).padStart(5, "0")}`, { page_id: `old-${i}`, product: "other",
+      site: i === 0 ? "old.dev" : i === 1 ? "pinned.dev" : "recent.dev", identity_epoch: 1,
+      first_seen: "2020-01-01T00:00:00Z", last_seen: new Date(i * 1000).toISOString() }])));
+  await f.storage.put("product-site-page-count", PAGE_LIMIT);
+  const result = await run(f);
+  assert.equal(result.status, "ok");
+  assert.equal((await get(f)).sites[site(f.source.url)].verified, 1);
+  assert.ok(!(await get(f, "other")).sites["old.dev"]);
+  const another = { id: "another-page", product: "flask", canonical_url: `${f.source.url}other/`, fetched_at: new Date().toISOString() };
+  await f.storage.put(`artifact:${another.id}`, another);
+  await f.authority.call("product_sites.learn", { id: another.id });
+  assert.equal((await get(f, "other")).sites["pinned.dev"].verified, 0);
+  assert.ok((await get(f, "other")).sites["pinned.dev"].pinned);
+  assert.equal((await f.storage.list({ prefix: "product-site-page:" })).size, PAGE_LIMIT);
+  assert.equal(await f.storage.get("product-site-page-count"), PAGE_LIMIT);
+});
+
+test("relearning refreshes LRU ordering without incrementing counts", async () => {
+  const f = await fixture();
+  const artifact = await f.published();
+  const pages = await f.storage.list({ prefix: "product-site-page:" });
+  const [key, identity] = [...pages][0];
+  identity.last_seen = "1970-01-01T00:00:00.000Z";
+  await f.storage.put(key, identity);
+  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
+    [`product-site-page:${String(i + 1).padStart(5, "0")}`, { page_id: `filler-${i}`, product: "flask",
+      site: "unused.dev", identity_epoch: null, first_seen: "2020-01-01T00:00:00Z", last_seen: "2020-01-01T00:00:00Z" }])));
+  await f.authority.call("product_sites.learn", { id: artifact.id });
+  const newArtifact = { ...artifact, id: "new-page", canonical_url: `${artifact.canonical_url}other/` };
+  await f.storage.put(`artifact:${newArtifact.id}`, newArtifact);
+  await f.authority.call("product_sites.learn", { id: newArtifact.id });
+  assert.equal((await get(f)).sites[site(f.source.url)].verified, 2);
+  assert.ok([...(await f.storage.list({ prefix: "product-site-page:" })).values()]
+    .some(entry => entry.page_id === identity.page_id));
+});
+
+test("rebuild paginates beyond 1000 manifests and deduplicates page revisions", async () => {
+  const f = await fixture();
+  const artifact = await f.published();
+  const manifests = Object.fromEntries(Array.from({ length: 1005 }, (_, i) => [`artifact:scan-${String(i).padStart(5, "0")}`,
+    { ...artifact, id: `scan-${i}`, product: i < 1000 ? "other" : "flask", canonical_url: `https://late.dev/page/${i}` }]));
+  manifests["artifact:scan-revision"] = { ...artifact, id: "scan-revision" };
+  await f.storage.put(manifests);
+  const calls = [];
+  const list = f.storage.list.bind(f.storage);
+  f.storage.list = async options => { if (options.prefix === "artifact:") calls.push(options); return list(options); };
+  const rebuilt = await update(f, { product: "flask", rebuild: true });
+  assert.equal(rebuilt.sites["late.dev"].verified, 5);
+  assert.equal(rebuilt.sites[site(f.source.url)].verified, 1);
+  assert.ok(calls.some(options => options.startAfter && options.limit === 1000));
+  assert.equal((await f.storage.list({ prefix: "product-site-page:" })).size, 6);
+});
+
+test("rebuild rejects a scan exceeding its cap before changing learned history", async () => {
+  const f = await fixture();
+  await f.published();
+  const before = await get(f);
+  const list = f.storage.list.bind(f.storage);
+  let seen = 0;
+  f.storage.list = async options => {
+    if (options.prefix !== "artifact:") return list(options);
+    assert.ok(options.limit <= 1000);
+    return new Map(Array.from({ length: options.limit }, () => [`artifact:large-${String(seen++).padStart(6, "0")}`, {}]));
+  };
+  await assert.rejects(update(f, { product: "flask", rebuild: true }), { code: "product_sites_limit" });
+  assert.equal(seen, 100001);
+  f.storage.list = list;
+  assert.deepEqual(await get(f), before);
+});
+
+test("identity eviction never decrements a site's later incarnation", async () => {
+  const f = await fixture();
+  await f.published();
+  const stored = await f.storage.get("product-sites:flask");
+  const host = site(f.source.url);
+  stored.sites[host].identity_epoch++;
+  stored.sites[host].verified = 1;
+  await f.storage.put("product-sites:flask", stored);
+  const pages = await f.storage.list({ prefix: "product-site-page:" });
+  const [key, identity] = [...pages][0];
+  identity.last_seen = "1970-01-01T00:00:00Z";
+  await f.storage.put(key, identity);
+  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
+    [`product-site-page:${String(i + 1).padStart(5, "0")}`, { page_id: `filler-${i}`, product: "flask",
+      site: "unused.dev", identity_epoch: null, last_seen: "2020-01-01T00:00:00Z" }])));
+  const artifact = { id: "new-incarnation-page", product: "flask", canonical_url: `${f.source.url}new/` };
+  await f.storage.put(`artifact:${artifact.id}`, artifact);
+  await f.authority.call("product_sites.learn", { id: artifact.id });
+  assert.equal((await get(f)).sites[host].verified, 2);
+  assert.ok(!Object.hasOwn((await get(f)).sites[host], "identity_epoch"));
+});
+
+test("reading legacy revision identities migrates retained pages and preserves operator overrides", async () => {
+  const f = await fixture();
+  const artifact = await createArtifact(f.source, f.text, "firecrawl");
+  const older = { ...artifact, id: "older-revision" };
+  const legacy = registry([[site(f.source.url), 2], ["pinned.dev", 0, true], ["expired.dev", 1]]);
+  legacy.product = "flask";
+  legacy.blocked["wrong.dev"] = { at: "2020-01-01", note: "Wrong product" };
+  await f.storage.put({ "product-sites:flask": legacy, [`artifact:${artifact.id}`]: artifact, "artifact:older-revision": older,
+    [`product-site-artifact:${artifact.id}`]: { product: "flask" }, "product-site-artifact:older-revision": { product: "flask" },
+    "product-site-artifact-count": 2 });
+  const migrated = await get(f);
+  assert.equal(migrated.sites[site(f.source.url)].verified, 1);
+  assert.ok(migrated.sites["pinned.dev"].pinned);
+  assert.ok(!migrated.sites["expired.dev"]);
+  assert.deepEqual(migrated.blocked, legacy.blocked);
+  assert.equal((await f.storage.list({ prefix: "product-site-artifact:" })).size, 0);
+  assert.equal(await f.storage.get("product-site-artifact-count"), undefined);
+  assert.equal(await f.storage.get("product-site-page-count"), 1);
+  assert.deepEqual(await get(f), migrated);
+  await f.authority.call("product_sites.learn", { id: artifact.id });
+  assert.equal((await get(f)).sites[site(f.source.url)].verified, 1);
 });
 
 test("pin batches preserve earlier and later pins when evicting learned sites", async () => {

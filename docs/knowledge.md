@@ -213,7 +213,7 @@ and it does not name the product (payment docs from overflow.co for a CSS `overf
 question, for example). `provider_sections_dropped` counts the dropped sections per
 provider; it is absent when nothing was dropped, and the status is unaffected.
 
-The product-site registry learns one verification per immutable artifact when ingestion
+The product-site registry learns one verification per distinct (product, canonical page URL) when ingestion
 publishes it or retrieval confirms its retained live excerpt. The site key is the
 hostname without `www`, reduced to its last two labels; this is an approximation,
 so separate products sharing a registrable domain still need operator review.
@@ -224,7 +224,7 @@ so separate products sharing a registrable domain still need operator review.
   `provider_sections_flagged` entries `{provider, site, reason}` for registry decisions.
 - `enforce` drops blocked sites first, keeps learned/pinned sites and sites supplying
   evidence or provider documentation in this answer, and drops unknown sites once
-  two learned sites or five verified artifacts establish the product. Earlier products
+  two learned sites or five verified pages establish the product. Earlier products
   use the original heuristic. URL-less sections are kept.
 
 Registry drops are counted in `provider_sections_dropped`. Outside `off`, discoveries
@@ -244,13 +244,18 @@ Blocked overrides pinned; unblocking preserves any learned/pinned entry.
 
 Each product keeps at most 64 sites and 64 blocks. Learning evicts the least-verified,
 oldest unpinned site; a full pinned registry quietly declines new sites. Global bounds
-are 400 products and 10,000 durable artifact identities. Identity markers survive
-snapshot expiry so retries cannot inflate counts. At either bound, automatic learning
-stops without failing publication or retrieval. Status exposes only aggregate sizes and
-limits. A per-product rebuild recomputes counts from all retained manifests (at most
-1,000), preserves pins/blocks, and replaces that product's identity markers; it can
-recover capacity from expired history. An explicit rebuild starts a new history from
-retained manifests, including manifests whose ingestion has not completed yet.
+are 400 products and 10,000 durable page identities. Markers survive snapshot expiry;
+revisions, providers and reacquisitions refresh recency without adding verifications.
+At the identity cap, learning evicts the least recently seen page, decrements its site's
+count, and removes an unpinned site reaching zero. The product cap still declines new
+products without failing publication or retrieval. Status exposes only aggregate sizes
+and limits; its existing `artifact_identities` fields now count distinct pages.
+A rebuild paginates all retained manifests, with a 100,000-manifest scan cap, preserves
+pins/blocks, and replaces the product's markers with distinct pages. Exceeding the scan
+cap rejects the rebuild instead of saving partial counts. Rebuild starts a new history,
+including manifests whose ingestion has not completed yet. Legacy revision markers
+migrate lazily from retained manifests on first read; expired history cannot be recovered
+from those old markers because they contain no URL.
 
 After deploying, backfill each relevant product with a management update using
 `rebuild: true`, inspect observed flags, and choose `enforce` through a complete policy

@@ -34,35 +34,46 @@ Learning runs inside the catalogue transaction at `job.publish`, including compl
 job retries. Retrieval calls the internal `product_sites.learn` operation only after
 snapshot confirmation and byte-span validation admits a live excerpt. Manifest
 admission alone does not learn. Empty products and unreadable/missing live excerpts
-do not learn. Publication and live verification of the same artifact count once.
-Separate providers or content revisions have separate artifact identities.
+do not learn. Publication and live verification count once per (product, canonical
+page URL), even across providers, content revisions and reacquisitions. A repeat updates
+the marker's and learned site's `last_seen` without increasing `verified` or revision.
 
-`product-site-artifact:<id>` markers outlive artifact expiry. A bounded counter limits
-them to 10,000 across the catalogue. Records are limited to 400 products. Automatic
-learning quietly stops at either limit; explicit updates reject new products at the
-product limit. These additional global caps bound a historical store that would
-otherwise grow forever despite the 1,000-manifest retention limit. Status reports only
-aggregate product/site/block/identity counts and caps, never whole registries.
+`product-site-page:<slot>` markers contain a digest of product and canonical URL, site,
+first/last seen timestamps and an `identity_epoch`. They outlive artifact expiry and
+are bounded to 10,000 slots globally. At capacity the least recently seen identity is
+evicted, decrementing its site's verification count and removing zero-count unpinned
+sites. A new page replaces the victim slot in the same atomic write as both registries
+and the count. Pinned sites survive with zero verifications. Site entries also retain
+`identity_epoch`, so a marker from an evicted site cannot decrement a later incarnation.
+Management responses omit this internal bookkeeping field.
+Records remain limited to 400 products; automatic learning declines new products at
+that limit. Status retains the `artifact_identities` and `artifact_identity_limit` field
+names for compatibility, with page-identity semantics.
 
 Each product has at most 64 sites and 64 blocked entries. A new learned or pinned site
 evicts the unpinned entry with the fewest verifications, then the oldest `last_seen`
 (with hostname as a stable tie-breaker). Pins are never evicted. A pin batch protects
 all its requested existing pins before making room. A fully pinned registry declines
-new learned sites. Artifact identities are still remembered to make retries idempotent.
+new learned sites. Page identities are still remembered to make retries idempotent.
 Unpinning an entry with no verifications removes it from the trusted-site map.
 
 ## Rebuild
 
-`product_sites.update` with `rebuild: true` scans all retained manifests (bounded at
-1,000) for that product, groups distinct artifact IDs by canonical site and recomputes
+`product_sites.update` with `rebuild: true` scans retained manifests in 1,000-entry
+pages using `startAfter`, bounded at 100,000 total. It rejects a catalogue exceeding
+that cap without saving a partial rebuild. It groups distinct canonical pages by site and recomputes
 counts, first and last timestamps. It preserves pinned and blocked entries, fills
 remaining slots with the strongest learned sites, and replaces that product's durable
 identity markers. Rebuild intentionally resets historical knowledge to currently
 stored manifests, including unpublished ones, as requested by the backfill contract.
 Artifacts that expired before rebuild no longer contribute. Later reacquisition may
-learn those artifacts in the new history. Explicit rebuild can recover identity-store
-capacity, but cannot exceed the global cap. All operations are serialized by the
-existing KnowledgeCatalogue Durable Object transaction.
+learn those pages in the new history. Rebuild applies the same global LRU identity cap,
+updating other products' counts if their older identities are evicted. Writes use batches
+of at most 128 records. All operations are serialized by the existing catalogue transaction.
+On the first registry read, round-1 revision markers trigger a one-time rebuild of
+existing product registries from retained manifests; pins and blocks survive. Old markers
+and their counter are removed. Expired history cannot be reconstructed because old
+markers carry only product names, not URLs. A schema marker prevents repeat migration.
 
 ## Retrieval and policy
 

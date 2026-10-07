@@ -3,7 +3,7 @@ import { digest } from "./evidence.mjs";
 import { defaultPolicy, retentionHours, validatePolicy, withProviderDefaults } from "./policy.mjs";
 import { ledgerStats, reserve, settle, usageFor, pruneSettled } from "./ledger.mjs";
 import { alexandriaCatalogue, pruneAlexandria } from "./alexandria/catalogue.mjs";
-import { getProductSites, learnProductSite, parseProductSites, productSitesSummary, updateProductSites } from "./product-sites.mjs";
+import { getProductSites, learnProductSite, parseProductSites, productSitesSummary, publicProductSites, updateProductSites } from "./product-sites.mjs";
 import { credentialOperation } from "./credentials.mjs";
 
 const ACTIVE = new Set(["queued", "acquiring", "snapshot", "pending_index", "unknown"]);
@@ -291,7 +291,7 @@ export class KnowledgeAuthority {
         return { generation: await generationOf(tx), policy: await policyOf(tx), sources: await values(tx, "source:"),
           ...(input.product ? { product_sites: productSites } : {}) };
       }
-      if (operation === "product_sites.get") return getProductSites(tx, parseProductSites(input).product);
+      if (operation === "product_sites.get") return publicProductSites(await getProductSites(tx, parseProductSites(input).product));
       if (operation === "product_sites.update") return updateProductSites(tx, input, now);
       if (operation === "product_sites.learn") {
         fields(input, ["id"], ["id"]);
