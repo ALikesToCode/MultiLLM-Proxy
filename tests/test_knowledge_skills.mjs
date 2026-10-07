@@ -126,6 +126,8 @@ test("contracts, file/hash limits and scope checks fail closed", async t => {
   for (const op of ["find", "get"]) await assert.rejects(f.submit(op, {}, ["knowledge:manage"]), { code: "insufficient_scope" });
   await assert.rejects(f.submit("sync", { skills: [first] }, ["knowledge:read"]), { code: "insufficient_scope" });
   assert.equal(f.files.size, 0);
+  const long = (await skill()).files[0].content + "x".repeat(100 * 1024);
+  assert.equal((await validateSkill({ ...first, files: [{ path: "SKILL.md", content: long, sha256: await digest(long) }] })).record.skill_id, "testing");
   const large = "x".repeat(256 * 1024 + 1);
   await assert.rejects(validateSkill(await skill("testing", "test", "agents", [{ path: "large.txt", content: large, sha256: await digest(large) }])), { code: "skill_limits" });
   const chunk = "x".repeat(256 * 1024), chunkHash = await digest(chunk);
