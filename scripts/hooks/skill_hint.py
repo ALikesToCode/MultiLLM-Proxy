@@ -15,7 +15,8 @@ import time
 import urllib.parse
 import urllib.request
 
-TIMEOUT = 0.8
+# A live find takes about 0.7 s (TLS, key lookup and the Skills object), so leave headroom.
+TIMEOUT = 1.5
 USER_AGENT = "multillm-skills/1"
 MAX_CONTEXT_BYTES = 600
 

@@ -14,6 +14,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from handoff import load
 from handoff_contracts import render
 
+# A live handoff read takes about 0.7 s, so leave headroom within the 2 s hook timeout.
+TIMEOUT = 1.5
+
 
 def clipped(value, maximum):
     return value.encode("utf-8")[:maximum].decode("utf-8", "ignore")
@@ -52,7 +55,7 @@ def hint(event, args, *, fetch=load, now=None):
     if not isinstance(event.get("cwd"), str):
         return None
     args.cwd = event["cwd"]
-    record = fetch(args, timeout=0.8).get("record")
+    record = fetch(args, timeout=TIMEOUT).get("record")
     if not isinstance(record, dict):
         return None
     created = datetime.fromisoformat(record["created_at"].replace("Z", "+00:00"))
@@ -93,7 +96,7 @@ def main(argv=None):
 
     thread = threading.Thread(target=work, daemon=True)
     thread.start()
-    thread.join(timeout=0.9)
+    thread.join(timeout=TIMEOUT + 0.1)
     if not thread.is_alive() and not results.empty():
         print(json.dumps(results.get_nowait(), ensure_ascii=False))
     return 0

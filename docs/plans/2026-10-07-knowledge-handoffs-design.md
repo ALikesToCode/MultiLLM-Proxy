@@ -159,8 +159,8 @@ location, quoted for the shell. Long identities use clipped labels and reserve
 the complete CLI instruction within the byte budget.
 `--mode full` opts into the existing rendered markdown. Both example matchers are
 `startup|clear`.
-A supervised daemon worker has a 0.9-second wall deadline, with HTTP timeout
-0.8 seconds; all errors and timeouts are silent with exit zero. Process startup
+A supervised daemon worker has a 1.6-second wall deadline, with HTTP timeout
+1.5 seconds (a live read takes about 0.7 seconds); all errors and timeouts are silent with exit zero. Process startup
 adds a small overhead. Nothing modifies or installs global client configuration.
 
 Current public format references, checked 2026-10-07:

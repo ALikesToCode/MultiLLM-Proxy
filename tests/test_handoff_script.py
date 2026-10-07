@@ -422,11 +422,11 @@ def test_hook_process_outputs_context_and_stays_silent_on_timeout_error(server, 
     result = subprocess.run(command, input=event, text=True, capture_output=True, timeout=3)
     assert result.returncode == 0 and not result.stderr
     assert json.loads(result.stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    for status, delay in [(503, 0), (200, 2)]:
+    for status, delay in [(503, 0), (200, 3)]:
         server.update(status=status, delay=delay)
         start = time.monotonic()
-        result = subprocess.run(command, input=event, text=True, capture_output=True, timeout=3)
-        assert time.monotonic() - start < 1.3
+        result = subprocess.run(command, input=event, text=True, capture_output=True, timeout=5)
+        assert time.monotonic() - start < 2
         assert result.returncode == 0 and not result.stdout and not result.stderr
     result = subprocess.run([sys.executable, "-I", str(HOOK_PATH), "--unknown"], input="invalid", text=True, capture_output=True, timeout=3)
     assert result.returncode == 0 and not result.stdout and not result.stderr

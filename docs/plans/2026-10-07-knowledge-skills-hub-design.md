@@ -172,7 +172,7 @@ slug and safe reason/root labels, never content or credentials.
 `scripts/hooks/skill_hint.py` reads bounded JSON stdin, selects the prompt and
 agent (`turn_id` identifies Codex, or --agent claude/codex), and requests REST
 POST find with `mode: "fast"`, `limit: 3`, `min_confidence: "high"`. A daemon worker plus an absolute deadline bounds DNS,
-read and decode time; 50 ms of the 800 ms budget is reserved for formatting and
+read and decode time; 50 ms of the 1.5 s budget is reserved for formatting and
 process overhead. All errors, invalid arguments, timeouts, short prompts below
 12 characters, missing configuration and no high-confidence results emit nothing
 and exit zero. There is no normalized-score threshold. `--base-url` wins over

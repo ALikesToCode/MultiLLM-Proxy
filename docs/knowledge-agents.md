@@ -140,7 +140,8 @@ is disabled when unset; calibrate it using labeled prompts and deployed embeddin
 before enabling it. The fast hook does not use semantic confidence.
 
 The optional prompt hook uses POST `/v1/knowledge/skills/find` with JSON
-`{query, mode: "fast", limit: 3, min_confidence: "high"}` and a total 800 ms budget.
+`{query, mode: "fast", limit: 3, min_confidence: "high"}` and a total 1.5 s budget
+(a live find takes about 0.7 s).
 The GET search mirror remains for manual use; its query URL may be logged by
 Cloudflare, Worker observability and Flask. POST keeps hook prompts out of URLs.
 It adds at most 600 UTF-8 bytes of context (about 150 tokens), and emits nothing on
@@ -160,7 +161,7 @@ Claude Code `settings.json`:
       "hooks": [{
         "type": "command",
         "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent claude --key-file /private/path/read-key --base-url https://gateway.example",
-        "timeout": 1
+        "timeout": 2
       }]
     }]
   }
@@ -176,7 +177,7 @@ Codex `hooks.json` (user or trusted project configuration):
       "hooks": [{
         "type": "command",
         "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent codex --key-file /private/path/read-key --base-url https://gateway.example",
-        "timeout": 1
+        "timeout": 2
       }]
     }]
   }
@@ -301,7 +302,7 @@ explicit loading instructions. The CLI command uses the absolute script path
 from the hook location, so it works in the operator project directory. Long
 identities use clipped labels and the CLI instruction to keep the pointer bounded. Use `--mode full` to opt into rendered markdown.
 `resume` and `compact` emit nothing. It prints only unexpired
-handoffs younger than 48 hours, finishes within approximately one second, and
+handoffs younger than 48 hours, finishes within approximately 1.6 seconds, and
 stays silent on configuration, transcript, git or network errors. Nothing
 installs this hook automatically. Merge a snippet into existing settings after
 reviewing it; replace `/path/to/MultiLLM-Proxy` with the checkout location.
@@ -309,13 +310,13 @@ reviewing it; replace `/path/to/MultiLLM-Proxy` with the checkout location.
 Claude Code (`.claude/settings.json`):
 
 ```json
-{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent claude","timeout":1}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent claude","timeout":2}]}]}}
 ```
 
 Codex (`.codex/hooks.json`):
 
 ```json
-{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent codex","timeout":1,"additionalContextLimit":2500}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup|clear","hooks":[{"type":"command","command":"python3 /path/to/MultiLLM-Proxy/scripts/hooks/handoff_hint.py --agent codex","timeout":2,"additionalContextLimit":2500}]}]}}
 ```
 
 The formats follow the official [Claude Code hooks](https://code.claude.com/docs/en/hooks)

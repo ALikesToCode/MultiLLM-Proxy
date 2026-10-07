@@ -156,11 +156,11 @@ def test_hook_silence_timeout_total_budget_and_token_bound(monkeypatch):
         raise OSError("synthetic private detail")
     assert hook.hint(event, fetcher=fail) is None
     def slow(*_args):
-        time.sleep(1.5)
+        time.sleep(hook.TIMEOUT + 1)
         return []
     start = time.monotonic()
     assert hook.hint(event, fetcher=slow) is None
-    assert time.monotonic() - start < 0.9
+    assert time.monotonic() - start < hook.TIMEOUT + 0.1
     records = [{"skill_id": "testing", "name": "Testing", "description": "Testing reference guide " * 20, "confidence": "high", "score": 1}] * 3
     text = hook.context(records)
     assert len(text.encode()) <= 600
@@ -247,12 +247,12 @@ def test_client_key_file_precedence_default_state_and_permissions(tmp_path, monk
 def test_key_file_read_obeys_hook_total_deadline(tmp_path, monkeypatch):
     monkeypatch.setenv("MULTILLM_BASE_URL", "https://unused.example")
     def slow(*args, **kwargs):
-        time.sleep(1.5)
+        time.sleep(hook.TIMEOUT + 1)
         raise OSError("synthetic read error")
     monkeypatch.setattr(hook.Path, "open", slow)
     start = time.monotonic()
     assert hook.hint({"prompt": "Test regression behavior"}, key_file=tmp_path / "synthetic") is None
-    assert time.monotonic() - start < 0.9
+    assert time.monotonic() - start < hook.TIMEOUT + 0.1
 
 
 def test_large_skills_keep_their_instructions_within_file_and_reference_budgets(tmp_path):
