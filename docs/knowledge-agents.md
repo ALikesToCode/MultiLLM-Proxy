@@ -43,6 +43,8 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 | `knowledge_firecrawl_scrape`, `_search`, `_map`, `_crawl`, `_crawl_status`, `_extract`, `_extract_status` | Firecrawl scraping, search, site maps, crawls and structured extraction |
 | `knowledge_deepwiki_structure`, `knowledge_deepwiki_contents`, `knowledge_deepwiki_ask` | DeepWiki repository documentation and answers |
 | `knowledge_mintlify_context` | Mintlify Index research with citations |
+| `knowledge_skills_find`, `knowledge_skills_get` | Find and load operator skills (read) |
+| `knowledge_skills_sync` | Upload or delete operator skills (manage) |
 | `knowledge_artifact` | Retained source text and citation manifest |
 | `knowledge_status` | Source, job, configuration and allowance status (manage) |
 | `knowledge_source_register` | Register public documentation without fetching (manage) |
@@ -86,6 +88,90 @@ Useful initial tasks:
 
 > Discover an Alexandria capability for this dataset. Show its contract and
 > published price before retrieval, then report the actual receipt cost.
+
+## Skills hub
+
+Upload the local library once, then search a few skills per prompt instead of
+listing every skill. `knowledge_skills_find` defaults to hybrid search and three
+results; `mode: "fast"` uses only BM25. `knowledge_skills_get` loads `SKILL.md` or a
+referenced relative path. These are operator instructions (`trust: "operator"`);
+provider evidence remains untrusted data. `/mcp?toolsets=skills` lists only these
+three tools, subject to the key's scopes.
+
+From the repository, use Python 3.11+ and an existing private environment containing
+`MULTILLM_BASE_URL` and `MULTILLM_KNOWLEDGE_API_KEY`. Sync requires
+`knowledge:manage`; hooks and retrieval require `knowledge:read`.
+
+```sh
+python3 scripts/skills_sync.py --dry-run --state-file /private/path/skills-receipts.json
+python3 scripts/skills_sync.py --state-file /private/path/skills-receipts.json
+```
+
+The defaults are `~/.claude/skills`, `~/.claude/skills-library`, `~/.codex/skills`
+and `~/.agents/skills`. Override them with repeated `--root LABEL=PATH`, and set
+`--base-url` or `--key-file PATH` if needed. Dry run prints only metadata and a
+plan; it never reads the key or contacts the service. Keep the receipt file:
+only previously successful uploads from the selected root labels are eligible
+for deletion. An unavailable root or invalid local skill disables pruning for
+that root. Duplicate slugs retain the first root's skill. High-confidence secrets
+reject the containing skill without printing the secret. Links must stay inside
+the skill folder; only referenced files and explicitly referenced directories
+are uploaded, with a bounded scan.
+
+The optional prompt hook uses fast search, limit three, and a total 800 ms budget.
+It adds at most 600 UTF-8 bytes of context (about 150 tokens), and emits nothing on
+errors, timeouts, prompts shorter than 12 characters or no score of at least 0.2.
+Install these snippets yourself, merging with existing hooks. Replace the absolute
+repository path and supply the two environment variables through your client's
+private environment; do not put credential values in JSON.
+
+Claude Code `settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent claude",
+        "timeout": 1
+      }]
+    }]
+  }
+}
+```
+
+Codex `hooks.json` (user or trusted project configuration):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{
+      "hooks": [{
+        "type": "command",
+        "command": "python3 /absolute/path/MultiLLM-Proxy/scripts/hooks/skill_hint.py --agent codex",
+        "timeout": 1
+      }]
+    }]
+  }
+}
+```
+
+Review and trust a new Codex hook through `/hooks`. Both clients accept
+`hookSpecificOutput.additionalContext` for UserPromptSubmit. Codex defaults to
+approximately 2,500 tokens per model-visible hook message; this hook stays well
+below it. See the official [Claude Code hook reference](https://code.claude.com/docs/en/hooks)
+and [Codex hook reference](https://learn.chatgpt.com/docs/hooks). Whether Codex hooks
+fire under the T3 app-server remains unverified; retrieval through MCP works
+without a hook.
+
+A find increments `suggested`. A successful get increments `fetched`; it increments
+`helpful` once if the same principal was offered the skill in the preceding
+30 minutes. Ranking adds a small `0.03 * log(1 + helpful)` prior. Counters stay in
+the private index and are omitted from compact retrieval results. Superseded,
+deleted and interrupted R2 revisions are cleaned on subsequent non-dry syncs
+after a one-minute grace period. Cleanup is bounded to 64 pending revisions;
+retry sync after the grace period if storage cleanup applies backpressure.
 
 ## Official Firecrawl skills
 
