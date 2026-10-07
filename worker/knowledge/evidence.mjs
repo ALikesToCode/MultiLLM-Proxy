@@ -89,6 +89,64 @@ export function isProviderContext(observation) {
   return PROVIDER_CONTEXT_KINDS.has(observation?.kind);
 }
 
+// Mintlify searches one index of many products and separates the pages it returns this way.
+const SECTION_SEPARATOR = "\n--------------------------------";
+const FUNCTION_WORDS = new Set(("what when where which while with without within that this these those there their them "
+  + "then than have does doing done should would could will shall must into onto from about after before over under "
+  + "between through each every some same other such only also just more most very much many your yours they been "
+  + "being were here please").split(" "));
+
+const words = text => text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+
+function site(url) {
+  try { return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join("."); }
+  catch { return null; }
+}
+
+/**
+ * Drop provider sections about a different product with the same name, such as payment docs
+ * from overflow.co for a CSS overflow question. A section goes only when its site supplied no
+ * verified evidence, it matches fewer than two of the question's distinctive terms and it does
+ * not name the product; anything that cannot be judged is kept.
+ */
+export function dropForeignProviderSections(items, request, evidenceUrls) {
+  const product = words(request.product ?? "");
+  const excluded = new Set(words([request.product, request.repository, request.version].filter(Boolean).join(" ")));
+  // Five-letter stems let "configured" match "configuration".
+  const stems = [...new Set(words(request.query).filter(word => word.length >= 4 && /^[a-z0-9_]+$/.test(word)
+    && !FUNCTION_WORDS.has(word) && !excluded.has(word)).map(word => word.slice(0, 5)))];
+  const sites = new Set(evidenceUrls.map(site));
+  for (const item of items) {
+    if (item.kind !== "provider_documentation" || typeof item.text !== "string") continue;
+    for (const [, url] of item.text.matchAll(/Source: (\S+)/g)) sites.add(site(url));
+  }
+  sites.delete(null);
+  const dropped = {};
+  if (!product.length || !stems.length || !sites.size) return { items, dropped };
+  const required = Math.min(2, stems.length);
+  const foreign = section => {
+    const source = site(section.match(/Source: (\S+)/)?.[1] ?? "");
+    if (!source || sites.has(source)) return false;
+    const lower = section.toLowerCase();
+    if (stems.filter(stem => new RegExp(`(?<![\\p{L}\\p{N}_])${stem}`, "u").test(lower)).length >= required) return false;
+    const present = new Set(words(section));
+    return !product.every(word => present.has(word));
+  };
+  const kept = [];
+  for (const item of items) {
+    if (item.kind !== "derived_context" || typeof item.text !== "string" || !item.text.includes(SECTION_SEPARATOR)) {
+      kept.push(item);
+      continue;
+    }
+    const sections = item.text.split(SECTION_SEPARATOR);
+    const remaining = sections.filter(section => !foreign(section));
+    const removed = sections.length - remaining.length;
+    if (removed) dropped[item.provider] = (dropped[item.provider] ?? 0) + removed;
+    if (remaining.some(section => section.replace(/-/g, "").trim())) kept.push({ ...item, text: remaining.join(SECTION_SEPARATOR) });
+  }
+  return { items: kept, dropped };
+}
+
 /**
  * Provider-generated answers and extracted documentation, bounded by a token budget.
  * They are useful context but not byte-verified evidence, so they never become excerpts.

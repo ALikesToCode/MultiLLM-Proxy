@@ -205,7 +205,11 @@ the 24 s deadline: a provider that misses it becomes a `provider_timeout` gap an
 answer is built from the rest. Context7 documentation and DeepWiki or Mintlify answers
 are returned in `provider_context` (up to 40% of the token budget, or all of it when no
 source excerpt exists), marked `provider_generated_unverified` and never cited as
-excerpts.
+excerpts. Mintlify searches many products at once, so a Mintlify section is dropped when
+its site supplied no verified evidence, it matches fewer than two distinctive query terms
+and it does not name the product (payment docs from overflow.co for a CSS `overflow`
+question, for example). `provider_sections_dropped` counts the dropped sections per
+provider; it is absent when nothing was dropped, and the status is unaffected.
 
 Provider tools (`knowledge_<provider>_<tool>`, or `POST /v1/knowledge/native/<tool>`)
 expose each provider's own features with its native parameters. Their contracts live in

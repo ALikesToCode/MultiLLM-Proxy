@@ -1,5 +1,5 @@
 import { fail, KnowledgeError, publicUrl } from "./contracts.mjs";
-import { createArtifact, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
+import { createArtifact, dropForeignProviderSections, evidenceMatch, isProviderContext, normalizeSourceText, packEvidence, packProviderContext, selectPassage, validateChunk } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
 import { providerStatus, retrieve } from "./providers/index.mjs";
 import { confirmSnapshot, metered } from "./operations.mjs";
@@ -341,9 +341,10 @@ async function runRetrieval(env, authority, principal, request, options, signal,
   }
   const { latest, candidates } = await currentCandidates(state);
   state.candidates = candidates;
+  const relevant = dropForeignProviderSections(state.providerContext, request, state.candidates.map(item => item.url));
   // Verified excerpts keep most of the budget; provider context gets up to 40% of it,
   // or all of it when no source excerpt was found.
-  const providerContext = packProviderContext(state.providerContext,
+  const providerContext = packProviderContext(relevant.items,
     Math.floor(request.token_budget * (state.candidates.length ? 0.4 : 1)));
   const packed = packEvidence(state.candidates, { ...request, token_budget: request.token_budget - providerContext.token_count });
   if (!packed.excerpts.length) state.gaps.push({ code: request.version ? "version_not_verified" : "insufficient_evidence",
@@ -355,6 +356,7 @@ async function runRetrieval(env, authority, principal, request, options, signal,
     gaps: state.gaps, providers_used: [...state.providersUsed], evidence_providers: [...new Set(state.candidates.map(item => item.provider))],
     path: state.paths.size > 1 ? "mixed" : [...state.paths][0] || "live", elapsed_ms: Math.round(performance.now() - state.started),
     index_diagnostics: state.indexDiagnostics ?? null,
+    ...(Object.keys(relevant.dropped).length ? { provider_sections_dropped: relevant.dropped } : {}),
     usage: state.usage, served_at: nowIso(), freshness: { requested: request.freshness,
       source_checks: [...new Set(state.candidates.map(item => item.checked_at))] } };
   if (options.schedule && latest.policy.providers.ai_search.background_limit > 0) {

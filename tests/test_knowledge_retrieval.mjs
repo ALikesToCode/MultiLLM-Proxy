@@ -3,7 +3,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { retrieve } from "../worker/knowledge/providers/index.mjs";
-import { createArtifact } from "../worker/knowledge/evidence.mjs";
+import { createArtifact, dropForeignProviderSections } from "../worker/knowledge/evidence.mjs";
 import { fixture, principal, request } from "./knowledge_fixture.mjs";
 
 const run = (f, query = request(), extra = {}) => retrieveKnowledge(f.env, f.authority, principal, query,
@@ -517,6 +517,44 @@ test("smart retrieval asks every eligible provider and keeps their context out o
   assert.ok(result.provider_context.every(item => item.verification === "provider_generated_unverified"));
   assert.ok(result.excerpts.every(item => item.provider === "exa"), "provider answers never become excerpts");
   assert.ok(result.token_count <= 6000);
+});
+
+const section = (title, url, body) => `### ${title}\n\nSource: ${url}\n\n${body}\n--------------------------------`;
+
+test("provider sections about a same-named product are dropped and counted without changing the status", async () => {
+  const f = await fixture();
+  f.policy.providers.mintlify = { ...f.policy.providers.exa };
+  await f.storage.put("policy", f.policy);
+  const onTopic = section("File uploads", "https://flask.palletsprojects.com/en/3.1.x/patterns/fileuploads/",
+    "Set MAX_CONTENT_LENGTH to limit the request size.");
+  const elsewhere = section("Limits", "https://docs.example.org/limits", "Request size limits are configured per route.");
+  const named = section("Flask payments", "https://pay.example.net/flask", "Checkout pages.");
+  const foreign = section("Wallets", "https://docs.ledger.example/wallets", "Migrate wallets between chains.");
+  f.retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => provider === "exa"
+    ? { observations: [{ kind: "source_excerpt", provider, url: f.source.url, text: f.text, freshness: "live" }], warnings: [] }
+    : { observations: [{ kind: "derived_context", provider, url: "https://index.mintlify.com", title: "mintlify context",
+      text: onTopic + elsewhere + named + foreign }], warnings: [] });
+  const result = await run(f, request({ mode: "smart" }));
+  assert.equal(result.provider_context[0].text, onTopic + elsewhere + named);
+  assert.deepEqual(result.provider_sections_dropped, { mintlify: 1 });
+  assert.ok(result.excerpts.length);
+  assert.ok(!result.gaps.some(gap => gap.code.includes("provider_section")), "dropping noise is not a coverage gap");
+});
+
+test("provider sections are kept whenever the answer cannot judge them", () => {
+  const item = text => ({ kind: "derived_context", provider: "mintlify", text });
+  const foreign = item(section("Wallets", "https://docs.ledger.example/wallets", "Migrate wallets."));
+  const ask = changes => ({ query: "Which hook events can add context?", product: "codex", ...changes });
+  const evidence = ["https://developers.openai.example/codex/hooks"];
+  assert.deepEqual(dropForeignProviderSections([foreign], ask({}), evidence), { items: [], dropped: { mintlify: 1 } });
+  for (const [request, urls] of [[ask({ product: "" }), evidence], [ask({}), []], [ask({ query: "What is it?" }), evidence]]) {
+    assert.deepEqual(dropForeignProviderSections([foreign], request, urls), { items: [foreign], dropped: {} });
+  }
+  const documented = { kind: "provider_documentation", provider: "context7", text: "### Hooks\nSource: https://docs.ledger.example/hooks" };
+  assert.deepEqual(dropForeignProviderSections([foreign, documented], ask({}), evidence).items, [foreign, documented],
+    "a site that supplied provider documentation is not foreign");
+  const unsectioned = item("Wallet migrations. Source: https://docs.ledger.example/wallets");
+  assert.deepEqual(dropForeignProviderSections([unsectioned], ask({}), evidence).items, [unsectioned]);
 });
 
 test("a provider that misses its budget becomes a gap instead of failing the answer", async () => {
