@@ -151,3 +151,6 @@ Durable Object reopen, real homonym replays, cold-start compatibility, block pre
 observation limits, source-less sections, discovery removal, stable status/gaps, cache
 invalidation, storage failure fallback, and REST/MCP scope and operation parity. Existing
 Knowledge suites remain part of the acceptance gate.
+Stalled, slow and failing live-learning calls retain successful byte-verified answers;
+the regression checks the exact 250 ms timeout and allows 50 ms for local scheduling
+and answer packing in its wall-clock assertion.

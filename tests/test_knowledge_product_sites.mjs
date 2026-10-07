@@ -441,18 +441,6 @@ test("cache invalidates registry decisions, but count-only learning below a thre
   assert.equal(blocked.provider_context.length, 0);
 });
 
-
-test("a stalled optional learning call cannot consume the whole retrieval deadline", async () => {
-  const f = await fixture();
-  const originalCall = f.authority.call.bind(f.authority);
-  f.authority.call = (operation, payload) => operation === "product_sites.learn" ? new Promise(() => {}) : originalCall(operation, payload);
-  const start = performance.now();
-  const result = await run(f, request({ mode: "economy" }));
-  assert.equal(result.status, "ok");
-  assert.deepEqual(result.gaps, []);
-  assert.ok(performance.now() - start < 2000);
-});
-
 test("caught atomic registry-write failure cannot inflate counts on a later publication retry", async () => {
   const f = await fixture();
   const put = f.storage.put.bind(f.storage);
