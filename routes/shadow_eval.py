@@ -12,7 +12,7 @@ from routes.unified import dispatch_unified_chat_completion
 from services.auto_route_service import AutoRouteService
 from services.intelligence_store import IntelligenceStore
 from services.shadow_eval_contract import validate_config
-from services.shadow_eval_league import league, proposal
+from services.shadow_eval_league import league, proposal, result_counts
 from services.shadow_eval_runner import start_run
 from services.shadow_eval_store import ShadowEvalStore
 
@@ -48,7 +48,8 @@ def register_shadow_eval_routes(app, csrf, auth, metrics, proxy):
     @login_required
     def shadow_league():
         require_admin_dashboard_user()
-        return jsonify({"league": league(ShadowEvalStore.results())})
+        results = ShadowEvalStore.results()
+        return jsonify({"league": league(results), "result_counts": result_counts(results)})
 
     @app.get("/admin/workbench/shadow/samples")
     @login_required

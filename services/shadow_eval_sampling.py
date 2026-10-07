@@ -58,6 +58,7 @@ class SampleStream:
         self.bytes = 0
         self.done = False
         self.finished = False
+        self.finish_reason = None
         self.failed = False
 
     def __iter__(self):
@@ -107,6 +108,7 @@ class SampleStream:
                 if choice.get("index", 0) != 0:
                     continue
                 self.finished = self.finished or choice.get("finish_reason") in {"stop", "length", "tool_calls", "function_call"}
+                self.finish_reason = choice.get("finish_reason") or self.finish_reason
                 delta = choice.get("delta") or {}
                 self.answer["content"] += delta.get("content") or ""
                 for item in delta.get("tool_calls", [])[:128]:
@@ -128,7 +130,7 @@ class SampleStream:
             if self.calls:
                 self.answer["tool_calls"] = [self.calls[key] for key in sorted(self.calls)]
             try:
-                callback(self.answer, self.model, self.usage)
+                callback(self.answer, self.model, self.usage, self.finish_reason)
             except Exception as error:
                 logger.warning("Shadow stream not sampled (%s)", type(error).__name__)
 
@@ -166,9 +168,9 @@ def sample_success(response, payload=None):
         started = g.shadow_eval_started
         model = response.headers.get("X-MultiLLM-Auto-Selected-Model") or getattr(g, "multillm_model", None)
 
-        def capture(answer, selected, usage):
+        def capture(answer, selected, usage, finish_reason=None):
             sample = make_sample(payload, user, route, answer, selected,
-                                 (time.monotonic() - started) * 1000, usage)
+                                 (time.monotonic() - started) * 1000, usage, finish_reason=finish_reason)
             submit(sample)
 
         if response.is_streamed:
@@ -181,7 +183,7 @@ def sample_success(response, payload=None):
             if isinstance(body, dict) and not body.get("error"):
                 selected = (body.get("multillm") or {}).get("selected_model") or model
                 if isinstance(body.get("choices"), list) and body["choices"]:
-                    capture(body["choices"][0]["message"], selected, body.get("usage"))
+                    capture(body["choices"][0]["message"], selected, body.get("usage"), body["choices"][0].get("finish_reason"))
     except Exception as error:
         logger.warning("Shadow sampling unavailable (%s)", type(error).__name__)
     return response

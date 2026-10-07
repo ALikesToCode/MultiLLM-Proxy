@@ -16,7 +16,7 @@ MAX_STEP = 15
 def league(results):
     rows = {}
     for result in sorted(results, key=lambda value: (value.get("_created_at", 0), value.get("_id", ""))):
-        if result["outcome"] not in {"win", "loss", "tie"} or result["candidate_model"] == result["production_model"]:
+        if result.get("candidate_truncated") or result["outcome"] not in {"win", "loss", "tie"} or result["candidate_model"] == result["production_model"]:
             continue
         task = result["task_type"]
         pair = []
@@ -91,3 +91,17 @@ def proposal(policy, rows, auto_routes=()):
     document = {"policy_diff": changes, "suggested_auto_route_orders": orders, "policy": updated}
     document["revision"] = hashlib.sha256(encoded({"base": policy, **document}).encode()).hexdigest()
     return document
+
+
+def result_counts(results):
+    counts = {"judged": 0, "failed": 0, "same_model": 0, "candidate_truncated": 0}
+    for result in results:
+        if result.get("candidate_truncated") or result["outcome"] == "candidate_truncated":
+            counts["candidate_truncated"] += 1
+        elif result["outcome"] == "same_model" or result["candidate_model"] == result["production_model"]:
+            counts["same_model"] += 1
+        elif result["outcome"] in {"win", "loss", "tie"}:
+            counts["judged"] += 1
+        else:
+            counts["failed"] += 1
+    return counts

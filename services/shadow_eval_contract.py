@@ -17,7 +17,7 @@ MAX_SAMPLES = 2000
 MAX_RESULTS = 10000
 MODEL = re.compile(r"[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,223}\Z")
 ID = re.compile(r"[0-9a-f]{32}\Z")
-REQUEST_FIELDS = ("messages", "tools", "tool_choice", "response_format")
+REQUEST_FIELDS = ("messages", "tools", "tool_choice", "response_format", "max_tokens", "max_completion_tokens")
 
 
 def encoded(value):
@@ -76,7 +76,7 @@ def eligible(payload, user, path, *, random_value):
             and type(rate) in (int, float) and 0 < rate <= 0.2 and random_value < rate)
 
 
-def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=None):
+def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=None, finish_reason=None):
     request = {name: payload[name] for name in REQUEST_FIELDS if name in payload}
     answer = {name: answer[name] for name in ("content", "tool_calls") if name in answer}
     if (len(encoded(request).encode()) > REQUEST_BYTES or len(encoded(answer).encode()) > ANSWER_BYTES
@@ -87,11 +87,14 @@ def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=N
         report = scan_payload(value)
         if report["high"] or report["truncated"]:
             return None
-    return {"id": uuid.uuid4().hex, "created_at": time.time() if now is None else now,
+    sample = {"id": uuid.uuid4().hex, "created_at": time.time() if now is None else now,
             "key_id": str(user.get("username") or user.get("id") or "")[:128],
             "route": route, "task_type": task_type(payload), "request": request,
             "production_model": model, "production_answer": answer,
             "latency_ms": min(86400000, max(0, round(latency_ms))), "usage": clean_usage(usage)}
+    if finish_reason in ("stop", "length", "tool_calls", "function_call", "content_filter"):
+        sample["production_finish_reason"] = finish_reason
+    return sample
 
 
 def clean_usage(value):
@@ -106,7 +109,7 @@ def finite(value):
 
 
 def valid_sample(value, now):
-    return (isinstance(value, dict) and set(value) == {"id", "created_at", "key_id", "route", "task_type",
+    return (isinstance(value, dict) and set(value) - {"production_finish_reason"} == {"id", "created_at", "key_id", "route", "task_type",
             "request", "production_model", "production_answer", "latency_ms", "usage"}
             and isinstance(value["id"], str) and bool(ID.fullmatch(value["id"]))
             and finite(value["created_at"]) and now - SAMPLE_TTL < value["created_at"] <= now + 60
@@ -114,6 +117,9 @@ def valid_sample(value, now):
             and isinstance(value["route"], str) and bool(MODEL.fullmatch(value["route"]))
             and value["route"].startswith(("auto:", "cascade:")) and value["task_type"] in TASKS
             and isinstance(value["request"], dict) and not set(value["request"]) - set(REQUEST_FIELDS)
+            and ("production_finish_reason" not in value or value["production_finish_reason"] in ("stop", "length", "tool_calls", "function_call", "content_filter"))
+            and all(type(value["request"][name]) is int and value["request"][name] > 0
+                    for name in ("max_tokens", "max_completion_tokens") if name in value["request"])
             and isinstance(value["request"].get("messages"), list)
             and len(encoded(value["request"]).encode()) <= REQUEST_BYTES
             and isinstance(value["production_answer"], dict)

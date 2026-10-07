@@ -29,12 +29,15 @@ export function validConfig(value) {
 }
 
 export function validSample(value, now) {
-  return fields(value, ["id", "created_at", "key_id", "route", "task_type", "request", "production_model", "production_answer", "latency_ms", "usage"])
+  return object(value) && fields(Object.fromEntries(Object.entries(value).filter(([name]) => name !== "production_finish_reason")), ["id", "created_at", "key_id", "route", "task_type", "request", "production_model", "production_answer", "latency_ms", "usage"])
     && identifier(value.id) && finite(value.created_at) && value.created_at > now - 604800 && value.created_at <= now + 60
     && typeof value.key_id === "string" && value.key_id.length > 0 && value.key_id.length <= 128
     && model(value.route) && /^(auto|cascade):/.test(value.route) && TASKS.includes(value.task_type)
     && object(value.request) && Array.isArray(value.request.messages)
-    && Object.keys(value.request).every(name => ["messages", "tools", "tool_choice", "response_format"].includes(name))
+    && Object.keys(value.request).every(name => ["messages", "tools", "tool_choice", "response_format", "max_tokens", "max_completion_tokens"].includes(name))
+    && ["max_tokens", "max_completion_tokens"].every(name => !Object.hasOwn(value.request, name)
+      || (Number.isSafeInteger(value.request[name]) && value.request[name] > 0))
+    && (!Object.hasOwn(value, "production_finish_reason") || ["stop", "length", "tool_calls", "function_call", "content_filter"].includes(value.production_finish_reason))
     && bytes(value.request) <= 65536 && object(value.production_answer)
     && Object.keys(value.production_answer).every(name => ["content", "tool_calls"].includes(name))
     && bytes(value.production_answer) <= 32768 && model(value.production_model)
@@ -45,9 +48,10 @@ export function validSample(value, now) {
 export function validResult(value) {
   const names = ["sample_id", "task_type", "candidate_model", "candidate_route", "production_model", "outcome",
     "judge_model", "latencies", "usage", "costs", "tool_validity"];
-  return fields(value, names) && identifier(value.sample_id) && TASKS.includes(value.task_type)
+  return object(value) && fields(Object.fromEntries(Object.entries(value).filter(([name]) => name !== "candidate_truncated")), names)
+    && (!Object.hasOwn(value, "candidate_truncated") || typeof value.candidate_truncated === "boolean") && identifier(value.sample_id) && TASKS.includes(value.task_type)
     && [value.candidate_model, value.candidate_route, value.production_model, value.judge_model].every(model)
-    && ["win", "loss", "tie", "failed"].includes(value.outcome)
+    && ["win", "loss", "tie", "failed", "same_model", "candidate_truncated"].includes(value.outcome)
     && fields(value.latencies, ["production", "candidate", "judges"])
     && finite(value.latencies.production) && finite(value.latencies.candidate)
     && Array.isArray(value.latencies.judges) && value.latencies.judges.length <= 2 && value.latencies.judges.every(finite)

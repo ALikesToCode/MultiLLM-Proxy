@@ -56,10 +56,22 @@ def call(payload, dispatch, *, judge=False):
         model = response.headers.get("X-MultiLLM-Auto-Selected-Model") or (body.get("multillm") or {}).get("selected_model") or payload["model"]
         usage = clean_usage(body.get("usage"))
         return {"answer": answer, "model": model, "usage": usage, "cost": _cost(model, usage),
-                "latency_ms": round((time.monotonic() - started) * 1000)}
+                "latency_ms": round((time.monotonic() - started) * 1000),
+                "finish_reason": body["choices"][0].get("finish_reason")}
     finally:
         if response is not None:
             response.close()
+
+
+def replay_payload(sample, candidate):
+    tokens = sample["usage"].get("completion_tokens")
+    cap = max(1024, min(8192, 2 * tokens)) if type(tokens) is int else 8192
+    payload = dict(sample["request"])
+    for name in ("max_tokens", "max_completion_tokens"):
+        limit = payload.pop(name, None)
+        if type(limit) is int and limit > 0:
+            cap = min(cap, limit)
+    return {**payload, "model": candidate, "stream": False, "max_completion_tokens": cap}
 
 
 def evaluate(sample, candidate, config, dispatch, *, deadline):
@@ -70,11 +82,16 @@ def evaluate(sample, candidate, config, dispatch, *, deadline):
         "costs": {"production": _cost(sample["production_model"], sample["usage"]), "candidate": None, "judges": []},
         "tool_validity": None}
     try:
-        candidate_call = call({**sample["request"], "model": candidate, "stream": False, "max_tokens": 2048}, dispatch)
+        candidate_call = call(replay_payload(sample, candidate), dispatch)
         result["candidate_model"] = candidate_call["model"]
         for target, source in (("latencies", "latency_ms"), ("usage", "usage"), ("costs", "cost")):
             result[target]["candidate"] = candidate_call[source]
         if candidate_call["model"] == sample["production_model"]:
+            result["outcome"] = "same_model"
+            return result
+        if candidate_call.get("finish_reason") == "length" and sample.get("production_finish_reason") != "length":
+            result["candidate_truncated"] = True
+            result["outcome"] = "candidate_truncated"
             return result
         production_validity = tool_validity(sample["production_answer"], sample)
         if production_validity is not None:

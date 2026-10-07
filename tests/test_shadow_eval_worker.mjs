@@ -149,3 +149,25 @@ test('cron never wakes an idle Container and expires D1 samples while asleep', a
   container.fetchIfRunning = async () => { throw new Error('synthetic unavailable'); };
   assert.deepEqual(await runScheduledShadowEval({ ADMIN_API_KEY: 'synthetic-admin' }, container), { skipped: 'unavailable' });
 });
+
+
+test('private sample/result contracts retain replay bounds and classify exclusions', async t => {
+  const { call } = await database(t);
+  const value = { ...sample(), production_finish_reason: 'length',
+    request: { ...sample().request, max_tokens: 500, max_completion_tokens: 600 } };
+  assert.equal(validSample(value, Date.now() / 1000), true);
+  assert.equal(validSample({ ...value, production_finish_reason: 'bad' }, Date.now() / 1000), false);
+  assert.equal(validSample({ ...value, request: { ...value.request, max_tokens: true } }, Date.now() / 1000), false);
+  assert.equal((await call('put', { id: value.id, created_at: value.created_at, document: JSON.stringify(value) })).result, true);
+  assert.deepEqual((await call('sample', { id: value.id })).result, value);
+  assert.equal(validResult({ ...result(), outcome: 'same_model' }), true);
+  assert.equal(validResult({ ...result(), outcome: 'candidate_truncated', candidate_truncated: true }), true);
+  assert.equal(validResult({ ...result(), candidate_truncated: 'true' }), false);
+  const settings = JSON.stringify(config());
+  await call('config_seed', { document: settings });
+  await call('lease', { run_id: id(100), until: Date.now() / 1000 + 300 });
+  await call('claim', { sample_id: value.id, candidate: 'openai:candidate', config: settings, run_id: id(100), id: id(200) });
+  const excluded = { ...result(), outcome: 'candidate_truncated', candidate_truncated: true };
+  assert.equal((await call('finish', { id: id(200), document: JSON.stringify(excluded) })).result, true);
+  assert.deepEqual(JSON.parse((await call('results', { after: '' })).result[0].document), excluded);
+});

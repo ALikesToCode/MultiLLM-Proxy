@@ -181,7 +181,6 @@ def test_judge_agreement(first, second, expected):
 
 @pytest.mark.parametrize("text", ['{}', '```json\n{}\n```', '{"winner":"C","confidence":1,"reasons":[]}',
     '{"winner":"A","confidence":true,"reasons":[]}', '{"winner":"A","confidence":NaN,"reasons":[]}',
-    '{"winner":"A","confidence":1,"reasons":["a","b","c","d"]}',
     '{"winner":"A","winner":"B","confidence":1,"reasons":[]}'])
 def test_malformed_judge_output(text):
     with pytest.raises((ValueError, TypeError)):
@@ -411,3 +410,143 @@ def test_proposal_anchors_each_task_independently():
     document = proposal(base, rows)
     assert [item["task_scores"] for item in document["policy"]["candidates"]] == [
         {"chat": 95, "coding": 75}, {"chat": 85, "coding": 65}]
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_judge_accepts_fence_extra_keys_numeric_confidence_and_normalizes_reasons(wrapped):
+    text = encoded({"winner": "A", "confidence": "0.75", "extra": "ignored",
+                    "reasons": [None, "x" * 180, 42, "second", "third", "fourth"]})
+    if wrapped:
+        text = "```json\n" + text + "\n```"
+    assert parse_judgment(text) == {"winner": "A", "confidence": 0.75,
+                                    "reasons": ["x" * 160, "second", "third"]}
+    assert parse_judgment('{"winner":"tie","confidence":1,"reasons":null}')["reasons"] == []
+
+
+@pytest.mark.parametrize("text", [
+    'x' * 4097, '{"winner":[],"confidence":1}', '{"winner":"A","confidence":"NaN"}',
+    '{"winner":"A","confidence":"1.1"}', '{"winner":"A","confidence":"bad"}',
+    '```json\n```json\n{"winner":"A","confidence":1}\n```\n```',
+])
+def test_judge_rejects_oversize_invalid_score_and_nested_fences(text):
+    with pytest.raises((ValueError, TypeError)):
+        parse_judgment(text)
+
+
+@pytest.mark.parametrize("usage,limits,expected", [
+    ({}, {}, 8192), ({"completion_tokens": 0}, {}, 1024), ({"completion_tokens": 2000}, {}, 4000),
+    ({"completion_tokens": 10000}, {}, 8192), ({}, {"max_tokens": 500}, 500),
+    ({"completion_tokens": 3000}, {"max_completion_tokens": 3000}, 3000),
+    ({}, {"max_tokens": 2000, "max_completion_tokens": 1000}, 1000),
+])
+def test_replay_cap_preserves_full_request_and_uses_normal_completion_translation(usage, limits, expected):
+    from services.shadow_eval_runner import replay_payload
+    value = sample(usage=usage)
+    value["request"].update(limits, tools=[{"function": {"name": "synthetic", "parameters": {"type": "object"}}}])
+    before = copy.deepcopy(value)
+    payload = replay_payload(value, "openai:candidate")
+    assert payload["max_completion_tokens"] == expected and "max_tokens" not in payload
+    assert payload["messages"] == value["request"]["messages"] and payload["tools"] == value["request"]["tools"]
+    assert value == before
+
+
+@pytest.mark.parametrize("production_finish,candidate_finish,selected,expected", [
+    ("stop", "length", "openai:candidate", "candidate_truncated"),
+    (None, "length", "openai:candidate", "candidate_truncated"),
+    ("length", "length", "openai:candidate", "tie"),
+    ("stop", "stop", "openai:production", "same_model"),
+])
+def test_unfair_and_same_model_comparisons_are_excluded_and_counted(monkeypatch, production_finish, candidate_finish, selected, expected):
+    from services.shadow_eval_league import result_counts
+    calls = []
+    def fake_call(payload, dispatch, **kwargs):
+        calls.append(payload)
+        return {"answer": {"content": encoded({"winner": "tie", "confidence": 1}) if kwargs.get("judge") else "Synthetic"},
+                "model": selected, "usage": {}, "cost": None, "latency_ms": 1, "finish_reason": candidate_finish}
+    monkeypatch.setattr("services.shadow_eval_runner.call", fake_call)
+    value = evaluate(sample(production_finish_reason=production_finish), "openai:candidate", default_config(), Mock(), deadline=time.monotonic()+10)
+    assert value["outcome"] == expected
+    counts = result_counts([value])
+    assert counts["failed"] == 0
+    if expected == "tie":
+        assert counts["judged"] == 1 and len(calls) == 3 and league([value])
+        assert all(payload["max_tokens"] == 1024 for payload in calls[1:])
+    else:
+        assert counts[expected] == 1 and len(calls) == 1 and league([value]) == []
+    if expected == "candidate_truncated":
+        assert value["candidate_truncated"] is True
+        assert league([result(candidate_truncated=True)]) == []
+
+
+def test_judge_compacts_system_recent_messages_tools_and_keeps_answer_format():
+    from services.shadow_eval_context import compact_request, SYSTEM_BYTES, MESSAGE_BYTES
+    tools = [{"type": "function", "function": {"name": name, "description": "Synthetic tool", "parameters": {"type": "object", "padding": "x" * 5000}}}
+             for name in ("called-a", "called-b", "unused")]
+    request = {"messages": [{"role": "system", "content": "λ" * 10000}, {"role": "system", "content": "second system"}] +
+        [{"role": "user", "content": str(index)} for index in range(12)], "tools": tools,
+        "response_format": {"type": "json_object"}}
+    answers = [{"content": "Synthetic", "tool_calls": [{"function": {"name": name, "arguments": "{}"}}]} for name in ("called-a", "called-b")]
+    before = copy.deepcopy(request)
+    view = compact_request(request, answers)
+    systems = [item for item in view["messages"] if item["role"] == "system"]
+    recent = [item for item in view["messages"] if item["role"] != "system"]
+    assert len(encoded(systems).encode()) <= SYSTEM_BYTES
+    assert len(encoded(recent).encode()) <= MESSAGE_BYTES
+    assert [item["content"] for item in recent] == [str(index) for index in range(4, 12)]
+    assert view["tools"][:2] == tools[:2] and "parameters" not in view["tools"][2]["function"]
+    assert view["response_format"] == request["response_format"] and request == before
+
+
+def test_judge_message_budget_keeps_newest_and_whole_request_drops_oldest_first():
+    from services.shadow_eval_context import compact_request
+    messages = [{"role": "user", "content": str(index) + "λ" * 5000} for index in range(10)]
+    value = sample(request={"messages": messages})
+    view = compact_request(value["request"], [])
+    kept = [item["content"] for item in view["messages"]]
+    assert len(encoded(view["messages"]).encode()) <= 24576
+    assert kept[-1] == messages[-1]["content"] and kept[-2] == messages[-2]["content"]
+    assert kept[0].startswith("7") and len(kept[0]) < len(messages[7]["content"])
+    value["production_answer"] = {"content": "x" * 22000}
+    answer = {"content": "x" * 22000}
+    payload = judge_payload("free:json", value, answer, True)
+    data = json.loads(payload["messages"][1]["content"])
+    assert len(encoded(payload).encode()) <= 65536
+    assert data["A"] == answer and data["B"] == value["production_answer"]
+    kept = data["request"]["messages"]
+    assert kept[-1] == messages[-1] and len(kept) < len(view["messages"])
+    with pytest.raises(ValueError, match="64 KiB"):
+        judge_payload("free:json", sample(production_answer={"content": "x" * 32750}), {"content": "x" * 32750}, True)
+
+
+def test_sample_contract_retains_request_limits_and_finish_reason(store):
+    from services.shadow_eval_contract import valid_sample
+    value = make_sample({"model": "auto:test", "messages": [], "max_tokens": 500, "max_completion_tokens": 600},
+        {"username": "sampled-user"}, "auto:test", {"content": "Synthetic"}, "openai:production", 1, {}, finish_reason="length")
+    assert value["production_finish_reason"] == "length"
+    assert value["request"]["max_tokens"] == 500 and value["request"]["max_completion_tokens"] == 600
+    store.put(value)
+    assert store.sample(value["id"]) == value
+    assert valid_sample(sample(), time.time())  # Existing retained samples remain readable.
+    value["request"]["max_tokens"] = True
+    assert not valid_sample(value, time.time())
+
+
+def test_capture_preserves_nonstream_and_stream_finish_reasons(monkeypatch):
+    from services.shadow_eval_sampling import sample_success
+    samples = []
+    monkeypatch.setattr("services.shadow_eval_sampling.submit", samples.append)
+    monkeypatch.setattr("services.shadow_eval_sampling.random.random", lambda: 0)
+    app = Flask(__name__)
+    init_shadow_sampling(app)
+    payload = {"model": "auto:test", "messages": []}
+    with app.test_request_context("/v1/chat/completions", method="POST", json=payload):
+        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        g.shadow_eval_started = time.monotonic()
+        response = app.json.response({"choices": [{"message": {"content": "Synthetic"}, "finish_reason": "length"}],
+                                     "multillm": {"selected_model": "openai:production"}})
+        sample_success(response, payload)
+    assert samples[0]["production_finish_reason"] == "length"
+    captured = []
+    chunks = [b'data: {"choices":[{"delta":{"content":"Synthetic"},"finish_reason":"length"}]}\n\n', b'data: [DONE]\n\n']
+    list(SampleStream(iter(chunks), lambda *args: captured.append(args), "openai:production"))
+    assert captured[0][3] == "length"
