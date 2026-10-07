@@ -1,16 +1,15 @@
 import { fail, fields, string } from "./contracts.mjs";
 import { digest, site, validSite } from "./evidence.mjs";
+import { COUNT, LRU_PREFIX, PAGE_LIMIT, SCHEMA, listIdentities, lruKey, migratePageLayout,
+  pageKey, replaceIdentities, scanRecords } from "./product-site-identities.mjs";
+
+export { PAGE_LIMIT } from "./product-site-identities.mjs";
 
 export const SITE_LIMIT = 64;
 const PRODUCT_LIMIT = 400;
-export const PAGE_LIMIT = 10000;
 const SCAN_LIMIT = 100000;
-const PAGE_SIZE = 1000;
 const PREFIX = "product-sites:";
 const LEGACY = "product-site-artifact:";
-const LEARNED = "product-site-page:";
-const COUNT = "product-site-page-count";
-const SCHEMA = "product-site-page-schema";
 const empty = product => ({ product, sites: {}, blocked: {}, revision: 0 });
 
 export function parseProductSites(input, update = false) {
@@ -78,25 +77,6 @@ function addSite(registry, host, timestamp, verified = 1) {
   return true;
 }
 
-// Page through retained manifests; exceeding the total cap fails rather than trusting a partial rebuild.
-async function listAll(tx, prefix, maximum) {
-  const records = new Map();
-  let startAfter;
-  while (records.size < maximum) {
-    const limit = Math.min(PAGE_SIZE, maximum - records.size);
-    const page = await tx.list({ prefix, limit,
-      ...(startAfter ? { startAfter } : {}) });
-    if (!page.size) return records;
-    for (const [key, value] of page) records.set(key, value);
-    if (page.size < limit) return records;
-    startAfter = [...page.keys()].at(-1);
-  }
-  if ((await tx.list({ prefix, startAfter, limit: 1 })).size) {
-    fail("product_sites_limit", "The product-site rebuild scan limit was exceeded.", 409);
-  }
-  return records;
-}
-
 async function pageIdentity(artifact, timestamp) {
   const host = site(artifact.canonical_url);
   if (!artifact.product || !host) return null;
@@ -105,7 +85,6 @@ async function pageIdentity(artifact, timestamp) {
 }
 
 const oldestFirst = ([a, x], [b, y]) => x.last_seen.localeCompare(y.last_seen) || a.localeCompare(b);
-const slotKey = index => `${LEARNED}${String(index).padStart(5, "0")}`;
 
 function decrement(registry, identity) {
   const entry = registry.sites[identity.site];
@@ -118,15 +97,17 @@ function decrement(registry, identity) {
 
 async function retainedPages(tx, product) {
   const pages = new Map();
-  for (const artifact of (await listAll(tx, "artifact:", SCAN_LIMIT)).values()) {
-    if (product && artifact.product !== product) continue;
-    const identity = await pageIdentity(artifact, artifact.published_at || artifact.fetched_at);
-    if (!identity) continue;
-    const previous = pages.get(identity.page_id);
-    if (previous) {
-      previous.first_seen = [previous.first_seen, identity.first_seen].sort()[0];
-      previous.last_seen = [previous.last_seen, identity.last_seen].sort().at(-1);
-    } else pages.set(identity.page_id, identity);
+  for await (const page of scanRecords(tx, "artifact:", SCAN_LIMIT)) {
+    for (const artifact of page.values()) {
+      if (product && artifact.product !== product) continue;
+      const identity = await pageIdentity(artifact, artifact.published_at || artifact.fetched_at);
+      if (!identity) continue;
+      const previous = pages.get(identity.page_id);
+      if (previous) {
+        previous.first_seen = [previous.first_seen, identity.first_seen].sort()[0];
+        previous.last_seen = [previous.last_seen, identity.last_seen].sort().at(-1);
+      } else pages.set(identity.page_id, identity);
+    }
   }
   return pages;
 }
@@ -155,19 +136,11 @@ function resetLearned(registry, identities) {
   }
 }
 
-async function replaceIdentities(tx, identities, previous) {
-  const slots = [...identities.values()];
-  // Durable storage batches are bounded, too; rebuild runs in the catalogue transaction.
-  for (let start = 0; start < slots.length; start += 128) {
-    await tx.put(Object.fromEntries(slots.slice(start, start + 128).map((entry, index) => [slotKey(start + index), entry])));
-  }
-  for (const key of previous.keys()) if (Number(key.slice(LEARNED.length)) >= slots.length) await tx.delete(key);
-  await tx.put(COUNT, slots.length);
-}
-
 async function migrateIdentities(tx) {
-  if (await tx.get(SCHEMA) === 2) return;
-  const legacy = await listAll(tx, LEGACY, PAGE_LIMIT);
+  const schema = await tx.get(SCHEMA);
+  if (schema === 3) return;
+  if (schema === 2) return migratePageLayout(tx);
+  const legacy = await listIdentities(tx, LEGACY);
   if (legacy.size) {
     // Revision markers lack URLs; retained manifests provide a safe one-time backfill.
     const registries = await tx.list({ prefix: PREFIX, limit: PRODUCT_LIMIT });
@@ -179,11 +152,12 @@ async function migrateIdentities(tx) {
       registry.revision++;
       await tx.put(`${PREFIX}${registry.product}`, registry);
     }
-    await replaceIdentities(tx, identities, await listAll(tx, LEARNED, PAGE_LIMIT));
-    for (const key of legacy.keys()) await tx.delete(key);
+    await replaceIdentities(tx, identities, await listIdentities(tx));
+    const keys = [...legacy.keys()];
+    for (let start = 0; start < keys.length; start += 128) await tx.delete(keys.slice(start, start + 128));
     await tx.delete("product-site-artifact-count");
   }
-  await tx.put(SCHEMA, 2);
+  await tx.put(SCHEMA, 3);
 }
 
 /** Distinct page identities outlive expiry; revised or reacquired pages only refresh recency. */
@@ -191,42 +165,46 @@ export async function learnProductSite(tx, artifact, now) {
   await migrateIdentities(tx);
   const identity = await pageIdentity(artifact, new Date(now).toISOString());
   if (!identity) return false;
-  const identities = await listAll(tx, LEARNED, PAGE_LIMIT);
-  const previous = [...identities].find(([, entry]) => entry.page_id === identity.page_id);
-  const registry = await getProductSites(tx, artifact.product);
+  const key = pageKey(identity.page_id);
+  const previous = await tx.get(key);
+  const stored = await tx.get(`${PREFIX}${artifact.product}`);
+  const registry = stored ?? empty(artifact.product);
   if (previous) {
-    const [key, existing] = previous;
-    existing.last_seen = identity.last_seen;
-    const entry = registry.sites[existing.site];
-    if (entry && existing.identity_epoch !== null && existing.identity_epoch === entry.identity_epoch) entry.last_seen = identity.last_seen;
-    await tx.put({ [key]: existing, [`${PREFIX}${artifact.product}`]: registry });
+    const oldIndex = lruKey(previous);
+    previous.last_seen = identity.last_seen;
+    const entry = registry.sites[previous.site];
+    if (entry && previous.identity_epoch !== null && previous.identity_epoch === entry.identity_epoch) entry.last_seen = identity.last_seen;
+    await tx.put({ [key]: previous, [lruKey(previous)]: previous.page_id, [`${PREFIX}${artifact.product}`]: registry });
+    if (oldIndex !== lruKey(previous)) await tx.delete([oldIndex]);
     return false;
   }
-  if (!await roomForProduct(tx, artifact.product)) return false;
+  if (!stored && (await tx.list({ prefix: PREFIX, limit: PRODUCT_LIMIT })).size >= PRODUCT_LIMIT) return false;
+  const count = await tx.get(COUNT) ?? 0;
   const changes = {};
-  let key;
-  if (identities.size >= PAGE_LIMIT) {
-    const victim = [...identities].sort(oldestFirst)[0];
-    key = victim[0];
-    const affected = victim[1].product === artifact.product ? registry : await getProductSites(tx, victim[1].product);
-    decrement(affected, victim[1]);
-    changes[`${PREFIX}${victim[1].product}`] = affected;
-  } else {
-    for (let index = 0; index < PAGE_LIMIT; index++) if (!identities.has(slotKey(index))) { key = slotKey(index); break; }
+  const deletions = [];
+  if (count >= PAGE_LIMIT) {
+    const [oldIndex, victimId] = [...await tx.list({ prefix: LRU_PREFIX, limit: 1 })][0] ?? [];
+    const victim = victimId && await tx.get(pageKey(victimId));
+    if (!victim) fail("product_sites_index", "The product-site recency index is inconsistent.", 409);
+    const affected = victim.product === artifact.product ? registry : await tx.get(`${PREFIX}${victim.product}`) ?? empty(victim.product);
+    decrement(affected, victim);
+    changes[`${PREFIX}${victim.product}`] = affected;
+    deletions.push(pageKey(victimId), oldIndex);
   }
   const added = addSite(registry, identity.site, identity.last_seen);
   if (added) {
     identity.identity_epoch = registry.sites[identity.site].identity_epoch;
     registry.revision++;
   }
-  // Reuse the evicted slot so counts, victim and new identity change atomically.
-  await tx.put({ ...changes, [key]: identity, [`${PREFIX}${artifact.product}`]: registry,
-    [COUNT]: Math.min(PAGE_LIMIT, identities.size + 1) });
+  // The catalogue transaction commits the page, recency, victim, registries and count together.
+  await tx.put({ ...changes, [key]: identity, [lruKey(identity)]: identity.page_id,
+    [`${PREFIX}${artifact.product}`]: registry, [COUNT]: Math.min(PAGE_LIMIT, count + 1) });
+  if (deletions.length) await tx.delete(deletions);
   return added;
 }
 
 async function rebuildProductSites(tx, registry) {
-  const previous = await listAll(tx, LEARNED, PAGE_LIMIT);
+  const previous = await listIdentities(tx);
   const identities = new Map([...previous.values()].filter(entry => entry.product !== registry.product)
     .map(entry => [entry.page_id, entry]));
   for (const [key, identity] of await retainedPages(tx, registry.product)) identities.set(key, identity);

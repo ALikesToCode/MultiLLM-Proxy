@@ -10,7 +10,7 @@ class Storage {
     if (typeof key === "string") this.values.set(key, structuredClone(value));
     else for (const [name, entry] of Object.entries(key)) this.values.set(name, structuredClone(entry));
   }
-  async delete(key) { this.values.delete(key); }
+  async delete(key) { for (const name of Array.isArray(key) ? key : [key]) this.values.delete(name); }
   async list({ prefix, limit = Infinity, startAfter }) {
     const records = [...this.values].filter(([key]) => key.startsWith(prefix) && (!startAfter || key > startAfter));
     if (Number.isFinite(limit) || startAfter) records.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
@@ -26,6 +26,16 @@ class Storage {
 export const principal = { id: "fixture-reader", scopes: ["knowledge:read"] };
 export const manager = { id: "fixture-manager", scopes: ["knowledge:read", "knowledge:manage"] };
 export const request = changes => parseQuery({ query: "How are request size limits configured?", product: "flask", mode: "economy", ...changes });
+
+export async function seedProductSitePages(storage, identities) {
+  const writes = {};
+  for (const identity of identities) {
+    writes[`product-site-page:${identity.page_id}`] = identity;
+    writes[`product-site-lru:${identity.last_seen}:${identity.page_id}`] = identity.page_id;
+  }
+  await storage.put(writes);
+  await storage.put("product-site-page-count", (await storage.list({ prefix: "product-site-page:" })).size);
+}
 
 export async function fixture() {
   const storage = new Storage();

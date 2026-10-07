@@ -46,12 +46,19 @@ do not learn. Publication and live verification count once per (product, canonic
 page URL), even across providers, content revisions and reacquisitions. A repeat updates
 the marker's and learned site's `last_seen` without increasing `verified` or revision.
 
-`product-site-page:<slot>` markers contain a digest of product and canonical URL, site,
+`product-site-page:<page_id>` markers are keyed directly by the digest of product and
+canonical URL and contain that digest, site,
 first/last seen timestamps and an `identity_epoch`. They outlive artifact expiry and
-are bounded to 10,000 slots globally. At capacity the least recently seen identity is
+are bounded to 10,000 identities globally. `product-site-page-count` supplies the count
+without a scan. A recency index `product-site-lru:<last_seen ISO>:<page_id>` maps to
+the page id; a refresh replaces the prior index entry. Learning uses a direct duplicate
+lookup and, at capacity, lists just one recency entry to choose the oldest identity.
+Its storage operations are constant regardless of the identity count (new products may
+also list the fixed 400-product registry bound). At capacity the oldest identity is
 evicted, decrementing its site's verification count and removing zero-count unpinned
-sites. A new page replaces the victim slot in the same atomic write as both registries
-and the count. Pinned sites survive with zero verifications. Site entries also retain
+sites. One put batch and one delete batch inside the existing catalogue transaction
+update the new page, its index, both registries, the count and the victim deletions.
+Pinned sites survive with zero verifications. Site entries also retain
 `identity_epoch`, so a marker from an evicted site cannot decrement a later incarnation.
 Management responses omit this internal bookkeeping field.
 Records remain limited to 400 products; automatic learning declines new products at
@@ -69,7 +76,10 @@ Unpinning an entry with no verifications removes it from the trusted-site map.
 
 `product_sites.update` with `rebuild: true` scans retained manifests in 1,000-entry
 pages using `startAfter`, bounded at 100,000 total. It rejects a catalogue exceeding
-that cap without saving a partial rebuild. It groups distinct canonical pages by site and recomputes
+that cap without saving a partial rebuild. Only one page of raw manifests is retained
+at a time; identity objects are accumulated while each page is processed. Normal artifact
+admission already caps retained manifests at 1,000. Rebuild groups distinct canonical
+pages by site and recomputes
 counts, first and last timestamps. It preserves pinned and blocked entries, fills
 remaining slots with the strongest learned sites, and replaces that product's durable
 identity markers. Rebuild intentionally resets historical knowledge to currently
@@ -77,19 +87,24 @@ stored manifests, including unpublished ones, as requested by the backfill contr
 Artifacts that expired before rebuild no longer contribute. Later reacquisition may
 learn those pages in the new history. Rebuild applies the same global LRU identity cap,
 updating other products' counts if their older identities are evicted. Writes use batches
-of at most 128 records. All operations are serialized by the existing catalogue transaction.
+of at most 128 records, including paired identity/index writes. All operations are
+serialized by the existing catalogue transaction.
 On the first registry read, round-1 revision markers trigger a one-time rebuild of
 existing product registries from retained manifests; pins and blocks survive. Old markers
 and their counter are removed. Expired history cannot be reconstructed because old
-markers carry only product names, not URLs. A schema marker prevents repeat migration.
+markers carry only product names, not URLs. Schema-2 slot records migrate directly to
+page-id keys and recency entries in bounded put/delete batches, preserving exact
+timestamps and identity epochs without resetting registry counts or overrides.
+`product-site-page-schema: 3` prevents repeat migration. This storage migration runs
+automatically on the first registry operation; no external migration command is needed.
 
 ## Retrieval and policy
 
 The optional product registry is loaded in the existing `catalogue.state` round trip.
 A registry storage failure returns null, so the original filter continues to operate.
 Learning errors cannot fail publication or evidence retrieval and create no gaps. Live
-learning has its own 250 ms wait budget and stores registry/count/identity updates in
-one atomic write batch so caught failures cannot inflate later retries.
+learning has its own 250 ms wait budget. Registry, count, identity and recency writes
+are batched inside the catalogue transaction.
 
 `product_sites_mode` is optional in complete policy updates and defaults to `observe`,
 including policies persisted before this feature. The dashboard preserves a mode set

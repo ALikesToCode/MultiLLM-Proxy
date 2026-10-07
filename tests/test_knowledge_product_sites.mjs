@@ -7,7 +7,7 @@ import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { defaultPolicy, validatePolicy, withProviderDefaults } from "../worker/knowledge/policy.mjs";
 import { cacheKey } from "../worker/knowledge/cache.mjs";
-import { fixture, manager, principal, request } from "./knowledge_fixture.mjs";
+import { fixture, manager, principal, request, seedProductSitePages } from "./knowledge_fixture.mjs";
 
 const section = (url, text = "Availability: browser support configured with feature detection.") =>
   `### Availability\nSource: ${url}\n${text}\n--------------------------------`;
@@ -144,10 +144,10 @@ test("full page identity store evicts least recently seen pages across products 
   other.product = "other";
   for (const entry of Object.values(other.sites)) entry.identity_epoch = 1;
   await f.storage.put("product-sites:other", other);
-  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT }, (_, i) =>
-    [`product-site-page:${String(i).padStart(5, "0")}`, { page_id: `old-${i}`, product: "other",
+  await seedProductSitePages(f.storage, Array.from({ length: PAGE_LIMIT }, (_, i) =>
+    ({ page_id: `old-${i}`, product: "other",
       site: i === 0 ? "old.dev" : i === 1 ? "pinned.dev" : "recent.dev", identity_epoch: 1,
-      first_seen: "2020-01-01T00:00:00Z", last_seen: new Date(i * 1000).toISOString() }])));
+      first_seen: "2020-01-01T00:00:00Z", last_seen: new Date(i * 1000).toISOString() })));
   await f.storage.put("product-site-page-count", PAGE_LIMIT);
   const result = await run(f);
   assert.equal(result.status, "ok");
@@ -166,12 +166,12 @@ test("relearning refreshes LRU ordering without incrementing counts", async () =
   const f = await fixture();
   const artifact = await f.published();
   const pages = await f.storage.list({ prefix: "product-site-page:" });
-  const [key, identity] = [...pages][0];
+  const [, identity] = [...pages][0];
+  await f.storage.delete(`product-site-lru:${identity.last_seen}:${identity.page_id}`);
   identity.last_seen = "1970-01-01T00:00:00.000Z";
-  await f.storage.put(key, identity);
-  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
-    [`product-site-page:${String(i + 1).padStart(5, "0")}`, { page_id: `filler-${i}`, product: "flask",
-      site: "unused.dev", identity_epoch: null, first_seen: "2020-01-01T00:00:00Z", last_seen: "2020-01-01T00:00:00Z" }])));
+  await seedProductSitePages(f.storage, [identity, ...Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
+    ({ page_id: `filler-${i}`, product: "flask", site: "unused.dev", identity_epoch: null,
+      first_seen: "2020-01-01T00:00:00Z", last_seen: "2020-01-01T00:00:00Z" }))]);
   await f.authority.call("product_sites.learn", { id: artifact.id });
   const newArtifact = { ...artifact, id: "new-page", canonical_url: `${artifact.canonical_url}other/` };
   await f.storage.put(`artifact:${newArtifact.id}`, newArtifact);
@@ -224,12 +224,12 @@ test("identity eviction never decrements a site's later incarnation", async () =
   stored.sites[host].verified = 1;
   await f.storage.put("product-sites:flask", stored);
   const pages = await f.storage.list({ prefix: "product-site-page:" });
-  const [key, identity] = [...pages][0];
+  const [, identity] = [...pages][0];
+  await f.storage.delete(`product-site-lru:${identity.last_seen}:${identity.page_id}`);
   identity.last_seen = "1970-01-01T00:00:00Z";
-  await f.storage.put(key, identity);
-  await f.storage.put(Object.fromEntries(Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
-    [`product-site-page:${String(i + 1).padStart(5, "0")}`, { page_id: `filler-${i}`, product: "flask",
-      site: "unused.dev", identity_epoch: null, last_seen: "2020-01-01T00:00:00Z" }])));
+  await seedProductSitePages(f.storage, [identity, ...Array.from({ length: PAGE_LIMIT - 1 }, (_, i) =>
+    ({ page_id: `filler-${i}`, product: "flask", site: "unused.dev", identity_epoch: null,
+      last_seen: "2020-01-01T00:00:00Z" }))]);
   const artifact = { id: "new-incarnation-page", product: "flask", canonical_url: `${f.source.url}new/` };
   await f.storage.put(`artifact:${artifact.id}`, artifact);
   await f.authority.call("product_sites.learn", { id: artifact.id });
