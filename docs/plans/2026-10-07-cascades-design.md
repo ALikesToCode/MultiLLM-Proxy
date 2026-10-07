@@ -15,7 +15,7 @@ and escalates only after a failed check.
 `services/cascade_config.py` owns bounded, strict normalization; the edge mirrors
 it in `worker/cascades-d1.mjs`. Administrator saves validate provider and route IDs.
 
-D1 migration `0013_cascades.sql` creates `cascades(name, config, updated_at)`.
+D1 migration `0012_cascades.sql` creates `cascades(name, config, updated_at)`.
 `services/cascade_service.py` uses private D1 in deployed mode and model-registry
 SQLite locally. Both support the empty default seed set: operators select their
 cost order rather than enabling unspecified paid tiers. The private list/put RPC
@@ -84,7 +84,7 @@ Cascades reject `n` other than 1 and intelligence routing overrides to keep a
 single explicit answer/configuration contract. Stateful features follow automatic
 routes' rejection rules. Additional bounds and operational details are in
 [cascades](../cascades.md). No binding/variable/DO changes are required; operators
-must apply migration 0013 to existing D1 before deployment.
+must apply migration 0012 to existing D1 before deployment.
 
 ## Verification
 

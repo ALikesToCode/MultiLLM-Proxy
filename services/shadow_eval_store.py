@@ -20,7 +20,7 @@ class ShadowEvalStore:
     @staticmethod
     def ensure(connection):
         # The account ALTER belongs to AuthService locally and the D1 migration remotely.
-        migration = (Path(__file__).resolve().parents[1] / "intelligence-migrations/0014_shadow_eval.sql").read_text()
+        migration = (Path(__file__).resolve().parents[1] / "intelligence-migrations/0013_shadow_eval.sql").read_text()
         for statement in migration[migration.index("CREATE TABLE"):].split(";"):
             if statement.strip():
                 connection.execute(statement)

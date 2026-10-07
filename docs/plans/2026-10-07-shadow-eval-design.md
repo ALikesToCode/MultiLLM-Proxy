@@ -10,9 +10,9 @@ path with fixed shared SQL, validation, compare-and-swap and atomic backups.
 
 `shadow_eval_rate` mirrors nullable `secret_scan_mode` across AuthService local
 schema, key controls, backup restore compatibility and Worker control users.
-Null/omitted/zero means no sampling; the range is 0–0.2. Migration 0014 adds the
+Null/omitted/zero means no sampling; the range is 0–0.2. Migration 0013 adds the
 column plus samples, results, config and policy backup tables. It does not depend
-on 0012 or the parallel cascade migration. Cascade eligibility is prefix-only.
+on the parallel cascade migration (0012). Cascade eligibility is prefix-only.
 
 Sampling occurs after successful unified chat dispatch on /v1/chat/completions,
 /v1/responses, /v1/messages and /optimize/v1/chat/completions (after normalization),
@@ -147,7 +147,7 @@ patch/delete decorators as well as route/add_url_rule.
 
 ## Explicit adaptations and limitations
 
-* The base had no policy replacement/backup path; migration 0014 includes one
+* The base had no policy replacement/backup path; migration 0013 includes one
   additional backup table and implements a guarded path instead of reusing a
   nonexistent one.
 * Default per-key state is nullable rather than literal 0 to mirror the lead's
@@ -176,7 +176,7 @@ patch/delete decorators as well as route/add_url_rule.
 
 ## Release steps and verification
 
-Apply 0014 before release; reuse existing INTELLIGENCE_DB/private outbound binding,
+Apply 0013 before release; reuse existing INTELLIGENCE_DB/private outbound binding,
 cron and Container. No new binding or Durable Object migration is required.
 Set SHADOW_EVAL_JUDGE_MODEL before first config seed if changing the default;
 afterward use dashboard config. Optional SHADOW_EVAL_DAILY_BUDGET_USD and

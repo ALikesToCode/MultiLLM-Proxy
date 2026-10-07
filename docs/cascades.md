@@ -103,7 +103,7 @@ A final answer is always passed through once the final tier runs.
 
 ## Storage and deployment
 
-Apply `intelligence-migrations/0013_cascades.sql` to the existing
+Apply `intelligence-migrations/0012_cascades.sql` to the existing
 `multillm-intelligence` D1 database before deploying. No new binding, variable,
 Durable Object migration, or dependency is required. Local mode stores cascades
 in the model-registry SQLite database. D1 access uses the private

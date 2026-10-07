@@ -264,4 +264,4 @@ normal admission, usage ledger, budgets, route health and outbound firewall.
 Twenty valid per-task comparisons are required before a candidate's `task_scores`
 can be proposed. The dashboard applies reviewed scores with policy validation,
 a revision guard and an atomic backup; `quality_tier` and auto routes remain
-unchanged. Migration `0014_shadow_eval.sql` must precede the code release.
+unchanged. Migration `0013_shadow_eval.sql` must precede the code release.

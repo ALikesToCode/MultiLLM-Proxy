@@ -239,7 +239,7 @@ retain at most 20. Purge requires confirmation and removes samples and results,
 without resetting the daily allowance or removing policy backups. This data is
 excluded from the general control-plane export so prompt text cannot enter it.
 
-Apply `0014_shadow_eval.sql` before releasing the Worker/Container. It adds the
+Apply `0013_shadow_eval.sql` before releasing the Worker/Container. It adds the
 nullable key override and four tables (including guarded policy backups). Reuse
 `INTELLIGENCE_DB`, the private intelligence outbound service and existing cron;
 no new binding or Durable Object migration is needed. Configure the judge and
