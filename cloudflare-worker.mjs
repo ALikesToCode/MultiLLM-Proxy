@@ -8,6 +8,7 @@ import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleMediaOutbound } from "./worker/media-outbound.mjs";
 import { serveSignedMediaFile, signedMediaFileId } from "./worker/media-files.mjs";
 import { MediaJobWorkflow } from "./worker/media-workflow.mjs";
+import { AdmissionCoordinator } from "./worker/admission-do.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { runScheduledShadowEval } from "./worker/shadow-eval-schedule.mjs";
@@ -41,6 +42,7 @@ import { withJanitorGlmReasoningNormalization } from "./worker/janitor-reasoning
 
 
 export { RoleplaySession };
+export { AdmissionCoordinator };
 export { MediaJobWorkflow };
 
 import { CORS_ALLOWED_METHODS, CORS_DEFAULT_HEADERS, CORS_EXPOSE_HEADERS } from "./worker/cors-policy.mjs";

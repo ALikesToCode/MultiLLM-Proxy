@@ -1,3 +1,4 @@
+import { handleAdmissionRequest } from "./admission-do.mjs";
 import { handleIntelligenceStoreRequest } from "./intelligence-d1.mjs";
 import { handleIntelligenceAuthRequest } from "./intelligence-auth-d1.mjs";
 import { handleControlUsersRequest } from "./control-users-d1.mjs";
@@ -19,6 +20,7 @@ export function handleIntelligenceOutbound(request, env) {
     return Response.json({ error: { code: "method_not_allowed", message: "Use POST for storage operations." } },
       { status: 405, headers: { Allow: "POST" } });
   }
+  if (url.pathname === "/v1/admission") return handleAdmissionRequest(request, env);
   if (url.pathname === "/v1/store") return handleIntelligenceStoreRequest(request, env);
   if (url.pathname === "/v1/auth") return handleIntelligenceAuthRequest(request, env);
   if (url.pathname === "/v1/users") return handleControlUsersRequest(request, env);
