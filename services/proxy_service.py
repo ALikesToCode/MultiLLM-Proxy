@@ -1,6 +1,7 @@
 import json
 import logging
 import requests
+from functools import partial
 from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
 from error_handlers import APIError
@@ -14,6 +15,8 @@ from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
+from services.managed_dispatch import retry_managed_attempt
+from services.retry_advice import retry_advice_settings
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
@@ -1250,6 +1253,7 @@ class ProxyService:
         timeout_override: Optional[Tuple[int, int]] = None,
         force_raw_passthrough: bool = False,
         is_streaming: Optional[bool] = None,
+        deadline: Optional[float] = None,
     ) -> requests.Response:
         """
         Make a base request with retries and error handling
@@ -1262,6 +1266,16 @@ class ProxyService:
             force_raw_passthrough
             or api_provider in RAW_PASSTHROUGH_PROVIDERS
         )
+        next_request = partial(
+            cls._make_base_request, method=method, url=url, headers=headers,
+            params=params, data=data, api_provider=api_provider, use_cache=use_cache,
+            timeout_override=timeout_override, force_raw_passthrough=force_raw_passthrough,
+            deadline=deadline,
+        )
+
+        def next_attempt(count: int) -> requests.Response:
+            return next_request(retry_count=count, is_streaming=is_streaming)
+
         try:
             if not raw_passthrough and retry_count == 0:
                 circuit_response = cls._circuit_open_response(api_provider)
@@ -1325,21 +1339,14 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
-                close_retry_response(response)
-                time.sleep(RETRY_DELAY * (retry_count + 1))
-                return cls._make_base_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=data,
-                    api_provider=api_provider,
-                    use_cache=use_cache,
-                    retry_count=retry_count + 1,
-                    timeout_override=timeout_override,
-                    force_raw_passthrough=force_raw_passthrough,
-                    is_streaming=is_streaming,
+                retried = retry_managed_attempt(
+                    next_attempt,
+                    lambda: classify_upstream_outcome(response.status_code, replay_permission=True),
+                    retry_count=retry_count, max_retries=MAX_RETRIES,
+                    retry_delay=RETRY_DELAY, response=response, deadline=deadline, sleep=time.sleep,
                 )
+                if retried is not None:
+                    return retried
 
             if not is_streaming:
                 try:
@@ -1384,21 +1391,23 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
-                        close_retry_response(response)
-                        time.sleep(RETRY_DELAY * (retry_count + 1))
-                        return cls._make_base_request(
-                            method=method,
-                            url=url,
-                            headers=headers,
-                            params=params,
-                            data=data,
-                            api_provider=api_provider,
-                            use_cache=use_cache,
-                            retry_count=retry_count + 1,
-                            timeout_override=timeout_override,
-                            force_raw_passthrough=force_raw_passthrough,
-                            is_streaming=is_streaming,
+                        replay_allowed = (
+                            not retry_advice_settings().enabled
+                            or (not is_streaming and (
+                                method.upper() in cls.SAFE_RETRY_METHODS
+                                or cls._has_idempotency_key(headers)
+                            ))
                         )
+                        retried = retry_managed_attempt(
+                            next_attempt,
+                            lambda: classify_upstream_outcome(
+                                response.status_code, replay_permission=replay_allowed,
+                            ),
+                            retry_count=retry_count, max_retries=MAX_RETRIES,
+                            retry_delay=RETRY_DELAY, response=response, deadline=deadline, sleep=time.sleep,
+                        )
+                        if retried is not None:
+                            return retried
 
                     if api_provider == "cline-pass" and response.status_code < 400:
                         normalized_payload = cline_completion_payload(normalized_payload)
@@ -1461,20 +1470,16 @@ class ProxyService:
                 and retry_count < MAX_RETRIES
             ):
                 logger.info(f"Retrying request (attempt {retry_count + 1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY * (retry_count + 1))
-                return cls._make_base_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=data,
-                    api_provider=api_provider,
-                    use_cache=use_cache,
-                    retry_count=retry_count + 1,
-                    timeout_override=timeout_override,
-                    force_raw_passthrough=force_raw_passthrough,
-                    is_streaming=is_streaming,
+                retried = retry_managed_attempt(
+                    next_attempt,
+                    lambda error=e: classify_upstream_outcome(
+                        transport_failure=cls._transport_failure_kind(error), replay_permission=True,
+                    ),
+                    retry_count=retry_count, max_retries=MAX_RETRIES,
+                    retry_delay=RETRY_DELAY, deadline=deadline, sleep=time.sleep,
                 )
+                if retried is not None:
+                    return retried
             if not raw_passthrough:
                 cls._record_circuit_result(
                     api_provider, 503,
