@@ -1,3 +1,5 @@
+import { prepareCandidateContext } from "./candidate-context.mjs";
+
 const FAMILY_LIMITS = {
   kimi: {
     contextWindow: 262_144,
@@ -196,11 +198,28 @@ export function prepareRoleplayCandidates(
   estimatedInputTokens,
   requestedOutputTokens,
   settings,
+  context = null,
 ) {
   const prepared = candidates.flatMap((candidate) => {
+    const contextPlan = context
+      ? prepareCandidateContext({
+          contextWindow: candidate.contextWindow,
+          messages: context.messages,
+          outputReserveTokens: candidateOutputCeiling(
+            candidate,
+            requestedOutputTokens,
+            settings.contextReplyReserveTokens,
+          ),
+          safetyTokens: settings.contextSafetyTokens,
+          estimateTokens: context.estimateTokens,
+        })
+      : null;
+    if (contextPlan && !contextPlan.fit) return [];
+    const candidateInputTokens =
+      contextPlan?.estimatedInputTokens ?? estimatedInputTokens;
     const availableOutputTokens =
       candidate.contextWindow -
-      estimatedInputTokens -
+      candidateInputTokens -
       settings.contextSafetyTokens;
     if (availableOutputTokens < 1) {
       return [];
@@ -215,7 +234,10 @@ export function prepareRoleplayCandidates(
     );
     return [
       {
-        candidate: { ...candidate, resolvedMaxOutputTokens },
+        candidate: {
+          ...candidate, resolvedMaxOutputTokens,
+          ...(contextPlan ? { contextPlan } : {}),
+        },
         clamped:
           requestedOutputTokens !== null &&
           resolvedMaxOutputTokens < requestedOutputTokens,

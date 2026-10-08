@@ -215,7 +215,10 @@ export async function roleplayModuleUrl() {
       readFile(endpointUrl, "utf8"),
     ]);
   const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
-  const capacityDataUrl = dataModuleUrl(capacitySource);
+  const candidateContextUrl = new URL("../../worker/roleplay/candidate-context.mjs", import.meta.url);
+  const capacityDataUrl = dataModuleUrl(
+    capacitySource.replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`),
+  );
   const validationDataUrl = dataModuleUrl(validationSource);
   const messageValidationDataUrl = dataModuleUrl(
     messageValidationSource.replace(
@@ -483,6 +486,7 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`)
     .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./recovery.mjs";', `from "${new URL("../../worker/roleplay/recovery.mjs", import.meta.url)}";`)
