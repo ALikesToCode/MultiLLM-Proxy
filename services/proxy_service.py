@@ -13,6 +13,7 @@ from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_
 from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
+from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
@@ -253,8 +254,11 @@ class ProxyService:
         return response
 
     @classmethod
-    def _record_circuit_result(cls, api_provider: str, status_code: int) -> None:
-        ResilienceService.record_result(api_provider, status_code)
+    def _record_circuit_result(
+        cls, api_provider: str, status_code: int, *, outcome: Optional[UpstreamOutcome] = None
+    ) -> None:
+        classified = outcome if outcome is not None else classify_upstream_outcome(status_code)
+        ResilienceService.record_result(api_provider, status_code, outcome=classified)
 
     @classmethod
     def get_google_access_token(cls) -> Optional[str]:
@@ -1472,7 +1476,12 @@ class ProxyService:
                     is_streaming=is_streaming,
                 )
             if not raw_passthrough:
-                cls._record_circuit_result(api_provider, 503)
+                cls._record_circuit_result(
+                    api_provider, 503,
+                    outcome=classify_upstream_outcome(
+                        transport_failure=cls._transport_failure_kind(e),
+                    ),
+                )
             
             # If all retries fail, return a JSON error response
             error_response = requests.Response()
