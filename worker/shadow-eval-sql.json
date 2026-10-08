@@ -52,5 +52,10 @@
     "INSERT INTO shadow_eval_policy_backups (id, created_at, document)\nSELECT :id, :now, document FROM intelligence_policy WHERE id = 1 AND document = :expected",
     "UPDATE intelligence_policy SET document = :document WHERE id = 1 AND document = :expected\nAND EXISTS (SELECT 1 FROM shadow_eval_policy_backups WHERE id = :id AND document = :expected)",
     "DELETE FROM shadow_eval_policy_backups WHERE id IN (SELECT id FROM shadow_eval_policy_backups ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 20)"
+  ],
+  "claim_three_arm": [
+    "UPDATE shadow_eval_config SET day = :day,\nreplay_count = CASE WHEN day = :day THEN replay_count + 9 ELSE 9 END\nWHERE id = 1 AND document = :config AND lease_owner = :run_id AND lease_until > :now\nAND json_extract(document, '$.enabled') = 1\nAND CASE WHEN day = :day THEN replay_count ELSE 0 END + 9 <= json_extract(document, '$.daily_cap')\nAND EXISTS (SELECT 1 FROM shadow_eval_samples WHERE id = :sample_id AND created_at > :cutoff)\nAND NOT EXISTS (SELECT 1 FROM shadow_eval_results WHERE sample_id = :sample_id AND candidate = :candidate) AND EXISTS (SELECT 1 FROM shadow_eval_samples s,\njson_each(shadow_eval_config.document, '$.candidate_models.' || json_extract(s.document, '$.task_type')) m\nWHERE s.id = :sample_id AND m.value = :candidate)",
+    "INSERT INTO shadow_eval_results (id, sample_id, candidate, created_at)\nSELECT :id, :sample_id, :candidate, :now WHERE changes() = 1",
+    "DELETE FROM shadow_eval_results WHERE created_at <= :result_cutoff OR id IN (SELECT id FROM shadow_eval_results ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET 10000)"
   ]
 }
