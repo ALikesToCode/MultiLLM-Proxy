@@ -45,26 +45,57 @@ export function validSample(value, now) {
     && safe(value.request) && safe(value.production_answer);
 }
 
-export function validResult(value) {
+function validNoiseFloor(value) {
+  const outcomes = [null, "win", "loss", "tie"];
+  return fields(value, ["version", "run_id", "seed", "bootstrap_draws", "completed_arms", "candidate_first", "pairs", "repeat"])
+    && value.version === 1 && identifier(value.run_id)
+    && Number.isSafeInteger(value.seed) && value.seed >= 0 && value.seed < 2**32
+    && Number.isSafeInteger(value.bootstrap_draws) && value.bootstrap_draws >= 1 && value.bootstrap_draws <= 5000
+    && Number.isSafeInteger(value.completed_arms) && value.completed_arms >= 0 && value.completed_arms <= 3
+    && Array.isArray(value.candidate_first) && value.candidate_first.length === 3
+    && value.candidate_first.every(value => typeof value === "boolean")
+    && fields(value.pairs, ["ab", "ac", "bc"]) && Object.values(value.pairs).every(value => outcomes.includes(value))
+    && fields(value.repeat, ["model", "latency_ms", "usage", "cost", "tool_validity"])
+    && model(value.repeat.model) && finite(value.repeat.latency_ms) && cleanUsage(value.repeat.usage)
+    && (value.repeat.cost === null || finite(value.repeat.cost))
+    && (value.repeat.tool_validity === null || (fields(value.repeat.tool_validity, ["checked", "valid", "invalid"])
+      && Object.values(value.repeat.tool_validity).every(value => Number.isSafeInteger(value) && value >= 0 && value <= 128)));
+}
+
+export function validResult(value, noiseFloorEnabled = false) {
   const names = ["sample_id", "task_type", "candidate_model", "candidate_route", "production_model", "outcome",
     "judge_model", "latencies", "usage", "costs", "tool_validity"];
+  const threeArm = object(value) && Object.hasOwn(value, "noise_floor");
+  if (threeArm) {
+    if (noiseFloorEnabled !== true || !validNoiseFloor(value.noise_floor)) return false;
+    names.push("noise_floor");
+  }
+  const maxJudges = threeArm ? 6 : 2;
   return object(value) && fields(Object.fromEntries(Object.entries(value).filter(([name]) => name !== "candidate_truncated")), names)
     && (!Object.hasOwn(value, "candidate_truncated") || typeof value.candidate_truncated === "boolean") && identifier(value.sample_id) && TASKS.includes(value.task_type)
     && [value.candidate_model, value.candidate_route, value.production_model, value.judge_model].every(model)
     && ["win", "loss", "tie", "failed", "same_model", "candidate_truncated"].includes(value.outcome)
     && fields(value.latencies, ["production", "candidate", "judges"])
     && finite(value.latencies.production) && finite(value.latencies.candidate)
-    && Array.isArray(value.latencies.judges) && value.latencies.judges.length <= 2 && value.latencies.judges.every(finite)
+    && Array.isArray(value.latencies.judges) && value.latencies.judges.length <= maxJudges && value.latencies.judges.every(finite)
     && fields(value.usage, ["production", "candidate", "judges"])
     && cleanUsage(value.usage.production) && cleanUsage(value.usage.candidate)
-    && Array.isArray(value.usage.judges) && value.usage.judges.length <= 2 && value.usage.judges.every(cleanUsage)
+    && Array.isArray(value.usage.judges) && value.usage.judges.length <= maxJudges && value.usage.judges.every(cleanUsage)
     && fields(value.costs, ["production", "candidate", "judges"])
     && [value.costs.production, value.costs.candidate].every(value => value === null || finite(value))
-    && Array.isArray(value.costs.judges) && value.costs.judges.length <= 2
+    && Array.isArray(value.costs.judges) && value.costs.judges.length <= maxJudges
     && value.costs.judges.every(value => value === null || finite(value))
     && (value.tool_validity === null || (fields(value.tool_validity, ["production", "candidate"])
       && Object.values(value.tool_validity).every(value => fields(value, ["checked", "valid", "invalid"])
         && Object.values(value).every(value => Number.isSafeInteger(value) && value >= 0 && value <= 128))))
+    && (!threeArm || (value.latencies.judges.length === value.usage.judges.length
+      && value.usage.judges.length === value.costs.judges.length
+      && (!["win", "loss", "tie"].includes(value.outcome)
+        || (value.noise_floor.completed_arms === 3 && value.usage.judges.length === 6
+          && Object.values(value.noise_floor.pairs).every(value => value !== null)
+          && value.noise_floor.repeat.model === value.production_model && value.candidate_model !== value.production_model
+          && !value.candidate_truncated
+          && value.outcome === (value.noise_floor.pairs.ac === value.noise_floor.pairs.bc ? value.noise_floor.pairs.ac : "tie")))))
     && bytes(value) <= 4096;
 }
 
@@ -72,13 +103,15 @@ const FIELDS = {
   cleanup: [], config_get: [], config_seed: ["document"], config_save: ["document", "expected"],
   put: ["id", "created_at", "document"], sample: ["id"], samples: [], pending: ["task", "candidate"],
   lease: ["run_id", "until"], release: ["run_id"], claim: ["sample_id", "candidate", "config", "run_id", "id"],
+  claim_three_arm: ["sample_id", "candidate", "config", "run_id", "id"],
   finish: ["id", "document"], results: ["after"], purge: [], apply: ["expected", "document", "id"],
 };
 const canonical = value => JSON.stringify(object(value)
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, JSON.parse(canonical(value[key]))]))
   : Array.isArray(value) ? value.map(item => JSON.parse(canonical(item))) : value);
 
-function validBody(body, now) {
+function validBody(body, now, noiseFloorEnabled = false) {
+  if (body.operation === "claim_three_arm" && !noiseFloorEnabled) return false;
   const names = FIELDS[body.operation];
   if (!names || !fields(body, ["version", "operation", ...names]) || body.version !== 1) return false;
   for (const name of ["id", "sample_id", "run_id"]) if (Object.hasOwn(body, name) && !identifier(body[name])) return false;
@@ -91,9 +124,9 @@ function validBody(body, now) {
     if (typeof body[name] !== "string" || new TextEncoder().encode(body[name]).length > 131072) return false;
     try {
       const value = JSON.parse(body[name]);
-      if (["config_seed", "config_save", "claim"].includes(body.operation) && !validConfig(value)) return false;
+      if (["config_seed", "config_save", "claim", "claim_three_arm"].includes(body.operation) && !validConfig(value)) return false;
       if (body.operation === "put" && (!validSample(value, now) || value.id !== body.id || value.created_at !== body.created_at)) return false;
-      if (body.operation === "finish" && !validResult(value)) return false;
+      if (body.operation === "finish" && !validResult(value, noiseFloorEnabled)) return false;
       if (body.operation === "apply") validatePolicy(value);
     } catch { return false; }
   }
@@ -113,7 +146,8 @@ export async function handleShadowEvalRequest(request, env) {
   try {
     if (request.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/json") throw new Error();
     body = JSON.parse(await boundedBody(request, 262144));
-    if (!object(body) || !validBody(body, now)) throw new Error();
+    const noiseFloorEnabled = String(env.SHADOW_EVAL_NOISE_FLOOR_ENABLED || "").toLowerCase() === "true";
+    if (!object(body) || !validBody(body, now, noiseFloorEnabled)) throw new Error();
   } catch { return reply("invalid_request", 400); }
   const db = env.INTELLIGENCE_DB;
   if (!db) return reply("storage_unavailable", 503);
@@ -135,7 +169,7 @@ export async function handleShadowEvalRequest(request, env) {
     if (["config_get", "sample", "pending"].includes(body.operation)) {
       result = results[0].results.length ? JSON.parse(results[0].results[0].document) : null;
     } else if (["samples", "results"].includes(body.operation)) result = results[0].results;
-    else result = results[["claim", "apply"].includes(body.operation) ? 1 : 0].meta.changes === 1;
+    else result = results[["claim", "claim_three_arm", "apply"].includes(body.operation) ? 1 : 0].meta.changes === 1;
     return reply(result);
   } catch (error) {
     logFailure("shadow_eval_storage_failed", error);

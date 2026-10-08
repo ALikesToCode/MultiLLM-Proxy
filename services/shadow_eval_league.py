@@ -5,6 +5,7 @@ import hashlib
 from statistics import mean, median
 
 from services.shadow_eval_contract import encoded
+from services import evaluation_noise_floor as noise_floor
 
 
 # Anchor Elo differences to existing absolute policy scores (100 Elo = 10 points).
@@ -14,8 +15,11 @@ MAX_STEP = 15
 
 
 def league(results):
+    results = list(results)
     rows = {}
     for result in sorted(results, key=lambda value: (value.get("_created_at", 0), value.get("_id", ""))):
+        if "noise_floor" in result and not noise_floor.enabled():
+            continue
         if result.get("candidate_truncated") or result["outcome"] not in {"win", "loss", "tie"} or result["candidate_model"] == result["production_model"]:
             continue
         task = result["task_type"]
@@ -46,7 +50,8 @@ def league(results):
         row["median_latency_ms"] = median(row.pop("latencies"))
         costs = row.pop("costs")
         row["median_cost_usd"] = median(costs) if costs else None
-    return sorted(rows.values(), key=lambda row: (row["task_type"], -row["rating"], row["model"]))
+    ordered = sorted(rows.values(), key=lambda row: (row["task_type"], -row["rating"], row["model"]))
+    return noise_floor.annotate_league(ordered, results) if noise_floor.enabled() else ordered
 
 
 def proposal(policy, rows, auto_routes=()):
@@ -58,7 +63,7 @@ def proposal(policy, rows, auto_routes=()):
     changes = []
     anchors = {}
     for task in {row["task_type"] for row in rows}:
-        rated = [row for row in rows if row["task_type"] == task and row["sample_count"] >= 20]
+        rated = [row for row in rows if row["task_type"] == task and noise_floor.reviewable(row)]
         if not rated:
             continue
         scores = [candidates[row["model"]]["task_scores"][task] for row in rated
@@ -66,7 +71,7 @@ def proposal(policy, rows, auto_routes=()):
         anchors[task] = (mean(scores) if scores else 70, mean(row["rating"] for row in rated))
     for row in rows:
         candidate = candidates.get(row["model"])
-        if row["sample_count"] < 20 or candidate is None:
+        if not noise_floor.reviewable(row) or candidate is None or row.get("noise_floor", {}).get("role") == "baseline":
             continue
         task = row["task_type"]
         anchor, mean_rating = anchors[task]
@@ -82,13 +87,17 @@ def proposal(policy, rows, auto_routes=()):
     orders = []
     for route in list(auto_routes)[:128]:
         for task in sorted({row["task_type"] for row in rows}):
-            ratings = {row["model"]: row["rating"] for row in rows if row["task_type"] == task and row["sample_count"] >= 20}
+            ratings = {row["model"]: row["rating"] for row in rows if row["task_type"] == task and noise_floor.reviewable(row)}
             if not ratings or not all(model in ratings for model in route.candidates):
                 continue
             order = sorted(route.candidates, key=lambda model: -ratings[model])
             if order != list(route.candidates):
                 orders.append({"route": route.id, "task_type": task, "from": list(route.candidates), "to": order})
     document = {"policy_diff": changes, "suggested_auto_route_orders": orders, "policy": updated}
+    if noise_floor.enabled():
+        cohorts = {encoded(item): item for row in rows for item in row.get("noise_floor", {}).get("cohorts", [])}
+        if cohorts:
+            document["noise_floor"] = [cohorts[key] for key in sorted(cohorts)]
     document["revision"] = hashlib.sha256(encoded({"base": policy, **document}).encode()).hexdigest()
     return document
 

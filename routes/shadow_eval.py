@@ -16,6 +16,7 @@ from services.shadow_eval_league import league, proposal, result_counts
 from services.shadow_eval_runner import start_run
 from services.shadow_eval_sampling import sampling_counts
 from services.shadow_eval_store import ShadowEvalStore
+from services import evaluation_noise_floor as noise_floor
 
 
 def current_proposal():
@@ -110,7 +111,20 @@ def register_shadow_eval_routes(app, csrf, auth, metrics, proxy):
         from flask import g
         if not getattr(g, "authenticated_user", {}).get("is_admin"):
             raise APIError("Administrator API authentication required", 403)
+        body = request.get_json(silent=True)
+        options = None
+        if isinstance(body, dict) and "three_arm" in body:
+            try:
+                if not noise_floor.enabled():
+                    raise ValueError("Three-arm evaluation is disabled")
+                options = noise_floor.run_options(body)
+            except ValueError as error:
+                raise APIError(str(error), 400) from None
         config = ShadowEvalStore.config()
         if not config["enabled"]:
             return jsonify({"started": False, "reason": "disabled"})
+        if options is not None:
+            if config["max_replays_per_run"] < noise_floor.CALL_UNITS:
+                raise APIError("Three-arm evaluation requires at least nine calls per run", 400)
+            return jsonify({"started": start_run(app, dispatch, options=options)}), 202
         return jsonify({"started": start_run(app, dispatch)}), 202
