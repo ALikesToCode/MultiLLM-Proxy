@@ -14,14 +14,14 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Optional
 
 from flask import Response, current_app, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
-from services import key_controls, telemetry_export, usage_ledger
+from services import key_controls, prompt_cache_cost, telemetry_export, usage_ledger
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
 from services.usage_types import StreamUsageObserver, UsageObservation
@@ -273,11 +273,17 @@ def _qualified(model: str, provider: Optional[str]) -> str:
 
 def _usage_from(value: Any) -> Optional[UsageObservation]:
     """Input and output tokens from a Chat Completions, Responses or embeddings body."""
-    return UsageObservation.from_body(value)
+    return (prompt_cache_cost.CacheObservation.from_body(value) if prompt_cache_cost.enabled()
+            else UsageObservation.from_body(value))
+
+
+def _usage_observer():
+    return (prompt_cache_cost.CacheStreamObserver(SSE_TAIL_BYTES) if prompt_cache_cost.enabled()
+            else StreamUsageObserver(SSE_TAIL_BYTES))
 
 
 def _sse_usage(tail: bytes) -> Optional[UsageObservation]:
-    observer = StreamUsageObserver(SSE_TAIL_BYTES)
+    observer = _usage_observer()
     observer.feed(tail)
     return observer.finish()
 
@@ -367,8 +373,10 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
                 context.input_tokens, context.output_tokens)
             selected = context.selected or row["selected_model"]
             models = [selected] if selected else [_qualified(model, context.provider) for model in context.models]
-            budget_row = {**row, "cost_usd": price(models, estimated.input_tokens,
-                                                  estimated.output_tokens, context.units)}
+            estimate = (prompt_cache_cost.budget_price(models, estimated, context.units)
+                        if prompt_cache_cost.enabled() else price(models, estimated.input_tokens,
+                                                                  estimated.output_tokens, context.units))
+            budget_row = {**row, "cost_usd": estimate}
         BudgetService.record_cost(budget_row)
         usage_ledger.LEDGER.record(row)
         telemetry_export.EXPORTER.submit({**row, "method": context.method, "trace_id": context.trace[0],
@@ -383,7 +391,8 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
 
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
     if usage is not None and context.path == "/v1/embeddings":
-        usage = UsageObservation(usage.input_tokens, 0, "provider", ("provider",))
+        usage = (replace(usage, output_tokens=0) if isinstance(usage, prompt_cache_cost.CacheObservation)
+                 else UsageObservation(usage.input_tokens, 0, "provider", ("provider",)))
     qualified = [_qualified(model, context.provider) for model in context.models]
     requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
     selected = context.selected or (requested if requested and requested != "mixed"
@@ -396,11 +405,12 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
     elif status < 400 or usage is not None:
         observation = usage if usage is not None else UsageObservation().with_estimates(
             context.input_tokens, context.output_tokens)
-        cost = price([selected] if selected else qualified, observation.input_tokens,
-                     observation.output_tokens, context.units)
-        basis = observation.storage_basis(cost)
+        if not (prompt_cache_cost.enabled() and context.kind in {"chat", "responses", "proxy", "embeddings"}):
+            cost = price([selected] if selected else qualified, observation.input_tokens,
+                         observation.output_tokens, context.units)
+            basis = observation.storage_basis(cost)
     prefix = context.user.get("api_key_prefix")
-    return {
+    row = {
         "at": usage_ledger.utc_timestamp(),
         "principal": str(context.user.get("username") or context.user.get("id") or "unknown")[:256],
         "key_prefix": str(prefix)[:64] if prefix else None,
@@ -416,6 +426,15 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         "cost_basis": basis,
         "request_id": context.request_id,
     }
+    if prompt_cache_cost.enabled() and context.kind in {"chat", "responses", "proxy", "embeddings"}:
+        breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)
+        row.update({name: breakdown[name] for name in prompt_cache_cost.ROW_FIELDS})
+        if context.cached and status < 400:
+            row.update({name: 0.0 for name in prompt_cache_cost.COST_FIELDS})
+        elif status < 400 or usage is not None:
+            row["cost_usd"] = breakdown["cost_usd"]
+            row["cost_basis"] = usage.storage_basis(row["cost_usd"]) if usage is not None else None
+    return row
 
 
 def _capture(context: UsageContext) -> None:
@@ -436,7 +455,7 @@ class _SniffedStream:
         self._iterator = iter(iterable)
         self._on_close = on_close
         self._tail = b""
-        self._usage = StreamUsageObserver(SSE_TAIL_BYTES) if event_stream else None
+        self._usage = _usage_observer() if event_stream else None
 
     def __iter__(self):
         return self

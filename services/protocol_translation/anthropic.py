@@ -850,6 +850,10 @@ def _message_id(value: Any) -> str:
 
 
 def _anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
+    from services import prompt_cache_cost
+
+    if prompt_cache_cost.enabled():
+        return prompt_cache_cost.anthropic_to_chat(dict(usage))
     def count(key: str) -> int:
         value = usage.get(key)
         return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
@@ -862,6 +866,10 @@ def _anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
 
 
 def _chat_usage_to_anthropic(usage: Any) -> dict:
+    from services import prompt_cache_cost
+
+    if prompt_cache_cost.enabled():
+        return prompt_cache_cost.chat_to_anthropic(usage)
     numbers = usage_numbers(usage)
     return {
         "input_tokens": max(0, numbers["prompt"] - numbers["cached"] - numbers["cache_write"]),

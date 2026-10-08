@@ -70,9 +70,10 @@ test("key controls and the usage ledger persist through the Worker in D1", async
 });
 
 test("a D1 without the account migration fails closed for dashboard keys but not for the environment admin", async t => {
-  // 0007, 0011 and 0013 alter control_users, so they are skipped with the migration that creates the table.
+  // 0007, 0011 and 0013 alter control_users, so they are skipped with the migration that creates the table;
+  // 0016 alters 0007's usage_events.
   const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql",
-    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql"]);
+    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0016_usage_buckets.sql"]);
   assert.deepEqual(await drive(url, "unmigrated"), { dashboard_key: 503, admin: "admin",
     route: ["gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5"], save_route: 503 });
 });
