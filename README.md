@@ -38,6 +38,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🩺 [Upstream outcomes](docs/upstream-outcomes.md) separate valid responses, credential rejection, throttling and ambiguous transport failure in circuit recovery
 - 📊 Request, latency, response-class, and configured cost telemetry
 - 🚀 Streaming support for compatible providers
+- 🛂 Opt-in [first-event stream validation](docs/stream-preflight.md) before an `auto:` route commits to a provider
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
