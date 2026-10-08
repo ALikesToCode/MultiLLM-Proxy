@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 from providers.registry import get_registry
-from services import auto_route_d1
+from services import auto_route_d1, config_revision_sync
 from services.model_registry import ModelRegistry
 from services.sqlite_store import connect, storage_path
 
@@ -404,7 +404,9 @@ class AutoRouteService:
     @classmethod
     def _durable_routes(cls) -> list[AutoRoute]:
         """Seeded defaults overlaid by the routes operators saved in D1."""
-        stored = auto_route_d1.stored_routes()
+        stored = config_revision_sync.route_copy()
+        if stored is None:
+            stored = auto_route_d1.stored_routes()
         routes = {route_id: AutoRoute(route_id, candidates, "") for route_id, candidates in DEFAULT_AUTO_ROUTES.items()}
         for route_id, (candidates, updated_at) in stored.items():
             # A route still holding a retired default follows the current default.

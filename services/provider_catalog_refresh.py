@@ -128,6 +128,9 @@ class ProviderCatalogAutoRefresh:
 
 def start_provider_catalog_refresh(app, auth_service_cls, proxy_service_cls):
     """Start the background provider catalog refresh when it is enabled."""
+    from services.config_revision_sync import request_poll
+
+    request_poll(app)
     refresher = app.extensions.get("provider_catalog_refresh")
     if refresher is None or not app.config.get("PROVIDER_CATALOG_AUTO_REFRESH", True):
         return None
@@ -141,3 +144,20 @@ def refresh_model_catalogs(app, auth_service_cls, proxy_service_cls) -> None:
     refresher = app.extensions.get("provider_catalog_refresh")
     if refresher is not None:
         refresher.wait_for_first_refresh()
+
+
+def refresh_provider_catalog_revision(revision):
+    """Load the durable catalog strictly; an outage leaves the last installed copy intact."""
+    from services import control_state_d1, provider_catalog_d1
+
+    fetched = {}
+    listing = provider_catalog_d1._listing(control_state_d1.call(provider_catalog_d1.ENDPOINT, "list"))
+    for provider in listing:
+        snapshot = provider_catalog_d1._snapshot(
+            control_state_d1.call(provider_catalog_d1.ENDPOINT, "get", provider=provider), provider)
+        if snapshot is None:
+            raise ValueError("Catalog snapshot disappeared during refresh")
+        fetched[provider] = snapshot
+    with provider_catalog_d1._refresh_lock, provider_catalog_d1._lock:
+        provider_catalog_d1._state.update(snapshots=fetched, loaded=True, expires=float("inf"),
+                                          version=provider_catalog_d1._state["version"] + 1)
