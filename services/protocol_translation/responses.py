@@ -47,8 +47,11 @@ INTERRUPTED_REASON = "upstream_interrupted"
 
 
 def responses_request_to_chat(payload: Mapping[str, Any]) -> dict:
+    from services.protocol_extras import validate_request_extras
+
     if not isinstance(payload, Mapping):
         raise TranslationError("The request body must be a JSON object")
+    validate_request_extras(payload, "responses")
     for field, feature in _STATEFUL_FIELDS.items():
         if payload.get(field):
             raise TranslationError(
@@ -314,8 +317,11 @@ def _text_format_to_chat(fmt: Any) -> dict | None:
 
 
 def chat_request_to_responses(payload: Mapping[str, Any]) -> dict:
+    from services.protocol_extras import validate_request_extras
+
     if not isinstance(payload, Mapping):
         raise TranslationError("The request body must be a JSON object")
+    validate_request_extras(payload, "chat")
     if payload.get("n") not in (None, 1):
         raise TranslationError("The Responses API returns one output; n must be 1", param="n")
     if payload.get("audio") or "audio" in (payload.get("modalities") or []):
@@ -492,6 +498,9 @@ def _chat_content_to_input(content: Any, index: int) -> Any:
 def responses_response_to_chat(
     payload: Mapping[str, Any], *, model: str | None = None, **_: Any
 ) -> dict:
+    from services.protocol_extras import validate_response_extras
+
+    validate_response_extras(payload)
     status = payload.get("status")
     if status == "failed" or (payload.get("error") and status not in ("completed", "incomplete")):
         reason, error_type, code = error_details({"error": payload.get("error") or {}})
@@ -562,6 +571,9 @@ def chat_response_to_responses(
     request: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> dict:
+    from services.protocol_extras import validate_response_extras
+
+    validate_response_extras(payload)
     message, finish = first_chat_choice(payload)
     output: list[dict] = []
     reasoning = message_reasoning(message)
