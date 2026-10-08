@@ -11,6 +11,7 @@ from contextlib import closing
 from email.utils import parsedate_to_datetime
 
 from services import free_quota_d1
+from services.retry_advice import parse_retry_advice, retry_advice_settings
 from services.sqlite_store import connect, storage_path
 
 MAX_COOLDOWN = 7 * 24 * 3600
@@ -30,6 +31,11 @@ def reset_seconds(value: str) -> float | None:
 
 
 def retry_seconds(headers, now: float, default: int = 60) -> int:
+    settings = retry_advice_settings()
+    if settings.enabled:
+        advice = parse_retry_advice(headers, now=now, max_seconds=settings.max_seconds)
+        delay = advice.delay_seconds if advice is not None else default
+        return min(settings.max_seconds, max(1, math.ceil(delay)))
     normalized = {k.lower(): v for k, v in headers.items()}
     value = normalized.get("retry-after", "")
     delay = None
