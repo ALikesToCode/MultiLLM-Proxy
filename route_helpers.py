@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = (
-    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, "
+    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, "
     "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
     "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
     "Idempotency-Key, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, "
+    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
