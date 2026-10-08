@@ -191,6 +191,10 @@ def _mcp_tool(identifier, params):
         return _rpc_result(identifier, {"isError": True, "content": [{"type": "text", "text": json.dumps({
             "error": {"code": "insufficient_scope", "message": "The key is not authorized for this Knowledge tool."},
         })}]})
+    try:
+        mcp.check_contract_pin(tool_name, request.headers.get("X-MultiLLM-MCP-Contract"), definition=entry["definition"])
+    except KnowledgeError as error:
+        return _rpc_error(identifier, error.code, error.message, error.status)
     arguments = params.get("arguments", {})
     if not isinstance(arguments, dict):
         return _rpc_error(identifier, -32602, "Tool arguments must be an object.")
@@ -256,9 +260,8 @@ def _mcp():
             toolsets = mcp.requested_toolsets(request.args.get("toolsets"))
         except ValueError:
             return _rpc_error(identifier, -32602, f"Unknown toolset. Use any of: {', '.join(mcp.TOOLSETS)}.")
-        return _rpc_result(identifier, {"tools": [entry["definition"] for entry in _CATALOGUE["tools"]
-            if management.permits(g.authenticated_user, entry["scope"])
-            and (toolsets is None or entry["toolset"] in toolsets)]})
+        return _rpc_result(identifier, mcp.discovery_for_user(
+            g.authenticated_user, toolsets, entries=_CATALOGUE["tools"]))
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     return _mcp_tool(identifier, params)

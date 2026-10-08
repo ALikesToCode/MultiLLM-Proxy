@@ -1,0 +1,2699 @@
+{
+  "format": "multillm-mcp-contract-v1",
+  "contract_version": "1.0.0",
+  "vectors": [
+    {
+      "definition": {
+        "name": "knowledge_test",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "b": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "a": {
+              "minimum": 1.0,
+              "x-vendor": {
+                "東京": "café",
+                "values": [
+                  true,
+                  null,
+                  -0.0,
+                  1e-07
+                ]
+              }
+            }
+          },
+          "required": [
+            "b",
+            "a"
+          ]
+        },
+        "outputSchema": {
+          "type": "string"
+        }
+      },
+      "contract_version": "1.0.0",
+      "canonical": "[\"object\",[[\"contractVersion\",[\"string\",\"1.0.0\"]],[\"inputSchema\",[\"object\",[[\"properties\",[\"object\",[[\"a\",[\"object\",[[\"minimum\",[\"number\",\"3ff0000000000000\"]],[\"x-vendor\",[\"object\",[[\"values\",[\"array\",[[\"boolean\",true],[\"null\"],[\"number\",\"0000000000000000\"],[\"number\",\"3e7ad7f29abcaf48\"]]]],[\"東京\",[\"string\",\"café\"]]]]]]]],[\"b\",[\"object\",[[\"type\",[\"array\",[[\"string\",\"string\"],[\"string\",\"null\"]]]]]]]]]],[\"required\",[\"array\",[[\"string\",\"b\"],[\"string\",\"a\"]]]],[\"type\",[\"string\",\"object\"]]]]],[\"name\",[\"string\",\"knowledge_test\"]],[\"outputSchema\",[\"object\",[[\"type\",[\"string\",\"string\"]]]]]]]",
+      "digest": "86ca5e6572acf7096006d501b4eaebb0a8c5344672ff34025f553fa90e0554ae"
+    },
+    {
+      "definition": {
+        "name": "knowledge_😀",
+        "inputSchema": {
+          "": 1,
+          "😀": 2,
+          "type": "object",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "contract_version": "1.0.0",
+      "canonical": "[\"object\",[[\"contractVersion\",[\"string\",\"1.0.0\"]],[\"inputSchema\",[\"object\",[[\"anyOf\",[\"array\",[[\"object\",[[\"type\",[\"string\",\"string\"]]]],[\"object\",[[\"type\",[\"string\",\"number\"]]]]]]],[\"type\",[\"string\",\"object\"]],[\"\",[\"number\",\"3ff0000000000000\"]],[\"😀\",[\"number\",\"4000000000000000\"]]]]],[\"name\",[\"string\",\"knowledge_😀\"]],[\"outputSchema\",[\"null\"]]]]",
+      "digest": "b581ac9b31927692d5fb4bb84ad51081c9e0235a17513ccdec91dc1b482f231f"
+    },
+    {
+      "definition": {
+        "name": "knowledge_test",
+        "inputSchema": true
+      },
+      "contract_version": "1.0.0",
+      "canonical": "[\"object\",[[\"contractVersion\",[\"string\",\"1.0.0\"]],[\"inputSchema\",[\"boolean\",true]],[\"name\",[\"string\",\"knowledge_test\"]],[\"outputSchema\",[\"null\"]]]]",
+      "digest": "bed47def1f7c19e8d07d34874b2d486f799d4a25349711cda9102a208f52c0d3"
+    }
+  ],
+  "tools": [
+    {
+      "definition": {
+        "name": "knowledge_context",
+        "description": "Retrieve cited technical excerpts with explicit version evidence and gaps.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[\\w.-]+/[\\w.-]+$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "economy",
+                "smart",
+                "deep"
+              ],
+              "default": "smart"
+            },
+            "token_budget": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 16000,
+              "default": 6000
+            },
+            "freshness": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "fresh"
+              ],
+              "default": "normal"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "b1e612922e794405c5da6639992111a9c60ab0a0e93665d03a533fd826c4b666"
+    },
+    {
+      "definition": {
+        "name": "knowledge_search",
+        "description": "Search technical sources and inspect normalized retrieval diagnostics.",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[\\w.-]+/[\\w.-]+$"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "economy",
+                "smart",
+                "deep"
+              ],
+              "default": "smart"
+            },
+            "token_budget": {
+              "type": "integer",
+              "minimum": 256,
+              "maximum": 16000,
+              "default": 6000
+            },
+            "freshness": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "fresh"
+              ],
+              "default": "normal"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "0b3d1e62a1c5aba33599c48e7e084a8fad9ee6e16111e30cefeb15242260921e"
+    },
+    {
+      "definition": {
+        "name": "knowledge_alexandria_search",
+        "description": "Discover Alexandria capabilities for free. Only returned quote ids can be inspected or executed.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "cafc8da9f81dfc89fab02c5132223069d65089cd959d071e7538234ed7d49810"
+    },
+    {
+      "definition": {
+        "name": "knowledge_alexandria_inspect",
+        "description": "Inspect a discovered capability's inputs and response contract for free.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quote_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "quote_id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "7a54ca8b0bada37be5dc11f905989e005c43d525d78a7a8f753ffebc1778d259"
+    },
+    {
+      "definition": {
+        "name": "knowledge_alexandria_execute",
+        "description": "Spend Firecrawl credits to execute a recently discovered quote. Choose options from its contract; reserve_credits counts against the allowance but is not an upstream price cap. Per-record pricing requires accept_variable_cost=true. Reuse request_id for the same request; never retry with a new id after an unknown outcome. Report the returned cost to the user.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quote_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "options": {
+              "type": "object"
+            },
+            "reserve_credits": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "accept_variable_cost": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "quote_id",
+            "request_id",
+            "options",
+            "reserve_credits"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "5a463eb856ce9a6fefd19a31a77a7028857baad608fbc4842bb45674fcc8027f"
+    },
+    {
+      "definition": {
+        "name": "knowledge_alexandria_receipt",
+        "description": "Read a previous request's credit receipt without executing the provider again. No charge.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "request_id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      },
+      "digest": "3b76a3b68d7306dbc4d528f999cef41cecf87ad931342f2a18e5273b5e1eec7e"
+    },
+    {
+      "definition": {
+        "name": "knowledge_context7_resolve_library",
+        "description": "Context7: find libraries by name and return their Context7 IDs, versions, snippet counts and trust scores. Use the returned id with knowledge_context7_docs.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "libraryName",
+            "query"
+          ],
+          "properties": {
+            "libraryName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "Library or product name, for example react, next.js or express."
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000,
+              "description": "The task or question, used to rank matching libraries."
+            },
+            "fast": {
+              "type": "boolean",
+              "description": "Skip Context7's reranking for lower latency."
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "e6e2c1cbdce24860e06bd7589854568d9e52d40ecd03aaafbba816c389491e64"
+    },
+    {
+      "definition": {
+        "name": "knowledge_context7_docs",
+        "description": "Context7: up-to-date documentation and code examples for one library, ranked for a question. Accepts /owner/repo or /owner/repo/version IDs from knowledge_context7_resolve_library.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "libraryId",
+            "query"
+          ],
+          "properties": {
+            "libraryId": {
+              "type": "string",
+              "pattern": "^/[^\\s?#]{1,300}$",
+              "description": "Context7 library ID such as /vercel/next.js or /vercel/next.js/v15.1.8."
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000,
+              "description": "What you need from the documentation."
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "json",
+                "txt"
+              ],
+              "default": "json",
+              "description": "json returns structured snippets; txt returns LLM-ready text."
+            },
+            "fast": {
+              "type": "boolean",
+              "description": "Skip Context7's reranking for lower latency."
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "be8bc7b689eec0fdfc62200b863de277ae4b196b3dd1df3e0e00fe11657998ba"
+    },
+    {
+      "definition": {
+        "name": "knowledge_exa_search",
+        "description": "Exa: web search with full Exa options (search type, result count, categories, domain and date filters, and page text, highlights or summaries under contents). Units grow with deep search types, results above 10 and content pages; keys without knowledge:manage may request at most 25 results and 5 subpages.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "fast",
+                "instant",
+                "deep-lite",
+                "deep",
+                "deep-reasoning"
+              ],
+              "default": "auto"
+            },
+            "numResults": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10,
+              "description": "Results to return. Above 25 requires knowledge:manage."
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "company",
+                "research paper",
+                "news",
+                "pdf",
+                "github",
+                "personal site",
+                "people",
+                "financial report"
+              ]
+            },
+            "includeDomains": {
+              "type": "array",
+              "maxItems": 1200,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "excludeDomains": {
+              "type": "array",
+              "maxItems": 1200,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "startPublishedDate": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "endPublishedDate": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "startCrawlDate": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "endCrawlDate": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "includeText": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "excludeText": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "userLocation": {
+              "type": "string",
+              "maxLength": 8
+            },
+            "moderation": {
+              "type": "boolean"
+            },
+            "additionalQueries": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "contents": {
+              "type": "object",
+              "description": "Exa contents options, for example {\"highlights\": true} or {\"text\": {\"maxCharacters\": 10000}, \"summary\": true, \"maxAgeHours\": 0}."
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "77bd6e5fb82f502ecc4fa654532228b3ff623ac1f6c74a5cb9db53e853700ad1"
+    },
+    {
+      "definition": {
+        "name": "knowledge_exa_contents",
+        "description": "Exa: fetch clean page text, highlights or summaries for known URLs (crawl), optionally forcing a fresh crawl with maxAgeHours 0. Units are charged per 10 pages per content type; keys without knowledge:manage may fetch at most 25 URLs with 5 subpages each.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 2048
+              }
+            },
+            "text": {
+              "type": [
+                "boolean",
+                "object"
+              ]
+            },
+            "highlights": {
+              "type": [
+                "boolean",
+                "object"
+              ]
+            },
+            "summary": {
+              "type": [
+                "boolean",
+                "object"
+              ]
+            },
+            "maxAgeHours": {
+              "type": "integer",
+              "minimum": -1,
+              "maximum": 100000
+            },
+            "livecrawlTimeout": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 90000
+            },
+            "subpages": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "subpageTarget": {
+              "type": [
+                "string",
+                "array"
+              ]
+            },
+            "extras": {
+              "type": "object"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "2ea7ab1fd00e8534c414da2452b15bcc1e11a03355dfd171ac1959bff7722e2a"
+    },
+    {
+      "definition": {
+        "name": "knowledge_exa_code_context",
+        "description": "Exa Code: code examples and API usage context for libraries, SDKs and frameworks, gathered from GitHub, docs and Q&A.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "tokensNum": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 50,
+                  "maximum": 100000
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "dynamic"
+                  ]
+                }
+              ],
+              "default": "dynamic"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "b5a10f4339fdf177938fe651da268122d55e34b0f48578025d771e27b314eef7"
+    },
+    {
+      "definition": {
+        "name": "knowledge_exa_answer",
+        "description": "Exa: a generated answer to a question with the web sources it cites; optionally structured by outputSchema. Including source text costs an extra unit.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "text": {
+              "type": "boolean",
+              "description": "Include full text of the cited sources."
+            },
+            "systemPrompt": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "outputSchema": {
+              "type": "object"
+            },
+            "userLocation": {
+              "type": "string",
+              "maxLength": 8
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "4079b6755a8b00df98ac19763170dd600fa7f1b015c30deef205720020a3898b"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_scrape",
+        "description": "Firecrawl: scrape one page into markdown, HTML, links, screenshots, summaries or JSON, with waits, location and proxy options. LLM formats (json, summary, changeTracking) and enhanced proxies cost more units. Custom headers, browser actions, skipped TLS checks and enhanced or stealth proxies require knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "formats": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": [
+                  "string",
+                  "object"
+                ]
+              }
+            },
+            "onlyMainContent": {
+              "type": "boolean"
+            },
+            "includeTags": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "excludeTags": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "maxAge": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "headers": {
+              "type": "object",
+              "description": "Requires knowledge:manage."
+            },
+            "waitFor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000
+            },
+            "mobile": {
+              "type": "boolean"
+            },
+            "skipTlsVerification": {
+              "type": "boolean",
+              "description": "Requires knowledge:manage."
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000
+            },
+            "parsers": {
+              "type": "array",
+              "maxItems": 10
+            },
+            "actions": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object"
+              },
+              "description": "Requires knowledge:manage."
+            },
+            "location": {
+              "type": "object"
+            },
+            "removeBase64Images": {
+              "type": "boolean"
+            },
+            "blockAds": {
+              "type": "boolean"
+            },
+            "proxy": {
+              "type": "string",
+              "enum": [
+                "basic",
+                "stealth",
+                "enhanced",
+                "auto"
+              ],
+              "description": "enhanced and stealth require knowledge:manage and cost up to 5 units per page."
+            },
+            "storeInCache": {
+              "type": "boolean"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "fefc031664b32966bfef7f56c1e9730888870eebcc234a5085a9886650b10d4f"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_search",
+        "description": "Firecrawl: search the web, news, images or GitHub/research categories and optionally scrape each result with scrapeOptions. Units: 2 per 10 results plus each scraped page; keys without knowledge:manage may request at most 25 results.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 5,
+              "description": "Results to return. Above 25 requires knowledge:manage."
+            },
+            "sources": {
+              "type": "array",
+              "maxItems": 3,
+              "items": {
+                "type": [
+                  "string",
+                  "object"
+                ]
+              }
+            },
+            "categories": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": [
+                  "string",
+                  "object"
+                ]
+              }
+            },
+            "tbs": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "location": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "country": {
+              "type": "string",
+              "maxLength": 8
+            },
+            "includeDomains": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "excludeDomains": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000
+            },
+            "ignoreInvalidURLs": {
+              "type": "boolean"
+            },
+            "scrapeOptions": {
+              "type": "object"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "40a537895075604146169d292d1010c946f46b952e10288cb75570c5cfacfe75"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_map",
+        "description": "Firecrawl: list the URLs of a website from its sitemap, search results and links, optionally ranked by a search term.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "search": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "sitemap": {
+              "type": "string",
+              "enum": [
+                "skip",
+                "include",
+                "only"
+              ]
+            },
+            "includeSubdomains": {
+              "type": "boolean"
+            },
+            "ignoreQueryParameters": {
+              "type": "boolean"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000
+            },
+            "location": {
+              "type": "object"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "98e5b9d51316ff0dd8ac9a2be6f491e7802fd497089c8075338cd7b426c958be"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_crawl",
+        "description": "Firecrawl: start an asynchronous crawl of a website and return its job id; read pages with knowledge_firecrawl_crawl_status. Units are charged per page limit and page cost; keys without knowledge:manage may crawl at most 100 pages and cannot follow external links.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "prompt": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "includePaths": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "excludePaths": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "maxDiscoveryDepth": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "sitemap": {
+              "type": "string",
+              "enum": [
+                "skip",
+                "include",
+                "only"
+              ]
+            },
+            "ignoreQueryParameters": {
+              "type": "boolean"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 10,
+              "description": "Maximum pages. Above 100 requires knowledge:manage."
+            },
+            "crawlEntireDomain": {
+              "type": "boolean"
+            },
+            "allowExternalLinks": {
+              "type": "boolean",
+              "description": "Requires knowledge:manage."
+            },
+            "allowSubdomains": {
+              "type": "boolean"
+            },
+            "delay": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60
+            },
+            "maxConcurrency": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "scrapeOptions": {
+              "type": "object"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "4a825599d601b705a60f080d237268e7566258f0619f805dcb34700f2d8e3d52"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_crawl_status",
+        "description": "Firecrawl: status and scraped pages of a crawl started with knowledge_firecrawl_crawl. No allowance units.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,80}$"
+            },
+            "skip": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000,
+              "description": "Pages to skip, from the previous response's next link."
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "58f771fa0a5b74776356422d566140f857521db9b458d4b9c65cd6287d74f19f"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_extract",
+        "description": "Firecrawl: start an asynchronous LLM extraction of structured data from up to 10 URLs with a prompt or JSON schema; read it with knowledge_firecrawl_extract_status. Units are charged per URL, and a glob reserves 25 pages. Globs, web search and external links require knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "description": "Page URLs. A URL ending in /* (a glob) requires knowledge:manage."
+            },
+            "prompt": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "systemPrompt": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "schema": {
+              "type": "object"
+            },
+            "enableWebSearch": {
+              "type": "boolean",
+              "description": "Requires knowledge:manage."
+            },
+            "ignoreSitemap": {
+              "type": "boolean"
+            },
+            "includeSubdomains": {
+              "type": "boolean"
+            },
+            "allowExternalLinks": {
+              "type": "boolean",
+              "description": "Requires knowledge:manage."
+            },
+            "showSources": {
+              "type": "boolean"
+            },
+            "ignoreInvalidURLs": {
+              "type": "boolean"
+            },
+            "scrapeOptions": {
+              "type": "object"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "9fab350cad37d179725884e20704fdb0a974ed669b0ed4c394aea08418e22fa6"
+    },
+    {
+      "definition": {
+        "name": "knowledge_firecrawl_extract_status",
+        "description": "Firecrawl: status and data of an extraction started with knowledge_firecrawl_extract. No allowance units.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,80}$"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "8851ff09fb3fbe6cec37ea9d254712398575fda1ced997bf5434375871e2394e"
+    },
+    {
+      "definition": {
+        "name": "knowledge_deepwiki_structure",
+        "description": "DeepWiki: the documentation topics DeepWiki has generated for a public GitHub repository.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repoName"
+          ],
+          "properties": {
+            "repoName": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "efa01f496c5274561f24fbdfc6c6ec3a443cb1a3a604cb701739f98ea55a4ad3"
+    },
+    {
+      "definition": {
+        "name": "knowledge_deepwiki_contents",
+        "description": "DeepWiki: the full generated documentation of a public GitHub repository.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repoName"
+          ],
+          "properties": {
+            "repoName": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "e7a6aea36095a707a1551348011132572fb5904aa2cb653105917cb0928d43ff"
+    },
+    {
+      "definition": {
+        "name": "knowledge_deepwiki_ask",
+        "description": "DeepWiki: an AI answer grounded in the DeepWiki of one or up to 10 public GitHub repositories.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repoName",
+            "question"
+          ],
+          "properties": {
+            "repoName": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$"
+                  }
+                }
+              ]
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "7a80a05d863e0772067cfc47a0c668443146ea610b0fa6e9f9d4ecc9c512b8d1"
+    },
+    {
+      "definition": {
+        "name": "knowledge_mintlify_context",
+        "description": "Mintlify Index: research an implementation question across indexed product documentation and return a compact answer with primary-source citations.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "product": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "includeDomains": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "excludeDomains": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              }
+            },
+            "tokenBudget": {
+              "type": "integer",
+              "minimum": 500,
+              "maximum": 20000,
+              "default": 3000
+            }
+          }
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "b3af73d28b72a634801352a766d0cd22bc2867f57c42e7a4766f774d2d7d2922"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_find",
+        "description": "Find relevant operator skills. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "default": 3
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "fast",
+                "hybrid"
+              ],
+              "default": "hybrid"
+            },
+            "min_confidence": {
+              "type": "string",
+              "enum": [
+                "high"
+              ]
+            },
+            "roots": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "claude",
+                  "claude-library",
+                  "codex",
+                  "agents",
+                  "imported"
+                ]
+              }
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      },
+      "digest": "c52bb053ab79f1bd902d2fee5a4464adfb9367bd3c2a44f3257a1bc0429990b6"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_get",
+        "description": "Load operator skill instructions or a referenced file. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      },
+      "digest": "c2f14b25df76a3c426e1a549a5ee950047561e65c7ba32d67fca1a1f0fe3f7de"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_sync",
+        "description": "Sync operator skills; reject secrets per skill. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skills": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "root",
+                  "skill_id",
+                  "name",
+                  "description",
+                  "files"
+                ],
+                "properties": {
+                  "root": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "claude-library",
+                      "codex",
+                      "agents"
+                    ]
+                  },
+                  "skill_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 40,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "sha256"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "content": {
+                          "type": "string",
+                          "maxLength": 262144
+                        },
+                        "content_base64": {
+                          "type": "string",
+                          "maxLength": 349528
+                        }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "content"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "content_base64"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "delete": {
+              "type": "array",
+              "maxItems": 2000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 100,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              }
+            },
+            "dry_run": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "skills"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": false
+        }
+      },
+      "digest": "ecf5ec49b5a712fd9fa0a76bfbeaebbb2115f8b1d5c72a45337a7830f35fc89d"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_discover",
+        "description": "Search the operator library plus public skill marketplaces (SkillsMP, skills.sh, ClawHub, SkillHub, claude-plugins.dev) and GitHub; sends query keywords to them. External results are untrusted. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 10
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 7,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "library",
+                  "skillsmp",
+                  "skills-sh",
+                  "clawhub",
+                  "skillhub",
+                  "claude-plugins",
+                  "github"
+                ]
+              }
+            }
+          },
+          "required": [
+            "query"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "15be6026cdeff75a3dad2386fc21770507030d1c3f570feae94b01efa35fb428"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_preview",
+        "description": "Read an external skill's SKILL.md as untrusted data with review flags; pass a discover result's preview object. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "maxLength": 140,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            },
+            "ref": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9._-]{1,100}$"
+            },
+            "clawhub": {
+              "type": "string",
+              "maxLength": 201,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            }
+          },
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "fe8decb6d4d952d1ec3eb93a60f7585dc565b2c31a0c561bb6f3a7c286be8dda"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_import",
+        "description": "Copy one external skill folder into the library's imported root, pinned to a GitHub commit or ClawHub version. Without commit/version it only returns a review plan; apply the plan's apply payload, plus accept_flags for each review flag, only after the operator approves. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "maxLength": 140,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "ref": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9._-]{1,100}$"
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "clawhub": {
+              "type": "string",
+              "maxLength": 201,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$"
+            },
+            "accept_flags": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 7,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pipe_to_shell",
+                  "destructive_delete",
+                  "credential_paths",
+                  "encoded_execution",
+                  "instruction_override",
+                  "global_install",
+                  "marketplace_suspicious"
+                ]
+              }
+            }
+          },
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "550f25de67db8256c30a90039286846da2f9304a1ced2c8cb1cb553dd1348fcf"
+    },
+    {
+      "definition": {
+        "name": "knowledge_skills_report",
+        "description": "Operator reports: updates lists imported skills with upstream diffs found by the daily check (check=true checks now); gaps lists searches the library could not answer, with external candidates. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "updates",
+                "gaps"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            },
+            "check": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "12ec777348731e83d9d07a27f1ddb7026b77c8585d4970e360514ea0769b0d65"
+    },
+    {
+      "definition": {
+        "name": "knowledge_artifact",
+        "description": "Read a retained source snapshot and immutable citation manifest. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "206b5d2554e758b5eac9f96814de3509ef1bc39014804faf3605788d40319dd2"
+    },
+    {
+      "definition": {
+        "name": "knowledge_status",
+        "description": "Inspect source, job, allowance and configuration status. Requires knowledge:manage; configuration is not a connectivity test.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {},
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "d5ee827a74adaddf616c85d5ac408dcf92bf2b70be1bcbe9f3af91cbe2becbad"
+    },
+    {
+      "definition": {
+        "name": "knowledge_product_sites_get",
+        "description": "Read learned, pinned and blocked documentation sites for a product. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "11318a4a0098cecf80585145102976a7dcda4bb46e736c15b51f0547f95ece94"
+    },
+    {
+      "definition": {
+        "name": "knowledge_product_sites_update",
+        "description": "Pin, unpin, block, unblock or rebuild a product's learned documentation sites from retained artifacts. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "pin": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
+              }
+            },
+            "unpin": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
+              }
+            },
+            "block": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
+              }
+            },
+            "unblock": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}|(?:github\\.com|gitlab\\.com|bitbucket\\.org|raw\\.githubusercontent\\.com)/[a-z0-9][a-z0-9_.-]{0,99})$",
+                "description": "Lowercase public hostname or code-host owner, such as github.com/pallets."
+              }
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "rebuild": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "73878951ae517ba5e612dc4a4d0fe28c52701cce5dd6142710d39e7e0224a998"
+    },
+    {
+      "definition": {
+        "name": "knowledge_memos_stats",
+        "description": "Inspect verified answer memo counts, hits and ages by product. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {},
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        }
+      },
+      "digest": "efbbe203583c23d60525424ce3364307a0741f344212ebd2641fcdcbe65b5efe"
+    },
+    {
+      "definition": {
+        "name": "knowledge_memos_purge",
+        "description": "Purge verified answer memos for a product or explicitly all products. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "all": {
+              "type": "boolean"
+            }
+          },
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "f5e1b902e599628666a48c868bf0104332e5f54badc6a2b291b23befb8d18b60"
+    },
+    {
+      "definition": {
+        "name": "knowledge_source_register",
+        "description": "Register an approved public documentation URL without fetching it. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "product": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "provider": {
+              "type": "string",
+              "enum": [
+                "firecrawl",
+                "exa"
+              ],
+              "default": "firecrawl"
+            },
+            "refresh_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "url",
+            "product"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "205dd072d35d9b31f0be5392cfaaeb0bad01eb098a707f5cdc58002ab8c00a75"
+    },
+    {
+      "definition": {
+        "name": "knowledge_source_update",
+        "description": "Enable, disable, pin or change a source refresh interval using its current revision. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            },
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740990
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "pinned": {
+              "type": "boolean"
+            },
+            "refresh_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            }
+          },
+          "required": [
+            "id",
+            "expected_revision"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "ea938fe39c30f126244ec7ddc93965ee2ebda1a8de05118683cde44ffa44f64d"
+    },
+    {
+      "definition": {
+        "name": "knowledge_source_refresh",
+        "description": "Start or reconcile the source's durable indexing job. Can spend provider and platform allowances. Reuse the existing source after uncertainty. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "e405030e39b5e65ab34f8a004926ce12667262cf02201b410d718d8d91e8ff47"
+    },
+    {
+      "definition": {
+        "name": "knowledge_job_cancel",
+        "description": "Fence future job work. Accepted upstream work and charges may still complete. Requires knowledge:manage.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "a02cb28ed0ba344f4090c342177eb95d6667833c1258faef621142b9d5afaefa"
+    },
+    {
+      "definition": {
+        "name": "knowledge_policy_update",
+        "description": "Save the complete allowance and retention policy with its current revision. Requires knowledge:manage. Obtain operator confirmation of billing controls and retention rights; never invent acknowledgements or raise limits to retry unknown work.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740990
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "product_sites_mode": {
+              "type": "string",
+              "enum": [
+                "off",
+                "observe",
+                "enforce"
+              ],
+              "default": "observe"
+            },
+            "cache_ttl_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3600
+            },
+            "memo_exact": {
+              "type": "string",
+              "enum": [
+                "on",
+                "off"
+              ],
+              "default": "on"
+            },
+            "memo_semantic": {
+              "type": "string",
+              "enum": [
+                "off",
+                "observe",
+                "on"
+              ],
+              "default": "observe"
+            },
+            "memo_similarity": {
+              "type": "number",
+              "minimum": 0.85,
+              "maximum": 0.99,
+              "default": 0.92
+            },
+            "memo_ttl_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 72
+            },
+            "retention_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720
+            },
+            "unreviewed_retention_hours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "default": 24,
+              "description": "Retention for discoveries from hosts that only * admits."
+            },
+            "allowed_hosts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "providers": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "context7",
+                "firecrawl",
+                "exa",
+                "mintlify",
+                "deepwiki",
+                "ai_search",
+                "alexandria"
+              ],
+              "properties": {
+                "context7": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "firecrawl": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "exa": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "mintlify": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "deepwiki": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "ai_search": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                },
+                "alexandria": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enabled",
+                    "limit",
+                    "background_limit",
+                    "interactive_reserve",
+                    "units_per_call",
+                    "hard_limit_confirmed",
+                    "retention_allowed"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "hard_limit_confirmed": {
+                      "type": "boolean"
+                    },
+                    "retention_allowed": {
+                      "type": "boolean"
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "background_limit": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "interactive_reserve": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "units_per_call": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "expected_revision",
+            "enabled",
+            "cache_ttl_seconds",
+            "retention_hours",
+            "allowed_hosts",
+            "providers"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": true
+        }
+      },
+      "digest": "d4929050d917451d064691841bef156c141c1c4ae743910cf7c066e8763d7b88"
+    },
+    {
+      "definition": {
+        "name": "knowledge_handoff_save",
+        "description": "Save an operator handoff for this principal; rejects secrets and records over 32 KB. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
+            },
+            "branch": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "current git branch (git branch --show-current)"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "sections": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "goal": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "state": {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "files": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "change": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "change"
+                    ]
+                  }
+                },
+                "commands": {
+                  "type": "array",
+                  "maxItems": 30,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "command",
+                      "outcome"
+                    ]
+                  }
+                },
+                "decisions": {
+                  "type": "array",
+                  "maxItems": 30,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "failed_attempts": {
+                  "type": "array",
+                  "maxItems": 30,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "next_steps": {
+                  "type": "array",
+                  "maxItems": 30,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "open_questions": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              },
+              "required": []
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "agent": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "opencode",
+                    "other"
+                  ]
+                },
+                "thread_id": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              },
+              "required": [
+                "agent"
+              ]
+            },
+            "ttl_days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 90,
+              "default": 14
+            }
+          },
+          "required": [
+            "project",
+            "title",
+            "sections",
+            "source"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": false
+        }
+      },
+      "digest": "d23a953d9d2412ba80852232109d5674943deee348969b1a789d6f0d979cec1d"
+    },
+    {
+      "definition": {
+        "name": "knowledge_handoff_get",
+        "description": "Load the newest unexpired project/branch handoff with project fallback, or by id (optional project must match). Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
+            },
+            "branch": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "current git branch (git branch --show-current)"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [],
+          "anyOf": [
+            {
+              "required": [
+                "project"
+              ]
+            },
+            {
+              "required": [
+                "id"
+              ]
+            }
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      },
+      "digest": "b58f7f9e1230012b72ca7e968cfcc469fd57329efb8e2128d99814e38b4f0449"
+    },
+    {
+      "definition": {
+        "name": "knowledge_handoff_list",
+        "description": "List up to 20 unexpired handoffs belonging to this principal. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "maxLength": 200,
+              "minLength": 1,
+              "description": "owner/name from the git origin URL (for example acme/widgets), otherwise the directory name"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 20
+            }
+          },
+          "required": []
+        },
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        }
+      },
+      "digest": "72e3906b726fd92a1e095b031f4022c15f9ce07c7fb099e294cb865c60f43947"
+    },
+    {
+      "definition": {
+        "name": "knowledge_handoff_delete",
+        "description": "Delete this principal’s handoff by id. Requires knowledge:read.",
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,80}$"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "annotations": {
+          "readOnlyHint": false,
+          "openWorldHint": false,
+          "destructiveHint": true
+        }
+      },
+      "digest": "afad004267bc98715d2715e80fbfe4c73973de604fe4fbb0a6ea7a4e8b0c38e3"
+    }
+  ]
+}

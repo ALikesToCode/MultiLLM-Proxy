@@ -13,6 +13,7 @@ from routes import knowledge_management as management
 from routes import knowledge_handoffs as handoffs
 from routes import knowledge_skills as skills
 from services.knowledge_native import NATIVE_OPERATIONS, NATIVE_TOOLS
+from services import mcp_contract_drift as drift
 
 CATALOGUE_PATH = Path(__file__).resolve().parents[1] / "worker" / "knowledge-mcp-catalogue.json"
 # 2025-03-26 is not offered: it requires JSON-RPC batching, which this server does not accept.
@@ -130,3 +131,27 @@ def catalogue():
 
 def catalogue_json():
     return json.dumps(catalogue(), indent=2, ensure_ascii=False) + "\n"
+
+
+def discovery_contract(scopes, toolsets=None, *, enabled=None, entries=None):
+    """Runtime discovery hook: authorization filtering precedes digest metadata."""
+    active = drift.digests_enabled() if enabled is None else enabled
+    return drift.discovery_contract(catalogue()["tools"] if entries is None else entries, scopes, toolsets, enabled=active)
+
+
+def discovery_for_user(user, toolsets=None, *, entries=None):
+    scopes = ["admin"] if user.get("is_admin") else user.get("scopes") or []
+    return discovery_contract(scopes, toolsets, entries=entries)
+
+
+def check_contract_pin(tool_name, pin, *, enabled=None, definition=None):
+    """Runtime preflight hook; invoke after tool authorization, before dispatch."""
+    active = drift.digests_enabled() if enabled is None else enabled
+    if not active or pin is None:
+        return
+    if definition is None:
+        definition = next((entry["definition"] for entry in catalogue()["tools"]
+                           if entry["definition"]["name"] == tool_name), None)
+    if definition is None:
+        raise ValueError("Unknown Knowledge tool.")
+    drift.check_contract_pin(definition, pin, enabled=True)
