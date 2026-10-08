@@ -38,6 +38,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 📊 Request, latency, response-class, and configured cost telemetry
 - 🚀 Streaming support for compatible providers
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
+- 🪟 Opt-in [candidate-specific roleplay context](docs/roleplay-candidate-context.md) fits protected fallback history to each model window
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
 

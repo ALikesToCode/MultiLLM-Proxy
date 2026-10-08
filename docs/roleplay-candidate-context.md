@@ -52,14 +52,9 @@ remain independent; windowing does not delete stored history or create a
 migration. The public roleplay parser's existing text-only schema is unchanged;
 multimodal/tool preservation is covered directly by the pure fitter tests.
 
-## Integration handoff
+## Tests
 
-Append `tests/test_roleplay_candidate_context_worker.mjs` to `test:worker` in
-`package.json`. The fixed data-URL import map in
-`tests/helpers/load_cloudflare_worker.mjs` also needs to resolve the new
-`./candidate-context.mjs` imports in capacity and endpoint. The new test file
-provides its own narrow resolution hook; existing suites need the shared map
-updated. The loader, package file and README are outside this feature's ownership.
-
-README sentence: “Roleplay can opt into protected, candidate-specific fallback
-context windows.”
+`tests/test_roleplay_candidate_context_worker.mjs` runs in `npm run test:worker`.
+The data-URL import map in `tests/helpers/load_cloudflare_worker.mjs` resolves
+the `./candidate-context.mjs` imports in capacity and endpoint for the other
+roleplay suites.
