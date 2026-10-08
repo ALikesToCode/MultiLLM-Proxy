@@ -12,6 +12,7 @@ import { authStorageBackend } from "./container-env.mjs";
 import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { contractPinMismatch, digestsEnabled, discoveryContract } from "./knowledge/contract-drift.mjs";
 import { SYNC_REQUEST_BYTES } from "./knowledge/skills-validation.mjs";
 import { protectPayload, secretScanMode, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
 
@@ -345,6 +346,8 @@ async function callTool(env, request, principal, id, params) {
   if (!permits(principal, entry.scope)) {
     return failure("insufficient_scope", "The key is not authorized for this Knowledge tool.");
   }
+  const mismatch = await contractPinMismatch(entry.definition, request.headers.get("X-MultiLLM-MCP-Contract"), env.MCP_CONTRACT_DIGESTS_ENABLED);
+  if (mismatch) return rpcError(id, mismatch.code, mismatch.message, mismatch.status);
   const args = params.arguments ?? {};
   if (!isRecord(args)) return rpcError(id, -32602, "Tool arguments must be an object.");
   try {
@@ -408,8 +411,9 @@ async function handleMcp(request, env, principal) {
     if (toolsets && (!toolsets.size || [...toolsets].some(name => !catalogue.toolsets.includes(name)))) {
       return rpcError(id, -32602, `Unknown toolset. Use any of: ${catalogue.toolsets.join(", ")}.`);
     }
-    return rpcResult(id, { tools: catalogue.tools.filter(entry => permits(principal, entry.scope)
-      && (!toolsets || toolsets.has(entry.toolset))).map(entry => entry.definition) });
+    return rpcResult(id, await discoveryContract(catalogue.tools, principal.scopes, {
+      toolsets: toolsets === null ? null : [...toolsets], enabled: digestsEnabled(env.MCP_CONTRACT_DIGESTS_ENABLED),
+    }));
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found.");
   return callTool(env, request, principal, id, params);
