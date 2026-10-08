@@ -25,6 +25,7 @@ import {
   recordCompactionSuccess,
 } from "./compaction-policy.mjs";
 import { prepareProtectedContext } from "./directives.mjs";
+import { parseCandidateContextMode } from "./candidate-context.mjs";
 import { revalidateNanoCredential } from "./credential-health.mjs";
 import {
   applyRoleplayCompletionState,
@@ -226,6 +227,9 @@ export class RoleplaySession extends DurableObject {
     }
 
     const memoryEnabled = parsedWithProfile.memory.mode !== "off";
+    const candidateContextMode = parseCandidateContextMode(
+      this.env.ROLEPLAY_CANDIDATE_CONTEXT_REFIT,
+    );
     const protectedContext = prepareProtectedContext(
       state,
       parsedWithProfile,
@@ -313,6 +317,7 @@ export class RoleplaySession extends DurableObject {
       settings,
     );
     if (
+      candidateContextMode === "off" &&
       protectedContext.activeDirectives.length > 0 &&
       contextPolicy.hardInputTokens > 0 &&
       estimateTokens(protectedContext.activeDirectives) >
@@ -508,15 +513,14 @@ export class RoleplaySession extends DurableObject {
       estimatedInputTokens,
       plan.estimatedTokens + checkpointSavedTokens,
     );
-    const inputTokensSaved = Math.max(
-      0,
-      estimatedInputBefore - estimatedInputTokens,
-    );
     const generationCandidates = prepareRoleplayCandidates(
       candidates,
       estimatedInputTokens,
       parsed.maxTokens,
       settings,
+      candidateContextMode === "window"
+        ? { messages: roleplayMessages, estimateTokens }
+        : null,
     );
     if (!generationCandidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "context_too_large");
@@ -541,14 +545,14 @@ export class RoleplaySession extends DurableObject {
           buildUpstreamPayload(
             parsed,
             candidate,
-            roleplayMessages,
+            candidate.contextPlan?.messages ?? roleplayMessages,
             settings,
           ),
           candidate,
-          roleplayMessages,
+          candidate.contextPlan?.messages ?? roleplayMessages,
           settings,
           parsed.promptCache,
-          estimatedInputTokens,
+          candidate.contextPlan?.estimatedInputTokens ?? estimatedInputTokens,
         ),
       this.env,
       settings,
@@ -576,13 +580,22 @@ export class RoleplaySession extends DurableObject {
       promptCache,
       refusalFallbackCandidates,
     } = attempted;
+    // Dispatch and continuation share the selected view. Persistence and
+    // recovery above retain the original conversation independently.
+    const selectedMessages =
+      candidate.contextPlan?.messages ?? roleplayMessages;
+    const selectedInputTokens =
+      candidate.contextPlan?.estimatedInputTokens ?? estimatedInputTokens;
+    const inputTokensSaved = Math.max(
+      0, estimatedInputBefore - selectedInputTokens,
+    );
     trace?.phase("headers");
     trace?.metrics({ headerMs });
     trace?.selected(candidate, parameterReceipt(parsed, candidate, settings));
     const continuation = createRoleplayContinuation({
       state,
       candidate,
-      messages: roleplayMessages,
+      messages: selectedMessages,
       parsed,
       env: this.env,
       settings,
@@ -610,7 +623,7 @@ export class RoleplaySession extends DurableObject {
       candidate,
       selectionReason,
       memoryStatus,
-      estimatedInputTokens,
+      selectedInputTokens,
       candidate.resolvedMaxOutputTokens,
       headerMs,
       fallbackCount,
@@ -620,11 +633,20 @@ export class RoleplaySession extends DurableObject {
       {
         estimatedInputBefore,
         inputTokensSaved,
-        messagesOptimized,
+        messagesOptimized: messagesOptimized +
+          (roleplayMessages.length - selectedMessages.length),
         promptCache,
       },
       timings,
     );
+    if (candidate.contextPlan?.omittedGroups > 0) {
+      responseHeaders.set("X-MultiLLM-Context-Refit", "window");
+      responseHeaders.set(
+        "X-MultiLLM-Context-Refit-Omitted-Groups",
+        String(candidate.contextPlan.omittedGroups),
+      );
+      responseHeaders.set("X-MultiLLM-Optimization-Mode", "window");
+    }
 
     applyScanHeader(responseHeaders);
 
