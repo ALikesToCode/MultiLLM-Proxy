@@ -6,7 +6,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-PROVIDER_FAILURE_STATUS_CODES = frozenset({408, 500, 502, 503, 504})
+from services.upstream_outcome import (
+    PROVIDER_FAILURE_STATUS_CODES as PROVIDER_FAILURE_STATUS_CODES,
+    UpstreamOutcome,
+    classify_upstream_outcome,
+)
 NEUTRAL_STATUS_CODES = frozenset({429})
 
 
@@ -185,8 +189,10 @@ class ResilienceService:
         status_code: int,
         *,
         now: float | None = None,
+        outcome: UpstreamOutcome | None = None,
     ) -> dict[str, Any]:
-        """Record a final transport result and return the resulting snapshot."""
+        """Record health evidence independently of transport replay permission."""
+        outcome = outcome if outcome is not None else classify_upstream_outcome(status_code)
         provider = cls._normalize_provider(provider)
         current_time = time.time() if now is None else now
         settings = cls.settings()
@@ -197,7 +203,7 @@ class ResilienceService:
             previous_state = state["state"]
             state["last_status"] = status_code
 
-            if status_code in PROVIDER_FAILURE_STATUS_CODES:
+            if outcome.provider_health == "failure":
                 if previous_state == "half_open":
                     state["half_open_in_flight"] = max(
                         0,
@@ -222,14 +228,15 @@ class ResilienceService:
                     >= settings.degraded_failures
                 ):
                     state["state"] = "degraded"
-            elif status_code in NEUTRAL_STATUS_CODES:
-                state["rate_limit_events"] += 1
+            elif outcome.provider_health == "neutral":
+                if outcome.credential_health == "throttled":
+                    state["rate_limit_events"] += 1
                 if previous_state == "half_open":
                     state["half_open_in_flight"] = max(
                         0,
                         state["half_open_in_flight"] - 1,
                     )
-            else:
+            elif outcome.provider_health == "success":
                 state["total_successes"] += 1
                 if previous_state == "half_open":
                     state["half_open_in_flight"] = max(
