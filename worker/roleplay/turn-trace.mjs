@@ -16,7 +16,8 @@ export class TurnTraceJournal {
     }).catch(() => {});
   }
 
-  begin() {
+  begin(retentionPolicy = null) {
+    const retainContent = !retentionPolicy?.enabled || retentionPolicy.mode !== "zero";
     const row = { id: crypto.randomUUID(), startedAt: Date.now(),
       phase: "queued", events: [], metrics: {} };
     this.records.push(row);
@@ -35,6 +36,7 @@ export class TurnTraceJournal {
     return {
       id: row.id, phase, metrics,
       selected(candidate, receipt) {
+        if (!retainContent) return;
         row.provider = candidate.provider;
         row.model = candidate.model;
         row.parameters = receipt;
@@ -49,7 +51,15 @@ export class TurnTraceJournal {
         phase(success ? "completed" : "interrupted");
         row.finishedAt = Date.now();
         row.reason = /^[a-z0-9_]{1,64}$/.test(reason) ? reason : "failed";
-        const completed = this.records.filter((item) => item.finishedAt);
+        if (!retainContent) {
+          // Do not rewrite old content traces or call a conversation persistence callback.
+          row.retention = "zero";
+          const safe = structuredClone(this.records.filter(item => item.finishedAt && item.retention === "zero"));
+          this.writes = this.writes.catch(() => {}).then(() => this.storage.put("zero-turn-traces-v1", safe));
+          try { await this.writes; } catch { row.diagnosticsPersisted = false; }
+          return;
+        }
+        const completed = this.records.filter((item) => item.finishedAt && item.retention !== "zero");
         this.writes = this.writes.catch(() => {}).then(() => persist ? persist({ [KEY]: completed }) : this.storage.put(KEY, completed));
         try { await this.writes; } catch (error) {
           row.diagnosticsPersisted = false;

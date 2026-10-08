@@ -11,6 +11,7 @@ from flask import g, request
 
 from services.shadow_eval_contract import ANSWER_BYTES, REQUEST_BYTES, REQUEST_FIELDS, clean_usage, eligible, encoded, make_sample
 from services.shadow_eval_store import ShadowEvalStore
+from services.retention_policy import RetentionPolicy, request_policy
 
 logger = logging.getLogger(__name__)
 _QUEUE = queue.Queue(maxsize=32)
@@ -38,16 +39,16 @@ class CaptureOversize(ValueError):
     pass
 
 
-def submit(sample):
+def submit(sample, *, retention_policy=None):
     global _WORKER
-    if sample is None:
+    if sample is None or retention_policy is not None and not retention_policy.allows_content:
         return
     with _LOCK:
         if _WORKER is None or not _WORKER.is_alive():
             _WORKER = threading.Thread(target=_persist, name="shadow-samples", daemon=True)
             _WORKER.start()
     try:
-        _QUEUE.put_nowait(sample)
+        _QUEUE.put_nowait((sample, retention_policy) if retention_policy is not None else sample)
         count("sampled")
     except queue.Full:
         count("skipped_queue_full")
@@ -57,6 +58,10 @@ def _persist():
     while True:
         sample = _QUEUE.get()
         try:
+            if isinstance(sample, tuple) and isinstance(sample[1], RetentionPolicy):
+                sample, retention = sample
+                if not retention.allows_content:
+                    continue
             ShadowEvalStore.put(sample)
         except Exception as error:
             count("skipped_error")
@@ -201,6 +206,9 @@ def sample_success(response, payload=None):
         if (response.status_code >= 400 or request.method != "POST" or getattr(g, "shadow_eval_internal", False)
                 or getattr(g, "gateway_subrequest", False)):
             return response
+        retention = request_policy()
+        if not retention.allows_content:
+            return response
         payload = payload if payload is not None else request.get_json(silent=True)
         selected = _sampling_decision(payload)
         if selected is None:
@@ -211,9 +219,14 @@ def sample_success(response, payload=None):
         model = response.headers.get("X-MultiLLM-Auto-Selected-Model") or getattr(g, "multillm_model", None)
 
         def capture(answer, selected, usage, finish_reason=None):
+            if not retention.allows_content:
+                return
             sample = make_sample(payload, user, route, answer, selected,
                 (time.monotonic() - started) * 1000, usage, finish_reason=finish_reason, on_skip=count)
-            submit(sample)
+            if retention.enabled:
+                submit(sample, retention_policy=retention)
+            else:
+                submit(sample)
 
         if response.is_streamed:
             if response.mimetype == "text/event-stream":
