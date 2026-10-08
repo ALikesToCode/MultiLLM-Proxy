@@ -101,5 +101,5 @@ no-new-provider accounting. A miss or bypass can incur ordinary upstream cost.
 Isolation is not a live provider capability, metering or deployment certification.
 Route/policy reads are not a cross-service atomic configuration transaction; the
 completion-time comparison prevents detected changes from being stored but does
-not lock administrator writes. The Container must receive
-`RESPONSE_CACHE_POLICY_REVISION` through the coordinator's environment allowlist.
+not lock administrator writes. The Worker forwards
+`RESPONSE_CACHE_POLICY_REVISION` to the Container with its other environment settings.
