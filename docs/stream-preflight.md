@@ -70,14 +70,7 @@ configured upstream read timeout. A blocked synchronous read cannot be
 interrupted by a byte/event limit; there is no hard wall-clock deadline or
 background reader thread. No body is persisted and no migration is needed.
 
-## Deployment integration
+## Deployment
 
-Standalone Flask reads the variable directly. The Container deployment needs
-`MULTILLM_STREAM_PREFLIGHT` added to the environment allowlist in
-`worker/container-env.mjs` by the coordinator/W5 before activation.
-
-README feature sentence for the coordinator/W5:
-
-> Managed automatic Chat streams can opt into bounded first-event validation before commitment.
-
-No new Worker test or package script registration is needed.
+Standalone Flask reads the variable directly. On the Worker deployment,
+`worker/container-env.mjs` forwards `MULTILLM_STREAM_PREFLIGHT` to the Container.
