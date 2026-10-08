@@ -27,7 +27,7 @@ DEADLINE_SECONDS = 55
 _SLOTS = threading.BoundedSemaphore(8)
 _OPERATIONS = frozenset({
     "context", "search", "artifact", "status", "sources.create", "sources.update",
-    "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync",
+    "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync", "skills.discover", "skills.preview", "skills.import", "skills.report",
     "alexandria.search", "alexandria.inspect", "alexandria.execute", "alexandria.receipt",
     "handoffs.save", "handoffs.get", "handoffs.list", "handoffs.delete",
     *NATIVE_OPERATIONS,

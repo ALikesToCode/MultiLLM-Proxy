@@ -36,6 +36,10 @@ was rotated, revoked or deleted, and the operator must issue a replacement.
 | Check an interrupted purchase | `knowledge_alexandria_receipt` |
 | Inspect sources, jobs, policy and setup | `knowledge_status` |
 | Read a retained citation artifact | `knowledge_artifact` |
+| Find and load an operator skill | `knowledge_skills_find`, then `knowledge_skills_get` |
+| Find skills on public marketplaces and GitHub | `knowledge_skills_discover`, then `knowledge_skills_preview` (untrusted text) |
+| Adopt an external skill after the operator approves | `knowledge_skills_import` (plan, then apply with `accept_flags`) |
+| Check imported skills for upstream changes or library gaps | `knowledge_skills_report` |
 | Register or change a source | `knowledge_source_register`, `knowledge_source_update` |
 | Start or reconcile indexing | `knowledge_source_refresh` |
 | Cancel future indexing work | `knowledge_job_cancel` |

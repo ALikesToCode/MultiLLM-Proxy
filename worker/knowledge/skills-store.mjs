@@ -1,14 +1,18 @@
-import { fail } from "./contracts.mjs";
+import { fail, fields, isRecord } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, skillKey, SKILLS_LIMIT } from "./skills-validation.mjs";
 import { quantizeEmbedding } from "./memo-store.mjs";
 import { SkillsIndex } from "./skills-index.mjs";
+import { pinOf, publicOrigin, SkillsLedger } from "./skills-ledger.mjs";
 
 const SUGGESTION_LIMIT = 5000;
 const CLEANUP_LIMIT = 64;
 const CLEANUP_GRACE_MS = 60000;
 const HELPFUL_MS = 30 * 60 * 1000;
 const cap = number => Math.min(Number.MAX_SAFE_INTEGER, number + 1);
+const sameSource = (a, b) => a?.source === b?.source && (a.source === "clawhub"
+  ? a.clawhub.toLowerCase() === b.clawhub.toLowerCase()
+  : a.repository.toLowerCase() === b.repository.toLowerCase() && a.path === b.path);
 async function bounded(callback, milliseconds) {
   let timer;
   try { return await Promise.race([Promise.resolve().then(callback), new Promise((_, reject) => {
@@ -29,6 +33,7 @@ export class SkillsStore {
     this.sql.exec("CREATE INDEX IF NOT EXISTS skill_suggestion_age ON skill_suggestions(at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS skill_cleanup (skill_id TEXT NOT NULL, content_hash TEXT NOT NULL,
       record TEXT NOT NULL, after INTEGER NOT NULL, PRIMARY KEY (skill_id, content_hash))`);
+    this.ledger = new SkillsLedger(storage, clock);
   }
   rows(sql, ...args) { return [...this.sql.exec(sql, ...args)]; }
   read(id) {
@@ -83,7 +88,8 @@ export class SkillsStore {
       const cached = this.index?.records.find(item => item.skill_id === record.skill_id);
       if (cached && helpful) cached.helpful = cap(current.helpful);
     });
-    const response = { skill_id: record.skill_id, path: parsed.path, files: record.files.map(item => item.path), content_hash: record.content_hash, trust: "operator" };
+    const response = { skill_id: record.skill_id, path: parsed.path, files: record.files.map(item => item.path), content_hash: record.content_hash, trust: "operator",
+      ...(record.origin ? { origin: publicOrigin(record.origin) } : {}) };
     try { return { ...response, text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) }; }
     catch { return { ...response, content_base64: btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join("")) }; }
   }
@@ -121,13 +127,24 @@ export class SkillsStore {
       } catch { break; } // Retain receipts and apply backpressure if R2 cleanup is unavailable.
     }
   }
-  async syncSkill(skill, dryRun, deadline) {
+  async syncSkill(skill, dryRun, deadline, origin = null) {
+    // Imported skills carry a pinned origin and are written only by an approved import.
+    if (!origin && skill?.root === "imported") return { skill_id: skill?.skill_id, status: "rejected", reason: "import_only" };
     const validated = await validateSkill(skill);
     if (validated.rejected) return { skill_id: skill.skill_id, status: "rejected", ...validated.rejected };
     const { record, files } = validated, old = this.read(record.skill_id);
     if (old && old.root !== record.root) return { skill_id: record.skill_id, status: "rejected", reason: "root_conflict" };
     const status = !old ? "created" : old.content_hash === record.content_hash ? "unchanged" : "updated";
+    if (status === "unchanged" && origin && !dryRun && pinOf(old.origin) !== pinOf(origin)) {
+      // Identical content at a new pin moves only the pin.
+      this.storage.transactionSync(() => {
+        const row = this.rows("SELECT record FROM skills WHERE skill_id = ?", record.skill_id)[0];
+        if (row) this.sql.exec("UPDATE skills SET record = ? WHERE skill_id = ?", JSON.stringify({ ...JSON.parse(row.record), origin }), record.skill_id);
+      });
+      this.index = null;
+    }
     if (status === "unchanged" || dryRun) return { skill_id: record.skill_id, status };
+    if (origin) record.origin = origin;
     if (!old && this.rows("SELECT COUNT(*) AS count FROM skills")[0].count >= SKILLS_LIMIT) return { skill_id: record.skill_id, status: "rejected", reason: "skills_limit" };
     if (this.pendingR2.has(skillKey(record, ""))) return { skill_id: record.skill_id, status: "rejected", reason: "cleanup_backlog" };
     // Receipts cap pending R2 promises as well as interrupted revision storage.
@@ -174,6 +191,7 @@ export class SkillsStore {
           this.enqueueCleanup(found);
           this.sql.exec("DELETE FROM skills WHERE skill_id = ?", id);
           this.sql.exec("DELETE FROM skill_suggestions WHERE skill_id = ?", id);
+          this.ledger.forget(id);
         });
         results.push({ skill_id: id, status: found ? "deleted" : "unchanged" });
       } catch (error) { results.push({ skill_id: id, status: "rejected", reason: error.code ?? "skills_unavailable" }); }
@@ -181,7 +199,31 @@ export class SkillsStore {
     if (!parsed.dry_run && parsed.delete.length) this.index = null;
     return { results };
   }
+  // Writes an approved import; an existing skill with another root or origin is never replaced.
+  async importSkill(payload) {
+    fields(payload, ["skill", "origin", "dry_run"], ["skill", "origin"]);
+    const { skill, origin } = payload;
+    if (!isRecord(origin) || !["github", "clawhub"].includes(origin.source) || !pinOf(origin)) fail("invalid_request", "Invalid import origin.");
+    const existing = typeof skill?.skill_id === "string" ? this.read(skill.skill_id) : null;
+    if (existing && (existing.root !== "imported" || !sameSource(existing.origin, origin))) {
+      return { skill_id: skill.skill_id, status: "rejected", reason: "skill_exists", root: existing.root,
+        ...(existing.origin ? { origin: publicOrigin(existing.origin) } : {}) };
+    }
+    if (!existing && this.rows("SELECT COUNT(*) AS count FROM skills")[0].count >= SKILLS_LIMIT) {
+      return { skill_id: skill.skill_id, status: "rejected", reason: "skills_limit" };
+    }
+    const result = await this.syncSkill(skill, payload.dry_run === true, performance.now() + 45000,
+      { ...origin, imported_at: new Date(this.clock()).toISOString() });
+    if (!payload.dry_run && result.status !== "rejected") this.ledger.forget(skill.skill_id);
+    return result;
+  }
   async call(operation, payload, principal) {
+    if (operation.startsWith("market.") || operation.startsWith("report.") || operation.startsWith("imports.")) return this.ledger.call(operation, payload);
+    if (operation === "import") {
+      const task = this.syncTail.then(() => this.importSkill(payload));
+      this.syncTail = task.catch(() => {});
+      return task;
+    }
     if (operation === "find") return this.find(payload, principal);
     if (operation === "get") return this.get(payload, principal);
     if (operation === "sync") {

@@ -81,6 +81,22 @@ test("edge covers only the Knowledge MCP and REST namespaces", () => {
   for (const path of ["/mcpx", "/v1/chat/completions", "/knowledge", "/admin/knowledge/status"]) assert.equal(isKnowledgeEdgePath(path), false);
 });
 
+test("skills import and report need knowledge:manage at the edge, and GET still reads skills with those names", async () => {
+  const { env, dispatched } = environment({ result: { status: "review" } });
+  const post = (key, path, body) => call(env, new Request(`${ORIGIN}${path}`, { method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify(body) }));
+  const plan = { repository: "acme/skills", path: "skills/pg" };
+  assert.equal((await post(reader.key, "/v1/knowledge/skills/import", plan)).status, 403);
+  assert.equal((await post(reader.key, "/v1/knowledge/skills/report", { kind: "gaps" })).status, 403);
+  assert.equal(dispatched.length, 0);
+  assert.equal((await post(manager.key, "/v1/knowledge/skills/import", plan)).status, 200);
+  assert.equal((await post(manager.key, "/v1/knowledge/skills/report", { kind: "updates", check: true })).status, 200);
+  assert.deepEqual(dispatched.map(item => [item.operation, item.payload]), [["skills.import", plan], ["skills.report", { kind: "updates", check: true }]]);
+  const read = await call(env, new Request(`${ORIGIN}/v1/knowledge/skills/import`, { headers: { authorization: `Bearer ${reader.key}` } }));
+  assert.equal(read.status, 200);
+  assert.deepEqual([dispatched.at(-1).operation, dispatched.at(-1).payload], ["skills.get", { skill_id: "import" }]);
+});
+
 test("durable read keys discover and call only read tools through the private service", async () => {
   const { env, dispatched } = environment({ result: { status: "ok", excerpts: [] } });
   const init = await (await call(env, mcpRequest(reader.key, "initialize", { protocolVersion: "2099-01-01" }))).json();

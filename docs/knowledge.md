@@ -33,6 +33,9 @@ separate release steps. Configuration status is not a connectivity test.
 | Context7 | Library documentation discovery | Knowledge Worker secret `CONTEXT7_API_KEY` |
 | Mintlify Index | Additional documentation discoveries | Public MCP; no key in this adapter |
 | DeepWiki | Public repository discoveries | Public MCP; no key in this adapter |
+| Skill marketplaces | `knowledge_skills_discover` across SkillsMP, skills.sh, ClawHub, SkillHub and claude-plugins.dev | Public APIs; optional secret `SKILLSMP_API_KEY` raises the SkillsMP rate limit |
+| GitHub code search | `knowledge_skills_discover` source `github` | Knowledge Worker secret `GITHUB_TOKEN` (fine-grained, public read only) |
+| Skill imports and update checks | `knowledge_skills_import`, `knowledge_skills_report` from GitHub and ClawHub | Public APIs; `GITHUB_TOKEN` avoids GitHub's shared anonymous limit |
 
 The minimum useful live setup is Cloudflare plus Exa. Firecrawl can acquire and
 refresh registered sources without Exa, but does not discover source URLs here.
@@ -95,6 +98,9 @@ See Cloudflare's [binding compatibility reference](https://developers.cloudflare
    npx wrangler secret put EXA_API_KEY --config wrangler.knowledge.jsonc
    npx wrangler secret put FIRECRAWL_API_KEY --config wrangler.knowledge.jsonc
    npx wrangler secret put CONTEXT7_API_KEY --config wrangler.knowledge.jsonc
+   # Optional, for skill discovery, imports and update checks:
+   npx wrangler secret put GITHUB_TOKEN --config wrangler.knowledge.jsonc
+   npx wrangler secret put SKILLSMP_API_KEY --config wrangler.knowledge.jsonc
    ```
 
    These keys belong on the Knowledge Worker. They are not passed to the Flask

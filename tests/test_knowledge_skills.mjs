@@ -184,7 +184,8 @@ test("edge REST/MCP parity, skills toolset and per-file firewall delegation", as
   const long = await skill("testing", "Test guide", "agents", [{ path: "reference.md", content: "x".repeat(100000), sha256: await digest("x".repeat(100000)) }]);
   assert.equal((await request("/v1/knowledge/skills", "POST", { skills: [long] })).status, 200);
   const listed = (await (await rpc("tools/list", {}, "/mcp?toolsets=skills")).json()).result.tools;
-  assert.deepEqual(listed.map(tool => tool.name), ["knowledge_skills_find", "knowledge_skills_get", "knowledge_skills_sync"]);
+  assert.deepEqual(listed.map(tool => tool.name), ["knowledge_skills_find", "knowledge_skills_get", "knowledge_skills_sync", "knowledge_skills_discover", "knowledge_skills_preview",
+    "knowledge_skills_import", "knowledge_skills_report"]);
   const rest = await (await request("/v1/knowledge/skills?query=test&mode=fast&limit=3&roots=agents")).json();
   const mcp = (await (await rpc("tools/call", { name: "knowledge_skills_find", arguments: { query: "test", mode: "fast", limit: 3, roots: ["agents"] } })).json()).result;
   assert.deepEqual(JSON.parse(mcp.content[0].text), rest);

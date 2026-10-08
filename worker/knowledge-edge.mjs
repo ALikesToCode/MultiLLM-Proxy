@@ -439,8 +439,8 @@ function restRoute(method, pathname) {
     return { operation: method === "GET" ? "skills.find" : "skills.sync",
       scope: method === "GET" ? "knowledge:read" : "knowledge:manage", body: method === "POST", skills: true };
   }
-  if (first === "skills" && second === "find" && path.length === 2 && method === "POST") {
-    return { operation: "skills.find", scope: "knowledge:read", body: true, skills: true };
+  if (first === "skills" && ["find", "discover", "preview", "import", "report"].includes(second) && path.length === 2 && method === "POST") {
+    return { operation: `skills.${second}`, scope: ["import", "report"].includes(second) ? "knowledge:manage" : "knowledge:read", body: true, skills: true };
   }
   if (first === "skills" && path.length === 2 && method === "GET") {
     return { operation: "skills.get", scope: "knowledge:read", skills: true, skill: second };
