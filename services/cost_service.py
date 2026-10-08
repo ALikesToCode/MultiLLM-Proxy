@@ -131,3 +131,10 @@ class CostService:
             + Decimal(safe_output_tokens) * prices["output"]
         ) / Decimal(1_000_000) + Decimal(cls._token_count(requests)) * prices.get("request", Decimal(0))
         return float(total.quantize(Decimal("0.0000000001")))
+
+    @classmethod
+    def price_buckets(cls, model_id, usage, *, requests: int = 1) -> dict:
+        """Return nullable bucket costs without changing legacy estimate semantics."""
+        from services.prompt_cache_cost import price_buckets
+
+        return price_buckets(model_id, usage, requests=requests)

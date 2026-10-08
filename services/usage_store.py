@@ -16,7 +16,7 @@ import threading
 from contextlib import closing
 from typing import Any, Optional
 
-from services import intelligence_d1_store
+from services import intelligence_d1_store, prompt_cache_cost
 from services.sqlite_store import connect, storage_path
 
 # Upper bounds in milliseconds of the latency buckets; the last bucket is open.
@@ -93,6 +93,10 @@ def _checked_rows(value: Any, fields: set[str]) -> list[dict]:
     return value
 
 
+def _event_columns() -> tuple:
+    return EVENT_COLUMNS + (prompt_cache_cost.ROW_FIELDS if prompt_cache_cost.enabled() else ())
+
+
 class D1UsageStore:
     backend = "d1"
 
@@ -108,6 +112,9 @@ class D1UsageStore:
         return response
 
     def record(self, batch_id: str, rows: list[dict]) -> int:
+        if not prompt_cache_cost.enabled():
+            rows = [{name: value for name, value in row.items() if name not in prompt_cache_cost.ROW_FIELDS}
+                    for row in rows]
         response = self._call("record", batch=batch_id, rows=rows)
         if set(response) != {"version", "recorded", "duplicate"} or type(response["duplicate"]) is not bool:
             raise UsageStoreError("invalid record response")
@@ -129,7 +136,7 @@ class D1UsageStore:
 
     def recent(self, since: str, principal: Optional[str], before: Optional[int], limit: int) -> list[dict]:
         response = self._call("recent", since=since, principal=principal, before=before, limit=limit)
-        return _checked_rows(response.get("rows") if set(response) == {"version", "rows"} else None, set(EVENT_COLUMNS))
+        return _checked_rows(response.get("rows") if set(response) == {"version", "rows"} else None, set(_event_columns()))
 
     def prune(self, events_before: str, rollups_before: str, limit: int) -> dict:
         response = self._call("prune", events_before=events_before, rollups_before=rollups_before, limit=limit)
@@ -159,7 +166,29 @@ class SqlUsageStore:
                 self.ensure(connection)
                 connection.commit()
                 self._ready.add(key)
+            if prompt_cache_cost.enabled():
+                self.ensure_buckets(connection)
+                connection.commit()
         return connection
+
+    @staticmethod
+    def ensure_buckets(connection) -> None:
+        postgres = getattr(connection, "dialect", None) == "postgresql"
+        if postgres:
+            columns = {row["name"] for row in connection.execute(
+                "SELECT column_name AS name FROM information_schema.columns "
+                "WHERE table_schema = 'multillm' AND table_name = 'usage_events'")}
+        else:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(usage_events)")}
+        for name in prompt_cache_cost.ROW_FIELDS:
+            if name not in columns:
+                kind = "TEXT" if name in {"bucket_basis", "bucket_source"} else "REAL" if name in prompt_cache_cost.COST_FIELDS else "INTEGER"
+                if postgres and kind == "REAL":
+                    kind = "DOUBLE PRECISION"
+                elif postgres and kind == "INTEGER":
+                    kind = "BIGINT"
+                # Names and types come exclusively from fixed first-party constants.
+                connection.execute(f"ALTER TABLE usage_events ADD COLUMN {name} {kind}")  # nosec B608
 
     @staticmethod
     def ensure(connection) -> None:
@@ -208,6 +237,8 @@ class SqlUsageStore:
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_usage_daily_principal ON usage_daily(principal, day)")
+        if prompt_cache_cost.enabled():
+            SqlUsageStore.ensure_buckets(connection)
 
     def record(self, batch_id: str, rows: list[dict]) -> int:
         if not _BATCH_ID.fullmatch(batch_id):
@@ -224,15 +255,16 @@ class SqlUsageStore:
             totals[5] += int(row["cost_usd"] is not None)
             totals[6] += row["latency_ms"]
             totals[7 + latency_bucket(row["latency_ms"])] += 1
+        row_fields = ROW_FIELDS + (prompt_cache_cost.ROW_FIELDS if prompt_cache_cost.enabled() else ())
         columns = ", ".join(TOTAL_COLUMNS)
         updates = ", ".join(f"{name} = usage_daily.{name} + excluded.{name}" for name in TOTAL_COLUMNS)
         try:
             with closing(self._connect()) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 connection.executemany(
-                    f"INSERT INTO usage_events (day, {', '.join(ROW_FIELDS)}) "  # nosec B608
-                    f"VALUES ({', '.join('?' for _ in range(len(ROW_FIELDS) + 1))})",
-                    [(row["at"][:10], *(row[name] for name in ROW_FIELDS)) for row in rows],
+                    f"INSERT INTO usage_events (day, {', '.join(row_fields)}) "  # nosec B608
+                    f"VALUES ({', '.join('?' for _ in range(len(row_fields) + 1))})",
+                    [(row["at"][:10], *(row[name] if name in ROW_FIELDS else row.get(name) for name in row_fields)) for row in rows],
                 )
                 # Column names come only from the fixed TOTAL_COLUMNS definition.
                 connection.executemany(
@@ -292,7 +324,7 @@ class SqlUsageStore:
             parameters.append(before)
         # Only fixed column names and filters are interpolated.
         return self._query(
-            f"SELECT {', '.join(EVENT_COLUMNS)} FROM usage_events WHERE {where} "  # nosec B608
+            f"SELECT {', '.join(_event_columns())} FROM usage_events WHERE {where} "  # nosec B608
             "ORDER BY id DESC LIMIT ?",
             (*parameters, limit),
         )
