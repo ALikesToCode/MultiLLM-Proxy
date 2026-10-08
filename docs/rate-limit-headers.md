@@ -75,8 +75,8 @@ provider token cost and does not change admission, reservation or retry policy.
 ## Where the headers apply
 
 Flask adds the headers to managed `/v1/` responses; raw provider routes are
-excluded. Native Worker responses get them only when shared admission
-(`ADMISSION_ENABLED`) supplies authenticated gateway counters.
-Counters are never read from request headers or payloads. Forwarded Container
-responses keep the Container's headers unchanged. Set `RATE_LIMIT_HEADERS_ENABLED`
-on both the Worker and the Container.
+excluded. Counters are never read from request headers or payloads. Requests the
+Worker forwards to the Container keep the Container's headers unchanged. Native
+Worker routes (codex-easy, linkapi, opencode direct) enforce no gateway request
+counters, so their responses carry no advisory headers. Set
+`RATE_LIMIT_HEADERS_ENABLED` on the Container.
