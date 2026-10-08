@@ -18,6 +18,8 @@ from typing import ClassVar
 
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from services.auth_primitives import usable_credential
+from services.model_cooldown import model_cooldown, settings
+from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
 REFUSED_REST_SECONDS = 300
 RATE_LIMITED_REST_SECONDS = 60
@@ -64,25 +66,108 @@ class CredentialPool:
 
     @classmethod
     def available(
-        cls, provider: str, keys: list[str] | None = None, *, now: float | None = None
+        cls,
+        provider: str,
+        keys: list[str] | None = None,
+        *,
+        now: float | None = None,
+        model: str | None = None,
+        quota_bucket: str | None = None,
     ) -> list[str]:
         """Configured keys that are not resting, in preference order."""
         keys = cls.keys(provider) if keys is None else keys
+        config = settings()
+        if config.enabled and (model or quota_bucket):
+            with cls._lock:
+                legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
+            return model_cooldown.available(
+                provider,
+                keys,
+                model=model,
+                quota_bucket=quota_bucket,
+                max_seconds=config.max_seconds,
+                now=now,
+                legacy_rest_until=legacy,
+            )
         current = time.monotonic() if now is None else now
         with cls._lock:
-            return [key for key in keys if cls._resting.get((provider, key), 0) <= current]
+            return [
+                key for key in keys if cls._resting.get((provider, key), 0) <= current
+            ]
 
     @classmethod
-    def select(cls, provider: str, *, now: float | None = None) -> str | None:
+    def select(
+        cls,
+        provider: str,
+        *,
+        now: float | None = None,
+        model: str | None = None,
+        quota_bucket: str | None = None,
+    ) -> str | None:
         """The key to use now; the first configured one when every key is resting."""
         keys = cls.keys(provider)
+        config = settings()
+        if config.enabled and (model or quota_bucket):
+            with cls._lock:
+                legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
+            return model_cooldown.select(
+                provider,
+                keys,
+                model=model,
+                quota_bucket=quota_bucket,
+                max_seconds=config.max_seconds,
+                now=now,
+                legacy_rest_until=legacy,
+            )
         return next(iter(cls.available(provider, keys, now=now) or keys), None)
 
     @classmethod
     def record(
-        cls, provider: str, key: str | None, status: int, *, now: float | None = None
+        cls,
+        provider: str,
+        key: str | None,
+        status: int,
+        *,
+        now: float | None = None,
+        model: str | None = None,
+        quota_bucket: str | None = None,
+        outcome: UpstreamOutcome | None = None,
+        credential_wide_auth: bool | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         if not key or provider not in POOLED_KEY_ENVS:
+            return
+        config = settings()
+        if config.enabled and (model or quota_bucket):
+            classified = outcome or classify_upstream_outcome(status)
+            wide_auth = (
+                status == 401 if credential_wide_auth is None else credential_wide_auth
+            )
+            until = model_cooldown.record(
+                provider,
+                key,
+                classified,
+                model=model,
+                quota_bucket=quota_bucket,
+                now=now,
+                credential_wide_auth=wide_auth,
+                retry_after_seconds=retry_after_seconds,
+                max_seconds=config.max_seconds,
+                fallback_seconds=(
+                    REFUSED_REST_SECONDS
+                    if classified.credential_health == "rejected"
+                    else RATE_LIMITED_REST_SECONDS
+                ),
+            )
+            if (
+                classified.credential_health == "rejected"
+                and wide_auth
+                and until is not None
+            ):
+                with cls._lock:
+                    cls._resting[(provider, key)] = max(
+                        cls._resting.get((provider, key), 0), until
+                    )
             return
         current = time.monotonic() if now is None else now
         with cls._lock:
@@ -94,15 +179,42 @@ class CredentialPool:
                 cls._resting.pop((provider, key), None)
 
     @classmethod
-    def record_headers(cls, provider: str, headers: Mapping[str, str], status: int) -> None:
+    def record_headers(
+        cls,
+        provider: str,
+        headers: Mapping[str, str],
+        status: int,
+        *,
+        model: str | None = None,
+        quota_bucket: str | None = None,
+        outcome: UpstreamOutcome | None = None,
+        credential_wide_auth: bool | None = None,
+        retry_after_seconds: float | None = None,
+        now: float | None = None,
+    ) -> None:
         """Record the result for the bearer key a request carried."""
         if provider not in POOLED_KEY_ENVS:
             return
         authorization = next(
-            (value for name, value in headers.items() if name.lower() == "authorization"), ""
+            (
+                value
+                for name, value in headers.items()
+                if name.lower() == "authorization"
+            ),
+            "",
         )
         if isinstance(authorization, str) and authorization.startswith("Bearer "):
-            cls.record(provider, authorization[len("Bearer "):].strip(), status)
+            cls.record(
+                provider,
+                authorization[len("Bearer ") :].strip(),
+                status,
+                model=model,
+                quota_bucket=quota_bucket,
+                outcome=outcome,
+                credential_wide_auth=credential_wide_auth,
+                retry_after_seconds=retry_after_seconds,
+                now=now,
+            )
 
     @classmethod
     def reset(cls) -> None:
