@@ -57,6 +57,24 @@ branches, explicit interrupted-response recovery, and Worker/Container release
 checks. [External PostgreSQL and encrypted backups](docs/control-plane-storage.md)
 keep control-plane settings independent of ephemeral Container storage.
 
+### Opt-in gateway features
+
+Most of these stay off until a setting or request header enables them, or an
+operator runs a script. Partial usage accounting and the authenticated OpenAPI
+document are always on. Each document lists its settings, and features that
+store data name the D1 migration to apply before enabling them.
+
+- [Cache policy isolation](docs/cache-policy.md): `RESPONSE_CACHE_POLICY_REVISION` keys cached chat responses by the current route and guardrail policy.
+- [Partial usage and unknown cost](docs/usage-uncertainty.md): the usage ledger records a missing token count or price as unknown instead of zero.
+- [Conversion fidelity diagnostics](docs/conversion-fidelity.md): sending `X-MultiLLM-Conversion-Report: 1` returns headers that rate a chat, responses or messages translation and list the affected fields.
+- [OpenAPI contract](docs/openapi.md): `GET /openapi.json` returns the client API description to authenticated callers.
+- [Versioned prompt templates](docs/prompt-templates.md): `PROMPT_TEMPLATES_ENABLED` adds admin-published templates and a render endpoint.
+- [Capability probes](docs/capability-probes.md): an operator script checks tool calls, JSON schema output and vision on selected models.
+- [Configuration snapshots](docs/config-snapshots.md): `CONFIG_SNAPSHOTS_ENABLED` adds reviewed, revisioned auto-route changes with a diff and audit records.
+- [Health probe cost forecast](docs/probe-cost-forecast.md): an offline script bounds the API calls and spend of a probe plan.
+- [Three-arm evaluation](docs/evaluation-noise-floor.md): `SHADOW_EVAL_NOISE_FLOOR_ENABLED` compares a candidate against two replays of the production model, and an offline script replays routing cost.
+- [Quantization and precision preferences](docs/model-precision.md): `MODEL_PRECISION_PREFERENCE` orders catalog and intelligence candidates by model precision.
+
 ## Setup
 
 1. Clone the repository:
