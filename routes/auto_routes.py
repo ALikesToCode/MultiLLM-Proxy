@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from collections.abc import Callable
 
@@ -23,6 +24,7 @@ from services.provider_catalog_service import (
 )
 from services.resilience_service import ResilienceService
 from services.route_health import RouteHealth, ordering_settings
+from services.stream_preflight import preflight_chat_stream
 
 # Payment-required responses mean this candidate cannot serve the request with
 # its current credentials. Explicit auto routes may safely try the next
@@ -209,7 +211,23 @@ def dispatch_auto_route(
         except Exception:
             RouteHealth.record(candidate, ok=False, outcome="error")
             raise
+        preflight_failed = False
+        preflight_outcome = ""
+        if (
+            fail_over is chat_fail_over
+            and has_request_context()
+            and request.method == "POST"
+            and request.path == "/v1/chat/completions"
+            and payload.get("stream") is True
+            and os.environ.get("MULTILLM_STREAM_PREFLIGHT", "off").strip().lower() == "strict"
+        ):
+            preflight = preflight_chat_stream(response)
+            response = preflight.response
+            preflight_failed = preflight.outcome not in {"skipped", "validated"}
+            preflight_outcome = preflight.outcome
         ok, reason = attempt_outcome(response)
+        if preflight_failed:
+            ok, reason = False, preflight_outcome
         if ok is not None:
             RouteHealth.record(
                 candidate,
@@ -218,7 +236,8 @@ def dispatch_auto_route(
                 latency_ms=(time.monotonic() - started) * 1000 if ok else None,
                 status=response.status_code,
             )
-        if not fail_over(response):
+        # A local preflight failure does not prove the provider generated nothing.
+        if preflight_failed or not fail_over(response):
             if last_failure is not None:
                 last_failure.close()
             return _decorate_response(
