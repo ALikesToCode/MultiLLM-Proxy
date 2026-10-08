@@ -1,3 +1,4 @@
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics } from "./worker/gateway-extensions.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
@@ -1446,7 +1447,7 @@ function createOpencodeStreamResponse(upstreamResponse) {
   });
 }
 
-async function handleDirectOpencodeRequest(request, env, requestUrl) {
+async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
   const providedToken = extractOpencodeCallerToken(request);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
@@ -1492,10 +1493,10 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
     signal: request.signal,
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
     route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   if (isOpencodeNativeRequest(requestUrl.pathname, request.method)) {
     const downstreamResponse = new Response(upstreamResponse.body, {
@@ -1580,7 +1581,7 @@ async function authorizeContainerOpencodeRequest(request, env, requestUrl) {
   return null;
 }
 
-async function handleDirectLinkApiRequest(request, env, requestUrl) {
+async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
   const providedToken = extractLinkApiCallerToken(request, requestUrl);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildLinkApiUnauthorizedResponse(), env);
@@ -1627,10 +1628,10 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
     route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   return applyCorsHeaders(
     request,
@@ -1643,7 +1644,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
   );
 }
 
-async function handleDirectCodexEasyRequest(request, env, requestUrl) {
+async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
   const providedToken = extractBearerToken(request);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
@@ -1685,10 +1686,10 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
     route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   return applyCorsHeaders(
     request,
@@ -1982,7 +1983,7 @@ export default {
 
     if (codexEasyPath) {
       try {
-        return await handleDirectCodexEasyRequest(request, env, requestUrl);
+        return await handleDirectCodexEasyRequest(request, env, requestUrl, ctx);
       } catch (error) {
         logStructuredError("direct_codex_easy_fetch_failed", error);
         return applyCorsHeaders(
@@ -2001,7 +2002,7 @@ export default {
 
     if (linkapiPath) {
       try {
-        return await handleDirectLinkApiRequest(request, env, requestUrl);
+        return await handleDirectLinkApiRequest(request, env, requestUrl, ctx);
       } catch (error) {
         logStructuredError("direct_linkapi_fetch_failed", error);
         return applyCorsHeaders(
@@ -2021,7 +2022,7 @@ export default {
     if (opencodePath) {
       try {
         if (env.OPENCODE_EDGE_FETCH === "true") {
-          return await handleDirectOpencodeRequest(request, env, requestUrl);
+          return await handleDirectOpencodeRequest(request, env, requestUrl, ctx);
         }
         const rejected = await authorizeContainerOpencodeRequest(
           request,
@@ -2059,6 +2060,7 @@ export default {
       await withAccessIdentity(request, env, headers);
       headers.delete("content-length");
       headers.delete("host");
+      withForwardedCorrelation(headers, env);
       headers.set("x-forwarded-proto", requestUrl.protocol.slice(0, -1));
       headers.set("x-forwarded-host", requestUrl.host);
       headers.set("x-multillm-external-origin", requestUrl.origin);
@@ -2074,7 +2076,10 @@ export default {
         signal: request.signal,
         ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
       });
-      const response = await container.fetch(forwardedRequest);
+      let response = await container.fetch(forwardedRequest);
+      if (requestUrl.pathname === "/v1/metrics/prometheus") {
+        response = await withNativeMetrics(response, env);
+      }
       if (await isContainerPackageStartupFailure(response)) {
         logStructuredError("container_start_failed_response", new Error("Container unavailable"));
         if (rootPath) {

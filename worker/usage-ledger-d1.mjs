@@ -193,3 +193,21 @@ export async function handleUsageLedgerRequest(request, env) {
     return reply({ error: "storage_unavailable" }, 503);
   }
 }
+
+/** Serialize native telemetry into the existing strict ledger; richer fields need a migration. */
+export async function recordNativeUsage(env, event) {
+  const model = event.model ? `${event.provider}:${event.model}` : null;
+  const kind = event.endpoint.endsWith("/responses") ? "responses" : event.endpoint.endsWith("/embeddings") ? "embeddings"
+    : event.endpoint.endsWith("/images/generations") ? "images" : "chat";
+  const row = { at: new Date().toISOString(), principal: event.principal, key_prefix: null,
+    kind, endpoint: event.endpoint, requested_model: model, selected_model: model,
+    status: event.status, latency_ms: event.duration_ms, input_tokens: event.input_tokens,
+    output_tokens: event.output_tokens, cost_usd: event.cost_usd, cost_basis: event.cost_basis,
+    request_id: event.requestId };
+  if (!validRow(row)) throw new Error("Invalid native usage metadata");
+  if (!env.INTELLIGENCE_DB) { console.error(JSON.stringify({ event: "native_usage_storage_unavailable" })); return; }
+  try {
+    return await record(env.INTELLIGENCE_DB, env, { version: 1, operation: "record",
+      batch: event.requestId.replaceAll("-", ""), rows: [row] });
+  } catch { console.error(JSON.stringify({ event: "native_usage_storage_failed" })); }
+}
