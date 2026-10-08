@@ -118,6 +118,12 @@ class CostService:
         if prices is None:
             return None
 
+        # A missing count is unknown when it contributes to the invoice. Flat-only
+        # and explicitly free components do not require provider token counts.
+        if ((input_tokens is None and prices["input"] != 0)
+                or (output_tokens is None and prices["output"] != 0)):
+            return None
+
         safe_input_tokens = cls._token_count(input_tokens)
         safe_output_tokens = cls._token_count(output_tokens)
         total = (

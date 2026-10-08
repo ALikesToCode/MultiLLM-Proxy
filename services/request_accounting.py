@@ -24,6 +24,7 @@ from error_handlers import APIError
 from services import key_controls, telemetry_export, usage_ledger
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
+from services.usage_types import StreamUsageObserver, UsageObservation
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ def _candidates(model: str) -> list[str]:
     return [model]
 
 
-def price(models: list[str], input_tokens: int, output_tokens: int, units: int) -> Optional[float]:
+def price(models: list[str], input_tokens: Optional[int], output_tokens: Optional[int], units: int) -> Optional[float]:
     """The highest configured price among the models (and automatic route candidates)
     a request may use, in USD; None when none of them is priced."""
     costs = [CostService.estimate(candidate, input_tokens, output_tokens, requests=units)
@@ -270,34 +271,15 @@ def _qualified(model: str, provider: Optional[str]) -> str:
     return model if ":" in model or not provider else f"{provider}:{model}"
 
 
-def _usage_from(value: Any) -> Optional[tuple[int, int]]:
+def _usage_from(value: Any) -> Optional[UsageObservation]:
     """Input and output tokens from a Chat Completions, Responses or embeddings body."""
-    if not isinstance(value, dict):
-        return None
-    usage = value.get("usage")
-    if not isinstance(usage, dict) and isinstance(value.get("response"), dict):
-        usage = value["response"].get("usage")
-    if not isinstance(usage, dict):
-        return None
-    input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
-    output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
-    if type(input_tokens) is not int or type(output_tokens) is not int or input_tokens < 0 or output_tokens < 0:
-        return None
-    return input_tokens, output_tokens
+    return UsageObservation.from_body(value)
 
 
-def _sse_usage(tail: bytes) -> Optional[tuple[int, int]]:
-    for line in reversed(tail.decode("utf-8", "replace").splitlines()):
-        line = line.strip()
-        if not line.startswith("data:") or '"usage"' not in line:
-            continue
-        try:
-            found = _usage_from(json.loads(line[5:].strip()))
-        except (ValueError, RecursionError):
-            continue
-        if found:
-            return found
-    return None
+def _sse_usage(tail: bytes) -> Optional[UsageObservation]:
+    observer = StreamUsageObserver(SSE_TAIL_BYTES)
+    observer.feed(tail)
+    return observer.finish()
 
 
 def _reported_model(value: Any) -> Optional[str]:
@@ -321,7 +303,7 @@ def _sse_model(tail: bytes) -> Optional[str]:
     return None
 
 
-def _json_tail_usage(tail: bytes) -> Optional[tuple[int, int]]:
+def _json_tail_usage(tail: bytes) -> Optional[UsageObservation]:
     """Token usage from the last `"usage": {...}` object in a streamed JSON body's tail."""
     text = tail.decode("utf-8", "replace")
     position = text.rfind('"usage"')
@@ -369,7 +351,7 @@ def _clean_model(value: Any) -> Optional[str]:
     return value if isinstance(value, str) and MODEL_ID.fullmatch(value) else None
 
 
-def _record(context: UsageContext, status: int, usage: Optional[tuple[int, int]], units: Optional[int]) -> None:
+def _record(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> None:
     if context.finished:
         return
     context.finished = True
@@ -378,7 +360,16 @@ def _record(context: UsageContext, status: int, usage: Optional[tuple[int, int]]
         return
     try:
         row = _row(context, status, usage, units)
-        BudgetService.record_cost(row)
+        budget_row = row
+        if row["cost_usd"] is None and usage is not None:
+            # Only the budget sees estimates; measured ledger counts remain unchanged.
+            estimated = UsageObservation(row["input_tokens"], row["output_tokens"]).with_estimates(
+                context.input_tokens, context.output_tokens)
+            selected = context.selected or row["selected_model"]
+            models = [selected] if selected else [_qualified(model, context.provider) for model in context.models]
+            budget_row = {**row, "cost_usd": price(models, estimated.input_tokens,
+                                                  estimated.output_tokens, context.units)}
+        BudgetService.record_cost(budget_row)
         usage_ledger.LEDGER.record(row)
         telemetry_export.EXPORTER.submit({**row, "method": context.method, "trace_id": context.trace[0],
                                           "parent_span_id": context.trace[1], "start_ns": context.start_ns,
@@ -390,7 +381,9 @@ def _record(context: UsageContext, status: int, usage: Optional[tuple[int, int]]
         BudgetService.settle(context.reservation)
 
 
-def _row(context: UsageContext, status: int, usage: Optional[tuple[int, int]], units: Optional[int]) -> dict:
+def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
+    if usage is not None and context.path == "/v1/embeddings":
+        usage = UsageObservation(usage.input_tokens, 0, "provider", ("provider",))
     qualified = [_qualified(model, context.provider) for model in context.models]
     requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
     selected = context.selected or (requested if requested and requested != "mixed"
@@ -400,13 +393,12 @@ def _row(context: UsageContext, status: int, usage: Optional[tuple[int, int]], u
     cost, basis = None, None
     if context.cached and status < 400:
         cost, basis = 0.0, "cache"
-    elif status < 400 or usage:
-        if usage:
-            input_tokens, output_tokens, basis = usage[0], usage[1], "usage"
-        else:
-            input_tokens, output_tokens, basis = context.input_tokens, context.output_tokens, "estimate"
-        cost = price([selected] if selected else qualified, input_tokens, output_tokens, context.units)
-        basis = basis if cost is not None else None
+    elif status < 400 or usage is not None:
+        observation = usage if usage is not None else UsageObservation().with_estimates(
+            context.input_tokens, context.output_tokens)
+        cost = price([selected] if selected else qualified, observation.input_tokens,
+                     observation.output_tokens, context.units)
+        basis = observation.storage_basis(cost)
     prefix = context.user.get("api_key_prefix")
     return {
         "at": usage_ledger.utc_timestamp(),
@@ -418,8 +410,8 @@ def _row(context: UsageContext, status: int, usage: Optional[tuple[int, int]], u
         "selected_model": _clean_model(selected),
         "status": min(599, max(100, int(status))),
         "latency_ms": min(86_400_000, max(0, round((time.perf_counter() - context.started) * 1000))),
-        "input_tokens": usage[0] if usage else None,
-        "output_tokens": usage[1] if usage else None,
+        "input_tokens": usage.input_tokens if usage is not None else None,
+        "output_tokens": usage.output_tokens if usage is not None else None,
         "cost_usd": cost,
         "cost_basis": basis,
         "request_id": context.request_id,
@@ -439,11 +431,12 @@ def _capture(context: UsageContext) -> None:
 class _SniffedStream:
     """Pass a streamed body through unchanged while keeping its tail for token usage."""
 
-    def __init__(self, iterable: Iterable, on_close) -> None:
+    def __init__(self, iterable: Iterable, on_close, event_stream: bool = False) -> None:
         self._iterable = iterable
         self._iterator = iter(iterable)
         self._on_close = on_close
         self._tail = b""
+        self._usage = StreamUsageObserver(SSE_TAIL_BYTES) if event_stream else None
 
     def __iter__(self):
         return self
@@ -452,6 +445,8 @@ class _SniffedStream:
         chunk = next(self._iterator)
         data = chunk.encode("utf-8") if isinstance(chunk, str) else bytes(chunk)
         self._tail = (self._tail + data)[-SSE_TAIL_BYTES:]
+        if self._usage is not None:
+            self._usage.feed(data)
         return chunk
 
     def close(self):
@@ -462,7 +457,7 @@ class _SniffedStream:
         finally:
             on_close, self._on_close = self._on_close, None
             if on_close is not None:
-                on_close(self._tail)
+                on_close(self._tail, self._usage.finish() if self._usage is not None else None)
 
 
 def finish(result: Any) -> Any:
@@ -482,13 +477,13 @@ def finish(result: Any) -> Any:
         json_stream = (response.mimetype or "").endswith("json")
         status = response.status_code
 
-        def closed(tail: bytes) -> None:
-            usage = _sse_usage(tail) if event_stream else _json_tail_usage(tail) if json_stream else None
+        def closed(tail: bytes, observed: Optional[UsageObservation]) -> None:
+            usage = observed if event_stream else _json_tail_usage(tail) if json_stream else None
             if event_stream and context.selected is None:
                 context.selected = _sse_model(tail)
             _record(context, status, usage, None)
 
-        response.response = _SniffedStream(response.response, closed)
+        response.response = _SniffedStream(response.response, closed, event_stream=event_stream)
         return response
     body = _json_body(response)
     if context.selected is None:
