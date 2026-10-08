@@ -47,12 +47,12 @@ from routes.protocol_bridge import (
     ENDPOINT_PROTOCOLS,
     translate_downstream_response,
     translation_api_error,
-    translation_request_headers,
 )
 from routes.tool_repair import with_chat_tool_repair, with_native_tool_repair
 from routes.unified_messages import register_unified_messages_routes
 from routes.media_edits import dispatch_reference_generation, has_reference_images
 from routes.unified_transport import send_configured_unified_provider_request
+from routes.unified_bridge import dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services import cloudflare_ai
@@ -368,6 +368,7 @@ def _dispatch_bridged_chat(
 ):
     """Serve Chat Completions from a model that speaks only Responses or Messages."""
     target = ENDPOINT_PROTOCOLS[endpoint]
+    record_request_conversion(payload, CHAT, target)
     try:
         body = translate_request(_copy_request_payload(payload, provider_model), CHAT, target)
     except TranslationError as error:
@@ -804,27 +805,9 @@ def _dispatch_translated_protocol(
     protocol: str,
 ):
     """Serve a Responses or Messages request through the Chat Completions dispatcher."""
-    try:
-        chat_payload = translate_request(payload, protocol, CHAT)
-    except TranslationError as error:
-        raise translation_api_error(error) from error
-    if "routing" in payload:
-        chat_payload["routing"] = payload["routing"]
-    response = dispatch_unified_chat_completion(
-        app,
-        auth_service_cls,
-        metrics_service_cls,
-        proxy_service_cls,
-        chat_payload,
-        request_headers=translation_request_headers(request.headers),
-    )
-    return translate_downstream_response(
-        response,
-        source=CHAT,
-        target=protocol,
-        stream=bool(chat_payload.get("stream")),
-        model=payload.get("model"),
-        request_payload=payload,
+    return dispatch_translated_protocol(
+        app, auth_service_cls, metrics_service_cls, proxy_service_cls, payload, protocol,
+        dispatch_chat=dispatch_unified_chat_completion,
     )
 
 
@@ -857,6 +840,7 @@ def dispatch_protocol_request(
             app.config
         )
         if speaks(provider, provider_model, endpoint) and not subscription_only:
+            record_request_conversion(payload, protocol, protocol)
             return _dispatch_native_protocol(
                 app,
                 auth_service_cls,
@@ -923,6 +907,7 @@ def dispatch_unified_image_generation(
 
 
 def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls) -> None:
+    register_conversion_routes(app, csrf)
     register_intelligence_routes(app, csrf, auth_service_cls, metrics_service_cls, proxy_service_cls)
     register_model_discovery_route(app, csrf, auth_service_cls, proxy_service_cls)
     register_cascade_admin_routes(app, login_required, auth_service_cls)
@@ -951,6 +936,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @app.route("/v1/chat/completions", methods=["POST", "OPTIONS"])
     @csrf.exempt
     @api_auth_required
+    @with_chat_conversion_report
     @cached_chat_completion
     def unified_chat_completions():
         payload = json_object_body()

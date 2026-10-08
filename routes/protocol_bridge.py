@@ -13,6 +13,7 @@ from providers.protocols import CHAT_COMPLETIONS, MESSAGES, RESPONSES
 from route_helpers import stream_upstream_response
 from services import protocol_translation as translation
 from services.protocol_translation import TranslationError, UpstreamFailure
+from services.conversion_diagnostics import response_report
 
 ENDPOINT_PROTOCOLS = {
     CHAT_COMPLETIONS: translation.CHAT,
@@ -132,6 +133,8 @@ def translate_downstream_response(
         )
 
     event_stream = response.mimetype == "text/event-stream"
+    if event_stream:
+        _record_response_conversion(None, source, target)
     if event_stream and stream:
         events = translation.translate_stream(
             response.iter_encoded(), source, target, model=model, request=request_payload
@@ -155,6 +158,7 @@ def translate_downstream_response(
         decoded = _decode(body)
         if not isinstance(decoded, dict):
             raise APIError("Upstream provider returned a non-JSON response", status_code=502)
+        _record_response_conversion(decoded, source, target)
         if stream:
             events = translation.completion_stream(
                 decoded, source, target, model=model, request=request_payload
@@ -171,3 +175,10 @@ def translate_downstream_response(
     except UpstreamFailure as failure:
         return failure_response(failure, target, headers)
     return _json_response(payload, status, headers)
+
+
+def _record_response_conversion(payload, source, target) -> None:
+    from routes.unified_bridge import diagnostics_requested, record_conversion
+
+    if diagnostics_requested():
+        record_conversion(response_report(payload, source, target))
