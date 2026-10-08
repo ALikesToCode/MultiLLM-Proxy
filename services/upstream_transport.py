@@ -1,28 +1,23 @@
 """Resource-safe helpers for consuming provider HTTP responses."""
 
-import logging
-from typing import Generator
+from collections.abc import Iterator
 
 import requests
 
 from streaming.sse import iter_sse_data
-
-logger = logging.getLogger(__name__)
-
+from services.request_cancellation import CancellationIterator, bind_cancellation
 
 def close_retry_response(response: requests.Response) -> None:
     """Release a retryable response without masking the original result."""
-    try:
-        response.close()
-    except Exception as error:
-        logger.warning(
-            "Retry response cleanup failed type=%s",
-            type(error).__name__,
-        )
+    bind_cancellation(response).close()
 
 
-def iter_stream_content(response: requests.Response) -> Generator[bytes, None, None]:
+def iter_stream_content(response: requests.Response) -> Iterator[bytes]:
     """Yield decoded upstream bytes as soon as the socket exposes them."""
+    return CancellationIterator(lambda: _stream_content(response), bind_cancellation(response))
+
+
+def _stream_content(response: requests.Response) -> Iterator[bytes]:
     raw_response = getattr(response, "raw", None)
     raw_read1 = getattr(raw_response, "read1", None)
     if callable(raw_read1):
@@ -35,21 +30,21 @@ def iter_stream_content(response: requests.Response) -> Generator[bytes, None, N
     yield from response.iter_content(chunk_size=128)
 
 
-def iter_stream_lines(response: requests.Response) -> Generator[str, None, None]:
+def iter_stream_lines(response: requests.Response) -> Iterator[str]:
+    """Own the stream before the first read, including preflight rejection."""
+    return CancellationIterator(lambda: _stream_lines(response), bind_cancellation(response))
+
+
+def _stream_lines(response: requests.Response) -> Iterator[str]:
     """Parse SSE responses incrementally, with a line-based fallback."""
     content_type = response.headers.get("content-type", "").lower()
     if content_type.startswith("text/event-stream") and hasattr(
         response,
         "iter_content",
     ):
-        try:
-            for data_payload in iter_sse_data(iter_stream_content(response)):
-                yield f"data: {data_payload}"
-            return
-        except Exception as error:
-            logger.warning(
-                "SSE parser failed; falling back to line iteration type=%s",
-                type(error).__name__,
-            )
+        # A failed socket read is an interrupted handoff, not a fresh read path.
+        for data_payload in iter_sse_data(_stream_content(response)):
+            yield f"data: {data_payload}"
+        return
 
     yield from response.iter_lines(decode_unicode=True)

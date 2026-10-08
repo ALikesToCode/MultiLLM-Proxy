@@ -392,6 +392,7 @@ export async function roleplayModuleUrl() {
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
+      .replace('from "../upstream-cancellation.mjs";', `from "${new URL("../../worker/upstream-cancellation.mjs", import.meta.url)}";`)
       .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
       .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace(

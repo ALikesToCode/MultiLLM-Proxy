@@ -1,3 +1,4 @@
+import { UpstreamCancellation, readBoundedUpstreamBytes } from "../upstream-cancellation.mjs";
 import { firewallFetch, isSecretScanBlock } from "../secret-firewall.mjs";
 import {
   buildProviderHeaders,
@@ -121,62 +122,10 @@ export async function unwrapClineEnvelope(response) {
 }
 
 export async function readBoundedBytes(stream, maximumBytes, signal) {
-  if (!stream) {
-    return { bytes: new Uint8Array(), firstByteMs: 0 };
-  }
-
-  const reader = stream.getReader();
-  const chunks = [];
-  let size = 0;
-  let firstByteAt = 0;
-  const startedAt = performance.now();
-  const abort = () => { void reader.cancel().catch(() => {}); };
-  signal?.addEventListener("abort", abort, { once: true });
-
-  try {
-    while (true) {
-      if (signal?.aborted) {
-        throw new DOMException("Request aborted", "AbortError");
-      }
-      const { value, done } = await reader.read();
-      if (signal?.aborted) {
-        throw new DOMException("Request aborted", "AbortError");
-      }
-      if (done) {
-        break;
-      }
-      if (!value) {
-        continue;
-      }
-      if (!firstByteAt) {
-        firstByteAt = performance.now();
-      }
-      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-      size += chunk.byteLength;
-      if (size > maximumBytes) {
-        await reader.cancel("Response exceeded configured limit");
-        throw new RoleplayRequestError(
-          "Upstream response exceeded the roleplay response limit",
-          502,
-        );
-      }
-      chunks.push(chunk);
-    }
-  } finally {
-    signal?.removeEventListener("abort", abort);
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return {
-    bytes,
-    firstByteMs: firstByteAt ? firstByteAt - startedAt : 0,
-  };
+  return readBoundedUpstreamBytes(stream, maximumBytes, signal, () =>
+    new RoleplayRequestError(
+      "Upstream response exceeded the roleplay response limit", 502,
+    ));
 }
 
 export function copyUpstreamResponseHeaders(headers) {
@@ -223,7 +172,13 @@ async function handleCandidateHttpFailure(
   const explicitProviderError = settings.providerErrorFallbackEnabled
     ? await classifyExplicitProviderError(attempted.response)
     : null;
-  attempted.cleanup();
+  if (attempted.cancellation?.parentSignal?.aborted) {
+    attempted.cleanup();
+    return handleCandidatePreResponseFailure(
+      state, candidate, new RoleplayPreResponseFailure("client_abort"),
+      settings, false, fallbackCount,
+    );
+  }
 
   const safeFallback =
     isSafeFallbackStatus(attempted.response.status) ||
@@ -241,7 +196,7 @@ async function handleCandidateHttpFailure(
   );
 
   if (safeFallback && hasFallbackCandidate) {
-    await attempted.response.body?.cancel();
+    attempted.cleanup();
     return {
       state: nextState,
       fallbackCount: fallbackCount + 1,
@@ -596,21 +551,15 @@ async function fetchCandidateWithPaygoFallback(
 }
 
 async function fetchCandidate(candidate, payload, env, settings, signal, key) {
-  const controller = new AbortController();
-  const abort = () => controller.abort(signal?.reason);
-  let cleaned = false;
-  if (signal?.aborted) {
-    abort();
-  } else {
-    signal?.addEventListener("abort", abort, { once: true });
-  }
-  const timeout = setTimeout(
-    () => controller.abort("upstream_header_timeout"),
-    settings.upstreamHeaderTimeoutMs,
-  );
+  const cancellation = new UpstreamCancellation({
+    signal, headerTimeoutMs: settings.upstreamHeaderTimeoutMs,
+    onOutcome: settings.onCancellationOutcome,
+  });
+  const { controller } = cancellation;
   const startedAt = performance.now();
 
   try {
+    cancellation.throwIfAborted();
     const headers = buildProviderHeaders(candidate, env, key, settings.clientHeaders);
     const containerNamespace = env.MULTILLM_PROXY_CONTAINER;
     const useOpenCodeContainer =
@@ -628,6 +577,7 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
       redirect: "manual",
       signal: controller.signal,
     };
+    cancellation.handoff();
     const response = useOpenCodeContainer
       ? await containerNamespace.getByName("primary").fetch(
           new Request(
@@ -640,28 +590,23 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
           onDecision: settings.onSecretScan,
           principal: { id: env.ADMIN_USERNAME || "admin" },
         }, async checked => fetch(checked.url, { ...requestInit, headers: checked.headers, body: await checked.text() }));
-    clearTimeout(timeout);
+    cancellation.headersReceived();
+    const ownedResponse = isSecretScanBlock(response)
+      ? response : cancellation.wrapResponse(response);
+    if (isSecretScanBlock(response)) cancellation.complete();
+    cancellation.throwIfAborted();
     const headerMs = performance.now() - startedAt;
     return {
-      response:
-        candidate.provider === "cline-pass"
-          ? await unwrapClineEnvelope(response)
-          : response,
+      response: candidate.provider === "cline-pass"
+        ? await unwrapClineEnvelope(ownedResponse) : ownedResponse,
+      cancellation,
       controller,
       startedAt,
       headerMs,
-      cleanup() {
-        if (cleaned) {
-          return;
-        }
-        cleaned = true;
-        clearTimeout(timeout);
-        signal?.removeEventListener("abort", abort);
-      },
+      cleanup: () => cancellation.cleanup(),
     };
   } catch (error) {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", abort);
+    cancellation.cleanup();
     const failureKind = signal?.aborted
       ? "client_abort"
       : controller.signal.reason === "compaction_timeout"
@@ -777,20 +722,13 @@ export async function requestCompaction(
   settings,
   signal,
 ) {
-  const compactionController = new AbortController();
-  const forwardAbort = () =>
-    compactionController.abort(signal?.reason);
-  if (signal?.aborted) {
-    forwardAbort();
-  } else {
-    signal?.addEventListener("abort", forwardAbort, { once: true });
-  }
+  const compaction = new UpstreamCancellation({
+    signal, headerTimeoutMs: settings.compactionTimeoutMs,
+    timeoutReason: "compaction_timeout",
+  });
+  const compactionController = compaction.controller;
   const startedAt = performance.now();
   const deadlineAt = startedAt + settings.compactionTimeoutMs;
-  const deadline = setTimeout(
-    () => compactionController.abort("compaction_timeout"),
-    settings.compactionTimeoutMs,
-  );
   let fallbackCount = 0;
   try {
     const compactionCandidates = prepareCompactionCandidates(
@@ -857,10 +795,8 @@ export async function requestCompaction(
         );
         if (isSafeFallbackStatus(response.status)) {
           fallbackCount += 1;
-          await response.body?.cancel();
           continue;
         }
-        await response.body?.cancel();
         throw new Error(
           "Compaction provider returned an ambiguous failure",
         );
@@ -893,8 +829,7 @@ export async function requestCompaction(
     }
     throw new Error("No configured model accepted memory compaction");
   } finally {
-    clearTimeout(deadline);
-    signal?.removeEventListener("abort", forwardAbort);
+    compaction.cleanup();
   }
 }
 
