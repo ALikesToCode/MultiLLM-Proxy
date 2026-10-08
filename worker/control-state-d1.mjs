@@ -7,6 +7,7 @@
  */
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { handlePromptTemplates, promptTemplatesEnabled } from "./prompt-templates-d1.mjs";
 
 const CONTROL = /[\x00-\x1f\x7f]/;
 const HASH = /^[0-9a-f]{64}$/;
@@ -246,6 +247,7 @@ async function catalog(db, body) {
 }
 
 const DOMAINS = Object.freeze({
+  "prompt-templates": { handle: handlePromptTemplates, maxBytes: 524288, operations: ["create", "get", "list"] },
   limits: { handle: limits, maxBytes: 16384, operations: ["sync"] },
   login: { handle: login, maxBytes: 4096, operations: ["check", "failure", "success"] },
   models: { handle: models, maxBytes: 4096, operations: ["list", "put"] },
@@ -260,6 +262,7 @@ export async function handleControlStateRequest(request, env) {
   const domain = Object.hasOwn(DOMAINS, name) ? DOMAINS[name] : null;
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || !domain
     || url.search || url.hash || url.username || url.password) return reply({ error: "not_found" }, 404);
+  if (name === "prompt-templates" && !promptTemplatesEnabled(env)) return reply({ error: "not_found" }, 404);
   if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
     return reply({ error: "invalid_request" }, 400);
   }
