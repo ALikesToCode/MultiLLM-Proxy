@@ -5,6 +5,9 @@
  * in the edge cache on a custom domain, and per isolate everywhere (the Cache API does
  * nothing on workers.dev). The markup matches templates/public_status.html.
  */
+import { PROMETHEUS_CONTENT_TYPE, prometheusEnabled, renderStatusMetrics } from "./prometheus.mjs";
+export { prometheusEnabled } from "./prometheus.mjs";
+
 import { readStatusSnapshot } from "./route-health-d1.mjs";
 
 export const STATUS_PATHS = new Set(["/status", "/status.json"]);
@@ -148,21 +151,21 @@ function emptySnapshot(now) {
  * The status document without waking the Container: the D1 snapshot first, then a running
  * Container (reached without renewing its sleep timer), then an empty "unknown" document.
  */
-async function loadSnapshot(env, container, now) {
+export async function loadStatusSnapshot(env, container, now = Date.now()) {
   if (memo && now - memo.at < MEMO_MS) return memo.value;
   let value = null;
   const stored = await readStatusSnapshot(env.INTELLIGENCE_DB);
-  if (stored) value = { snapshot: stored, source: "snapshot" };
+  if (stored) value = { snapshot: stored, source: "snapshot", available: true };
   if (!value && container?.fetchIfRunning) {
     try {
       const live = await container.fetchIfRunning("/status.json", { headers: { Accept: "application/json" } });
       const parsed = live?.status === 200 ? JSON.parse(live.body) : null;
-      if (parsed?.version === 1) value = { snapshot: parsed, source: "live" };
+      if (parsed?.version === 1) value = { snapshot: parsed, source: "live", available: true };
     } catch {
       value = null;
     }
   }
-  value ??= { snapshot: emptySnapshot(now), source: "snapshot" };
+  value ??= { snapshot: emptySnapshot(now), source: "snapshot", available: false };
   memo = { at: now, value };
   return value;
 }
@@ -177,7 +180,7 @@ export async function handleStatusRequest(request, env, ctx, { container, now = 
   const cached = cache ? await cache.match(cacheKey).catch(() => undefined) : undefined;
   if (cached) return cached;
 
-  const { snapshot, source } = await loadSnapshot(env, container, now);
+  const { snapshot, source } = await loadStatusSnapshot(env, container, now);
   const headers = new Headers({ "Cache-Control": STATUS_CACHE_CONTROL });
   let body;
   if (url.pathname === "/status.json") {
@@ -196,4 +199,16 @@ export async function handleStatusRequest(request, env, ctx, { container, now = 
     else await stored;
   }
   return response;
+}
+
+/** Public scrape uses the same snapshot reader and never starts a sleeping Container. */
+export async function handleStatusPrometheusRequest(request, env, { container, now = Date.now() } = {}) {
+  if (!prometheusEnabled(env.PROMETHEUS_ENABLED)) return new Response("Not found", { status: 404 });
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+  const loaded = await loadStatusSnapshot(env, container, now);
+  return new Response(request.method === "HEAD" ? null : renderStatusMetrics(loaded, now), {
+    headers: { "Content-Type": PROMETHEUS_CONTENT_TYPE, "Cache-Control": STATUS_CACHE_CONTROL },
+  });
 }

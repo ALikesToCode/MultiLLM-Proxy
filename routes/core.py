@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import psutil
-from flask import Response, abort, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Response, abort, g, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask_wtf.csrf import CSRFError
 
 from config import Config
@@ -18,6 +18,7 @@ from routes.knowledge_onboarding import PUBLIC_ENDPOINTS as KNOWLEDGE_PUBLIC_END
 from routes.public_pages import PUBLIC_ENDPOINTS as PRODUCT_PUBLIC_ENDPOINTS, register_public_routes
 from routes.status_page import PUBLIC_ENDPOINTS as STATUS_PUBLIC_ENDPOINTS
 from route_helpers import (
+    api_authenticate_only,
     apply_cors_headers,
     apply_operational_headers,
     check_provider,
@@ -31,6 +32,7 @@ from services import audit_log, dashboard_sso
 from services.auth_service import AuthService
 from services.login_attempt_service import LoginAttemptService
 from services.metrics_service import MetricsService
+from services.prometheus_export import CONTENT_TYPE as PROMETHEUS_CONTENT_TYPE, enabled as prometheus_enabled, render_metrics
 from services.provider_usage_service import ProviderUsageService
 from services.proxy_service import ProxyService
 from services.resilience_service import ResilienceService
@@ -425,6 +427,16 @@ def register_core_routes(app) -> None:
         return response
 
     @app.before_request
+    def gate_prometheus():
+        if request.path != "/v1/metrics/prometheus" or request.method == "OPTIONS":
+            return None
+        if not prometheus_enabled(os.environ.get("PROMETHEUS_ENABLED")):
+            abort(404)
+        if request.method != "GET":
+            return Response("Method not allowed", status=405, headers={"Allow": "GET, OPTIONS"})
+        return None
+
+    @app.before_request
     def handle_redirects():
         """
         For every request (except login, static, favicon), enforce authentication.
@@ -494,6 +506,7 @@ def register_core_routes(app) -> None:
 
         if (
             request.endpoint in PRIVATE_CACHE_ENDPOINTS
+            or request.path == "/v1/metrics/prometheus"
             or request.endpoint in {"health_check"}
             or request.headers.get("Authorization")
             or request_api_key()
@@ -641,6 +654,17 @@ def register_core_routes(app) -> None:
                 error=INTERNAL_ERROR_MESSAGE,
                 request_id=get_request_id(),
             ), 500
+
+    @app.route("/v1/metrics/prometheus", methods=["GET", "OPTIONS"])
+    @api_authenticate_only(required_scope="admin")
+    def prometheus_metrics():
+        user = g.authenticated_user
+        # Other API routes allow admin identity to imply scope; scrapes require both.
+        scopes = user.get("scopes", [])
+        if not user.get("is_admin") or not isinstance(scopes, (list, tuple, set, frozenset)) or "admin" not in scopes:
+            raise APIError("Admin user and admin API key scope required", status_code=403)
+        body = render_metrics(MetricsService.get_instance().get_stats(hours=24))
+        return Response(body, content_type=PROMETHEUS_CONTENT_TYPE, headers={"Cache-Control": "no-store"})
 
     @app.route("/admin/metrics/requests")
     @login_required

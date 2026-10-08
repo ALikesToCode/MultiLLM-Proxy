@@ -36,6 +36,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
 - 📊 Request, latency, response-class, and configured cost telemetry
+- 📈 Opt-in Prometheus scrapes for public route health and admin-only request window metrics
 - 🚀 Streaming support for compatible providers
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
 - ⚡ Configurable timeouts and retry mechanisms per provider

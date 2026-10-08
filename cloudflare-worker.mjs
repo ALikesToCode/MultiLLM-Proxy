@@ -12,7 +12,7 @@ import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowle
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { runScheduledShadowEval } from "./worker/shadow-eval-schedule.mjs";
 import { fetchIfRunning, runScheduledHealth } from "./worker/health-schedule.mjs";
-import { STATUS_PATHS, handleStatusRequest } from "./worker/status-page.mjs";
+import { STATUS_PATHS, handleStatusRequest, handleStatusPrometheusRequest, prometheusEnabled } from "./worker/status-page.mjs";
 
 export { ContainerProxy };
 import { isApiRequestPath } from "./worker/api-paths.mjs";
@@ -1875,6 +1875,19 @@ export default {
 
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
+    }
+
+    if (requestUrl.pathname === "/status.prometheus" || requestUrl.pathname === "/v1/metrics/prometheus") {
+      if (!prometheusEnabled(env.PROMETHEUS_ENABLED)) {
+        return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+      }
+      if (requestUrl.pathname === "/status.prometheus") {
+        const container = env.MULTILLM_PROXY_CONTAINER ? getContainer(env.MULTILLM_PROXY_CONTAINER, "primary") : null;
+        return handleStatusPrometheusRequest(request, env, { container });
+      }
+      if (request.method !== "GET") {
+        return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, OPTIONS", "Cache-Control": "no-store" } });
+      }
     }
 
     if (STATUS_PATHS.has(requestUrl.pathname)) {
