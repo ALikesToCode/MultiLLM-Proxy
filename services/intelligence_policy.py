@@ -12,6 +12,12 @@ from services.intelligence_contract import (
     integer,
 )
 from services.model_registry import ModelRegistry
+from services.model_precision import (
+    configured_preference,
+    prefer_precision,
+    validate_preference,
+)
+from services.provider_catalog_service import ProviderCatalogService
 from services.route_health import RouteHealth
 
 DEFAULT_POLICY = {
@@ -114,9 +120,15 @@ def validate_model(raw):
 
 
 def validate_policy(raw):
-    if not isinstance(raw, dict) or set(raw) - set(DEFAULT_POLICY):
+    if not isinstance(raw, dict) or set(raw) - (
+        set(DEFAULT_POLICY) | {"precision_preference"}
+    ):
         raise ValueError("Invalid intelligence policy")
     policy = {**copy.deepcopy(DEFAULT_POLICY), **copy.deepcopy(raw)}
+    if "precision_preference" in policy:
+        policy["precision_preference"] = validate_preference(
+            policy["precision_preference"]
+        )
     if type(policy["version"]) is not int or policy["version"] != 1:
         raise ValueError("Unsupported policy version")
     for key in ("enabled", "allow_paid_overage"):
@@ -240,7 +252,28 @@ def select_candidates(policy, request, config):
             return (-score, -candidate.get("quality_tier", 0), *speed, priority)
         return (priority, -score, *speed)
 
-    return [candidate for _, candidate in sorted(candidates, key=rank)]
+    ranked = sorted(candidates, key=rank)
+    if request.explicit or request.profile == "balanced":
+        return [candidate for _, candidate in ranked]
+    preference = (
+        validate_preference(policy["precision_preference"])
+        if "precision_preference" in policy
+        else configured_preference()
+    )
+    if not preference or len(ranked) < 2:
+        return [candidate for _, candidate in ranked]
+    metadata = {
+        f"{model.provider}:{model.model_id}": model.metadata
+        for model in ProviderCatalogService.list_models()
+    }
+    # Every original ranking dimension precedes precision. A quality tier also
+    # separates fast-profile ties without altering their existing relative order.
+    return prefer_precision(
+        ranked,
+        preference,
+        lambda item: (*rank(item)[:-1], item[1].get("quality_tier", 0)),
+        metadata,
+    )
 
 
 def model_advertisement(policy, config=None):
