@@ -35,6 +35,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
 - 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
+- 🩺 [Upstream outcomes](docs/upstream-outcomes.md) separate valid responses, credential rejection, throttling and ambiguous transport failure in circuit recovery
 - 📊 Request, latency, response-class, and configured cost telemetry
 - 🚀 Streaming support for compatible providers
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory

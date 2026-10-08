@@ -63,11 +63,6 @@ down or otherwise mutate keys. Existing credential-pool penalties remain in
 place; model-specific credential health integration is outside this change.
 No request content, provider body or secret is retained by the outcome value.
 
-## Coordinator handoff
+## Deployment
 
-README feature-list sentence:
-
-“Provider circuit recovery distinguishes valid responses, credential rejection,
-throttling and ambiguous transport failure.”
-
-No package script or Container environment allowlist entry is needed.
+There is no configuration, package script or Container environment entry.
