@@ -21,6 +21,7 @@ from flask import Response, g, request
 
 from route_helpers import request_api_key
 from services import cache_policy
+from services.retention_policy import request_policy
 from services.cache_service import ResponseCache
 
 CACHE_HEADER = "X-MultiLLM-Cache"
@@ -166,10 +167,13 @@ def cached_chat_completion(view):
 
     @wraps(view)
     def wrapper(*args, **kwargs):
+        retention = request_policy()
         mode, max_age = request_mode()
         settings = _settings()
         if mode is None or request.method != "POST":
             return view(*args, **kwargs)
+        if not retention.allows_content:
+            return _mark(view(*args, **kwargs), "bypass")
         payload = request.get_json(silent=True)
         principal = _principal()
         if not settings["enabled"] or principal is None or not request_is_cacheable(payload):

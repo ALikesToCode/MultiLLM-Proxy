@@ -1,4 +1,5 @@
 import { fail } from "./contracts.mjs";
+import { resolveRetentionPolicy, retentionAllowsContent } from "../retention-policy.mjs";
 import { digest } from "./evidence.mjs";
 import { memoKey, memoQueryNorm, memoSecretQuery, quantizeEmbedding, MEMO_BUNDLE_BYTES } from "./memo-store.mjs";
 
@@ -34,6 +35,11 @@ export function getMemos(env) {
 class MemoSession {
   constructor(env, authority, request, policy, options, started, usage) {
     Object.assign(this, { env, authority, request, policy, options, started, usage });
+    this.retentionPolicy = options.retentionPolicy ?? resolveRetentionPolicy(env, {
+      keyId: options.retentionKeyId, keyHash: options.retentionKeyHash,
+      route: options.retentionRoute, header: options.retentionHeader,
+    });
+    if (!retentionAllowsContent(this.retentionPolicy)) { this.enabled = false; return; }
     try { this.store = options.memos ?? getMemos(env); }
     catch { this.store = null; }
     this.enabled = this.store && !memoSecretQuery(request.query);
@@ -50,6 +56,7 @@ class MemoSession {
   }
 
   async embed() {
+    if (!retentionAllowsContent(this.retentionPolicy)) return null;
     const { env, options, request, usage } = this;
     if (!options.embed && !env.KNOWLEDGE_SEARCH_AI?.run) return null;
     // Background completions must not mutate usage already returned to the caller.
@@ -141,6 +148,7 @@ class MemoSession {
   }
 
   async storeBundle(bundle) {
+    if (!retentionAllowsContent(this.retentionPolicy)) return;
     const deadline = Math.min(this.deadline(MEMO_TIMEOUT_MS),
       this.options.waitUntil ? Infinity : this.options.memoWriteDeadlineAt ?? Infinity);
     if (deadline <= performance.now()) return;
@@ -166,7 +174,7 @@ class MemoSession {
   }
 
   async write(bundle, failed) {
-    if (!this.enabled || failed || this.exact === "off" && this.semantic === "off"
+    if (!retentionAllowsContent(this.retentionPolicy) || !this.enabled || failed || this.exact === "off" && this.semantic === "off"
       || !["ok", "partial"].includes(bundle.status) || !bundle.excerpts?.length) return;
     // Validation, embedding and storage all belong to the background task.
     const write = Promise.resolve().then(() => this.storeBundle(bundle)).catch(() => {});

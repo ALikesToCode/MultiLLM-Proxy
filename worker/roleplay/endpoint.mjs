@@ -3,7 +3,10 @@ import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 import { clientContextHeaders } from "../client-headers.mjs";
 import { TurnTraceJournal } from "./turn-trace.mjs";
 import { handleOperatorMemory } from "./operator-memory.mjs";
-import { recoveryTemplate, preserveRecovery, handleRecoverySnapshot } from "./recovery.mjs";
+import {
+  recoveryTemplate, preserveRecovery, handleRecoverySnapshot, resolveRoleplayRetention,
+  retentionResponse, retentionRequestId, retentionAllowsContent, createRetentionStateRepository,
+} from "./recovery.mjs";
 import { parseRoutingPolicy, filterRoutingCandidates, parameterReceipt } from "./routing-policy.mjs";
 
 import {
@@ -114,17 +117,20 @@ export class RoleplaySession extends DurableObject {
   }
 
   async fetch(request) {
+    const retention = resolveRoleplayRetention(this.env, request);
     await this.traces.ready;
     const pathname = new URL(request.url).pathname;
     if (pathname === "/operator/timeline" && request.method === "GET") {
       return jsonResponse(this.traces.snapshot());
     }
     if (["/operator/memory", "/operator/import-branch"].includes(pathname)) {
+      if (!retentionAllowsContent(retention)) return retentionResponse(
+        errorResponse("Durable conversation memory is unavailable under zero retention", 409, "retention_forbidden"), retention);
       return handleOperatorMemory(this, request, pathname.split("/").pop());
     }
-    if (pathname === "/operator/recovery" && request.method === "POST") return handleRecoverySnapshot(this, request);
+    if (pathname === "/operator/recovery" && request.method === "POST") return handleRecoverySnapshot(this, request, retention);
     if (pathname === "/metrics" && request.method === "GET") {
-      const state = await this.stateRepository.load();
+      const state = await createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates).load();
       return jsonResponse(
         buildRoleplaySessionMetrics(state, {
           pendingTurns: this.pendingTurns,
@@ -134,19 +140,19 @@ export class RoleplaySession extends DurableObject {
     if (pathname !== "/turn" || request.method !== "POST") {
       return errorResponse("Method not allowed", 405, "method_not_allowed");
     }
-    this.refreshSessionAlarm();
-    return this.enqueueTurn(request, this.settings);
+    if (retentionAllowsContent(retention)) this.refreshSessionAlarm();
+    return retentionResponse(await this.enqueueTurn(request, this.settings, retention), retention);
   }
 
-  async enqueueTurn(request, settings) {
-    const trace = this.traces.begin();
+  async enqueueTurn(request, settings, retention = resolveRoleplayRetention(this.env, request)) {
+    const trace = this.traces.begin(retention);
     try {
       return await this.turnQueue.run(
         request, settings,
         async (turnRequest, queueMs) => {
           trace.phase("preparing");
           trace.metrics({ queueMs });
-          const result = await this.handleTurn(turnRequest, settings, queueMs, trace);
+          const result = await this.handleTurn(turnRequest, settings, queueMs, trace, retention);
           result.response.headers.set("X-Roleplay-Trace-ID", trace.id);
           result.completion = Promise.resolve(result.completion).then(async (completion) => {
             if (completion?.persistenceFailed) await trace.finish(false, "persistence_failed");
@@ -178,7 +184,8 @@ export class RoleplaySession extends DurableObject {
     }
   }
 
-  async handleTurn(request, settings, queueMs = 0, trace = null) {
+  async handleTurn(request, settings, queueMs = 0, trace = null, retention = resolveRoleplayRetention(this.env, request)) {
+    const stateRepository = createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates);
     const scanCounts = [0, 0];
     const applyScanHeader = headers => {
       if (scanCounts.some(Boolean)) headers.set(SECRET_SCAN_HEADER, `redacted=${scanCounts[0]}; observed=${scanCounts[1]}`);
@@ -192,9 +199,9 @@ export class RoleplaySession extends DurableObject {
     let compactionMs = 0;
     const payload = await request.json();
     if (payload.recovery_enabled !== undefined && typeof payload.recovery_enabled !== "boolean") throw new RoleplayRequestError("recovery_enabled must be a boolean");
-    const stateCacheHit = this.stateRepository.loaded;
+    const stateCacheHit = stateRepository.loaded;
     const stateLoadStartedAt = performance.now();
-    let state = await this.stateRepository.load();
+    let state = await stateRepository.load();
     const stateLoadMs = performance.now() - stateLoadStartedAt;
     state = recordRoleplayStateCache(state, stateCacheHit);
     const parsedInitial = parseRoleplayPayload(
@@ -213,7 +220,8 @@ export class RoleplaySession extends DurableObject {
       state,
       parsedInitial,
     );
-    const idempotencyKey = request.headers.get("Idempotency-Key") ?? "";
+    const suppliedIdempotencyKey = request.headers.get("Idempotency-Key") ?? "";
+    const idempotencyKey = retentionAllowsContent(retention) ? suppliedIdempotencyKey : await retentionRequestId(suppliedIdempotencyKey);
     const duplicate = existingRoleplayRequest(state, idempotencyKey);
     if (duplicate) {
       return {
@@ -259,7 +267,7 @@ export class RoleplaySession extends DurableObject {
     };
     state = markRoleplayRequest(state, idempotencyKey, "started");
     if (idempotencyKey) {
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
     }
 
     const configuredCandidates = filterRoutingCandidates(this.configuredCandidates, parsed.routing);
@@ -275,7 +283,7 @@ export class RoleplaySession extends DurableObject {
     const credentialCheckPerformed = checkedState !== state;
     if (checkedState !== state) {
       state = checkedState;
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
     }
     const rankFor = (preference) => rankRoleplayCandidates(
       configuredCandidates,
@@ -301,7 +309,7 @@ export class RoleplaySession extends DurableObject {
     if (parsed.routing.fallback === "none") candidates.splice(1);
     if (!candidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "no_provider");
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
       return {
         response: errorResponse(
           "No roleplay provider is configured for this model preference",
@@ -394,7 +402,7 @@ export class RoleplaySession extends DurableObject {
           );
           if (compacted.blockedResponse) {
             state = markRoleplayRequest(state, idempotencyKey, "provider_failed");
-            await this.stateRepository.save(state);
+            await stateRepository.save(state);
             return {
               response: compacted.blockedResponse,
               completion: Promise.resolve(),
@@ -467,7 +475,7 @@ export class RoleplaySession extends DurableObject {
           if (!preserveFullGeneration) {
             messagesOptimized += plan.olderMessages.length;
           }
-          await this.stateRepository.save(state);
+          await stateRepository.save(state);
         }
       }
       compactionMs = performance.now() - compactionStartedAt;
@@ -485,7 +493,7 @@ export class RoleplaySession extends DurableObject {
       projectedStoredBytes > settings.maxStoredBytes
     ) {
       state = markRoleplayRequest(state, idempotencyKey, "compaction_failed");
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
       return {
         response: errorResponse(
           "Automatic memory compaction could not produce a safe retained window",
@@ -524,7 +532,7 @@ export class RoleplaySession extends DurableObject {
     );
     if (!generationCandidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "context_too_large");
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
       return {
         response: errorResponse(
           "Roleplay context and requested output exceed every eligible provider limit",
@@ -535,7 +543,7 @@ export class RoleplaySession extends DurableObject {
       };
     }
 
-    const recovery = recoveryTemplate(payload, roleplayMessages);
+    const recovery = recoveryTemplate(payload, roleplayMessages, retention);
     trace?.phase("connecting");
     const attempted = await attemptRoleplayCandidates(
       state,
@@ -561,9 +569,9 @@ export class RoleplaySession extends DurableObject {
     );
     state = attempted.state;
     if (attempted.terminalResponse) {
-      await preserveRecovery(this.ctx.storage, recovery, { success: false, reason: "provider_failed" }, trace?.id);
+      await preserveRecovery(this.ctx.storage, recovery, { success: false, reason: "provider_failed" }, trace?.id, retention);
       state = markRoleplayRequest(state, idempotencyKey, "provider_failed");
-      await this.stateRepository.save(state);
+      await stateRepository.save(state);
       return {
         response: attempted.terminalResponse,
         completion: Promise.resolve(),
@@ -685,7 +693,7 @@ export class RoleplaySession extends DurableObject {
         detectRefusal: continuation.classifyRefusal,
         refusalFallbackEnabled: continuation.refusalFallbackEnabled,
         onComplete: async (completion) => {
-          await preserveRecovery(this.ctx.storage, recovery, completion, trace?.id);
+          await preserveRecovery(this.ctx.storage, recovery, completion, trace?.id, retention);
           const {
             success,
             assistant,
@@ -739,8 +747,11 @@ export class RoleplaySession extends DurableObject {
             idempotencyKey,
           });
           trace?.metrics(completion);
-          if (trace) await trace.finish(success, reason, (metadata) => this.stateRepository.save(state, metadata));
-          else await this.stateRepository.save(state);
+          if (trace && retentionAllowsContent(retention)) await trace.finish(success, reason, (metadata) => stateRepository.save(state, metadata));
+          else {
+            await trace?.finish(success, reason);
+            await stateRepository.save(state);
+          }
         },
       });
       return {
@@ -839,9 +850,12 @@ export class RoleplaySession extends DurableObject {
       timings,
     });
     trace?.selected(finalCandidate, parameterReceipt(parsed, finalCandidate, settings));
-    if (trace) await trace.finish(completionResult.success, completionResult.reason, (metadata) => this.stateRepository.save(state, metadata));
-    else await this.stateRepository.save(state);
-    await preserveRecovery(this.ctx.storage, recovery, completionResult, trace?.id);
+    if (trace && retentionAllowsContent(retention)) await trace.finish(completionResult.success, completionResult.reason, (metadata) => stateRepository.save(state, metadata));
+    else {
+      await trace?.finish(completionResult.success, completionResult.reason);
+      await stateRepository.save(state);
+    }
+    await preserveRecovery(this.ctx.storage, recovery, completionResult, trace?.id, retention);
     applyScanHeader(responseHeaders);
     return {
       response: new Response(responseBytes, {
