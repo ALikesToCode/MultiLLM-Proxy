@@ -20,6 +20,7 @@ from functools import wraps
 from flask import Response, g, request
 
 from route_helpers import request_api_key
+from services import cache_policy
 from services.cache_service import ResponseCache
 
 CACHE_HEADER = "X-MultiLLM-Cache"
@@ -115,9 +116,12 @@ def _principal() -> str | None:
     return f"{name}\x00{key_digest}"
 
 
-def cache_key(principal: str, path: str, payload: dict) -> str:
+def cache_key(principal: str, path: str, payload: dict, *, policy: cache_policy.CachePolicy | None = None) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256("\x00".join((principal, path, canonical)).encode("utf-8")).hexdigest()
+    identity = (principal, path, canonical)
+    if policy is not None:
+        identity += (cache_policy.ISOLATED_REVISION, cache_policy.policy_digest(policy))
+    return hashlib.sha256("\x00".join(identity).encode("utf-8")).hexdigest()
 
 
 def _hit(entry) -> Response:
@@ -170,13 +174,23 @@ def cached_chat_completion(view):
         principal = _principal()
         if not settings["enabled"] or principal is None or not request_is_cacheable(payload):
             return _mark(view(*args, **kwargs), "bypass")
-        key = cache_key(principal, request.path, payload)
+        revision = cache_policy.policy_revision()
+        policy = None
+        if revision == cache_policy.ISOLATED_REVISION:
+            policy = cache_policy.resolve_policy(payload)
+            if policy is None:
+                return _mark(view(*args, **kwargs), "bypass")
+        elif revision != cache_policy.LEGACY_REVISION:
+            return _mark(view(*args, **kwargs), "bypass")
+        key = cache_key(principal, request.path, payload, policy=policy)
+        policy_digest = cache_policy.policy_digest(policy) if policy is not None else None
         if mode == "on":
             entry = _store.get(key, max_age=max_age)
             if entry is not None:
                 return _hit(entry)
         response = view(*args, **kwargs)
-        if isinstance(response, Response):
+        if (isinstance(response, Response) and (policy_digest is None
+                or cache_policy.policy_is_current(payload, policy_digest))):
             _store_if_complete(response, key, settings)
         return _mark(response, "miss")
 
