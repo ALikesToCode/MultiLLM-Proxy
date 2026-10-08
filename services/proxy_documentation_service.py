@@ -14,6 +14,7 @@ from services import cloudflare_ai
 from services.agent_setup_prompt import build_agent_setup_prompt
 from services.auto_route_service import AutoRouteService
 from services.model_catalog_service import build_model_catalog
+from services.openapi_spec import build_openapi_spec
 from services.provider_catalog_service import PROVIDER_CATALOG_SPECS
 
 PROVIDER_DISPLAY_NAMES = {
@@ -45,6 +46,11 @@ PROVIDER_DISPLAY_NAMES = {
     **{pool.provider: pool.display_name for pool in CODEX_EVERYWHERE_POOLS},
     **{spec.provider: spec.display_name for spec in image_relay_specs()},
 }
+
+
+def build_openapi_documentation() -> dict[str, Any]:
+    """Publish the static contract without reading runtime provider configuration."""
+    return build_openapi_spec()
 
 
 def _provider_is_configured(auth_service_cls, provider: str) -> bool:

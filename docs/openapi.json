@@ -1,0 +1,3948 @@
+{
+  "components": {
+    "parameters": {
+      "AnthropicBeta": {
+        "description": "Native beta selection is provider-defined; managed translation may reject unsupported features.",
+        "in": "header",
+        "name": "Anthropic-Beta",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AnthropicKey": {
+        "description": "Alternative gateway credential for Messages clients.",
+        "in": "header",
+        "name": "X-Api-Key",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AnthropicVersion": {
+        "description": "Accepted Messages version header; optional on the managed bridge.",
+        "in": "header",
+        "name": "Anthropic-Version",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Cache": {
+        "description": "Chat only: off/bypass unless explicitly opted in. Eligibility and configured storage limits still apply.",
+        "in": "header",
+        "name": "X-MultiLLM-Cache",
+        "required": false,
+        "schema": {
+          "enum": [
+            "on",
+            "refresh",
+            "off"
+          ],
+          "type": "string"
+        }
+      },
+      "Cascade": {
+        "description": "Managed Chat: select a configured cascade explicitly; not enabled by fetching this contract.",
+        "in": "header",
+        "name": "X-MultiLLM-Cascade",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ImageQA": {
+        "description": "Managed images: opt in to bounded generation/judging; may incur additional cost. Off by default.",
+        "in": "header",
+        "name": "X-MultiLLM-Image-QA",
+        "required": false,
+        "schema": {
+          "enum": [
+            "on",
+            "off"
+          ],
+          "type": "string"
+        }
+      },
+      "ProxyKey": {
+        "description": "Alternative gateway credential; never a provider credential.",
+        "in": "header",
+        "name": "X-MultiLLM-Api-Key",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ToolRepair": {
+        "description": "Managed Chat repair override; deployment default is repair. Full may request another generation.",
+        "in": "header",
+        "name": "X-MultiLLM-Tool-Repair",
+        "required": false,
+        "schema": {
+          "enum": [
+            "off",
+            "repair",
+            "full"
+          ],
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "AnthropicError": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "type": {
+            "const": "error"
+          }
+        },
+        "required": [
+          "type",
+          "error"
+        ],
+        "type": "object"
+      },
+      "ChatCompletion": {
+        "additionalProperties": true,
+        "properties": {
+          "choices": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "finish_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "index": {
+                  "type": "integer"
+                },
+                "message": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "content": {},
+                    "role": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "role"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "object": {
+            "const": "chat.completion"
+          },
+          "usage": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ChatRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "max_tokens": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "content": {},
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "model": {
+            "description": "Managed routes accept provider:model or a configured route ID. Native routes use the provider model ID.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "response_format": {
+            "type": "object"
+          },
+          "stream": {
+            "default": false,
+            "type": "boolean"
+          },
+          "temperature": {
+            "type": "number"
+          },
+          "tool_choice": {},
+          "tools": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ],
+        "type": "object"
+      },
+      "GatewayError": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "ImageRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "model": {
+            "description": "Managed routes accept provider:model or a configured route ID. Native routes use the provider model ID.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "n": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prompt": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "response_format": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "Images": {
+        "additionalProperties": true,
+        "properties": {
+          "created": {
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "b64_json": {
+                  "type": "string"
+                },
+                "revised_prompt": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Message": {
+        "additionalProperties": true,
+        "properties": {
+          "content": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "const": "assistant"
+          },
+          "stop_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "const": "message"
+          },
+          "usage": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "MessagesRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "max_tokens": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "content": {},
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "model": {
+            "description": "Managed routes accept provider:model or a configured route ID. Native routes use the provider model ID.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "stream": {
+            "default": false,
+            "type": "boolean"
+          },
+          "system": {},
+          "tools": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "messages",
+          "max_tokens"
+        ],
+        "type": "object"
+      },
+      "Models": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "object": {
+                  "const": "model"
+                },
+                "owned_by": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "object": {
+            "const": "list"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "OpenAIError": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "code": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "param": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Response": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "response"
+          },
+          "output": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "usage": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ResponsesRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "input": {
+            "items": {},
+            "type": [
+              "string",
+              "array"
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model": {
+            "description": "Managed routes accept provider:model or a configured route ID. Native routes use the provider model ID.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "stream": {
+            "default": false,
+            "type": "boolean"
+          },
+          "tools": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "input"
+        ],
+        "type": "object"
+      },
+      "TokenCount": {
+        "additionalProperties": true,
+        "properties": {
+          "input_tokens": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input_tokens"
+        ],
+        "type": "object"
+      },
+      "TokenCountRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "content": {},
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "model": {
+            "description": "Managed routes accept provider:model or a configured route ID. Native routes use the provider model ID.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "system": {},
+          "tools": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "AnthropicKeyAuth": {
+        "in": "header",
+        "name": "X-Api-Key",
+        "type": "apiKey"
+      },
+      "BearerAuth": {
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "DashboardSession": {
+        "description": "Existing dashboard session, revalidated by the server.",
+        "in": "cookie",
+        "name": "session",
+        "type": "apiKey"
+      },
+      "ProxyKeyAuth": {
+        "in": "header",
+        "name": "X-MultiLLM-Api-Key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Bounded client contract, not a live provider catalog. Optional future APIs and administrator routes are excluded. Extra fields are not a guarantee of upstream support.",
+    "title": "MultiLLM public client API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/codex-easy/v1/images/generations": {
+      "post": {
+        "description": "Bounded example of the native public surface. Provider-native request/response fields are intentionally unspecified. Gateway auth and outbound policy still apply; capability and configuration are not certified by this document.",
+        "operationId": "nativeCodexImages",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Native"
+        ],
+        "x-multillm-runtime": {
+          "availability": "requires provider configuration and route permission",
+          "flask": "native",
+          "mode": "native",
+          "required_scope": "admin",
+          "worker": "native",
+          "worker_condition": "existing direct provider handler",
+          "worker_otherwise": "native"
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "description": "Dashboard session or gateway API credential with models scope. Anonymous browser requests redirect to login; JSON clients receive 401. No provider/catalog access.",
+        "operationId": "getOpenAPIContract",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Static OpenAPI 3.1.0 contract."
+          },
+          "302": {
+            "description": "Anonymous browser sign-in redirect.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayError"
+                }
+              }
+            },
+            "description": "Missing or invalid credential."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayError"
+                }
+              }
+            },
+            "description": "Credential lacks models scope."
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyKeyAuth": []
+          },
+          {
+            "DashboardSession": []
+          }
+        ],
+        "tags": [
+          "Documentation"
+        ],
+        "x-multillm-runtime": {
+          "flask": "static",
+          "mode": "documentation",
+          "required_scope": "models",
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/opencode/v1/chat/completions": {
+      "post": {
+        "description": "Bounded example of the native public surface. Provider-native request/response fields are intentionally unspecified. Gateway auth and outbound policy still apply; capability and configuration are not certified by this document.",
+        "operationId": "nativeOpencodeChat",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "SSE data frames with Chat deltas and [DONE]; errors can appear after HTTP 200. EOF alone is not completion.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Native"
+        ],
+        "x-multillm-runtime": {
+          "availability": "requires provider configuration and route permission",
+          "flask": "native",
+          "mode": "native",
+          "required_scope": "admin",
+          "worker": "native-when-enabled",
+          "worker_condition": "OPENCODE_EDGE_FETCH=true",
+          "worker_otherwise": "forwarded"
+        }
+      }
+    },
+    "/opencode/v1/messages": {
+      "post": {
+        "description": "Bounded example of the native public surface. Provider-native request/response fields are intentionally unspecified. Gateway auth and outbound policy still apply; capability and configuration are not certified by this document.",
+        "operationId": "nativeOpencodeMessages",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicVersion"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicBeta"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "Named Messages SSE events, including message_stop or error; no Chat [DONE] sentinel.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyKeyAuth": []
+          },
+          {
+            "AnthropicKeyAuth": []
+          }
+        ],
+        "tags": [
+          "Native"
+        ],
+        "x-multillm-runtime": {
+          "availability": "requires provider configuration and route permission",
+          "flask": "native",
+          "mode": "native",
+          "required_scope": "admin",
+          "worker": "native-when-enabled",
+          "worker_condition": "OPENCODE_EDGE_FETCH=true",
+          "worker_otherwise": "forwarded"
+        }
+      }
+    },
+    "/opencode/v1/models": {
+      "get": {
+        "description": "Bounded example of the native public surface. Provider-native request/response fields are intentionally unspecified. Gateway auth and outbound policy still apply; capability and configuration are not certified by this document.",
+        "operationId": "nativeOpencodeModels",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Native"
+        ],
+        "x-multillm-runtime": {
+          "availability": "requires provider configuration and route permission",
+          "flask": "native",
+          "mode": "native",
+          "required_scope": "admin",
+          "worker": "native-when-enabled",
+          "worker_condition": "OPENCODE_EDGE_FETCH=true",
+          "worker_otherwise": "forwarded"
+        }
+      }
+    },
+    "/opencode/v1/responses": {
+      "post": {
+        "description": "Bounded example of the native public surface. Provider-native request/response fields are intentionally unspecified. Gateway auth and outbound policy still apply; capability and configuration are not certified by this document.",
+        "operationId": "nativeOpencodeResponses",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "Named Responses SSE events, including response.completed, response.failed or response.incomplete; no Chat [DONE] guarantee.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Native"
+        ],
+        "x-multillm-runtime": {
+          "availability": "requires provider configuration and route permission",
+          "flask": "native",
+          "mode": "native",
+          "required_scope": "admin",
+          "worker": "native-when-enabled",
+          "worker_condition": "OPENCODE_EDGE_FETCH=true",
+          "worker_otherwise": "forwarded"
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "description": "Gateway model selection and existing managed policy apply. Protocol translation is stateless and bounded; unsupported features may fail with 400. This descriptor does not enable any optional feature.",
+        "operationId": "createChatCompletion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Cache"
+          },
+          {
+            "$ref": "#/components/parameters/ToolRepair"
+          },
+          {
+            "$ref": "#/components/parameters/Cascade"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletion"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "SSE data frames with Chat deltas and [DONE]; errors can appear after HTTP 200. EOF alone is not completion.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "chat",
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/v1/images/generations": {
+      "post": {
+        "description": "Gateway model selection and existing managed policy apply. Protocol translation is stateless and bounded; unsupported features may fail with 400. This descriptor does not enable any optional feature.",
+        "operationId": "generateImages",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          },
+          {
+            "$ref": "#/components/parameters/ImageQA"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Images"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "chat",
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/v1/messages": {
+      "post": {
+        "description": "Gateway model selection and existing managed policy apply. Protocol translation is stateless and bounded; unsupported features may fail with 400. This descriptor does not enable any optional feature.",
+        "operationId": "createMessage",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicVersion"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicBeta"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "Named Messages SSE events, including message_stop or error; no Chat [DONE] sentinel.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AnthropicError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyKeyAuth": []
+          },
+          {
+            "AnthropicKeyAuth": []
+          }
+        ],
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "chat",
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/v1/messages/count_tokens": {
+      "post": {
+        "description": "Local input token estimate, not native provider tokenization; no generation.",
+        "operationId": "estimateMessageTokens",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicKey"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicVersion"
+          },
+          {
+            "$ref": "#/components/parameters/AnthropicBeta"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenCountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenCount"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Token-Count": {
+                "description": "Estimate provenance.",
+                "schema": {
+                  "const": "estimate"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AnthropicError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ProxyKeyAuth": []
+          },
+          {
+            "AnthropicKeyAuth": []
+          }
+        ],
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "chat",
+          "token_count": {
+            "provider_call": false,
+            "source": "estimate"
+          },
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "description": "Gateway model selection and existing managed policy apply. Protocol translation is stateless and bounded; unsupported features may fail with 400. This descriptor does not enable any optional feature.",
+        "operationId": "listModels",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "models",
+          "worker": "forwarded"
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "description": "Gateway model selection and existing managed policy apply. Protocol translation is stateless and bounded; unsupported features may fail with 400. This descriptor does not enable any optional feature.",
+        "operationId": "createResponse",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProxyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponsesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Response"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "description": "Named Responses SSE events, including response.completed, response.failed or response.incomplete; no Chat [DONE] guarantee.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful response; fields and availability depend on the selected model.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Attempts": {
+                "description": "Automatic-route attempts; not permission to replay a request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Failover-Reasons": {
+                "description": "Existing automatic-route failover reasons, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Ordering": {
+                "description": "Existing automatic-route ordering mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Route": {
+                "description": "Configured automatic route ID, when used.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Model": {
+                "description": "Selected automatic-route candidate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Auto-Selected-Priority": {
+                "description": "Selected automatic-route candidate priority.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cache": {
+                "description": "Cache result on eligible opted-in managed Chat requests.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cascade": {
+                "description": "Managed cascade selection summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Circuit-State": {
+                "description": "Existing managed circuit state, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Cost-Basis": {
+                "description": "Basis of the available cost estimate.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Credential-Attempts": {
+                "description": "Credential selection attempts, when available; no credential values.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Cost-USD": {
+                "description": "Estimated USD cost when available; absence does not mean zero.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-After": {
+                "description": "Provider-neutral estimated input tokens after optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Estimated-Input-Before": {
+                "description": "Provider-neutral estimated input tokens before optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-Prompts-Compacted": {
+                "description": "Image prompts compacted by managed optimization.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Image-QA": {
+                "description": "Managed image quality summary, when requested.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Latency-Ms": {
+                "description": "Observed latency in milliseconds, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Messages-Summarized": {
+                "description": "Managed optimization summary count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Model": {
+                "description": "Selected model, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization": {
+                "description": "Existing managed context optimization status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Hits": {
+                "description": "Managed optimization cache hit count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Cache-Misses": {
+                "description": "Managed optimization cache miss count.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Mode": {
+                "description": "Existing managed optimization mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Optimization-Target-Met": {
+                "description": "Whether the managed optimization target was met.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache": {
+                "description": "Existing managed prompt-cache policy status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Estimated-Tokens": {
+                "description": "Estimated prompt-cache tokens; not guaranteed billed usage.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Prompt-Cache-Mode": {
+                "description": "Existing managed prompt-cache mode.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Provider": {
+                "description": "Selected provider, when known.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Route-Decision": {
+                "description": "Routing decision, when available.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Secret-Scan": {
+                "description": "Existing outbound policy counts; not a client policy override.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Summary": {
+                "description": "Managed summary status.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Tool-Repair": {
+                "description": "Managed Chat repair summary, when enabled.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-MultiLLM-Transport-Failure": {
+                "description": "Transport failure metadata; never permission to retry output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OpenAIError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayError"
+                    }
+                  ]
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Non-2xx error. Common statuses: 400 invalid input, 401 unauthenticated, 403 forbidden, 402 budget, 404 unavailable, 413 too large, 429 limited, 500/502/503/504 failure. Native upstream errors may be non-JSON.",
+            "headers": {
+              "Retry-After": {
+                "description": "Rate/provider advice, when supplied; not authorization to retry generated output.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "Request correlation ID.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Managed"
+        ],
+        "x-multillm-runtime": {
+          "flask": "managed",
+          "mode": "managed",
+          "required_scope": "chat",
+          "worker": "forwarded"
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    },
+    {
+      "ProxyKeyAuth": []
+    }
+  ],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Managed"
+    },
+    {
+      "name": "Native"
+    },
+    {
+      "name": "Documentation"
+    }
+  ],
+  "x-multillm-runtime": {
+    "catalog_refresh": false,
+    "flask": "registered client routes",
+    "limits": "Existing request, scope, rate, budget and provider bounds apply. Usage/cost may be missing or estimated. No retention or retry guarantee.",
+    "optional_features": "No new feature is enabled by this contract; deployment configuration and permissions control availability.",
+    "source": "reviewed static descriptors",
+    "worker": "native handlers or Flask forwarding as annotated"
+  }
+}
