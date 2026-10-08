@@ -44,6 +44,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🪟 Opt-in [candidate-specific roleplay context](docs/roleplay-candidate-context.md) fits protected fallback history to each model window
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
+- 🧮 [`/v1/messages/count_tokens`](docs/token-counting.md) can use explicitly configured native provider counts, with labeled local estimates otherwise
 
 The rationale for selectively adopting OmniRoute-style operational features
 without replacing MultiLLM's provider adapters is documented in

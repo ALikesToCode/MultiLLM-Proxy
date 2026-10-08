@@ -9,13 +9,15 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from flask import Response, jsonify, request
+from flask import Response, g, jsonify, request
 from werkzeug.datastructures import ImmutableMultiDict
 
 from error_handlers import get_request_id
 from request_validation import json_object_body
 from route_helpers import api_auth_required, api_authenticate_only
 from routes.protocol_bridge import translation_api_error
+from services.key_controls import model_allowed
+from services.native_token_count import NativeTokenCountError, count_native_tokens
 from services.protocol_translation import (
     CHAT,
     MESSAGES,
@@ -88,6 +90,27 @@ def register_unified_messages_routes(app, csrf, dispatch: Callable[[dict], Respo
     @csrf.exempt
     @api_authenticate_only
     def unified_messages_count_tokens():
-        response = jsonify({"input_tokens": estimate_message_tokens(json_object_body())})
+        payload = json_object_body()
+        mode = request.headers.get("X-MultiLLM-Token-Count-Mode", "estimate")
+        if mode not in {"estimate", "auto", "native"}:
+            return jsonify(anthropic_error_body(400, "Invalid token count mode; use estimate, auto or native")), 400
+        if mode != "estimate":
+            # Only a native count reaches a provider, so only it needs the key's model allowlist.
+            user = getattr(g, "authenticated_user", None)
+            if not user or not model_allowed(user, payload.get("model")):
+                return jsonify(anthropic_error_body(403, "This API key is not allowed to use the requested model")), 403
+            try:
+                count = count_native_tokens(payload, request.headers, app.config["API_BASE_URLS"])
+            except NativeTokenCountError as error:
+                return jsonify(anthropic_error_body(error.status, str(error))), error.status
+            if count is not None:
+                response = jsonify({"input_tokens": count})
+                response.headers["X-MultiLLM-Token-Count"] = "provider"
+                return response
+            if mode == "native":
+                return jsonify(anthropic_error_body(501, "Unsupported native counting for the requested model")), 501
+        response = jsonify({"input_tokens": estimate_message_tokens(payload)})
         response.headers["X-MultiLLM-Token-Count"] = "estimate"
+        if mode == "auto":
+            response.headers["X-MultiLLM-Token-Count-Fallback"] = "unsupported"
         return response
