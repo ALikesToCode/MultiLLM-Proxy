@@ -136,6 +136,15 @@ async function login(db, body) {
 }
 
 async function models(db, body, env) {
+  if (body.operation === "tool_grants") {
+    if (!fields(body, ["version", "operation", "principal"]) || !text(body.principal, 128) || body.principal === "*") return null;
+    const { deferredEnabled, readGrantSnapshot } = await import("./knowledge/deferred-tools.mjs");
+    if (!deferredEnabled(env.DEFERRED_TOOLS_ENABLED)) return reply({ error: "tool_grants_unavailable" }, 503);
+    try {
+      const { grants } = await readGrantSnapshot(env, body.principal);
+      return reply({ grants });
+    } catch { return reply({ error: "tool_grants_unavailable" }, 503); }
+  }
   if (body.operation === "revisions") {
     if (!revisionSyncSettings(env).enabled) return reply({ error: "not_found" }, 404);
     return handleRevisionMetadata(db, body);
