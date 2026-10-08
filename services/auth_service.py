@@ -983,6 +983,10 @@ class AuthService:
         if api_key.startswith(KEY_NAMESPACE):
             return verify_integration_key(api_key)
 
+        revisioned = key_controls.verify_revisioned_key(cls, api_key, remote_addr)
+        if revisioned is not key_controls.LEGACY_AUTH:
+            return revisioned
+
         remembered = cls._remembered_username(api_key)
         user = cls._users.get(remembered) if remembered else None
         if remembered and user and not user.get("revoked_at"):

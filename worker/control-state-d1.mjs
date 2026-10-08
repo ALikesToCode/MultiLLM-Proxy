@@ -8,6 +8,7 @@
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
 import { handlePromptTemplates, promptTemplatesEnabled } from "./prompt-templates-d1.mjs";
+import { commitRevision, handleRevisionMetadata, revisionSyncSettings } from "./config-revision.mjs";
 
 const CONTROL = /[\x00-\x1f\x7f]/;
 const HASH = /^[0-9a-f]{64}$/;
@@ -134,7 +135,11 @@ async function login(db, body) {
   }
 }
 
-async function models(db, body) {
+async function models(db, body, env) {
+  if (body.operation === "revisions") {
+    if (!revisionSyncSettings(env).enabled) return reply({ error: "not_found" }, 404);
+    return handleRevisionMetadata(db, body);
+  }
   if (body.operation === "list" && fields(body, ["version", "operation"])) {
     const { results } = await db.prepare(`SELECT model_id, status FROM control_model_overrides ORDER BY model_id LIMIT ${MAX_OVERRIDES}`).all();
     return reply({ overrides: results });
@@ -142,9 +147,12 @@ async function models(db, body) {
   if (body.operation === "put" && fields(body, ["version", "operation", "model_id", "status", "updated_at"])
     && matches(MODEL_ID, body.model_id) && body.model_id.includes(":")
     && ["available", "disabled"].includes(body.status) && matches(TIMESTAMP, body.updated_at)) {
-    await db.prepare(`INSERT INTO control_model_overrides (model_id, status, updated_at) VALUES (?, ?, ?)
+    const statement = db.prepare(`INSERT INTO control_model_overrides (model_id, status, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(model_id) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at`)
-      .bind(body.model_id, body.status, body.updated_at).run();
+      .bind(body.model_id, body.status, body.updated_at);
+    if (revisionSyncSettings(env).enabled) {
+      if (!await commitRevision(db, "model_overrides", [statement])) return reply({ error: "revision_conflict" }, 409);
+    } else await statement.run();
     return reply({ stored: true });
   }
   return null;
@@ -211,7 +219,7 @@ async function workbench(db, body) {
   }
 }
 
-async function catalog(db, body) {
+async function catalog(db, body, env) {
   switch (body.operation) {
     case "list": {
       if (!fields(body, ["version", "operation"])) return null;
@@ -236,9 +244,12 @@ async function catalog(db, body) {
         chunks.push(body.data.slice(offset, offset + SNAPSHOT_CHUNK_CHARS));
       }
       // The new snapshot replaces the previous one in a single transaction.
-      await db.batch([db.prepare("DELETE FROM control_provider_catalog WHERE provider = ?").bind(body.provider),
+      const statements = [db.prepare("DELETE FROM control_provider_catalog WHERE provider = ?").bind(body.provider),
         ...chunks.map((data, chunk) => db.prepare(`INSERT INTO control_provider_catalog (provider, chunk, data, updated_at)
-          VALUES (?, ?, ?, ?)`).bind(body.provider, chunk, data, body.updated_at))]);
+          VALUES (?, ?, ?, ?)`).bind(body.provider, chunk, data, body.updated_at))];
+      if (revisionSyncSettings(env).enabled) {
+        if (!await commitRevision(db, "provider_catalog", statements)) return reply({ error: "revision_conflict" }, 409);
+      } else await db.batch(statements);
       return reply({ stored: true });
     }
     default:
@@ -250,7 +261,7 @@ const DOMAINS = Object.freeze({
   "prompt-templates": { handle: handlePromptTemplates, maxBytes: 524288, operations: ["create", "get", "list"] },
   limits: { handle: limits, maxBytes: 16384, operations: ["sync"] },
   login: { handle: login, maxBytes: 4096, operations: ["check", "failure", "success"] },
-  models: { handle: models, maxBytes: 4096, operations: ["list", "put"] },
+  models: { handle: models, maxBytes: 4096, operations: ["list", "put", "revisions"] },
   quotas: { handle: quotas, maxBytes: 16384, operations: ["list", "block"] },
   workbench: { handle: workbench, maxBytes: 32768, operations: ["profiles", "save_profile", "reports", "save_report"] },
   catalog: { handle: catalog, maxBytes: 262144, operations: ["list", "get", "put"] },
@@ -275,9 +286,9 @@ export async function handleControlStateRequest(request, env) {
     if (!object(body) || body.version !== 1) return reply({ error: "invalid_request" }, 400);
   } catch { return reply({ error: "invalid_request" }, 400); }
   try {
-    return await domain.handle(env.INTELLIGENCE_DB, body) ?? reply({ error: "invalid_request" }, 400);
+    return await domain.handle(env.INTELLIGENCE_DB, body, env) ?? reply({ error: "invalid_request" }, 400);
   } catch (error) {
-    logFailure("control_state_storage_failed", error, { domain: name,
+    logFailure("control_state_storage_failed", revisionSyncSettings(env).enabled ? new Error("Revision storage unavailable") : error, { domain: name,
       operation: domain.operations.includes(body.operation) ? body.operation : "unknown" });
     return reply({ error: "storage_unavailable" }, 503);
   }

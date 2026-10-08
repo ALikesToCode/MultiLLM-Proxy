@@ -2,6 +2,7 @@
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
+import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
 import { logFailure } from "./log.mjs";
 import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
@@ -204,10 +205,11 @@ export async function handleControlUsersRequest(request, env) {
       case "list": {
         if (!fields(body, ["version", "operation", "after", "limit"]) || !optionalText(body.after, 128)
           || !Number.isSafeInteger(body.limit) || body.limit < 1 || body.limit > MAX_PAGE) break;
-        const users = await readUsers(async columns => (await (body.after === null
+        const query = async columns => (await (body.after === null
           ? db.prepare(`SELECT ${columns} FROM control_users ORDER BY username LIMIT ?`).bind(body.limit)
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
-        ).all()).results);
+        ).all()).results;
+        const users = revisionSyncSettings(env).enabled ? await read(() => query(COLUMNS)) : await readUsers(query);
         return reply({ version: 1, users });
       }
       case "get": {
@@ -232,7 +234,10 @@ export async function handleControlUsersRequest(request, env) {
         for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
           if (USER_FIELDS.slice(end).some(name => user[name] !== null)) throw new Error("Account controls require migration");
           try {
-            await db.batch([upsertStatement(db, user, USER_FIELDS.slice(0, end)), audit(db, "upsert", "stored", user)]);
+            const statements = [upsertStatement(db, user, USER_FIELDS.slice(0, end)), audit(db, "upsert", "stored", user)];
+            if (revisionSyncSettings(env).enabled) {
+              if (!await commitRevision(db, ["key_controls", "model_grants"], statements)) return reply({ error: "revision_conflict" }, 409);
+            } else await db.batch(statements);
             break;
           } catch (error) {
             if (!missingColumn(error) || end === 12) throw error;
@@ -242,11 +247,23 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "delete": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
-        const [result] = await db.batch([db.prepare("DELETE FROM control_users WHERE username=?").bind(body.username),
+        const statements = [db.prepare("DELETE FROM control_users WHERE username=?").bind(body.username),
           db.prepare(`INSERT INTO control_user_audit (at, operation, outcome, username)
             VALUES (?, 'delete', CASE WHEN changes() = 1 THEN 'deleted' ELSE 'missing' END, ?)`)
-            .bind(new Date().toISOString(), body.username)]);
-        return reply({ version: 1, deleted: result.meta.changes === 1 });
+            .bind(new Date().toISOString(), body.username)];
+        let deleted;
+        if (revisionSyncSettings(env).enabled) {
+          // Capture the DELETE result from the same atomic revision batch.
+          let results;
+          const capture = { prepare: sql => db.prepare(sql), batch: async batch => { results = await db.batch(batch); } };
+          if (!await commitRevision(capture, ["key_controls", "model_grants"], statements)) return reply({ error: "revision_conflict" }, 409);
+          // The final two statements are DELETE and its audit row.
+          deleted = results.at(-2).meta.changes === 1;
+        } else {
+          const [result] = await db.batch(statements);
+          deleted = result.meta.changes === 1;
+        }
+        return reply({ version: 1, deleted });
       }
       case "touch": {
         if (!fields(body, ["version", "operation", "username", "last_used_at", "last_used_ip"])
