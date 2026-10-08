@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
+    "Retry-After, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "

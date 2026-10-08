@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from flask import g, jsonify, render_template, request
 
 from error_handlers import APIError
+from middleware.rate_limit_headers import enabled as rate_limit_headers_enabled, usage_snapshot
 from request_validation import json_object_body
 from route_helpers import api_authenticate_only, login_required
 from services import key_controls, usage_ledger, usage_store
@@ -73,6 +74,8 @@ def register_usage_routes(app, csrf) -> None:
         principal = str(user.get("username") or user.get("id"))
         controls = key_controls.public(user)
         return jsonify({
+            **({"rate_limits": usage_snapshot(user, request.remote_addr)}
+               if rate_limit_headers_enabled() else {}),
             "object": "usage",
             "principal": principal,
             "key_prefix": user.get("api_key_prefix"),
@@ -105,6 +108,8 @@ def register_usage_routes(app, csrf) -> None:
                 current_user.get("username"))
             payload["budget"] = BudgetService.status(record or {"username": principal})
             payload["controls"] = key_controls.public(record or {})
+            if rate_limit_headers_enabled():
+                payload["rate_limits"] = usage_snapshot(record or {"username": principal}, request.remote_addr)
         if is_admin:
             payload["ledger"] = usage_ledger.LEDGER.stats()
         return jsonify(payload)
