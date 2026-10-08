@@ -2,7 +2,8 @@ import { fields, fail, integer, string } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { scanText } from "../secret-scan.mjs";
 
-export const SKILL_ROOTS = ["claude", "claude-library", "codex", "agents"];
+// "imported" holds skills adopted from GitHub or ClawHub by an approved import; sync cannot write it.
+export const SKILL_ROOTS = ["claude", "claude-library", "codex", "agents", "imported"];
 export const SKILLS_LIMIT = 2000;
 export const SYNC_REQUEST_BYTES = 8 * 1024 * 1024;
 export const SYNC_BATCH_LIMIT = 16;
@@ -22,7 +23,7 @@ export function parseFind(payload) {
   const query = string(payload.query, 2000, "query");
   const mode = payload.mode ?? "hybrid";
   if (!["fast", "hybrid"].includes(mode)) fail("invalid_request", "Choose fast or hybrid mode.");
-  if (payload.roots !== undefined && (!Array.isArray(payload.roots) || !payload.roots.length || payload.roots.length > 4
+  if (payload.roots !== undefined && (!Array.isArray(payload.roots) || !payload.roots.length || payload.roots.length > SKILL_ROOTS.length
     || new Set(payload.roots).size !== payload.roots.length || payload.roots.some(root => !SKILL_ROOTS.includes(root)))) fail("invalid_request", "Invalid roots filter.");
   if (payload.min_confidence !== undefined && payload.min_confidence !== "high") fail("invalid_request", "Choose high min_confidence.");
   return { min_confidence: payload.min_confidence, query, limit: integer(payload.limit ?? 3, 1, 5, "limit"), mode, roots: payload.roots };

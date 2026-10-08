@@ -6,6 +6,7 @@ import { errorReply, fail, fields, KnowledgeError, readJson, reply } from "./con
 import { logFailure } from "../log.mjs";
 import { HandoffStore } from "./handoff-store.mjs";
 import { SkillsStore } from "./skills-store.mjs";
+import { watchImportedSkills } from "./skills.mjs";
 import { SYNC_REQUEST_BYTES } from "./skills-validation.mjs";
 import { MemoStore } from "./memo-store.mjs";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
@@ -102,5 +103,7 @@ export default {
   },
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(maintainKnowledge(env).catch(error => { logFailure("knowledge_maintenance_failed", error); throw error; }));
+    // Separate so an upstream check failure cannot stop catalogue maintenance.
+    ctx.waitUntil(watchImportedSkills(env).catch(error => logFailure("knowledge_skills_watch_failed", error)));
   },
 };

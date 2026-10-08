@@ -144,7 +144,8 @@ def test_mcp_initialize_and_discovery(app, keys):
 
     assert [tool["name"] for tool in tools] == ["knowledge_context", "knowledge_search",
         "knowledge_alexandria_search", "knowledge_alexandria_inspect", "knowledge_alexandria_execute", "knowledge_alexandria_receipt",
-        *(f"knowledge_{name}" for name in NATIVE_TOOLS), "knowledge_skills_find", "knowledge_skills_get", "knowledge_artifact",
+        *(f"knowledge_{name}" for name in NATIVE_TOOLS), "knowledge_skills_find", "knowledge_skills_get",
+        "knowledge_skills_discover", "knowledge_skills_preview", "knowledge_artifact",
         "knowledge_handoff_save", "knowledge_handoff_get", "knowledge_handoff_list", "knowledge_handoff_delete"]
     assert tools[4]["annotations"]["readOnlyHint"] is False
     mutating = {tool["name"] for tool in tools if not tool["annotations"]["readOnlyHint"]}
@@ -159,9 +160,9 @@ def test_mcp_initialize_and_discovery(app, keys):
 def test_mcp_management_scope_filters_discovery_and_blocks_cross_scope_calls(app, keys):
     client = app.test_client()
     tools = mcp(client, keys["manager"], "tools/list").json["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["knowledge_skills_sync", "knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_memos_stats", "knowledge_memos_purge", "knowledge_source_register",
+    assert [tool["name"] for tool in tools] == ["knowledge_skills_sync", "knowledge_skills_import", "knowledge_skills_report", "knowledge_status", "knowledge_product_sites_get", "knowledge_product_sites_update", "knowledge_memos_stats", "knowledge_memos_purge", "knowledge_source_register",
         "knowledge_source_update", "knowledge_source_refresh", "knowledge_job_cancel", "knowledge_policy_update"]
-    assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_status", "knowledge_product_sites_get", "knowledge_memos_stats"})
+    assert all(tool["annotations"]["readOnlyHint"] == (tool["name"] in {"knowledge_skills_report", "knowledge_status", "knowledge_product_sites_get", "knowledge_memos_stats"})
                for tool in tools)
     with patch.object(knowledge, "dispatch") as remote:
         for key, tool in ((keys["reader"], "knowledge_policy_update"), (keys["manager"], "knowledge_context")):
@@ -662,6 +663,36 @@ def test_skills_rest_mcp_scope_toolset_and_list_parity(app, keys):
         assert response.json["trust"] == "operator"
         assert remote.call_args.args[2] == {"skill_id": "testing", "path": "references/guide.md"}
     assert client.post("/v1/knowledge/skills", json={"skills": []}, headers=bearer(keys["reader"])).status_code == 403
+    discovered = {"library": [], "external": [{"trust": "external", "name": "pg"}], "sources": []}
+    with patch.object(knowledge, "dispatch", return_value=discovered) as remote:
+        payload = {"query": "postgres", "sources": ["library", "github"]}
+        rest = client.post("/v1/knowledge/skills/discover", json=payload, headers=bearer(keys["reader"]))
+        assert rest.status_code == 200 and remote.call_args.args[0] == "skills.discover" and remote.call_args.args[2] == payload
+        rpc = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_discover", "arguments": payload})
+        assert json.loads(rpc.json["result"]["content"][0]["text"]) == rest.json
+        preview = {"repository": "acme/skills", "path": "skills/pg"}
+        assert client.post("/v1/knowledge/skills/preview", json=preview, headers=bearer(keys["reader"])).status_code == 200
+        assert remote.call_args.args[0] == "skills.preview" and remote.call_args.args[2] == preview
+        # A skill named "discover" stays readable through the GET route.
+        assert client.get("/v1/knowledge/skills/discover", headers=bearer(keys["reader"])).status_code == 200
+        assert remote.call_args.args[0] == "skills.get" and remote.call_args.args[2] == {"skill_id": "discover"}
+    assert client.post("/v1/knowledge/skills/discover", json={"query": "x"}, headers=bearer(keys["manager"])).status_code == 403
+    # Imports and reports are operator actions.
+    with patch.object(knowledge, "dispatch", return_value={"status": "review"}) as remote:
+        plan = {"repository": "acme/skills", "path": "skills/pg"}
+        assert client.post("/v1/knowledge/skills/import", json=plan, headers=bearer(keys["reader"])).status_code == 403
+        rest = client.post("/v1/knowledge/skills/import", json=plan, headers=bearer(keys["manager"]))
+        assert rest.status_code == 200 and remote.call_args.args[0] == "skills.import" and remote.call_args.args[2] == plan
+        rpc = mcp(client, keys["manager"], "tools/call", {"name": "knowledge_skills_import", "arguments": plan})
+        assert json.loads(rpc.json["result"]["content"][0]["text"]) == rest.json
+        report = {"kind": "updates", "check": True}
+        assert client.post("/v1/knowledge/skills/report", json=report, headers=bearer(keys["manager"])).status_code == 200
+        assert remote.call_args.args[0] == "skills.report" and remote.call_args.args[2] == report
+        denied = mcp(client, keys["reader"], "tools/call", {"name": "knowledge_skills_report", "arguments": {"kind": "gaps"}})
+        assert denied.json["result"]["isError"] is True and remote.call_count == 3
+        # A skill named "import" stays readable through the GET route.
+        assert client.get("/v1/knowledge/skills/import", headers=bearer(keys["reader"])).status_code == 200
+        assert remote.call_args.args[0] == "skills.get" and remote.call_args.args[2] == {"skill_id": "import"}
     with patch.object(knowledge, "dispatch", return_value={"results": []}) as remote:
         assert client.post("/v1/knowledge/skills", json={"skills": []}, headers=bearer(keys["manager"])).status_code == 200
         assert remote.call_args.args[0] == "skills.sync"
@@ -673,7 +704,8 @@ def test_skills_rest_mcp_scope_toolset_and_list_parity(app, keys):
         assert client.get("/v1/knowledge/skills?query=test&limit=bad", headers=bearer(keys["reader"])).status_code == 400
         remote.assert_not_called()
     listed = client.post("/mcp?toolsets=skills", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers=bearer(keys["reader"]))
-    assert [tool["name"] for tool in listed.json["result"]["tools"]] == ["knowledge_skills_find", "knowledge_skills_get"]
+    assert [tool["name"] for tool in listed.json["result"]["tools"]] == ["knowledge_skills_find", "knowledge_skills_get",
+                                                                        "knowledge_skills_discover", "knowledge_skills_preview"]
 
 
 def test_skills_client_delegates_sync_scan_to_handler_and_retains_normal_scans(monkeypatch):

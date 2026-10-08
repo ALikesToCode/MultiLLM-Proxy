@@ -60,7 +60,7 @@ function parseResponse(text, type, provider, acceptText = false) {
   }
 }
 
-async function fetchBounded(provider, url, options, { fetchImpl = fetch, signal, timeoutMs = REQUEST_TIMEOUT_MS, maxResponseBytes, acceptText }) {
+export async function fetchBounded(provider, url, options, { fetchImpl = fetch, signal, timeoutMs = REQUEST_TIMEOUT_MS, maxResponseBytes, acceptText }) {
   const controller = new AbortController();
   const cancel = () => controller.abort();
   if (signal?.aborted) cancel();

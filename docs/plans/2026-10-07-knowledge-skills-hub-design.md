@@ -9,6 +9,11 @@ The MCP instruction exception applies only to that tool. Other Knowledge text
 remains untrusted evidence. The feature never sends file contents to an upstream
 provider. Workers AI receives only `name: description` for skill embeddings and
 the user's query for hybrid search; fast search makes no embedding call.
+Marketplace discovery (below) is the exception: it sends the query's content words
+to public skill marketplaces and, when configured, GitHub.
+An operator-approved import (below) is the only way external text becomes operator
+text: it pins a GitHub commit or ClawHub version and records the review flags the
+operator accepted. Upstream changes are reported, never applied.
 
 ## Storage and index
 
@@ -97,6 +102,10 @@ expiry rule to active skills.
 | knowledge_skills_find | query; limit 1–5 default 3; mode fast/hybrid default hybrid; optional roots array; optional min_confidence high | Array of skill_id, name, description, score, confidence, why (matched terms), files (paths) | knowledge:read |
 | knowledge_skills_get | skill_id; optional path default SKILL.md | skill_id, path, text, files, content_hash, trust operator | knowledge:read |
 | knowledge_skills_sync | skills array; optional delete array and dry_run boolean | results array: skill_id, created/updated/unchanged/deleted/rejected status, safe rejection reason | knowledge:manage |
+| knowledge_skills_discover | query (≤500); limit 1–20 default 10; optional sources array of library, skillsmp, skills-sh, clawhub, skillhub, claude-plugins, github | library (find results, trust operator), external (merged candidates, trust external), sources (per-source status and count), optional withheld_flagged and cached | knowledge:read |
+| knowledge_skills_preview | repository with path or name, optional ref; or clawhub owner/slug alone | trust external, name, description, url, location, review_flags, text | knowledge:read |
+| knowledge_skills_import | repository with path and optional ref, or clawhub owner/slug; commit (40-hex) or version applies; optional accept_flags | plan: status review, would_be, skill_id, origin, files, skipped, review_flags, flagged_files, apply; applied: status created/updated/unchanged, origin with accepted_flags | knowledge:manage |
+| knowledge_skills_report | kind updates or gaps; limit 1–50 default 20; check boolean (updates) | kind, items, optional checked | knowledge:manage |
 
 Binary referenced files return `content_base64` instead of text; UTF-8 files,
 including base64-encoded UTF-8 uploads, return text. Find/get omit counters,
@@ -121,10 +130,86 @@ high-confidence secret detector. Metadata is also checked before embedding.
 An unsafe skill returns rejected, secret_detected, relative file and finding
 types only; other safe skills in the batch continue. Invalid skill IDs or duplicate
 batch identities reject the batch before storage. Find/get retain the normal
-outbound firewall. Frozen inventories include the three skills Flask routes and all
-four skills Worker modules. The catalogue is regenerated from Python contracts.
+outbound firewall. Frozen inventories include the seven skills Flask routes and all
+seven skills Worker modules. The catalogue is regenerated from Python contracts.
 
-## Sync client
+## Marketplace discovery
+
+`worker/knowledge/skills-market.mjs` runs in the stateless Knowledge Worker, not
+the Skills DO. Discover calls the DO's find for the library slice and fans out to
+the marketplaces with `Promise.all` over per-source searches that never reject.
+Each request uses the provider transport's bounded fetch: fixed HTTPS URLs,
+manual redirects, a 4.5-second timeout and a 1 MiB response cap. A failure,
+timeout or 429 affects only that source's status. The query is secret-scanned by
+the normal dispatch firewall first; marketplaces receive at most eight content
+words (stopwords and "skill(s)" removed).
+
+| Source | Endpoint | Fields used |
+| --- | --- | --- |
+| skillsmp | `skillsmp.com/api/v1/skills/search` | name, description, githubUrl (repository, ref, folder), stars, contentLanguage |
+| skills-sh | `skills.sh/api/search` | source (repository), skillId, installs |
+| clawhub | `clawhub.ai/api/v1/search` | install.reference (owner/slug; `skills-sh:` entries map to their repository), summary, downloads, installs, stars, isSuspicious, clawHubVerdict |
+| skillhub | `skills.palebluedot.live/api/skills` | name, description, githubOwner/Repo, stars, downloads, securityScore, isMalicious |
+| claude-plugins | `claude-plugins.dev/api/skills` | name, description, sourceUrl and rawFileUrl (repository, ref, folder), stars, installs |
+| github | `api.github.com/search/code` (`filename:SKILL.md`, needs GITHUB_TOKEN) | repository, folder |
+
+Candidates merge on lowercase repository plus slugged name (ClawHub-only skills on
+their owner/slug, because ClawHub slugs repeat across owners). The English description and folder win over translations, then the
+shortest folder. A merged skill flagged by any source is withheld. Ranking adds
+query-term coverage of name and description (name counted twice, the skills
+tokenizer), 0.2 × capped log popularity (installs, downloads, or stars/10) and
+0.1 per extra source. Lexically unrelated candidates appear only when relevant
+ones do not fill the limit. Fan-outs in which every searched source succeeded are
+cached in the Cache API for 15 minutes, keyed by keywords, the sorted sources
+actually searched and limit; partial ones are not.
+
+Discovery bookkeeping lives in the Skills DO and fails open. Before the fan-out
+`market.state` returns sources in a cooldown: three consecutive failures, or one
+rate limit, skip a source for 10 minutes, and a success clears its row. After the
+fan-out one `market.record` call stores the outcomes, returns installed markers
+(same imported origin, else a library skill_id equal to the slugged name) and
+records a gap when the library slice had no high-confidence result. Gap rows hold
+only the sorted content words and three candidate names, URLs and install
+commands; at most 500 rows for 90 days, removed when a later search answers
+confidently.
+
+Preview fetches only `raw.githubusercontent.com/<repository>/<ref>/<folder>/SKILL.md`,
+SkillHub's detail record for a folder, or ClawHub's file endpoint (with `owner`).
+Text over 128 KiB is refused. Review flags are fixed regexes plus the
+high-confidence secret detector. Discovery and preview store nothing external.
+
+## Imports and the update watch
+
+`worker/knowledge/skills-import.mjs` copies one folder into the `imported` root,
+which `skills.sync` refuses (`import_only`). GitHub imports resolve the ref with
+`commits/{ref}` (`application/vnd.github.sha`), list the folder with
+`git/trees/{commit}:{folder}?recursive=1` (truncated listings are refused; symlinks
+and submodules skipped) and read files from `raw.githubusercontent.com` at the
+commit, six at a time. ClawHub imports read `versions/{version}?owner=` for the file
+list and verify each download's SHA-256; a `malicious` verdict is refused and any
+other non-`clean` status adds `marketplace_suspicious`. Files are chosen SKILL.md
+first, then by path, within the sync limits; the rest are listed as skipped.
+
+Without a pin the request is a plan: the DO validates the skill in a dry run (so
+secrets, limits and conflicts surface) and nothing is written. With the plan's
+commit or version and `accept_flags` covering every review flag, the DO writes the
+skill through the sync path with `origin` (source, repository, path, ref, commit,
+folder tree SHA or ClawHub version, imported_at, accepted_flags). Existing skills
+from another root or origin are never replaced (`skill_exists`). Identical content
+at a new pin updates only the origin. `get` returns the origin with operator
+trust; that is the point of the operator's approval.
+
+The hourly cron runs the watch in its own `waitUntil`, beside catalogue
+maintenance. `imports.due` returns up to five imports not checked for 24 hours (or
+never checked under their current pin). GitHub checks resolve the ref; an equal
+commit, or an equal folder tree at a new commit, is `current`. Otherwise the folder
+is read at the new pin and compared by SHA-256 with the stored manifest; text
+changes get unified diffs against the R2 copy (8 KiB per file, 48 KiB per check,
+LCS for up to 250,000 line pairs). `imports.checked` stores the result only if the
+pin is still current. `report` with `check: true` checks two imports in the
+request, which keeps two full snapshots inside the 55-second deadline. Nothing is
+applied.
+
 
 `scripts/skills_sync.py` is Python 3.11+ stdlib plus the repository's standalone
 `services.secret_scan` detector, without importing application configuration.

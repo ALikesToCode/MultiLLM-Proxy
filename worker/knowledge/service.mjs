@@ -16,8 +16,8 @@ import { logFailure } from "../log.mjs";
 import { protectPayload } from "../secret-firewall.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
-  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync", ...HANDOFF_OPERATIONS, ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
-const READ = new Set([...HANDOFF_OPERATIONS, "context", "search", "artifact", "skills.find", "skills.get", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+  "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync", "skills.discover", "skills.preview", "skills.import", "skills.report", ...HANDOFF_OPERATIONS, ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
+const READ = new Set([...HANDOFF_OPERATIONS, "context", "search", "artifact", "skills.find", "skills.get", "skills.discover", "skills.preview", ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
 
 export function setupStatus(env) {
   return [

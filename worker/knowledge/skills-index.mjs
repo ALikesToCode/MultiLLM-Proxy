@@ -8,8 +8,10 @@ export const LONG_QUERY_TERMS = 20;
 export const SINGLE_NAME_MIN_DOCUMENTS = 3;
 export const SINGLE_NAME_DOCUMENT_RATIO = 0.03;
 const STOPWORDS = new Set(("a about above after again against all also am an and any are as at be because been before being below between both but by can could did do does doing done down during each else etc few for from further get got had has have having he her here hers him his how i if in into is it its itself just let lets like may me might more most must my myself no nor not now of off ok okay on once only or other our ours out over own please same shall she should so some such than thank thanks that the their theirs them then there these they this those through to too under until up us very was we were what when where which while who whom why will with would yes you your yours").split(" "));
-export const terms = text => (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
-  .filter(term => term.length > 1 && !STOPWORDS.has(term))
+// Unstemmed content words, for queries sent to search engines that do their own matching.
+export const keywords = text => (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+  .filter(term => term.length > 1 && !STOPWORDS.has(term));
+export const terms = text => keywords(text)
   .map(term => term.length > 3 && term.endsWith("s") && !/(ss|us|is)$/.test(term) ? term.slice(0, -1) : term);
 export class SkillsIndex {
   constructor(records, { confidentCosine } = {}) {

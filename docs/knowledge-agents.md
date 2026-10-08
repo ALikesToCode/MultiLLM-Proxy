@@ -44,7 +44,9 @@ configuration, and the downloadable skill. `/llms.txt` (also `/llm.txt`) links t
 | `knowledge_deepwiki_structure`, `knowledge_deepwiki_contents`, `knowledge_deepwiki_ask` | DeepWiki repository documentation and answers |
 | `knowledge_mintlify_context` | Mintlify Index research with citations |
 | `knowledge_skills_find`, `knowledge_skills_get` | Find and load operator skills (read) |
+| `knowledge_skills_discover`, `knowledge_skills_preview` | Search the library, public skill marketplaces and GitHub; read an external SKILL.md as untrusted data (read) |
 | `knowledge_skills_sync` | Upload or delete operator skills (manage) |
+| `knowledge_skills_import`, `knowledge_skills_report` | Import a reviewed external skill pinned to a commit or version; report upstream updates and library gaps (manage) |
 | `knowledge_artifact` | Retained source text and citation manifest |
 | `knowledge_status` | Source, job, configuration and allowance status (manage) |
 | `knowledge_source_register` | Register public documentation without fetching (manage) |
@@ -96,8 +98,85 @@ listing every skill. `knowledge_skills_find` defaults to hybrid search and three
 results; `mode: "fast"` uses only BM25. Results carry high/low confidence;
 `min_confidence: "high"` filters weak matches before limits and suggestion counts. `knowledge_skills_get` loads `SKILL.md` or a
 referenced relative path. These are operator instructions (`trust: "operator"`);
-provider evidence remains untrusted data. `/mcp?toolsets=skills` lists only these
-three tools, subject to the key's scopes.
+provider evidence remains untrusted data. `/mcp?toolsets=skills` lists only the
+seven skills tools, subject to the key's scopes.
+
+### Marketplaces and GitHub
+
+`knowledge_skills_discover` (POST `/v1/knowledge/skills/discover`, `knowledge:read`)
+searches the operator library and, in parallel, SkillsMP, skills.sh, ClawHub,
+SkillHub (skills.palebluedot.live), claude-plugins.dev and GitHub code search. It
+takes `{query, limit?, sources?}`: `limit` is 1–20 (default 10) and `sources` picks
+from `library`, `skillsmp`, `skills-sh`, `clawhub`, `skillhub`, `claude-plugins` and
+`github` (default all). Marketplaces receive the query's content words, never the
+full prompt; secrets in the query are rejected before any call.
+
+The reply has three parts. `library` holds operator skills (`trust: "operator"`) to
+load with `knowledge_skills_get`. `external` holds candidates (`trust: "external"`)
+merged by repository and skill name, with `found_in`, stars/installs, a GitHub or
+ClawHub `url`, an `install` command and a `preview` object. `sources` gives each
+source's `ok`, `timeout`, `rate_limited`, `access_denied`, `error`,
+`not_configured` or `skipped` status. Skills that SkillHub marks malicious or ClawHub
+marks suspicious are withheld and counted in `withheld_flagged`. Each source has
+4.5 s. A source that fails three times in a row, or hits a rate limit once, is
+`skipped` for 10 minutes (`retry_after` gives the seconds left); one success clears
+it. Answers in which every searched source succeeded are cached for 15 minutes.
+An external result the library already has carries `library: {skill_id, root,
+match}`: `imported` for the same imported origin, `same_name` for any library skill
+with that name. ClawHub skills are named `owner/slug`, because slugs repeat across
+owners.
+
+`knowledge_skills_preview` (POST `/v1/knowledge/skills/preview`) takes a result's
+`preview` object: `{repository, path, ref?}`, `{repository, name}` (tries
+`skills/<name>`, `<name>`, `.claude/skills/<name>`, `.agents/skills/<name>`, then
+SkillHub's recorded folder) or `{clawhub}`. It returns the SKILL.md (at most
+128 KiB) with `review_flags` such as `pipe_to_shell`, `credential_paths`,
+`instruction_override` or `embedded_secret`. Flags are prompts for review, not a
+verdict. Discovery and preview never change the library; only an approved import
+does.
+
+### Importing and watching external skills
+
+`knowledge_skills_import` (POST `/v1/knowledge/skills/import`, `knowledge:manage`)
+copies one skill folder into the `imported` root. It takes `{repository, path,
+ref?}` for GitHub (the preview's `path` works) or `{clawhub: "owner/slug"}`. The
+first call imports nothing: it resolves the ref to a commit (or ClawHub's latest
+version), reads the folder and returns a plan with the files, any skipped files,
+`review_flags` per file and an `apply` payload. ClawHub's own verdict is checked:
+`malicious` is refused and any status other than `clean` adds the
+`marketplace_suspicious` flag. To import, send the plan's `apply` payload (which
+pins `commit` or `version`) plus `accept_flags` listing every review flag the
+operator accepted. Missing flags return `review_required`; embedded secrets are
+always refused. Folders follow the sync limits (40 files, 128 KiB SKILL.md,
+256 KiB per file, 5 MiB total); oversized files are skipped and listed.
+
+Imported skills are served by `knowledge_skills_get` with `trust: "operator"` and
+an `origin` (repository, path, ref, commit or ClawHub version, accepted flags), and
+the hint hook can suggest them. An import never replaces a skill from another root
+or another origin (`skill_exists`); `knowledge_skills_sync` cannot write the
+`imported` root, and its `delete` removes an import. Re-importing the same origin
+at a new pin updates it.
+
+The hourly cron checks up to five imported skills a day each against their
+upstream. For GitHub it resolves the ref; an unchanged commit or folder tree costs
+one or two API calls. `knowledge_skills_report` with `{kind: "updates"}` lists each
+import with `status` (`unchecked`, `current`, `changed` or `error`), the latest
+commit or version, per-file `changes` with bounded unified diffs, new
+`review_flags` and an `apply` payload. `check: true` checks the two least recently
+checked imports now. Updates
+are never applied: adopting one is another import with that payload.
+
+`{kind: "gaps"}` lists searches the library could not answer with a
+high-confidence skill, by count, with up to three external candidates seen. Only
+discovery searches that include the library count, keyed by their sorted content
+words; a later confident answer removes the gap, and gaps expire after 90 days.
+
+GitHub code search needs the Knowledge Worker secret `GITHUB_TOKEN` (a
+fine-grained token with public read access only); without it the `github` source
+reports `not_configured`. Imports and update checks work without it, but share
+GitHub's unauthenticated limit of 60 requests an hour per IP address, which other
+Cloudflare tenants also use; a refusal returns `upstream_rate_limited`. The other marketplaces index GitHub too. SkillsMP works
+anonymously; the optional `SKILLSMP_API_KEY` secret raises its rate limit.
 
 From the repository, use Python 3.11+ and an existing private environment containing
 `MULTILLM_BASE_URL` and `MULTILLM_KNOWLEDGE_API_KEY`. Sync requires

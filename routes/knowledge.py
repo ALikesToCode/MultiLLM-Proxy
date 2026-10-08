@@ -312,9 +312,24 @@ def register_knowledge_routes(app, csrf):
     def skills_find_api():
         return jsonify(dispatch("skills.find", g.authenticated_user, _body()))
 
+    def skills_action_api(action):
+        return jsonify(dispatch("skills." + action, g.authenticated_user, _body()))
+
     app.add_url_rule("/v1/knowledge/skills/find", "knowledge_skills_find",
                      csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(skills_find_api)),
                      methods=["POST", "OPTIONS"])
+    app.add_url_rule("/v1/knowledge/skills/discover", "knowledge_skills_discover",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(skills_action_api)),
+                     methods=["POST", "OPTIONS"], defaults={"action": "discover"})
+    app.add_url_rule("/v1/knowledge/skills/preview", "knowledge_skills_preview",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:read")(skills_action_api)),
+                     methods=["POST", "OPTIONS"], defaults={"action": "preview"})
+    app.add_url_rule("/v1/knowledge/skills/import", "knowledge_skills_import",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:manage")(skills_action_api)),
+                     methods=["POST", "OPTIONS"], defaults={"action": "import"})
+    app.add_url_rule("/v1/knowledge/skills/report", "knowledge_skills_report",
+                     csrf.exempt(api_authenticate_only(required_scope="knowledge:manage")(skills_action_api)),
+                     methods=["POST", "OPTIONS"], defaults={"action": "report"})
     app.add_url_rule("/v1/knowledge/skills", "knowledge_skills",
                      csrf.exempt(api_authenticate_only(required_scope=lambda:
                          "knowledge:manage" if request.method == "POST" else "knowledge:read")(skills_api)),

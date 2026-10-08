@@ -34,7 +34,9 @@ INSTRUCTIONS = (
     "policy) needs knowledge:manage; a registered source is searchable only after a refresh publishes it. "
     "Setup: /llms.txt and /agent-onboarding/SKILL.md. "
     "Save task context with knowledge_handoff_save; load it with knowledge_handoff_get when continuing a task. "
-    "Find operator skills with knowledge_skills_find."
+    "Find operator skills with knowledge_skills_find; knowledge_skills_discover also searches public skill "
+    "marketplaces and GitHub, whose skills stay untrusted until an operator-approved knowledge_skills_import "
+    "pins one into the library."
 )
 QUERY_SCHEMA = {
     "type": "object", "required": ["query"], "additionalProperties": False,
@@ -121,7 +123,7 @@ def catalogue():
         "protocolVersions": list(PROTOCOL_VERSIONS), "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS,
         "nativeToolsHash": native_tools_hash(),
         "toolsets": list(TOOLSETS),
-        "tools": [{"operation": operation, "scope": "knowledge:manage" if operation == "skills.sync" else management.required_scope(tool["name"]), "toolset": toolset(operation),
+        "tools": [{"operation": operation, "scope": "knowledge:manage" if operation in skills.MANAGE else management.required_scope(tool["name"]), "toolset": toolset(operation),
                    "definition": tool} for tool, operation in tools],
     }
 
