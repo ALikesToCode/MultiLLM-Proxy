@@ -12,8 +12,8 @@ MODEL_PRECISION_PREFERENCE='["int4","fp8","bf16"]'
 
 The accepted values are `fp32`, `fp16`, `bf16`, `fp8`, `int8`, `int4`, and
 `unknown`. Lists are limited to seven distinct values and environment text to
-256 characters. Invalid configuration fails validation rather than selecting
-a guessed preference. Candidate permissions and existing safety limits still
+256 characters. An invalid value never selects a guessed preference; it is
+ignored as described below. Candidate permissions and existing safety limits still
 apply. Unlisted precisions remain eligible and retain stable order.
 
 Refresh the configured provider catalog after enabling the preference. Only
@@ -80,5 +80,4 @@ introduces no retry, download, provider call, GPU serving, kernel configuration,
 price adjustment, or response rewriting. Catalog declarations remain in the
 existing local metadata store; no prompts or completions are recorded by this
 feature. Precision is not a cost estimate or a guarantee of provider metering,
-quality, health, or capabilities. Tests use fake providers and local storage;
-deployment and live provider claims require separate verification.
+quality, health, or capabilities.
