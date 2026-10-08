@@ -33,6 +33,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Nineteen AI
   - Chutes AI
 - 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
+- 🔍 [Provider authenticity diagnostics](docs/provider-authenticity.md) give bounded, content-free conformance signals for each provider
 - 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
 - 📊 Request, latency, response-class, and configured cost telemetry

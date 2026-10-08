@@ -108,7 +108,3 @@ does not permit remote plaintext HTTP.
 The diagnostics do not change live routing, credential health, capability
 policies, provider credentials, dashboards or storage. Offline tests inject fake
 transports. Live probes require separate operator authorization.
-
-## README handoff
-
-Operator diagnostics provide bounded, content-free provider conformance and authenticity signals.
