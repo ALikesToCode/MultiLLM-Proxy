@@ -154,7 +154,7 @@ class ChatGateway:
         stronger_than = None
         self._key_refused = False
         try:
-            for candidate, token, spare_keys in self._attempts():
+            for candidate, token, spare_keys in getattr(self, "_prepared_attempts", None) or self._attempts():
                 self._key_refused = False
                 remaining(self.deadline, self.cancelled)
                 if self.attempts >= self.request.max_attempts:
@@ -240,6 +240,13 @@ class ChatGateway:
             raise last_error
         finally:
             self.settle()
+
+    def prepare_credentials(self):
+        """Decide first-candidate cooldown before streaming response headers."""
+        from itertools import chain
+        source = iter(self._attempts())
+        first = next(source, None)
+        self._prepared_attempts = chain((first,), source) if first is not None else source
 
     def _attempts(self):
         """Each candidate with its first usable key; the next key only after a key refusal."""

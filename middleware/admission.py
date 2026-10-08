@@ -82,3 +82,77 @@ def dispatch_with_admission(identity, dispatch, client, *, on_lost=None):
         if isinstance(error, AdmissionError):
             return admission_error_response(error)
         raise
+
+
+class _ReleaseOnce:
+    """Transfer one release operation from request setup to the response body."""
+
+    def __init__(self, lease):
+        self.lease = lease
+        self.closed = False
+        self.transferred = False
+
+    def check(self):
+        self.lease.check()
+
+    def release(self):
+        if not self.closed:
+            self.closed = True
+            self.lease.release()
+
+
+def register_admission(app):
+    from flask import g
+    from services.admission_leases import AdmissionClient, admission_settings
+    from services.admission_request import request_identity
+    from services.request_cancellation import RequestCancellation
+
+    app.extensions.setdefault("admission_client", AdmissionClient())
+
+    def admit():
+        settings = admission_settings()
+        if not settings.enabled or not settings.limited():
+            return None
+        identity = request_identity(settings)
+        if identity is None or not settings.limited(identity.model_group):
+            return None
+        owner = g.gateway_cancellation = RequestCancellation()
+        try:
+            lease = app.extensions["admission_client"].acquire(identity, on_lost=owner.cancel)
+            if lease is not None:
+                g.gateway_admission_lease = _ReleaseOnce(lease)
+                g.gateway_admission_lease.check()
+        except AdmissionError as error:
+            lease = getattr(g, "gateway_admission_lease", None)
+            if lease is not None:
+                lease.release()
+            return admission_error_response(error)
+        return None
+
+    app.extensions.setdefault("gateway_after_authentication", []).append(admit)
+    app.register_error_handler(AdmissionError, admission_error_response)
+
+    @app.after_request
+    def finish_admission(response):
+        lease = getattr(g, "gateway_admission_lease", None)
+        if lease is None:
+            return response
+        try:
+            lease.check()
+        except AdmissionError as error:
+            response.close()
+            lease.release()
+            return admission_error_response(error)
+        if response.is_streamed:
+            response.response = _LeasedIterable(response.response, lease)
+            response.call_on_close(response.response.close)
+            lease.transferred = True
+        else:
+            lease.release()
+        return response
+
+    @app.teardown_request
+    def abandon_admission(error):
+        lease = getattr(g, "gateway_admission_lease", None)
+        if lease is not None and not lease.transferred:
+            lease.release()

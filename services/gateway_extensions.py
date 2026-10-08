@@ -1,10 +1,49 @@
 """Static Flask extension registration; callbacks are supplied explicitly in policy order."""
-from flask import jsonify, request
+from flask import current_app, jsonify, request
 
 from route_helpers import is_api_request_path, login_required
 from services.auth_service import AuthService
 from services.config_revision_sync import configure_sync, load_settings, supported_settings
 from services.provider_catalog_refresh import refresh_provider_catalog_revision
+
+
+def after_authentication():
+    """Run static post-authentication collaborators once before admission and dispatch."""
+    from flask import g
+    if getattr(g, "gateway_authenticated_hooks_ran", False):
+        return None
+    g.gateway_authenticated_hooks_ran = True
+    for hook in current_app.extensions.get("gateway_after_authentication", ()):
+        refused = hook()
+        if refused is not None:
+            return refused
+    return None
+
+
+def register_retention(app):
+    app.extensions.setdefault("gateway_after_authentication", []).append(request_policy_hook)
+
+
+def request_policy_hook():
+    from services.retention_policy import request_policy
+    request_policy()
+    return None
+
+
+def register_cooldown_errors(app):
+    from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted, cooldown_error_response
+    def cooldown_failure(error):
+        from flask import g
+        g.gateway_cooldown_error = True
+        return cooldown_error_response(error)
+    for error in (ModelCooldownExhausted, ModelCooldownCapacity):
+        app.register_error_handler(error, cooldown_failure)
+
+
+def gateway_callbacks():
+    from middleware.admission import register_admission
+    from middleware.rate_limit_headers import register_rate_limit_headers
+    return (register_retention, register_admission, register_cooldown_errors, register_rate_limit_headers)
 
 
 def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, security_refreshers=None):

@@ -1,6 +1,7 @@
 """Private shared concurrency leases; local bookkeeping is never the authority."""
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import requests
+from error_handlers import APIError
 
 logger = logging.getLogger(__name__)
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
@@ -28,9 +30,19 @@ _clients: weakref.WeakSet = weakref.WeakSet()
 _scheduler = None
 
 
-class AdmissionError(Exception):
+def principal_hash(username: str) -> str:
+    """Shared authenticated account identity; never hash an unverified caller header."""
+    return hashlib.sha256(f"multillm-admission:v1:{username.strip()}".encode("utf-8")).hexdigest()
+
+
+def model_group(model, provider=None) -> str:
+    candidate = f"{provider}:{model}" if provider and isinstance(model, str) else model
+    return candidate if isinstance(candidate, str) and _GROUP.fullmatch(candidate) else (provider or "default")
+
+
+class AdmissionError(APIError):
     def __init__(self, code="admission_unavailable", status=503, retry_after=None):
-        super().__init__("Concurrency admission failed.")
+        super().__init__("Concurrency admission failed.", status_code=status)
         self.code, self.status, self.retry_after = code, status, retry_after
 
 

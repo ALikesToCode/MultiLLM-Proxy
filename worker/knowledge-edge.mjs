@@ -15,6 +15,7 @@ import { logFailure } from "./log.mjs";
 import { contractPinMismatch, digestsEnabled, discoveryContract } from "./knowledge/contract-drift.mjs";
 import { SYNC_REQUEST_BYTES } from "./knowledge/skills-validation.mjs";
 import { protectPayload, secretScanMode, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
+import { RETENTION_HEADER, resolveRetentionPolicy, retentionAllowsContent } from "./retention-policy.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
 const KEY_NAMESPACE = "mllm_intelligence_";
@@ -248,6 +249,9 @@ function contractCheck(status) {
 }
 
 async function dispatch(env, operation, principal, payload, signal) {
+  if (operation === "handoffs.save" && !retentionAllowsContent(principal.retentionPolicy)) {
+    throw new KnowledgeEdgeError("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409);
+  }
   // The private Skills handler scans individual files rather than rejecting the batch.
   const decision = operation === "skills.sync" ? { mode: secretScanMode(env, principal, true) }
     : await protectPayload(payload, env, { principal, knowledge: true, provider: "knowledge", route: `/v1/knowledge/${operation}` });
@@ -258,7 +262,8 @@ async function dispatch(env, operation, principal, payload, signal) {
   }
   if (decision.header) principal.secretScanHeader = decision.header;
   const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes }, payload,
-    secret_scan_mode: decision.mode, secret_scan_checked: true });
+    secret_scan_mode: decision.mode, secret_scan_checked: true,
+    ...(principal.retentionPolicy?.enabled ? { retention_policy: principal.retentionPolicy } : {}) });
   if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
@@ -553,6 +558,11 @@ export async function handleKnowledgeEdgeRequest(request, env) {
     // Either Knowledge scope opens MCP, so a key with neither needs the smaller one.
     const scope = route === "mcp" ? "knowledge:read" : route.scope;
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${scope} scope` }, 403);
+  }
+  if (resolveRetentionPolicy(env).enabled) {
+    principal.retentionPolicy = resolveRetentionPolicy(env, { keyId: principal.id,
+      keyHash: createHash("sha256").update(requestKey(request.headers)).digest("hex"),
+      route: pathname, header: request.headers.get(RETENTION_HEADER) ?? "" });
   }
   try {
     const response = route === "mcp" ? await handleMcp(request, env, principal) : await handleRest(request, env, principal, route);

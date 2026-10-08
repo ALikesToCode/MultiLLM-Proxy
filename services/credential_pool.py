@@ -73,6 +73,7 @@ class CredentialPool:
         now: float | None = None,
         model: str | None = None,
         quota_bucket: str | None = None,
+        require_eligible: bool = False,
     ) -> list[str]:
         """Configured keys that are not resting, in preference order."""
         keys = cls.keys(provider) if keys is None else keys
@@ -80,7 +81,7 @@ class CredentialPool:
         if config.enabled and (model or quota_bucket):
             with cls._lock:
                 legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
-            return model_cooldown.available(
+            eligible = model_cooldown.available(
                 provider,
                 keys,
                 model=model,
@@ -89,6 +90,12 @@ class CredentialPool:
                 now=now,
                 legacy_rest_until=legacy,
             )
+            if require_eligible and keys and not eligible:
+                model_cooldown.select(
+                    provider, keys, model=model, quota_bucket=quota_bucket,
+                    max_seconds=config.max_seconds, now=now, legacy_rest_until=legacy,
+                )
+            return eligible
         current = time.monotonic() if now is None else now
         with cls._lock:
             return [

@@ -74,6 +74,16 @@ store data name the D1 migration to apply before enabling them.
 - [Health probe cost forecast](docs/probe-cost-forecast.md): an offline script bounds the API calls and spend of a probe plan.
 - [Three-arm evaluation](docs/evaluation-noise-floor.md): `SHADOW_EVAL_NOISE_FLOOR_ENABLED` compares a candidate against two replays of the production model, and an offline script replays routing cost.
 - [Quantization and precision preferences](docs/model-precision.md): `MODEL_PRECISION_PREFERENCE` orders catalog and intelligence candidates by model precision.
+- [Upstream Retry-After advice](docs/retry-advice.md): `UPSTREAM_RETRY_AFTER_ADVICE_ENABLED` waits for a provider's bounded reset hint before an already-permitted retry.
+- [Native edge request metrics](docs/edge-request-metrics.md): `NATIVE_EDGE_METRICS_ENABLED` records native Worker generations in the usage ledger and Prometheus without double-counting forwarded requests.
+- [Prompt cache usage and cost](docs/prompt-cache-cost.md): `PROMPT_CACHE_USAGE_BUCKETS_ENABLED` records ordinary input, cache-read, cache-write and output tokens and costs separately (migration 0016).
+- [Model-scoped credential cooldown](docs/model-cooldown.md): `MODEL_COOLDOWN_ENABLED` rests a pooled key for one model or quota bucket instead of the whole provider.
+- [Zero-content retention](docs/zero-content-retention.md): `CONTENT_RETENTION_ENABLED` lets a policy or `X-MultiLLM-Retention: zero` keep request content out of caches, samples, roleplay memory and Knowledge memos.
+- [Revision-aware configuration sync](docs/config-revision-sync.md): `CONFIG_REVISION_SYNC_ENABLED` reloads configuration from committed revisions and fails closed when key controls can't be verified (migration 0017).
+- [Shared concurrency admission](docs/admission-leases.md): `ADMISSION_ENABLED` limits concurrent generations per account and model group across the Worker and Containers.
+- [Disconnect-aware cancellation](docs/request-cancellation.md): a client disconnect closes the upstream request once and records the usage as unknown, not zero.
+- [Rate-limit headers](docs/rate-limit-headers.md): `RATE_LIMIT_HEADERS_ENABLED` adds `X-MultiLLM-RateLimit-*` headers for the gateway's own request counters.
+- [MCP contract digests](docs/mcp-contract-drift.md): `MCP_CONTRACT_DIGESTS_ENABLED` adds schema digests to `/mcp` discovery and rejects a call whose pinned digest no longer matches.
 
 ## Setup
 

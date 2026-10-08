@@ -68,6 +68,7 @@ from routes.cascade_deadline import bounded_timeout, check_candidate
 from routes.cascades import dispatch_unified_cascade, register_cascade_admin_routes, validate_cascade_target
 from services.context_optimizer import ContextOptimizationResult
 from services.model_registry import ModelRegistry
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from routes.provider_credentials import (
     NanoGPTKeyPool,
     _provider_token,
@@ -231,7 +232,7 @@ def _validate_direct_image_target(
             f"Image generation is not supported for provider: {provider}",
             status_code=400,
         )
-    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider, model=model_id.split(":", 1)[1])
     return provider
 
 
@@ -246,7 +247,8 @@ def _validate_direct_chat_target(
     if not judge_candidate_allowed(model_id):
         raise APIError("Model is excluded from routed image judging", status_code=503)
     provider, _, _ = _resolve_enabled_model(app, model_id)
-    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+    upstream = _apply_nanogpt_speed_routing(app, provider, {"model": model_id.split(":", 1)[1]}, request.headers)
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider, model=upstream["model"])
     return provider
 
 
@@ -284,6 +286,8 @@ def validate_unified_chat_target(
                 candidate,
             )
             return "auto"
+        except (ModelCooldownExhausted, ModelCooldownCapacity):
+            raise
         except (APIError, ValueError):
             continue
     raise APIError(
@@ -346,6 +350,7 @@ def _send_native_request(
         proxy_service_cls,
         provider,
         send_request,
+        model=body.get("model"),
     )
 
 
@@ -566,6 +571,7 @@ def _dispatch_unified_chat_candidate(
             proxy_service_cls,
             provider,
             send_request,
+            model=upstream_payload.get("model"),
             billing_refusal_is_routing=nanogpt_model_has_speed_suffix(
                 upstream_payload.get("model")
             ),
@@ -580,6 +586,7 @@ def _dispatch_unified_chat_candidate(
                 proxy_service_cls,
                 provider,
                 send_request,
+                model=upstream_payload.get("model"),
             )
             credential_attempts += retry_attempts
 

@@ -56,7 +56,10 @@ and replay permission is false. Nothing here asserts zero tokens or zero cost.
 Callbacks run once and contain no generated content. Cleanup errors are logged
 by type only and do not mask the original result.
 
-These are transient transport outcomes, not durable accounting records.
+These are transient transport outcomes, not durable accounting records. Flask request
+accounting records a managed request whose stream was cancelled after handoff with
+status 499 and unknown usage instead of its original status; the in-flight budget
+estimate is then released as for any other request without measured usage.
 
 ## Coverage
 

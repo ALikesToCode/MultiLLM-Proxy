@@ -214,7 +214,10 @@ export async function roleplayModuleUrl() {
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
-  const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
+  const compatibilityDataUrl = dataModuleUrl(compatibilitySource.replace(
+    'from "../retention-policy.mjs";',
+    `from "${new URL("../../worker/retention-policy.mjs", import.meta.url)}";`,
+  ));
   const candidateContextUrl = new URL("../../worker/roleplay/candidate-context.mjs", import.meta.url);
   const capacityDataUrl = dataModuleUrl(
     capacitySource.replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`),
@@ -675,7 +678,7 @@ export async function loadRoleplayStreamingModule() {
   );
 }
 
-export async function loadWorkerModule() {
+export async function loadWorkerModule({ transformSource = source => source } = {}) {
   const workerUrl = new URL("../../cloudflare-worker.mjs", import.meta.url);
   const opencodeReasoningUrl = new URL(
     "../../worker/opencode/reasoning-response.mjs",
@@ -725,7 +728,8 @@ export async function loadWorkerModule() {
       `from "${dataModuleUrl(reasoningOutputSource)}";`,
     ),
   );
-  const patchedSource = source
+  const patchedSource = transformSource(source)
+    .replace('from "./worker/native-config-sync.mjs";', `from "${new URL("../../worker/native-config-sync.mjs", import.meta.url)}";`)
     .replace('from "./worker/shadow-eval-schedule.mjs";', `from "${new URL("../../worker/shadow-eval-schedule.mjs", import.meta.url)}";`)
     .replace('from "./worker/cors-policy.mjs";', `from "${new URL("../../worker/cors-policy.mjs", import.meta.url)}";`)
     .replace('from "./worker/secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)

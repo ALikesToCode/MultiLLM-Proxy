@@ -4,6 +4,8 @@ import requests
 from flask import Response
 
 from error_handlers import APIError
+from services.credential_context import observation_context, selection_context
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from providers.nanogpt import is_nanogpt_paygo_rejection
 from routes.auto_routes import AutoRouteCandidateUnavailable
 from services.nanogpt_key_pool import (
@@ -13,7 +15,8 @@ from services.nanogpt_key_pool import (
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool as NanoGPTKeyPool
 
 
-def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> str:
+def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str, *, model=None, quota_bucket=None) -> str:
+    context = selection_context(provider, model, config=app.config, quota_bucket=quota_bucket)
     if provider == "googleai":
         token = auth_service_cls.get_google_token()
     elif provider == "nanogpt":
@@ -25,6 +28,7 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
                     api_key,
                     app.config["NANOGPT_KEY_CHECK_TIMEOUT_SECONDS"],
                 ),
+                **context,
                 check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
                 check_every_requests=app.config[
                     "NANOGPT_KEY_CHECK_EVERY_REQUESTS"
@@ -36,7 +40,7 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str) -> 
         except NanoGPTKeyPoolExhausted as error:
             raise AutoRouteCandidateUnavailable(str(error)) from error
     else:
-        token = auth_service_cls.get_api_key(provider)
+        token = auth_service_cls.get_api_key(provider, **context)
     if not token:
         raise AutoRouteCandidateUnavailable(
             f"API key not configured for {provider}",
@@ -58,6 +62,7 @@ def _record_nanogpt_token_result(
     token: str,
     status_code: int,
     routing_refusal: bool = False,
+    *, model=None, quota_bucket=None, response=None,
 ) -> None:
     if provider != "nanogpt":
         return
@@ -69,6 +74,8 @@ def _record_nanogpt_token_result(
     NanoGPTKeyPool.record_result(
         token,
         status_code,
+        **selection_context(provider, model, config=app.config, quota_bucket=quota_bucket),
+        **(observation_context(response) if response is not None else {}),
         check_ttl_seconds=app.config["NANOGPT_KEY_CHECK_TTL_SECONDS"],
         rejected_cooldown_seconds=app.config[
             "NANOGPT_KEY_REJECTED_COOLDOWN_SECONDS"
@@ -83,6 +90,7 @@ def _request_with_provider_token_rotation(
     provider: str,
     send_request,
     billing_refusal_is_routing: bool = False,
+    *, model=None, quota_bucket=None,
 ):
     """Send once per usable NanoGPT key after definite pre-generation failures."""
     attempt_limit = 1
@@ -99,7 +107,12 @@ def _request_with_provider_token_rotation(
                 auth_service_cls,
                 proxy_service_cls,
                 provider,
+                model=model, quota_bucket=quota_bucket,
             )
+        except (ModelCooldownExhausted, ModelCooldownCapacity):
+            if response is not None:
+                response.close()
+            raise
         except APIError:
             if response is not None:
                 break
@@ -124,6 +137,7 @@ def _request_with_provider_token_rotation(
             token,
             response.status_code,
             routing_refusal,
+            model=model, quota_bucket=quota_bucket, response=response,
         )
         if routing_refusal:
             # Every key would refuse this suffix identically, so rotating on

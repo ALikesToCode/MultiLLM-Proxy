@@ -70,9 +70,14 @@ state/batch features; those features must adopt the same policy explicitly.
   public request path. It ignores identity in caller payloads and caller-set
   `X-MultiLLM-Retention-Key-ID`, `X-MultiLLM-Retention-Key-Hash` and
   `X-MultiLLM-Retention-Route` headers, and sets those headers itself for
-  roleplay turns, operator recovery and memory requests.
+  roleplay turns, operator recovery and memory requests. The bootstrap admin
+  uses the trimmed `ADMIN_USERNAME` (default `admin`); the dedicated roleplay
+  key uses `roleplay`. Both also match the SHA-256 digest of the verified key.
 - Knowledge retrieval uses a non-storing cache for zero requests. Handoff saves
   are rejected before content is serialized into a Durable Object call.
+  Knowledge requests sent from the Container carry the policy resolved for the
+  authenticated Flask request, and the Container rejects zero-retention handoff
+  saves with HTTP 409 before secret scanning or transport.
 - Set `CONTENT_RETENTION_ENABLED` and `CONTENT_RETENTION_POLICY_JSON` on both the
   Worker and the Container. No routes, D1 tables or migrations are added.
 - Browser clients can send `X-MultiLLM-Retention` and read

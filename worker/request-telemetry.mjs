@@ -171,7 +171,7 @@ export async function observeNativeResponse(response, context, options = {}) {
     options.signal?.removeEventListener("abort", abort);
     const parsed = observer.finish();
     const event = finalEvent(response, context, options, parsed, reason, millis(clock() - started), ttft);
-    countEvent(event);
+    if (options.metrics !== false) countEvent(event);
     try { await options.finalize?.(event); } catch { console.error(JSON.stringify({ event: "native_metrics_finalize_failed" })); }
   });
   const reader = response.body?.getReader(); let controllerRef;
