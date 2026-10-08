@@ -184,6 +184,7 @@ caps must bound billed input, output and reasoning; images, tools, retries,
 provider-specific metering, manual checks and rate limits need explicit accounting.
 Infrastructure, Container keep-warm runtime, network tariffs and taxes are excluded
 from API USD bounds. Configuration and tariffs can change; an incomplete or stale
-snapshot cannot certify a future bill. W12 separately enforces execution budgets.
+snapshot cannot certify a future bill. The capability probe command enforces its
+own execution budget ([capability probes](capability-probes.md)).
 The tool retains nothing; shell redirection and plan/report file retention are
 operator decisions. No live provider, deployment or metering validation occurs.
