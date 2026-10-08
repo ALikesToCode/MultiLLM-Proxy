@@ -86,3 +86,24 @@ def save_route(route_id, candidates, updated_at):
 def reset_cache():
     with _lock:
         _cache["routes"], _cache["expires"] = None, 0.0
+
+
+def snapshot_request(operation, **values):
+    """Snapshot operations fail closed, without the routing read cache or a retry."""
+    try:
+        if not using_d1():
+            raise ValueError("Durable snapshots require D1")
+        result = intelligence_d1_store.request_private_intelligence(
+            {"operation": operation, **values}, endpoint="auto_routes")
+        if (not isinstance(result, dict) or type(result.get("version")) is not int
+                or result["version"] != 1 or "error" in result):
+            raise ValueError("Invalid snapshot storage response")
+        return result
+    except intelligence_d1_store.PrivateIntelligenceError as error:
+        if error.status in {400, 404, 409, 413}:
+            raise APIError("Snapshot request was rejected", error.status,
+                           {"error": error.code}) from None
+    except Exception:
+        pass
+    raise APIError("Snapshot storage is unavailable; apply was not confirmed", 503,
+                   {"error": "config_snapshot_storage_unavailable"}) from None
