@@ -157,3 +157,15 @@ def shared_response_cache():
         store = SharedGenerationCache()
         current_app.extensions["shared_generation_cache"] = store
     return store
+
+
+def semantic_response_cache():
+    """The fixed private semantic store, overridable by an application collaborator."""
+    from flask import current_app
+    from services.semantic_generation_cache import SemanticGenerationCache
+
+    store = current_app.extensions.get("semantic_generation_cache")
+    if store is None:
+        store = SemanticGenerationCache()
+        current_app.extensions["semantic_generation_cache"] = store
+    return store
