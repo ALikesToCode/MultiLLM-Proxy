@@ -1,4 +1,5 @@
 import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled } from "./worker/gateway-extensions.mjs";
+import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
@@ -1837,6 +1838,9 @@ export default {
     tickNativeRevisionSync(env, ctx);
     if (scheduledMaintenanceEnabled(env)) ctx.waitUntil(runScheduledMaintenance(env));
     const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+    if (batchesEnabled(env)) ctx.waitUntil(runScheduledBatches(env, container).catch(() => {
+      console.warn(JSON.stringify({ event: "gateway_batch_schedule_failed" }));
+    }));
     ctx.waitUntil(runScheduledShadowEval(env, container));
     ctx.waitUntil(runScheduledHealth(controller, env, container).catch((error) => {
       logStructuredError("scheduled_health_failed", error);
