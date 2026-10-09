@@ -7,6 +7,7 @@
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
 import { submitNativeEvent } from "./observability-export.mjs";
+import { recordFlushedUsage } from "./usage-receipts.mjs";
 import { BUCKET_FIELDS, bucketInsertStatement, recordUsageWithBuckets, usageBucketsEnabled, validBaseUsageRow as validRow } from "./usage-buckets-d1.mjs";
 
 // Upper bounds in milliseconds of the usage_daily latency buckets; the last bucket is open.
@@ -100,6 +101,7 @@ async function record(db, env, body, insertEvents = INSERT_EVENTS) {
   ]);
   const duplicate = applied.meta.changes !== 1;
   if (!duplicate) mirror(env, body.rows);
+  await recordFlushedUsage(env, body.batch, body.rows);
   return { version: 1, recorded: duplicate ? 0 : rows.length, duplicate };
 }
 
