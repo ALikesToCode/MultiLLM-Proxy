@@ -105,6 +105,14 @@ store data name the D1 migration to apply before enabling them.
 - [PII redaction](docs/pii-rehydration.md): `PII_REDACTION_ENABLED` with `PII_REDACTION_POLICY_JSON` replaces detected emails, phone numbers and card numbers with request-local placeholders before dispatch and restores them in JSON and streamed responses.
 - [Prompt injection heuristics](docs/prompt-injection.md): `PROMPT_INJECTION_MODE=log` or `block` scores managed requests for injection and jailbreak patterns before dispatch.
 - [Reset-aware pool scheduling](docs/pool-reset-scheduling.md): `POOL_RESET_SCHEDULING_ENABLED` skips pooled accounts whose quota is freshly exhausted and prefers the earliest reset, using only data the gateway already receives.
+- [Latency SLO admission](docs/latency-slo.md): `LATENCY_SLO_MODE=reject` or `reroute` with `LATENCY_SLO_POLICY_JSON` predicts deadline risk from recent model measurements and can reject requests or reroute eligible automatic selections before dispatch.
+- [Hedged auto requests](docs/hedged-requests.md): `HEDGED_REQUESTS_ENABLED` with `HEDGED_REQUESTS_POLICY_JSON` races at most two candidates on auto routes explicitly marked idempotent-safe, and accounts for every attempt.
+- [Realtime WebSocket transport](docs/realtime.md): `REALTIME_ENABLED` with `REALTIME_PROVIDERS_JSON` bridges authenticated OpenAI-compatible Realtime sockets directly in the Worker, under a per-session cost cap (migration 0029).
+- [Stream cost breaker](docs/stream-cost-breaker.md): `STREAM_COST_BREAKER_ENABLED` lets a key carry `max_stream_cost_usd`, and stops a stream with the protocol's error when its observed or conservatively estimated cost would pass the cap (migration 0030).
+- [Learned provider cooldowns](docs/learned-cooldown.md): `LEARNED_COOLDOWN_MODE=shadow` or `apply` with `LEARNED_COOLDOWN_POLICY_JSON` narrows a bounded cooldown interval from natural throttle and recovery observations, without probes (migration 0031).
+- [Context-leak canary tokens](docs/context-canary.md): `CONTEXT_CANARY_MODE=log` or `block` with `CONTEXT_CANARY_POLICY_JSON` detects opted-in disclosure of a request-specific marker. It does not claim complete leak detection.
+- [Signed usage receipts](docs/usage-receipts.md): `USAGE_RECEIPTS_ENABLED` with a reviewed Ed25519 key writes a hash-chained receipt per settled usage event that its owner can fetch and verify, keeping unknown cost explicit (migration 0032).
+- [Enterprise integration contracts](docs/enterprise-contracts.md): typed identity, tenancy, quota and credit boundaries for later organisation, SSO and payment modules. `ENTERPRISE_PREVIEW_ENABLED` shows a read-only administrator preview; nothing else activates.
 
 ## Setup
 

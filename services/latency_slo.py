@@ -238,6 +238,11 @@ def selection_candidates(candidates, *, route, output_tokens, auto, lane_selecte
     context = getattr(g, "latency_slo_context", None) if has_request_context() else None
     if has_request_context() and context is None:
         return candidates
+    if context is not None and auto:
+        early = getattr(g, "latency_slo_decision", None)
+        if early is not None and early.action == "reroute":
+            approved = {item["model"] for item in early.candidates}
+            candidates = [item for item in candidates if item["model"] in approved]
     if context is not None and auto and not lane_selected:
         from services.managed_turn import current_turn
         turn = current_turn()
@@ -268,7 +273,8 @@ def order_auto_candidates(route, candidates):
     metadata = {item["model"]: item for item in getattr(g, "latency_slo_eligible", ())}
     decision = getattr(g, "latency_slo_decision", None)
     allowed = {item["model"] for item in decision.candidates} if decision is not None and decision.action == "reroute" else None
-    eligible = [metadata.get(model, {"model": model}) for model in candidates if allowed is None or model in allowed]
+    eligible = [metadata.get(model, {"model": model}) for model in candidates
+                if (not metadata or model in metadata) and (allowed is None or model in allowed)]
     _, _, output = g.latency_slo_context
     selected = selection_candidates(eligible, route=route, output_tokens=output, auto=True)
     return tuple(item["model"] for item in selected)

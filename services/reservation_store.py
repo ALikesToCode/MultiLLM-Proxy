@@ -138,11 +138,22 @@ def transition_fields(state, *, cost_usd=None, basis=None, input_tokens=None, ou
 
 def reconcile(store, identity, revision, cost_usd, *, admin, reason, evidence=None,
               authorized_adjustment=False, transition_id=None):
-    return store.transition(identity, revision, "reconciled", cost_usd=cost_usd,
+    result = store.transition(identity, revision, "reconciled", cost_usd=cost_usd,
                             admin=admin, reason=reason, evidence=evidence,
                             authorized_adjustment=authorized_adjustment,
                             basis="adjustment" if authorized_adjustment else "provider",
                             transition_id=transition_id or uuid.uuid4().hex, settlement_id=identity)
+    from services import usage_receipts
+    if result["applied"] and usage_receipts.enabled():
+        row = result["reservation"]
+        try:
+            usage_receipts.record_settled_usage(row["principal"], row["transition_id"], {
+                "reservation_id": row["id"], "settlement_id": row["settlement_id"],
+                "state": row["state"], "cost_usd": row["cost_usd"],
+                "cost_basis": row["basis"], "input_tokens": row["input_tokens"], "output_tokens": row["output_tokens"]})
+        except Exception:
+            logger.warning("Usage receipt unavailable")
+    return result
 
 
 class SqlReservationStore:

@@ -163,7 +163,7 @@ async function accountPrincipal(env, key, clientAddress) {
   if (key.length > MAX_KEY_LENGTH) return { denied: true };
   const prefix = `mllm_${key.slice(0, 8)}`;
   let users;
-  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, prefix); }
+  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, prefix, env); }
   catch (error) {
     logFailure("knowledge_edge_account_lookup_failed", error);
     return null;

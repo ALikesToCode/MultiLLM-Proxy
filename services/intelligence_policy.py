@@ -186,12 +186,13 @@ def validate_policy(raw):
     return policy
 
 
-def eligible(candidate, allow_paid, config):
+def eligible(candidate, allow_paid, config, *, model_status=None):
     provider = candidate["model"].split(":", 1)[0]
+    model_status = model_status or ModelRegistry.get_model_status
     return (
         all(candidate[key] for key in ("enabled", "entitled", "privacy_allowed"))
         and (candidate["billing"] != "payg" or allow_paid)
-        and ModelRegistry.get_model_status(candidate["model"]) != "disabled"
+        and model_status(candidate["model"]) != "disabled"
         and get_adapter(provider, config["API_BASE_URLS"]) is not None
     )
 
@@ -216,7 +217,8 @@ def expected_reply_ms(candidate, request, now=None):
     return first_ms + tokens * 1000 / max(rate, 1)
 
 
-def select_candidates(policy, request, config, *, session_tier=None):
+def select_candidates(policy, request, config, *, session_tier=None, model_status=None,
+                      apply_latency=True):
     candidates = []
     for priority, candidate in enumerate(policy["candidates"]):
         if request.explicit and candidate["model"] != request.payload["model"]:
@@ -224,7 +226,8 @@ def select_candidates(policy, request, config, *, session_tier=None):
         if candidate["model"].split(":", 1)[0] not in CHAT_PROVIDERS:
             continue
         if not eligible(
-            candidate, request.allow_paid, config
+            candidate, request.allow_paid, config,
+            **({"model_status": model_status} if model_status is not None else {})
         ) or not request.required <= set(candidate.get("capabilities", [])):
             continue
         if request.required & {"vision", "audio"} and not candidate.get(
@@ -255,6 +258,8 @@ def select_candidates(policy, request, config, *, session_tier=None):
     def apply_session_tier(choices):
         if session_tier is not None and not request.explicit:
             choices = session_tier.select(choices)
+        if not apply_latency:
+            return choices
         from services.latency_slo import selection_candidates
         return selection_candidates(choices, route="auto:intelligence",
                                     output_tokens=request.output_tokens, auto=not request.explicit,

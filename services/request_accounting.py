@@ -517,7 +517,7 @@ def _capture(context: UsageContext) -> None:
     if context.stream_cost is not None:
         owner = getattr(g, "gateway_cancellation", None)
         if owner is not None:
-            context.stream_cost.cancel = owner.cancel
+            context.stream_cost.cancel = lambda: owner.cancel() if not owner.lost else None
 
 
 class _SniffedStream:

@@ -304,7 +304,20 @@ def _error_body(error):
                       "message": "Managed response inspection stopped generation"}}, separators=(",", ":")).encode()
 
 
-def finalize_response(response, context, *, cancel=None, accounting=None):
+def _error_frame(error, protocol):
+    body = json.loads(_error_body(error))
+    if protocol in {"messages", "anthropic"}:
+        body = {"type": "error", **body}
+        event = b"event: error\n"
+    elif protocol == "responses":
+        body = {"type": "response.failed", "response": {"status": "failed", **body}}
+        event = b"event: response.failed\n"
+    else:
+        event = b""
+    return event + b"data: " + json.dumps(body, separators=(",", ":")).encode() + b"\n\n"
+
+
+def finalize_response(response, context, *, cancel=None, accounting=None, protocol="chat"):
     """Run before cache/accounting finalization; capture accounting for lazy streams."""
     if context is None:
         return response
@@ -386,7 +399,7 @@ def finalize_response(response, context, *, cancel=None, accounting=None):
             complete = True
         except ContextCanaryError as error:
             close(True)
-            yield b"data: " + _error_body(error) + b"\n\n"
+            yield _error_frame(error, protocol)
         finally:
             close(not complete)
 

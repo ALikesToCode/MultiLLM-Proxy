@@ -260,7 +260,8 @@ class _Attempt:
         for upstream in self.upstreams:
             self.capture_buffered_usage(upstream)
         # Cancellation is an uncertain outcome, not evidence of zero provider cost.
-        self.context.ambiguous = self.usage is None and (self.submissions > 0 or self.bridge.handed_off)
+        self.context.ambiguous = self.context.ambiguous or (
+            self.usage is None and (self.submissions > 0 or self.bridge.handed_off))
         if not self.bridge.handed_off and not self.submissions:
             BudgetService.settle(self.context.reservation, before_dispatch=True)
             self.context.finished = True
@@ -302,21 +303,21 @@ class _Attempt:
                 # candidate dispatchers without a managed turn own that boundary.
                 if local_turn is None:
                     self._dispatch_started()
-                self._observe(dispatch(body, self.model, decision))
+                from services.managed_turn import finalize_canary_response
+                self._observe(finalize_canary_response(local_turn, dispatch(body, self.model, decision)))
                 self.deadline.check()
                 self.useful = self.useful and not self.stopped.is_set()
             except BaseException as error:
                 self.error, self.useful = error, False
                 self.reason = "interrupted"
             finally:
-                try:
-                    RouteHealth.record(self.model, ok=self.useful, latency_ms=(time.monotonic() - started) * 1000,
-                                       outcome=self.reason)
-                finally:
-                    finished(self)
+                elapsed = (time.monotonic() - started) * 1000
+                finished(self)
             # Keep finalizers inside this attempt's request context, after selection.
             self.decision.wait()
             try:
+                if not self.stopped.is_set() and not self.owner.lost:
+                    RouteHealth.record(self.model, ok=self.useful, latency_ms=elapsed, outcome=self.reason)
                 for finalize in local_turn.finalizers if local_turn is not None else ():
                     finalize(self.accepted)
             finally:

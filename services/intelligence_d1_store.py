@@ -36,10 +36,14 @@ _ENDPOINTS = {
     "alerts": "http://intelligence.internal/v1/state/alerts",
     "reservations": "http://intelligence.internal/v1/reservations",
     "context-pages": "http://intelligence.internal/v1/managed-state/context-pages",
+    "learned-cooldown": "http://intelligence.internal/v1/state/learned-cooldown",
+    "usage-receipts": "http://intelligence.internal/v1/managed-state/usage-receipts",
 }
 _MAX_BYTES = 262144
-_ENDPOINT_MAX_BYTES = {"context-pages": 2 * 1024 * 1024}
+_ENDPOINT_MAX_BYTES = {"context-pages": 2 * 1024 * 1024, "learned-cooldown": 4096, "usage-receipts": 128 * 1024}
 _RESPONSE_MAX_BYTES = {_ENDPOINTS["context-pages"]: _ENDPOINT_MAX_BYTES["context-pages"],
+                       _ENDPOINTS["learned-cooldown"]: _ENDPOINT_MAX_BYTES["learned-cooldown"],
+                       _ENDPOINTS["usage-receipts"]: _ENDPOINT_MAX_BYTES["usage-receipts"],
                        _ENDPOINTS["cascades"]: 524288}
 _TIMEOUT = (2, 3)
 _DEADLINE_SECONDS = 5

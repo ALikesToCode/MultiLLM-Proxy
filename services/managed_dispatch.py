@@ -23,7 +23,7 @@ Outcome = Callable[[], UpstreamOutcome]
 def isolated_managed_attempt(turn):
     """Keep parallel attempt finalizers out of the parent managed turn."""
     from services.managed_turn import _turn
-    local = replace(turn, finalizers=[], pages=list(turn.pages), paged_candidates=dict(turn.paged_candidates)) if turn else None
+    local = replace(turn, finalizers=[], canary=None, canary_finalized=False, pages=list(turn.pages), paged_candidates=dict(turn.paged_candidates)) if turn else None
     token = _turn.set(local)
     try:
         yield local

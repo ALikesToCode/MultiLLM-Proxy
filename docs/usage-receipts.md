@@ -12,7 +12,9 @@ usage metadata only. They do not contain prompts, completions, or credentials.
 values are `true`, `1`, `yes`, and `on`; false values are `false`, `0`, `no`, and
 `off`, case-insensitively. An invalid value disables receipts with one warning
 that does not print the value. While off, usage rows, storage and responses keep
-their existing shape, and receipt routes return 404.
+their existing shape, and receipt routes return 404. Flask mounts both receipt
+routes with a disabled-feature gate before authentication; the JSON 404 uses
+`Cache-Control: no-store` and performs no receipt storage operation.
 
 For example, an enabled configuration names a key and a secret reference:
 

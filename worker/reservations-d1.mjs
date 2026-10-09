@@ -1,3 +1,4 @@
+import { recordSettledUsage } from "./usage-receipts.mjs";
 import { retentionRequestId } from "./retention-policy.mjs";
 /** Private, atomic monetary holds and injected request lifecycle. */
 const SCALE = 10_000_000_000;
@@ -244,6 +245,12 @@ export async function handleReservationsRequest(request, env, { now = Date.now }
         .bind(body.id).all();
       result = { transitions: rows.results };
     } else result = { reservation: publicRow(await db.prepare("SELECT * FROM usage_reservations WHERE id=?").bind(body.id).first()) };
+    if (body.operation === "transition" && body.state === "reconciled" && result.applied) {
+      const row = result.reservation;
+      await recordSettledUsage(env, row.principal, body.transition_id, { reservation_id: row.id,
+        settlement_id: row.settlement_id, state: row.state, cost_usd: row.cost_usd, cost_basis: row.basis,
+        input_tokens: row.input_tokens, output_tokens: row.output_tokens });
+    }
     return reply(result);
   } catch (error) {
     const failure = error instanceof ReservationError ? error : new ReservationError();

@@ -103,7 +103,7 @@ async function authenticate(request, env, model, now) {
     if (!row || !await checkHash(key, row.keyHash)) throw new RealtimeError("invalid_api_key", 401);
     principal = integration(row);
   } else if (authStorageBackend(env) === "d1") {
-    const rows = await activeUsersByPrefix(env.INTELLIGENCE_DB, `mllm_${key.slice(0, 8)}`);
+    const rows = await activeUsersByPrefix(env.INTELLIGENCE_DB, `mllm_${key.slice(0, 8)}`, env);
     if (rows.length > 8) throw new RealtimeError("realtime_auth_busy");
     for (const row of rows) { if (!validUser(row)) throw new RealtimeError("realtime_auth_unavailable");
       if (await checkHash(key, row.api_key_hash)) { principal = account(row); break; } }

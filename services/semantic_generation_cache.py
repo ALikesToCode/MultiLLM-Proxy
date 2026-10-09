@@ -324,6 +324,8 @@ def reuse_bypass(payload):
     from services.context_pages import paging_cache_bypass
     if paging_cache_bypass(payload) or getattr(g, "prompt_injection_action", None) == "logged":
         return True
+    if getattr(g, "context_canary_scope", None) is not None:
+        return True
     if getattr(g, "multillm_canary", None) is not None:
         return True
     from services.canary_traffic import enabled

@@ -465,6 +465,26 @@ class AutoRouteService:
         return routes[0] if routes else None
 
     @classmethod
+    def read_candidates(cls, route_id: object) -> tuple[str, ...]:
+        """Admission reads never seed routes or migrate an operator's stored order."""
+        normalized = cls.normalize_route_id(route_id)
+        if auto_route_d1.using_d1():
+            route = next((item for item in cls._durable_routes() if item.id == normalized), None)
+            return route.candidates if route is not None else ()
+        path = storage_path("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3")
+        if not path.is_file():
+            return DEFAULT_AUTO_ROUTES.get(normalized, ())
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                "SELECT model_id FROM auto_route_candidates WHERE route_id = ? ORDER BY priority",
+                (normalized,),
+            ).fetchall()
+        candidates = tuple(row[0] for row in rows)
+        if candidates in LEGACY_DEFAULT_AUTO_ROUTES.get(normalized, ()):
+            return DEFAULT_AUTO_ROUTES[normalized]
+        return candidates or DEFAULT_AUTO_ROUTES.get(normalized, ())
+
+    @classmethod
     def save_route(
         cls,
         route_id: object,

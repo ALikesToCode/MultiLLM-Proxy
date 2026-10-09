@@ -89,9 +89,8 @@ provider usage or fabricated successful completion.
 Flask registers `latency_slo_request_hook` immediately after the generation
 deadline hook and before the idempotency claim. Managed chat, messages, Responses
 and intelligence requests are covered; provider passthrough is unchanged.
-`latency_slo_candidate_policy` is an explicit read-only collaborator returning an
-ordered list after eligibility and approved lane selection. An unresolved auto
-selection has unknown coverage at this early boundary. Intelligence selection
+Flask registers `latency_slo_candidate_policy` as an explicit read-only collaborator returning an
+ordered list from reviewed eligibility without claiming a session-lane lease or seeding storage. Unknown reviewed policy, session-lane preparation, precision lookup, health probes and traffic cohorts have unknown coverage at this early boundary. Later selection preserves candidates removed by an early reroute. Intelligence selection
 and automatic route-health ordering enforce the policy again on their actual
 candidate lists before dispatch. Existing provider validation still applies.
 

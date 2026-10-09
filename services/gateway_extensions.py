@@ -8,7 +8,8 @@ from services.provider_catalog_refresh import refresh_provider_catalog_revision
 
 AUTHENTICATED_HOOK_ORDER = (
     "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
-    "responses_state_hook", "generation_deadline_hook", "latency_slo_request_hook", "idempotency_request_hook", "admit",
+    "responses_state_hook", "context_canary_request_hook", "generation_deadline_hook",
+    "latency_slo_request_hook", "idempotency_request_hook", "admit",
 )
 
 
@@ -35,6 +36,7 @@ def after_authentication():
     for hook in current_app.extensions.get("gateway_after_authentication", ()):
         refused = hook()
         if refused is not None:
+            g.pop("context_canary_scope", None)
             return refused
     return None
 
@@ -91,9 +93,11 @@ def gateway_callbacks(*, csrf=None):
     from functools import partial
     from middleware.admission import register_admission
     from middleware.rate_limit_headers import register_rate_limit_headers
+    from services.context_canary_hook import register_context_canary
     from services.pii_redaction import register_pii_redaction
     return (register_retention, register_injection_decision, register_batch_spillover, register_pii_redaction,
-            partial(register_hosted_responses, csrf=csrf), register_deadline, register_latency_slo, register_managed_idempotency,
+            partial(register_hosted_responses, csrf=csrf), register_context_canary,
+            register_deadline, register_latency_slo, register_managed_idempotency,
             register_admission, register_cooldown_errors, register_rate_limit_headers)
 
 
@@ -133,6 +137,8 @@ def latency_slo_candidate_policy(payload):
 
 def register_latency_slo(app):
     from services.latency_slo import register_latency_slo as register
+    from services.latency_slo_candidates import register_latency_slo_candidates
+    register_latency_slo_candidates(app)
     register(app, is_managed=managed_generation_request, candidates=latency_slo_candidate_policy)
 
 

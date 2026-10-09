@@ -1,11 +1,24 @@
 """Authenticated reads of immutable usage receipts and reviewed public keys."""
-from flask import g, jsonify
+from flask import g, jsonify, request
 
 from route_helpers import api_authenticate_only
 from services import usage_receipts
 
 
 def register_usage_receipt_routes(app, csrf, *, store=None):
+    if app.extensions.get("usage_receipt_routes_registered"):
+        return
+
+    def disabled_usage_receipts():
+        if (request.path == "/v1/usage/receipt-keys" or request.path.startswith("/v1/usage/receipts/")):
+            if not usage_receipts.enabled():
+                return jsonify({"error": {"code": "not_found",
+                    "message": "Usage receipt operation unavailable."}}), 404, {"Cache-Control": "no-store"}
+        return None
+
+    app.before_request_funcs.setdefault(None, []).insert(0, disabled_usage_receipts)
+    app.extensions["usage_receipt_routes_registered"] = True
+
     def authority():
         if not usage_receipts.enabled():
             raise usage_receipts.ReceiptError("not_found", 404)

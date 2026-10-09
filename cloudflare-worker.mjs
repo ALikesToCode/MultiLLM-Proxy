@@ -1500,7 +1500,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1636,7 +1636,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1695,7 +1695,7 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 

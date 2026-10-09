@@ -35,6 +35,7 @@ from routes.status_page import register_status_routes
 from routes.unified import register_unified_routes
 from routes.media import register_media_routes
 from routes.usage import register_usage_routes
+from routes.usage_receipts import register_usage_receipt_routes
 from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
@@ -151,6 +152,7 @@ def create_app() -> Flask:
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
     register_usage_routes(app, csrf)
+    register_usage_receipt_routes(app, csrf)
     register_gateway_extensions(app, callbacks=gateway_callbacks(csrf=csrf))
     register_gateway_batch_routes(app)
     from functools import partial

@@ -78,6 +78,8 @@ available. Admission acquisition is attempted once; there is no queue or retry.
 A denied lease, exhausted deadline window or completed first response suppresses
 the duplicate and releases its unused hold.
 
+Latency admission restricts candidates before the race. Each opted-in attempt has its own canary annotation and scanner; inspection precedes winner validation and settlement. Cancelled losers do not update successful latency observations or learned cooldowns.
+
 The winner must have HTTP 200, a valid complete JSON envelope, useful content in
 every choice, and no tool or function calls. Validation buffers at most 1 MiB.
 Empty, truncated or incomplete responses cannot win; a successful HTTP status

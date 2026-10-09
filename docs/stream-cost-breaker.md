@@ -65,6 +65,8 @@ the trailer is checked. Frames and the terminal trailer are each limited to
 64 KiB, plus the current upstream read. A malformed, incomplete or oversized
 frame fails closed with the protocol's error envelope.
 
+Managed canary inspection runs before cost inspection. If either stops the stream, the client receives one protocol error, upstream cancellation runs once, and unknown spend retains its ambiguous hold.
+
 A crossing stops upstream consumption and closes its owner once:
 
 - Chat emits `data: {"error":{"code":"stream_cost_cap_exceeded", ...}}`.
