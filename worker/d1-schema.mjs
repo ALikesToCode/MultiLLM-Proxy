@@ -10,7 +10,7 @@ export const REQUIRED_D1_TABLES = Object.freeze(["intelligence_policy", "intelli
   "usage_events", "usage_daily", "usage_batches",
   "media_jobs", "media_job_items", "shadow_eval_samples", "shadow_eval_results",
   "shadow_eval_config", "shadow_eval_policy_backups", "prompt_templates",
-  "config_snapshot_revisions", "config_snapshots", "config_snapshot_applications", "control_revisions", "tool_grants", "generation_cache", "usage_reservation_budgets", "usage_reservations", "usage_reservation_transitions", "session_tiers", "gateway_alert_rules", "gateway_alert_events", "managed_idempotency", "context_pages", "canary_traffic", "semantic_generation_cache", "gateway_batch_files", "gateway_batches", "gateway_batch_items", "hosted_responses"]);
+  "config_snapshot_revisions", "config_snapshots", "config_snapshot_applications", "control_revisions", "tool_grants", "generation_cache", "usage_reservation_budgets", "usage_reservations", "usage_reservation_transitions", "session_tiers", "gateway_alert_rules", "gateway_alert_events", "managed_idempotency", "context_pages", "canary_traffic", "semantic_generation_cache", "gateway_batch_files", "gateway_batches", "gateway_batch_items", "hosted_responses", "learned_cooldown"]);
 
 /**
  * Readiness for the D1 schema. A deploy that skipped `wrangler d1 migrations apply` reports
