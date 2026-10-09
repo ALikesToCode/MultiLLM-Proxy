@@ -19,6 +19,7 @@ from route_helpers import (
     login_required,
 )
 from routes.config_snapshots import register_config_snapshot_routes
+from routes.enterprise_preview import register_enterprise_preview_routes
 from routes.core import register_core_routes
 from routes.dashboard_security import register_dashboard_security_routes
 from routes.intelligence_media import register_intelligence_media_routes
@@ -144,6 +145,7 @@ def create_app() -> Flask:
     register_dashboard_security_routes(app)
     register_workbench_routes(app)
     register_config_snapshot_routes(app)
+    register_enterprise_preview_routes(app)
     register_shadow_eval_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_knowledge_routes(app, csrf)
     register_gateway_mcp_routes(app, csrf)
