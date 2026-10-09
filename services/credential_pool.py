@@ -20,6 +20,7 @@ from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from services.auth_primitives import usable_credential
 from services.model_cooldown import ModelCooldownExhausted, model_cooldown, settings
 from services import pool_reset_schedule as reset_schedule
+from services import learned_cooldown as learned
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
 REFUSED_REST_SECONDS = 300
@@ -234,11 +235,17 @@ class CredentialPool:
                     )
             return
         current = time.monotonic() if now is None else now
+        delay = learned.adjust_cooldown(
+            provider, key, outcome or classify_upstream_outcome(status),
+            model=model, quota_bucket=quota_bucket, now=now,
+            current_seconds=RATE_LIMITED_REST_SECONDS,
+            retry_after_seconds=retry_after_seconds,
+        )
         with cls._lock:
             if status in REFUSED_STATUSES:
                 cls._resting[(provider, key)] = current + REFUSED_REST_SECONDS
             elif status in RATE_LIMITED_STATUSES:
-                cls._resting[(provider, key)] = current + RATE_LIMITED_REST_SECONDS
+                cls._resting[(provider, key)] = current + delay
             elif 200 <= status < 300:
                 cls._resting.pop((provider, key), None)
 
