@@ -6,6 +6,7 @@
  */
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { submitNativeEvent } from "./observability-export.mjs";
 import { BUCKET_FIELDS, bucketInsertStatement, recordUsageWithBuckets, usageBucketsEnabled, validBaseUsageRow as validRow } from "./usage-buckets-d1.mjs";
 
 // Upper bounds in milliseconds of the usage_daily latency buckets; the last bucket is open.
@@ -192,7 +193,7 @@ export async function handleUsageLedgerRequest(request, env) {
 }
 
 /** Serialize native telemetry into the existing strict ledger; richer fields need a migration. */
-export async function recordNativeUsage(env, event) {
+export async function recordNativeUsage(env, event, ctx) {
   const model = event.model ? `${event.provider}:${event.model}` : null;
   const kind = event.endpoint.endsWith("/responses") ? "responses" : event.endpoint.endsWith("/embeddings") ? "embeddings"
     : event.endpoint.endsWith("/images/generations") ? "images" : "chat";
@@ -202,6 +203,7 @@ export async function recordNativeUsage(env, event) {
     output_tokens: event.output_tokens, cost_usd: event.cost_usd, cost_basis: event.cost_basis,
     request_id: event.requestId };
   if (!validRow(row)) throw new Error("Invalid native usage metadata");
+  submitNativeEvent(env, event, ctx);
   if (!env.INTELLIGENCE_DB) { console.error(JSON.stringify({ event: "native_usage_storage_unavailable" })); return; }
   try {
     return await record(env.INTELLIGENCE_DB, env, { version: 1, operation: "record",
