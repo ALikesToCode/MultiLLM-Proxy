@@ -9,6 +9,7 @@ import { nativeRevisionConsumer, tickNativeRevisionSync } from "./native-config-
 import { generationDeadlineHook, createGenerationDeadline, forwardedDeadlineHeaders, GenerationDeadlineExceeded, InvalidGenerationDeadline } from "./generation-deadline.mjs";
 import { nativeReservationLifecycle, reservationSettings, ReservationError } from "./reservations-d1.mjs";
 export { runScheduledMaintenance, scheduledMaintenanceEnabled } from "./scheduled-maintenance.mjs";
+export { handleResponsesStateRequest, responsesStateEnabled } from "./responses-state-d1.mjs";
 import { UpstreamCancellation } from "./upstream-cancellation.mjs";
 
 let warned = false;

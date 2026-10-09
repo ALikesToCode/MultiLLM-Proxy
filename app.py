@@ -147,7 +147,7 @@ def create_app() -> Flask:
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
     register_usage_routes(app, csrf)
-    register_gateway_extensions(app, callbacks=gateway_callbacks())
+    register_gateway_extensions(app, callbacks=gateway_callbacks(csrf=csrf))
     # Restore the dashboard's recent requests from the durable ledger in the background.
     usage_ledger.start(MetricsService.get_instance())
 
