@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
 import { handleReservationsRequest, createReservationLifecycle } from "../worker/reservations-d1.mjs";
 
 const MIGRATION = "0020_usage_reservations.sql";
+const PYTHON = process.env.PYTHON || (existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3");
 const NOW = Date.UTC(2026, 9, 9);
 const id = n => n.toString(16).padStart(32, "0");
 // A local SQLite-backed D1 contract fake exercises the actual SQL without workerd.
@@ -199,7 +200,7 @@ with tempfile.TemporaryDirectory() as directory:
  store.transition(identity,0,'dispatched',transition_id='${id(2)}',now=now)
  store.transition(identity,1,'unknown',transition_id='${id(3)}',input_tokens=0,now=now)
  print(json.dumps([store.get(identity),store.summary('alice',now)]))`;
-  const python = spawnSync("/home/mysterious/storage/github/MultiLLM-Proxy/.venv/bin/python", ["-I", "-c", code], {
+  const python = spawnSync(PYTHON, ["-I", "-c", code], {
     cwd: new URL("..", import.meta.url), encoding: "utf8", timeout: 10000,
   });
   assert.equal(python.status, 0, python.stderr);
