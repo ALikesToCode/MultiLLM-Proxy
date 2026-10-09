@@ -92,7 +92,7 @@ from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.prompt_cache_affinity import affinity_auto_request, affinity_candidate
 from services.managed_turn import managed_pipeline, emit_managed_request, with_managed_idempotency, check_managed_candidate
 from services.managed_dispatch import execute_managed_attempt, observe_managed_response
-
+from services.responses_state import with_responses_state
 logger = logging.getLogger(__name__)
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
@@ -823,6 +823,7 @@ def _dispatch_translated_protocol(
         dispatch_chat=dispatch_unified_chat_completion,
     )
 
+@with_responses_state
 @managed_pipeline
 def dispatch_protocol_request(
     app,

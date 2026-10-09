@@ -40,10 +40,17 @@ def register_cooldown_errors(app):
         app.register_error_handler(error, cooldown_failure)
 
 
-def gateway_callbacks():
+def register_hosted_responses(app, *, csrf=None):
+    from flask_wtf.csrf import CSRFProtect
+    from routes.responses_state import register_responses_state
+    register_responses_state(app, csrf or app.extensions.get("csrf") or CSRFProtect())
+
+
+def gateway_callbacks(*, csrf=None):
+    from functools import partial
     from middleware.admission import register_admission
     from middleware.rate_limit_headers import register_rate_limit_headers
-    return (register_retention, register_deadline, register_managed_idempotency,
+    return (register_retention, partial(register_hosted_responses, csrf=csrf), register_deadline, register_managed_idempotency,
             register_admission, register_cooldown_errors, register_rate_limit_headers)
 
 
@@ -84,6 +91,9 @@ def register_managed_idempotency(app):
     from middleware.idempotency import register_idempotency
     from services.idempotency_store import IdempotencyStore
     register_idempotency(app, store=IdempotencyStore(), policy_revision=managed_policy_revision)
+    from routes.responses_state import defer_hosted_idempotency
+    finalizers = app.after_request_funcs[None]
+    finalizers[-1] = defer_hosted_idempotency(finalizers[-1])
 
 
 def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, security_refreshers=None):

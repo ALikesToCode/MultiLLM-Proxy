@@ -714,7 +714,7 @@ def response_object(
     request = request if isinstance(request, Mapping) else {}
     reasoning = as_mapping(request.get("reasoning"))
     text = as_mapping(request.get("text"))
-    return {
+    response = {
         "id": response_id,
         "object": "response",
         "created_at": created_at,
@@ -738,6 +738,8 @@ def response_object(
         "usage": usage,
         "metadata": request.get("metadata") or {},
     }
+    from services.responses_state import rewrite_translated_response
+    return rewrite_translated_response(response)
 
 
 # ---------------------------------------------------------------------------

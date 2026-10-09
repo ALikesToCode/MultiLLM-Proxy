@@ -29,7 +29,7 @@ CORS_DEFAULT_HEADERS = (
     "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, X-MultiLLM-Retention, X-MultiLLM-Deadline-Ms, "
     "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
     "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
-    "Idempotency-Key, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
+    "Idempotency-Key, X-MultiLLM-Priority, Prefer, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
     "OpenAI-Project, Moderation, Moderation-Model, Redaction, X-App-Name, "
     "X-Billing-Mode, X-BYOK-Provider, X-Client-Request-ID, X-Encryption-Key, "
     "X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, "
@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Idempotency, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
+    "Retry-After, Location, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Idempotency, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
@@ -50,7 +50,7 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "
     "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, "
-    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
+    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Canary-Cohort, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
     "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
