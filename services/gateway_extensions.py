@@ -43,11 +43,53 @@ def register_cooldown_errors(app):
 def gateway_callbacks():
     from middleware.admission import register_admission
     from middleware.rate_limit_headers import register_rate_limit_headers
-    return (register_retention, register_admission, register_cooldown_errors, register_rate_limit_headers)
+    return (register_retention, register_deadline, register_managed_idempotency,
+            register_admission, register_cooldown_errors, register_rate_limit_headers)
+
+
+def verified_internal_transport():
+    # API credentials and proxy-origin headers do not authenticate the internal hop.
+    # No Flask-side transport verifier exists yet; keep internal budgets untrusted.
+    return False
+
+
+def generation_limits_ms():
+    """Resolve existing intelligence route limits only for an opted-in deadline."""
+    from services.generation_deadline import PUBLIC_HEADER
+    if request.headers.get(PUBLIC_HEADER) is None:
+        return ()
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
+    if (request.path.startswith("/intelligence/") or body.get("model") == "auto:intelligence"
+            or "routing" in body):
+        from services.intelligence_store import IntelligenceStore
+        policy = IntelligenceStore.policy()
+        routing = body.get("routing")
+        proposed = routing.get("deadline_ms") if isinstance(routing, dict) else None
+        return (policy["deadline_ms"], proposed)
+    return ()
+
+
+def register_deadline(app):
+    from services.generation_deadline import register_generation_deadline
+    register_generation_deadline(app, verify_internal=verified_internal_transport, limits_ms=generation_limits_ms)
+
+
+def managed_policy_revision(payload):
+    from services.managed_turn import idempotency_policy_revision
+    return idempotency_policy_revision(payload)
+
+
+def register_managed_idempotency(app):
+    from middleware.idempotency import register_idempotency
+    from services.idempotency_store import IdempotencyStore
+    register_idempotency(app, store=IdempotencyStore(), policy_revision=managed_policy_revision)
 
 
 def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, security_refreshers=None):
     """Mount revision sync and explicitly supplied middleware without peer imports."""
+    if app.extensions.get("gateway_extensions_registered"):
+        return
     settings = revision_sync.settings if revision_sync is not None else supported_settings(load_settings())
     if settings.enabled:
         sync = revision_sync or configure_sync(settings, security_refreshers=security_refreshers,
@@ -85,3 +127,4 @@ def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, securi
     from services.gateway_alerts import observe
     register_alert_routes(app)
     app.extensions["gateway_alert_observer"] = observe
+    app.extensions["gateway_extensions_registered"] = True

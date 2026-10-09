@@ -96,8 +96,10 @@ def idempotency_request_hook():
             policy = load_policy()
             if len(request.get_data(cache=True)) > policy["max_request_bytes"]:
                 raise GatewayError("request_too_large", "The intelligence request exceeds the size limit.", 413)
+            from services.managed_turn import contract_payload
             try:
-                ChatRequest.parse(payload, policy)
+                # The managed pipeline removes enabled gateway options before its own parse.
+                ChatRequest.parse(contract_payload(payload), policy)
             except (ValueError, TypeError, AttributeError, OverflowError):
                 raise GatewayError("invalid_routing_request", "The request does not satisfy the version-one chat and routing contract.") from None
             g.managed_idempotency_policy = policy

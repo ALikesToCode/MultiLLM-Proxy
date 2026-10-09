@@ -20,6 +20,8 @@ Outcome = Callable[[], UpstreamOutcome]
 def execute_managed_attempt(send, model, credential):
     """Capture the actual dispatch credential; headers alone never bind affinity."""
     from services.prompt_cache_affinity import current_scope
+    from services.managed_turn import before_provider_submission
+    before_provider_submission()
     scope = current_scope()
     if scope is None:
         return send()
@@ -165,6 +167,9 @@ class ManagedOutcomeIterator:
 
 def observe_managed_response(downstream, upstream, *, stream=False):
     """Deliver classified final outcomes through the managed-dispatch callback."""
+    from services.managed_turn import defer_affinity_response
+    if defer_affinity_response(downstream, upstream, stream=stream):
+        return downstream
     callback = getattr(upstream, "multillm_affinity_observer", None)
     if callback is None:
         return downstream

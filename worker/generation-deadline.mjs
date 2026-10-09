@@ -121,7 +121,7 @@ export function forwardedDeadlineHeaders(original, deadline) {
     deadline.check();
     const budget = deadline.remainingMs();
     if (budget < 1) throw new GenerationDeadlineExceeded();
-    headers.delete(DEADLINE_HEADER);
+    // Keep the caller's budget: the receiver applies the smaller of it and a verified internal budget.
     headers.set(INTERNAL_DEADLINE_HEADER, String(budget));
   }
   return headers;
@@ -244,6 +244,6 @@ export function generationDeadlineHook(request, env, options = {}) {
     before_dispatch() { deadline?.check(); },
     observe() { deadline?.check(); },
     finalize() { deadline?.stop(); },
-    fetch: fetcher => withGenerationDeadline(request, env, fetcher, { ...options, deadline, owner }),
+    fetch: (fetcher, outbound = request) => withGenerationDeadline(outbound, env, fetcher, { ...options, deadline, owner }),
   });
 }
