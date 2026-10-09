@@ -84,6 +84,16 @@ store data name the D1 migration to apply before enabling them.
 - [Disconnect-aware cancellation](docs/request-cancellation.md): a client disconnect closes the upstream request once and records the usage as unknown, not zero.
 - [Rate-limit headers](docs/rate-limit-headers.md): `RATE_LIMIT_HEADERS_ENABLED` adds `X-MultiLLM-RateLimit-*` headers for the gateway's own request counters.
 - [MCP contract digests](docs/mcp-contract-drift.md): `MCP_CONTRACT_DIGESTS_ENABLED` adds schema digests to `/mcp` discovery and rejects a call whose pinned digest no longer matches.
+- [Prompt cache affinity](docs/prompt-cache-affinity.md): `PROMPT_CACHE_AFFINITY_ENABLED` sends a managed automatic route back to the credential that last completed the same reusable prompt prefix, so provider prompt caches are reused, without overriding eligibility.
+- [Generation deadlines](docs/generation-deadline.md): `X-MultiLLM-Deadline-Ms` gives one generation a single time budget across setup, admission, retries, preflight and streaming, capped by `GENERATION_DEADLINE_MAX_MS`.
+- [Shared generation cache](docs/shared-generation-cache.md): `GENERATION_CACHE_SHARED_ENABLED` with `GENERATION_CACHE_BACKEND=d1-r2` shares exact, deterministic, complete responses between Containers and the Worker, isolated by account and policy (migration 0019).
+- [Gateway alerts](docs/gateway-alerts.md): `GATEWAY_ALERTS_ENABLED` sends content-free webhook alerts for spend, unpriced usage, open circuits, exhausted pools and provider failures (migration 0022).
+- [Managed request idempotency](docs/managed-idempotency.md): `MANAGED_IDEMPOTENCY_ENABLED` accepts `Idempotency-Key` on managed non-streaming chat and replays a completed response instead of generating again (migration 0023).
+- [Usage reservations](docs/usage-reservations.md): `USAGE_RESERVATIONS_ENABLED` keeps a budget hold when a provider call's outcome or usage is uncertain, until it is settled or reconciled (migration 0020).
+- [Output schema validation](docs/output-schema-validation.md): `OUTPUT_SCHEMA_VALIDATION_ENABLED` lets a managed request ask the gateway to check the response against a JSON schema and return 502 when it does not match.
+- [Deferred tool discovery](docs/deferred-tools.md): `DEFERRED_TOOLS_ENABLED` adds `multillm.tools.discover` to the MCP endpoints, with per-principal tool grants (migration 0018).
+- [Protocol extras](docs/protocol-extras.md): `PROTOCOL_EXTRAS_ENABLED` keeps reviewed protocol-specific fields, such as Messages `top_k`, through translation; they reach a provider only if it admits the field.
+- [Sticky session tiers](docs/session-tiers.md): `SESSION_TIER_MODE=sticky` keeps a session's approved model tier stable through tool calls in the main, delegation and aux lanes (migration 0021).
 
 ## Setup
 
