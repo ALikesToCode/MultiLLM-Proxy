@@ -303,3 +303,14 @@ test("HTTP call preflight permits an unadvertised grant and returns real permiss
   const denied = await handleDeferredMcp(body, env, principal, entries, { service: f.service, validate: () => true });
   assert.equal(denied.status, 403); assert.equal((await denied.json()).error.code, "tool_not_granted");
 });
+
+test("loading the module makes no random values, which Workers forbid in global scope", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis.crypto, "randomUUID");
+  globalThis.crypto.randomUUID = () => { throw new Error("randomUUID called while loading the module"); };
+  try {
+    await import(`../worker/knowledge/deferred-tools.mjs?global-scope=${Date.now()}`);
+  } finally {
+    if (original) Object.defineProperty(globalThis.crypto, "randomUUID", original);
+    else delete globalThis.crypto.randomUUID;
+  }
+});

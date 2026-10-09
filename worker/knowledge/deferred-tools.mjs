@@ -8,7 +8,9 @@ export const MAX_DISCOVERY_BYTES = 64 * 1024;
 export const CURSOR_TTL_SECONDS = 120;
 const MAX_GRANTS = 4096;
 const RPC_ENVELOPE_RESERVE = 4096;
-const processRevision = crypto.randomUUID();
+// Workers forbid random values in global scope, so the per-isolate revision is made on first use.
+let processRevision;
+const currentProcessRevision = () => processRevision ??= crypto.randomUUID();
 const encoder = new TextEncoder();
 const services = new WeakMap();
 let warned = false;
@@ -86,7 +88,7 @@ export async function readGrantSnapshot(env, principalId) {
     const grants = results[0].results.map(row => ({ principal_id: row.principal_id, tool_name: row.tool_name,
       scopes: JSON.parse(row.scopes_json), allowed: row.allowed, revision: row.revision }));
     validatedGrants(grants, principalId);
-    const revision = revisionEnabled ? results[1].results[0]?.revision : processRevision;
+    const revision = revisionEnabled ? results[1].results[0]?.revision : currentProcessRevision();
     if (revisionEnabled && (!Number.isSafeInteger(revision) || revision < 0)) throw unavailable();
     return { grants, revision };
   } catch { throw unavailable(); }
@@ -102,7 +104,7 @@ export class DeferredTools {
     try {
       const value = await this.readGrants(principal.id);
       const grants = validatedGrants(Array.isArray(value) ? value : value.grants, principal.id);
-      const revision = this.revision ? await this.revision() : value.revision ?? processRevision;
+      const revision = this.revision ? await this.revision() : value.revision ?? currentProcessRevision();
       if (!(typeof revision === "string" && revision || Number.isSafeInteger(revision) && revision >= 0)) throw unavailable();
       const rows = [...grants.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, row]) => row);
       return { grants, revision, stamp: await hash(rows) };
