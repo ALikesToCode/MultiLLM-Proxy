@@ -18,7 +18,7 @@ from flask import current_app, has_app_context
 from werkzeug.security import check_password_hash
 
 from error_handlers import APIError
-from services import user_store
+from services import user_store, stream_cost_breaker
 from services.auth_primitives import build_api_key_prefix, normalized_username
 
 CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate")
@@ -118,7 +118,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize an administrator's controls; unknown fields are refused."""
     if not isinstance(payload, Mapping):
         raise APIError("Key controls must be a JSON object", 400)
-    unknown = set(payload) - set(CONTROL_FIELDS)
+    unknown = set(payload) - set(CONTROL_FIELDS) - ({"max_stream_cost_usd"} if stream_cost_breaker.enabled() else set())
     if unknown:
         raise APIError(f"Unknown key control: {sorted(unknown)[0][:64]}", 400)
     mode = payload.get("secret_scan_mode")
@@ -147,6 +147,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         "expires_at": expires_at.isoformat() if expires_at else None,
         "secret_scan_mode": mode,
         "shadow_eval_rate": rate,
+        **stream_cost_breaker.validated_control(payload),
     }
 
 
@@ -163,6 +164,7 @@ def from_storage(row: Mapping[str, Any]) -> dict[str, Any]:
     rate = row.get("shadow_eval_rate") if hasattr(row, "get") else row_value(row, "shadow_eval_rate")
     if type(rate) in (int, float) and 0 <= rate <= 0.2:
         controls["shadow_eval_rate"] = float(rate)
+    controls.update(stream_cost_breaker.storage_control(row))
     return controls
 
 
@@ -184,6 +186,7 @@ def public(controls: Mapping[str, Any]) -> dict[str, Any]:
         "expires_at": controls.get("expires_at"),
         "secret_scan_mode": controls.get("secret_scan_mode"),
         "shadow_eval_rate": controls.get("shadow_eval_rate"),
+        **stream_cost_breaker.public_control(controls),
     }
 
 
@@ -283,9 +286,9 @@ _security_copies: dict[Any, dict[str, dict[str, Any]]] = {}
 
 def _security_user(auth, row):
     """Reject malformed authority records before permissive legacy decoding."""
-    if not isinstance(row, dict) or set(row) != set(user_store.USER_FIELDS):
+    if not isinstance(row, dict) or set(row) != set(user_store.USER_FIELDS) | ({stream_cost_breaker.CAP_FIELD} if stream_cost_breaker.enabled() else set()):
         raise ValueError("Incomplete security account")
-    user_store._row(row)
+    stream_cost_breaker.d1_row(row)
     if normalized_username(row["username"]) != row["username"]:
         raise ValueError("Invalid security account identity")
     if not row["api_key_hash"] or not row["api_key_prefix"] or not re.fullmatch(r"[A-Za-z0-9:_.,-]{0,512}", row["scopes"]):
