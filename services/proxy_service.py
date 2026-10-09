@@ -15,7 +15,10 @@ from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
-from services.managed_dispatch import retry_managed_attempt
+from services.generation_deadline import (
+    GenerationDeadlineExceeded, bounded_timeout, check_deadline, own_upstream,
+    retry_with_deadline as retry_managed_attempt,
+)
 from services.retry_advice import retry_advice_settings
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
@@ -1219,7 +1222,7 @@ class ProxyService:
                     pass
 
             from services.admission_request import bounded_generation_timeout
-            timeout = bounded_generation_timeout(timeout)
+            timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
             response = session.request(
                 method=method,
@@ -1230,11 +1233,13 @@ class ProxyService:
                 timeout=timeout,
                 allow_redirects=False,
                 verify=True,
-                stream=is_streaming
+                stream=is_streaming or check_deadline() is not None
             )
+            own_upstream(response)
 
             if not is_streaming:
                 _ = response.content
+                check_deadline()
                 logger.info(
                     "Upstream response status=%s content_length=%s",
                     response.status_code,
@@ -1262,6 +1267,7 @@ class ProxyService:
         """
         Make a base request with retries and error handling
         """
+        check_deadline()
         data = protect_body(data, headers, provider=api_provider)
         for key in list(headers):
             if key.lower() == "content-length" and data is not None:
@@ -1304,7 +1310,7 @@ class ProxyService:
             )
 
             from services.admission_request import bounded_generation_timeout
-            timeout = bounded_generation_timeout(timeout)
+            timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
             response = session.request(
                 method=method,
@@ -1316,6 +1322,7 @@ class ProxyService:
                 timeout=timeout,
                 allow_redirects=False,
             )
+            own_upstream(response)
 
             # Native/raw providers expose protocol-specific streams and binary
             # bodies. Reading, normalizing, retrying, or substituting a local
@@ -1359,6 +1366,7 @@ class ProxyService:
                 try:
                     # Let requests handle decompression automatically
                     content = response.content
+                    check_deadline()
                     content_type = response.headers.get('content-type', '').lower()
                     if not content or "json" not in content_type:
                         cls._record_circuit_result(api_provider, response.status_code)
@@ -1421,6 +1429,8 @@ class ProxyService:
                     response._content = json.dumps(normalized_payload).encode('utf-8')
                     response.headers['Content-Type'] = 'application/json'
 
+                except GenerationDeadlineExceeded:
+                    raise
                 except Exception as error:
                     logger.error(
                         "Response normalization failed provider=%s type=%s",
@@ -1433,7 +1443,19 @@ class ProxyService:
             cls._record_circuit_result(api_provider, response.status_code)
             return response
 
+        except GenerationDeadlineExceeded:
+            if not raw_passthrough:
+                cls._record_circuit_result(api_provider, 504,
+                    outcome=classify_upstream_outcome(cancelled=True))
+            raise
         except requests.exceptions.RequestException as e:
+            try:
+                check_deadline()
+            except GenerationDeadlineExceeded:
+                if not raw_passthrough:
+                    cls._record_circuit_result(api_provider, 504,
+                        outcome=classify_upstream_outcome(cancelled=True))
+                raise
             if raw_passthrough:
                 provider_name = {
                     **{pool.provider: pool.display_name for pool in CODEX_EVERYWHERE_POOLS},
