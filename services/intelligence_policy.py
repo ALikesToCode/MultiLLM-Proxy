@@ -216,7 +216,7 @@ def expected_reply_ms(candidate, request, now=None):
     return first_ms + tokens * 1000 / max(rate, 1)
 
 
-def select_candidates(policy, request, config):
+def select_candidates(policy, request, config, *, session_tier=None):
     candidates = []
     for priority, candidate in enumerate(policy["candidates"]):
         if request.explicit and candidate["model"] != request.payload["model"]:
@@ -252,28 +252,33 @@ def select_candidates(policy, request, config):
             return (-score, -candidate.get("quality_tier", 0), *speed, priority)
         return (priority, -score, *speed)
 
+    def apply_session_tier(choices):
+        if session_tier is not None and not request.explicit:
+            return session_tier.select(choices)
+        return choices
+
     ranked = sorted(candidates, key=rank)
     if request.explicit or request.profile == "balanced":
-        return [candidate for _, candidate in ranked]
+        return apply_session_tier([candidate for _, candidate in ranked])
     preference = (
         validate_preference(policy["precision_preference"])
         if "precision_preference" in policy
         else configured_preference()
     )
     if not preference or len(ranked) < 2:
-        return [candidate for _, candidate in ranked]
+        return apply_session_tier([candidate for _, candidate in ranked])
     metadata = {
         f"{model.provider}:{model.model_id}": model.metadata
         for model in ProviderCatalogService.list_models()
     }
     # Every original ranking dimension precedes precision. A quality tier also
     # separates fast-profile ties without altering their existing relative order.
-    return prefer_precision(
+    return apply_session_tier(prefer_precision(
         ranked,
         preference,
         lambda item: (*rank(item)[:-1], item[1].get("quality_tier", 0)),
         metadata,
-    )
+    ))
 
 
 def model_advertisement(policy, config=None):

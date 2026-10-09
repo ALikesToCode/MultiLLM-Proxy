@@ -1,14 +1,17 @@
 import { RoleplayRequestError } from "./validation.mjs";
 import { applyReasoningPolicy, requestedReasoningEffort } from "./reasoning.mjs";
 import { glmModelVariant } from "./model-selection.mjs";
+import { parseSessionTier } from "./session-tier-policy.mjs";
+export { SessionTierError, SessionTierPolicy, sessionTierSettings, beginRoleplaySessionTier } from "./session-tier-policy.mjs";
 
 const MODES = ["provider-priority", "fastest-eligible", "quality", "pinned"];
 const PROVIDERS = ["nanogpt", "opencode", "openrouter", "linkapi", "navyai", "cline-pass"];
 
-export function parseRoutingPolicy(value) {
+export function parseRoutingPolicy(value, { sessionTierEnabled = false } = {}) {
   if (value === undefined) value = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new RoleplayRequestError("routing must be an object");
-  if (Object.keys(value).some((key) => !["mode", "provider", "model", "billing", "fallback"].includes(key))) {
+  const allowed = ["mode", "provider", "model", "billing", "fallback", ...(sessionTierEnabled ? ["session_tier"] : [])];
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
     throw new RoleplayRequestError("Unsupported routing option");
   }
   const result = { mode: "provider-priority", provider: "", model: "", billing: "configured", fallback: "safe", ...value };
@@ -18,6 +21,7 @@ export function parseRoutingPolicy(value) {
   if (result.provider !== "" && !PROVIDERS.includes(result.provider)) throw new RoleplayRequestError("Invalid routing provider");
   if (typeof result.model !== "string" || result.model.length > 200 || /[\s\u0000-\u001f]/.test(result.model)) throw new RoleplayRequestError("Invalid routing model");
   if (result.mode === "pinned" && (!result.provider || !result.model)) throw new RoleplayRequestError("Pinned routing requires provider and model");
+  if (Object.hasOwn(result, "session_tier")) result.session_tier = parseSessionTier(result.session_tier);
   return result;
 }
 
