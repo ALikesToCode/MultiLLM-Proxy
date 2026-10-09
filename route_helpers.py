@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = (
-    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, X-MultiLLM-Retention, "
+    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, X-MultiLLM-Retention, X-MultiLLM-Deadline-Ms, "
     "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
     "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
     "Idempotency-Key, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "

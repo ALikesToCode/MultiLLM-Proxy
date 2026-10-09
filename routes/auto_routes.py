@@ -26,6 +26,9 @@ from services.provider_catalog_service import (
 from services.resilience_service import ResilienceService
 from services.route_health import RouteHealth, ordering_settings
 from services.stream_preflight import preflight_chat_stream
+from services.generation_deadline import (
+    GenerationDeadlineExceeded, check_deadline, check_response_deadline,
+)
 
 # Payment-required responses mean this candidate cannot serve the request with
 # its current credentials. Explicit auto routes may safely try the next
@@ -161,6 +164,7 @@ def dispatch_auto_route(
     Each attempt's outcome and time to response feed route health, and a route set to
     health ordering tries its candidates in the order RouteHealth.order returns.
     """
+    check_deadline()
     route = AutoRouteService.get_route(payload.get("model"))
     if route is None:
         raise APIError(
@@ -177,10 +181,12 @@ def dispatch_auto_route(
     last_priority = 0
     last_decision = "auto-failover"
     for position, candidate in enumerate(order.candidates):
+        check_deadline()
         priority = priorities[candidate]
         try:
             validate_candidate(candidate)
-        except (ModelCooldownExhausted, ModelCooldownCapacity):
+            check_deadline()
+        except (ModelCooldownExhausted, ModelCooldownCapacity, GenerationDeadlineExceeded):
             raise
         except (APIError, ValueError) as error:
             logger.info(
@@ -202,6 +208,7 @@ def dispatch_auto_route(
                 candidate,
                 route_decision,
             )
+            check_response_deadline(response)
         except AutoRouteCandidateUnavailable as error:
             logger.info(
                 "Skipping auto route candidate %s before generation (%s)",
@@ -226,6 +233,7 @@ def dispatch_auto_route(
         ):
             preflight = preflight_chat_stream(response)
             response = preflight.response
+            check_response_deadline(response)
             preflight_failed = preflight.outcome not in {"skipped", "validated"}
             preflight_outcome = preflight.outcome
         ok, reason = attempt_outcome(response)
