@@ -50,7 +50,7 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "
     "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, "
-    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
+    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Canary-Cohort, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
     "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
