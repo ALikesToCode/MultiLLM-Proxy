@@ -1,4 +1,4 @@
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics } from "./worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader } from "./worker/gateway-extensions.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
@@ -526,13 +526,13 @@ function buildLinkApiUpstreamHeaders(request, protocol, upstreamPathname, upstre
   return headers;
 }
 
-function copyLinkApiResponseHeaders(headers) {
+function copyLinkApiResponseHeaders(headers, env) {
   const responseHeaders = new Headers();
 
   for (const [header, value] of headers.entries()) {
     const normalized = header.toLowerCase();
     if (
-      LINKAPI_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      nativeCacheHeader(normalized, headers, env) || LINKAPI_RESPONSE_HEADER_WHITELIST.has(normalized) ||
       LINKAPI_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
     ) {
       responseHeaders.set(header, value);
@@ -613,13 +613,13 @@ function buildCodexEasyUpstreamHeaders(request, upstreamToken) {
   return headers;
 }
 
-function copyCodexEasyResponseHeaders(headers) {
+function copyCodexEasyResponseHeaders(headers, env) {
   const responseHeaders = new Headers();
 
   for (const [header, value] of headers.entries()) {
     const normalized = header.toLowerCase();
     if (
-      CODEX_EASY_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      nativeCacheHeader(normalized, headers, env) || CODEX_EASY_RESPONSE_HEADER_WHITELIST.has(normalized) ||
       CODEX_EASY_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
     ) {
       responseHeaders.set(header, value);
@@ -1497,7 +1497,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1505,7 +1505,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
     const downstreamResponse = new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers, env),
     });
     return applyCorsHeaders(
       request,
@@ -1632,7 +1632,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1641,7 +1641,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers, env),
     }),
     env,
   );
@@ -1690,7 +1690,7 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1699,7 +1699,7 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyCodexEasyResponseHeaders(upstreamResponse.headers),
+      headers: copyCodexEasyResponseHeaders(upstreamResponse.headers, env),
     }),
     env,
   );

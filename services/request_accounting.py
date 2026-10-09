@@ -15,13 +15,14 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
 from flask import Response, current_app, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
-from services import key_controls, prompt_cache_cost, telemetry_export, usage_ledger
+from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
 from services.usage_types import StreamUsageObserver, UsageObservation
@@ -214,6 +215,19 @@ def price(models: list[str], input_tokens: Optional[int], output_tokens: Optiona
     return max(known) if known else None
 
 
+def reservation_price(models, input_tokens, output_tokens, units):
+    costs = [CostService.estimate(candidate, input_tokens, output_tokens, requests=units)
+             for model in models for candidate in _candidates(model)]
+    return max(costs) if costs and all(cost is not None for cost in costs) else None
+
+
+def mark_dispatched():
+    """Injected pre-submission hook for managed request owners."""
+    context = getattr(g, "usage_context", None)
+    if isinstance(context, UsageContext):
+        BudgetService.mark_dispatched(context.reservation)
+
+
 def estimate_cost(models: list[str], input_tokens: int, output_tokens: int, units: int) -> float:
     return price(models, input_tokens, output_tokens, units) or 0.0
 
@@ -257,9 +271,11 @@ def begin() -> Optional[Response]:
                            trace=telemetry_export.trace_context(request.headers.get("traceparent")))
     context.input_tokens, context.output_tokens = _token_estimates(payload)
     if budgeted(user):
-        context.estimate = estimate_cost([_qualified(model, provider) for model in models],
-                                         context.input_tokens, context.output_tokens, context.units)
-        decision = BudgetService.check_and_reserve(user, context.estimate)
+        qualified = [_qualified(model, provider) for model in models]
+        estimate = (reservation_price(qualified, context.input_tokens, context.output_tokens, context.units)
+                    if reservation_store.enabled() else estimate_cost(qualified, context.input_tokens, context.output_tokens, context.units))
+        context.estimate = estimate or 0.0
+        decision = BudgetService.check_and_reserve(user, estimate)
         if not decision.allowed:
             return _error(decision.status_code, decision.error, decision.message, decision.retry_after,
                           **({"budget": decision.details} if decision.details else {}))
@@ -364,10 +380,27 @@ def cancellation_observer():
     if not isinstance(context, UsageContext):
         return None
 
+    if reservation_store.enabled():
+        BudgetService.mark_dispatched(context.reservation)
+
     def observe(outcome):
         if outcome.ambiguous and not context.finished:
             context.ambiguous = True
     return observe
+
+
+def _record_budget(context, row, budget_row=None):
+    if reservation_store.enabled() and context.reservation:
+        held = reservation_store.get_store().get(context.reservation)
+        # Admission owns the UTC budget period, including completion after midnight.
+        row = {**row, "at": datetime.fromtimestamp(held["created_at"] / 1000, timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")}
+        if row["cost_basis"] == "estimate":
+            row = {**row, "cost_usd": None, "cost_basis": None}
+        BudgetService.complete(context.reservation, row, cached=context.cached)
+    else:
+        BudgetService.record_cost(budget_row if budget_row is not None else row)
+    return row
 
 
 def _record(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> None:
@@ -377,7 +410,10 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
     if context.ambiguous:
         status, usage, units = 499, None, None
     if context.path in DEFERRED_PATHS:
-        BudgetService.settle(context.reservation)
+        if reservation_store.enabled():
+            BudgetService.settle(context.reservation, before_dispatch=True)
+        else:
+            BudgetService.settle(context.reservation)
         return
     try:
         row = _row(context, status, usage, units)
@@ -392,7 +428,7 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
                         if prompt_cache_cost.enabled() else price(models, estimated.input_tokens,
                                                                   estimated.output_tokens, context.units))
             budget_row = {**row, "cost_usd": estimate}
-        BudgetService.record_cost(budget_row)
+        row = _record_budget(context, row, budget_row)
         usage_ledger.LEDGER.record(row)
         telemetry_export.EXPORTER.submit({**row, "method": context.method, "trace_id": context.trace[0],
                                           "parent_span_id": context.trace[1], "start_ns": context.start_ns,
@@ -550,7 +586,9 @@ def admit_item(user: dict, model: str, units: int) -> tuple[Optional[dict], Opti
                 "message": f"This API key is not allowed to use {str(model)[:128]}."}, None
     if not budgeted(user):
         return None, None
-    decision = BudgetService.check_and_reserve(user, estimate_cost([model], 0, 0, max(1, units)))
+    estimate = (reservation_price([model], 0, 0, max(1, units)) if reservation_store.enabled()
+                else estimate_cost([model], 0, 0, max(1, units)))
+    decision = BudgetService.check_and_reserve(user, estimate)
     if not decision.allowed:
         return {"status": decision.status_code, "code": decision.error, "message": decision.message}, None
     return None, decision.reservation
@@ -568,7 +606,10 @@ def record_item(user: dict, *, endpoint: str, requested: str, selected: Optional
 def _record_row(context: UsageContext, status: int, units: int) -> None:
     try:
         row = _row(context, status, None, units)
-        BudgetService.record_cost(row)
+        if reservation_store.enabled() and context.reservation and status < 400 and row["cost_usd"] is not None:
+            # Flat-price media has measured units on success, even without tokens.
+            row = {**row, "cost_basis": "usage"}
+        row = _record_budget(context, row)
         usage_ledger.LEDGER.record(row)
     except Exception as error:  # Accounting must never fail the work it describes.
         logger.warning("Usage could not be recorded (%s)", type(error).__name__)
