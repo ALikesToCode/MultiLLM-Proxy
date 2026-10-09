@@ -362,3 +362,28 @@ class RegisteredGovernanceTest(UnifiedApiTestCase):
         governance.register_governance_collaborators(app=self.app, store=self.store)
         legacy = self.client.get("/v1/usage", headers={"Authorization": f"Bearer {self.key}"})
         assert disabled.status_code == legacy.status_code == 200 and disabled.data == legacy.data
+
+
+def test_shared_reconciliation_vectors_keep_unknown_holds_and_settle_once(setup):
+    import json
+    app, store = setup
+    identity = "tg_reconciliation"
+    store.call("reserve", id=identity, context=governance.context_dict(TENANT), amount=400000,
+               day="2026-10-09", month="2026-10", key_daily=1000000, key_monthly=None,
+               base_day=0, base_month=0)
+    store.call("dispatch", id=identity)
+    store.call("settle", id=identity, cost=None)
+    vectors = json.loads(Path("tests/fixtures/governance_reconciliation.json").read_text())
+    for vector in vectors:
+        values = {key: value for key, value in vector.items() if not key.startswith("expected_") and key not in {"error", "status"}}
+        if "error" in vector:
+            with pytest.raises(governance.GovernanceError) as failure:
+                store.call("reconcile", id=identity, **values)
+            assert (failure.value.code, failure.value.status) == (vector["error"], vector["status"])
+        else:
+            result = store.call("reconcile", id=identity, **values)
+            assert result["applied"] is vector["expected_applied"]
+            assert result["reservation"]["state"] == vector["expected_state"]
+            totals = store.call("usage", context=governance.context_dict(TENANT), role="admin")
+            assert totals["holds_micro_usd"] == (400000 if vector["cost"] is None else 0)
+            assert totals["spent_micro_usd"] == (0 if vector["cost"] is None else 100000)

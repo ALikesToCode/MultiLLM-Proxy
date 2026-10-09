@@ -42,6 +42,13 @@ function legacy(principal) {
 export function tenantNamespace(context) {
   return context.org_id === null ? "" : `org:${context.org_id}${context.team_id === null ? "" : `/team:${context.team_id}`}`;
 }
+/** Trusted callers append workspace scope; legacy bytes remain untouched. */
+export function tenantStorageKey(value, context) {
+  if (context == null) return value;
+  if (!(context instanceof TenantContext)) throw new TenantError("workspace_forbidden", 403);
+  const namespace = tenantNamespace(context);
+  return namespace ? createHash("sha256").update(JSON.stringify([value, namespace])).digest("hex") : value;
+}
 const one = (db, sql, values = []) => db.prepare(sql).bind(...values).first();
 const rows = async (db, sql, values = []) => (await db.prepare(sql).bind(...values).all()).results;
 async function requireSchema(db) {
@@ -259,4 +266,47 @@ export async function handleTenantRequest(request, env) {
   } catch (error) {
     return (error instanceof TenantError ? error : new TenantError("tenant_storage_unavailable", 503)).response(true);
   }
+}
+
+function scimTenantGuard(db, org, principal) {
+  // A failed conditional mutation aborts the entire SCIM/account/revision batch.
+  return db.prepare(`INSERT INTO tenant_memberships (org_id,principal,role,status,revision)
+    SELECT ?,?,'member','active',0 WHERE changes()!=1`).bind(org, principal);
+}
+/** No binding or privileged role is created by provisioning. */
+export function scimPrincipalStatements(db, { org_id, resource }) {
+  identifier(org_id); requireText(resource.userName);
+  return [db.prepare(`INSERT INTO tenant_memberships (org_id,principal,team_id,role,status,revision)
+    SELECT ?1,?2,NULL,'member',?3,1 WHERE EXISTS
+      (SELECT 1 FROM tenant_organisations WHERE id=?1 AND status='active')
+      AND ((SELECT COUNT(*) FROM tenant_memberships WHERE org_id=?1)<1000
+        OR EXISTS (SELECT 1 FROM tenant_memberships WHERE org_id=?1 AND principal=?2))
+    ON CONFLICT(org_id,principal) DO UPDATE SET status=excluded.status,revision=tenant_memberships.revision+1
+      WHERE tenant_memberships.role='member'`)
+    .bind(org_id, resource.userName, resource.active ? "active" : "deactivated"),
+    scimTenantGuard(db, org_id, resource.userName)];
+}
+/** Team and membership mutations join the SCIM resource transaction. */
+export function scimTeamStatements(db, { org_id, resource, prior, deactivated }) {
+  identifier(org_id); identifier(resource.id); requireText(resource.displayName);
+  const statements = [db.prepare(`INSERT INTO tenant_teams (id,org_id,name,status,revision)
+    SELECT ?1,?2,?3,?4,1 WHERE EXISTS
+      (SELECT 1 FROM tenant_organisations WHERE id=?2 AND status='active')
+      AND ((SELECT COUNT(*) FROM tenant_teams WHERE org_id=?2)<100
+        OR EXISTS (SELECT 1 FROM tenant_teams WHERE id=?1 AND org_id=?2))
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name,status=excluded.status,revision=tenant_teams.revision+1
+      WHERE tenant_teams.org_id=excluded.org_id`)
+    .bind(resource.id, org_id, resource.displayName, deactivated ? "deactivated" : "active"),
+    scimTenantGuard(db, org_id, resource.id)];
+  // Explicit group updates may move members of this group, never members of another team.
+  statements.push(db.prepare(`UPDATE tenant_memberships SET team_id=NULL,revision=revision+1
+    WHERE org_id=? AND team_id=? AND role='member'`).bind(org_id, resource.id));
+  for (const member of deactivated ? [] : resource.members) {
+    statements.push(db.prepare(`UPDATE tenant_memberships SET team_id=?1,revision=revision+1
+      WHERE org_id=?2 AND principal=(SELECT user_name FROM scim_resources
+        WHERE org_id=?2 AND kind='Users' AND id=?3 AND deactivated=0)
+        AND role='member' AND status='active' AND team_id IS NULL`)
+      .bind(resource.id, org_id, member.value), scimTenantGuard(db, org_id, member.value));
+  }
+  return statements;
 }

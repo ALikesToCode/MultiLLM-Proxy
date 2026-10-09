@@ -54,6 +54,18 @@ def limits(user: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
     return user.get("daily_budget_usd"), user.get("monthly_budget_usd")
 
 
+def principal_owner(user):
+    from flask import has_request_context
+    from services.tenant_hierarchy import current_tenant, principal_id, tenant_namespace
+    from services.credits_ledger import context_owner
+    principal = str(user.get("username") or user.get("id") or "")
+    if has_request_context():
+        context = current_tenant()
+        if context.principal_id == principal_id(principal) and tenant_namespace(context):
+            return context_owner(context)
+    return principal
+
+
 def budgeted(user: Mapping[str, Any]) -> bool:
     from services.tenant_governance import workspace_context
     return workspace_context(user) is not None or any(limit is not None for limit in limits(user))
@@ -211,7 +223,7 @@ class BudgetService:
             return BudgetDecision(True)
         if reservation_store.enabled():
             return cls._reserve_durable(user, estimate_usd, now)
-        principal = str(user.get("username") or user.get("id") or "")
+        principal = principal_owner(user)
         period = periods(now)
         state = cls._state(principal)
         try:
@@ -247,7 +259,7 @@ class BudgetService:
 
     @classmethod
     def _durable_totals(cls, user, now=None):
-        principal = str(user.get("username") or user.get("id") or "")
+        principal = principal_owner(user)
         summary = reservation_store.get_store().summary(principal, now, reservation_store.review_seconds())
         if not summary["day_seeded"] or not summary["month_seeded"]:
             state, period = cls._state(principal), periods(now)
@@ -269,7 +281,7 @@ class BudgetService:
             summary = cls._durable_totals(user, now)
             identity = uuid.uuid4().hex
             daily, monthly = limits(user)
-            reservation_store.get_store().reserve(identity, str(user.get("username") or user.get("id") or ""),
+            reservation_store.get_store().reserve(identity, principal_owner(user),
                 estimate, daily, monthly, summary["spent_today_usd"], summary["spent_this_month_usd"], now)
             return BudgetDecision(True, reservation=identity)
         except reservation_store.ReservationError as error:
@@ -281,10 +293,10 @@ class BudgetService:
                                   message="Durable usage reservations are unavailable.")
 
     @classmethod
-    def mark_dispatched(cls, reservation):
+    def mark_dispatched(cls, reservation, *, governance_store=None):
         """Persist before provider submission; failure must prevent submission."""
         from services.tenant_governance import dispatch
-        if dispatch(reservation):
+        if dispatch(reservation, authority=governance_store):
             return
         if not reservation or not reservation_store.enabled():
             return
@@ -296,10 +308,10 @@ class BudgetService:
             raise reservation_store.ReservationError("reservation_conflict", 409)
 
     @classmethod
-    def complete(cls, reservation, row, *, cached=False):
+    def complete(cls, reservation, row, *, cached=False, governance_store=None):
         """Replace a hold only with measured cost; uncertain completion retains it."""
         from services.tenant_governance import complete
-        if complete(reservation, row, cached=cached):
+        if complete(reservation, row, cached=cached, authority=governance_store):
             return
         if not reservation or not reservation_store.enabled():
             return
@@ -321,12 +333,12 @@ class BudgetService:
                          transition_id=uuid.uuid4().hex, **fields)
 
     @classmethod
-    def settle(cls, reservation: Optional[str], *, before_dispatch=False) -> None:
+    def settle(cls, reservation: Optional[str], *, before_dispatch=False, governance_store=None) -> None:
         """Release an in-flight estimate; the settled cost arrives through `record_cost`."""
         if not reservation:
             return
         from services.tenant_governance import complete
-        if complete(reservation, {}, before_dispatch=before_dispatch):
+        if complete(reservation, {}, before_dispatch=before_dispatch, authority=governance_store):
             return
         if reservation_store.enabled():
             if before_dispatch:
@@ -364,7 +376,7 @@ class BudgetService:
     def status(cls, user: Mapping[str, Any], now: Optional[datetime] = None) -> dict[str, Any]:
         """Spend and remaining budget for /v1/usage; reads durable totals when due."""
         daily, monthly = limits(user)
-        principal = str(user.get("username") or user.get("id") or "")
+        principal = principal_owner(user)
         period = periods(now)
         state = cls._state(principal)
         available = True

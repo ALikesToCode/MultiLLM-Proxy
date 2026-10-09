@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
@@ -23,6 +24,7 @@ from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
 from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
+from services import credits_admission, tenant_governance
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
 from services.usage_types import StreamUsageObserver, UsageObservation
@@ -94,6 +96,11 @@ class UsageContext:
     cached: bool = False
     ambiguous: bool = False
     stream_cost: Any = None
+    tenant: Any = None
+    credit_hold: Any = None
+    governance_store: Any = None
+    dispatched: bool = False
+    gateway_subrequest: bool = False
 
 
 def classify() -> Optional[str]:
@@ -226,7 +233,10 @@ def mark_dispatched():
     """Injected pre-submission hook for managed request owners."""
     context = getattr(g, "usage_context", None)
     if isinstance(context, UsageContext):
-        BudgetService.mark_dispatched(context.reservation)
+        BudgetService.mark_dispatched(context.reservation,
+            **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+        credits_admission.mark_dispatched(context.credit_hold)
+        context.dispatched = True
 
 
 def estimate_cost(models: list[str], input_tokens: int, output_tokens: int, units: int) -> float:
@@ -253,6 +263,8 @@ def check_key_controls(user: dict) -> Optional[Response]:
 
 def begin() -> Optional[Response]:
     """Enforce the model allowlist and budget before dispatch; None admits the request."""
+    if isinstance(getattr(g, "usage_context", None), UsageContext):
+        return None
     kind = classify()
     user = getattr(g, "authenticated_user", None)
     if kind is None or not isinstance(user, dict):
@@ -270,6 +282,8 @@ def begin() -> Optional[Response]:
                            started=getattr(g, "request_started_at", None) or time.perf_counter(),
                            start_ns=time.time_ns(), units=_image_units(kind, payload),
                            trace=telemetry_export.trace_context(request.headers.get("traceparent")))
+    from services.tenant_hierarchy import current_tenant
+    context.tenant = current_tenant()
     context.input_tokens, context.output_tokens = _token_estimates(payload)
     if payload and payload.get("stream") is True and stream_cost_breaker.enabled() and (
             user.get(stream_cost_breaker.CAP_FIELD) is not None or user.get("max_stream_cost_usd") is not None):
@@ -281,17 +295,44 @@ def begin() -> Optional[Response]:
                 user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol)
         except APIError as error:
             return _error(error.status_code, error.payload["error"], "Stream cost enforcement refused this request.")
-    if budgeted(user):
-        qualified = [_qualified(model, provider) for model in models]
+    denied = reserve_attempt(context)
+    if denied is not None:
+        return denied
+    g.usage_context = context
+    return None
+
+
+def reserve_attempt(context):
+    """Reserve each gateway-owned provider attempt before any submission."""
+    from services.managed_dispatch import current_attempt_id
+    from services.tenant_hierarchy import current_tenant, enabled as organisations_enabled
+    if organisations_enabled() and not hasattr(g, "tenant_context"):
+        return _error(503, "tenant_storage_unavailable", "The verified request workspace is unavailable.")
+    user = context.user
+    context.tenant = context.tenant or current_tenant()
+    governance = tenant_governance.workspace_context(user)
+    charged = credits_admission.enforcement() != "off"
+    qualified = [_qualified(model, context.provider) for model in context.models]
+    estimate = None
+    if budgeted(user) or charged:
         estimate = (reservation_price(qualified, context.input_tokens, context.output_tokens, context.units)
-                    if reservation_store.enabled() else estimate_cost(qualified, context.input_tokens, context.output_tokens, context.units))
+                    if (reservation_store.enabled() and not context.gateway_subrequest) or governance is not None or charged else
+                    estimate_cost(qualified, context.input_tokens, context.output_tokens, context.units))
+    if budgeted(user):
         context.estimate = estimate or 0.0
         decision = BudgetService.check_and_reserve(user, estimate)
         if not decision.allowed:
             return _error(decision.status_code, decision.error, decision.message, decision.retry_after,
                           **({"budget": decision.details} if decision.details else {}))
         context.reservation = decision.reservation
-    g.usage_context = context
+        if tenant_governance.governance_reservation(context.reservation):
+            context.governance_store = tenant_governance.store()
+    if charged:
+        try:
+            context.credit_hold = credits_admission.reserve(estimate, scoped_id=context.reservation or (uuid.uuid4().hex if context.gateway_subrequest else current_attempt_id()), context=context.tenant)
+        except credits_admission.CreditAdmissionError as error:
+            BudgetService.settle(context.reservation, before_dispatch=True, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+            return credits_admission.error_response(error)
     return None
 
 
@@ -391,8 +432,8 @@ def cancellation_observer():
     if not isinstance(context, UsageContext):
         return None
 
-    if reservation_store.enabled():
-        BudgetService.mark_dispatched(context.reservation)
+    if reservation_store.enabled() or context.governance_store is not None or context.credit_hold is not None:
+        mark_dispatched()
 
     def observe(outcome):
         if outcome.ambiguous and not context.finished:
@@ -402,8 +443,24 @@ def cancellation_observer():
     return observe
 
 
+def release_before_dispatch():
+    """Release admission after a later hook refuses the request, exactly once."""
+    context = getattr(g, "usage_context", None)
+    if not isinstance(context, UsageContext) or context.finished or context.dispatched:
+        return
+    credits_admission.release(context.credit_hold)
+    BudgetService.settle(context.reservation, before_dispatch=True, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+    context.finished = True
+
+
 def _record_budget(context, row, budget_row=None):
-    if reservation_store.enabled() and context.reservation:
+    credits_admission.complete(context.credit_hold, row, cached=context.cached)
+    if tenant_governance.governance_reservation(context.reservation):
+        if not context.dispatched and row.get("status", 200) >= 400:
+            BudgetService.settle(context.reservation, before_dispatch=True, governance_store=context.governance_store)
+        BudgetService.complete(context.reservation, row, cached=context.cached,
+                               **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+    elif reservation_store.enabled() and context.reservation:
         held = reservation_store.get_store().get(context.reservation)
         # Admission owns the UTC budget period, including completion after midnight.
         row = {**row, "at": datetime.fromtimestamp(held["created_at"] / 1000, timezone.utc).isoformat(
@@ -423,10 +480,8 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
     if context.ambiguous:
         status, usage, units = 499, None, None
     if context.path in DEFERRED_PATHS:
-        if reservation_store.enabled():
-            BudgetService.settle(context.reservation, before_dispatch=True)
-        else:
-            BudgetService.settle(context.reservation)
+        credits_admission.release(context.credit_hold)
+        BudgetService.settle(context.reservation, before_dispatch=True, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
         return
     try:
         row = _row(context, status, usage, units)
@@ -451,7 +506,7 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
     finally:
         # The settled cost is counted before the in-flight estimate is released.
         if context.stream_cost is None or context.stream_cost.final_usage is not None or reservation_store.enabled():
-            BudgetService.settle(context.reservation)
+            BudgetService.settle(context.reservation, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
 
 
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
@@ -478,6 +533,10 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)
         cost = breakdown["cost_usd"]
         basis = usage.storage_basis(cost)
+    from services.tenant_hierarchy import current_tenant, tenant_namespace
+    from flask import has_request_context
+    tenant = context.tenant or (current_tenant() if has_request_context() else None)
+    namespace = tenant_namespace(tenant) if tenant is not None else ""
     prefix = context.user.get("api_key_prefix")
     row = {
         "at": usage_ledger.utc_timestamp(),
@@ -495,6 +554,8 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         "cost_basis": basis,
         "request_id": context.request_id,
     }
+    if namespace:
+        row["principal"] = credits_admission.owner(tenant)
     if prompt_cache_cost.enabled() and context.kind in {"chat", "responses", "proxy", "embeddings"}:
         breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)
         row.update({name: breakdown[name] for name in prompt_cache_cost.ROW_FIELDS})
@@ -609,34 +670,59 @@ def fail(error: BaseException) -> None:
 
 
 def admit_item(user: dict, model: str, units: int) -> tuple[Optional[dict], Optional[str]]:
-    """Allowlist and budget for work run later for an account, such as an asynchronous
-    batch item. Returns an error for the item, or the budget reservation to settle."""
+    """Reserve one background item; its identity owns every admission component."""
+    from services.tenant_hierarchy import enabled as organisations_enabled
+    if organisations_enabled() and not hasattr(g, "tenant_context"):
+        return {"status": 503, "code": "tenant_storage_unavailable",
+                "message": "The verified item workspace is unavailable."}, None
     if not key_controls.model_allowed(user, model):
         return {"status": 403, "code": "model_not_allowed",
                 "message": f"This API key is not allowed to use {str(model)[:128]}."}, None
-    if not budgeted(user):
+    charged = credits_admission.enforcement() != "off"
+    governance = tenant_governance.workspace_context(user)
+    if not budgeted(user) and not charged:
         return None, None
-    estimate = (reservation_price([model], 0, 0, max(1, units)) if reservation_store.enabled()
-                else estimate_cost([model], 0, 0, max(1, units)))
+    estimate = (reservation_price([model], 0, 0, max(1, units))
+                if reservation_store.enabled() or governance is not None or charged else
+                estimate_cost([model], 0, 0, max(1, units)))
     decision = BudgetService.check_and_reserve(user, estimate)
     if not decision.allowed:
         return {"status": decision.status_code, "code": decision.error, "message": decision.message}, None
-    return None, decision.reservation
+    from services.tenant_hierarchy import current_tenant
+    import uuid
+    identity = decision.reservation or (uuid.uuid4().hex if charged else None)
+    authority = tenant_governance.store() if tenant_governance.governance_reservation(identity) else None
+    context = UsageContext("images", [model], None, user, time.perf_counter(), time.time_ns(),
+                           units=max(1, units), reservation=decision.reservation,
+                           tenant=current_tenant(), governance_store=authority)
+    try:
+        context.credit_hold = credits_admission.reserve(estimate, scoped_id=identity, context=context.tenant)
+    except credits_admission.CreditAdmissionError as error:
+        BudgetService.settle(decision.reservation, before_dispatch=True, governance_store=authority)
+        return {"status": error.status, "code": error.code, "message": "The item exceeds available credits."}, None
+    if identity and (charged or authority is not None):
+        # The Workflow handler admits and records in one request; capture each item,
+        # rather than sharing its last reservation through g or the parent context.
+        g.setdefault("managed_item_accounting", {})[identity] = context
+    return None, identity
 
 
 def record_item(user: dict, *, endpoint: str, requested: str, selected: Optional[str], status: int,
                 units: int, started: float, reservation: Optional[str]) -> None:
     """Record one item of background work in the ledger and settle its reservation."""
-    context = UsageContext(kind="images", models=[requested], provider=None, user=user, started=started,
+    context = getattr(g, "managed_item_accounting", {}).pop(reservation, None)
+    context = context or UsageContext(kind="images", models=[requested], provider=None, user=user, started=started,
                            start_ns=time.time_ns(), units=max(1, units), reservation=reservation)
     context.path, context.selected = endpoint, selected
+    context.dispatched = True
+    credits_admission.mark_dispatched(context.credit_hold)
     _record_row(context, status, units)
 
 
 def _record_row(context: UsageContext, status: int, units: int) -> None:
     try:
         row = _row(context, status, None, units)
-        if reservation_store.enabled() and context.reservation and status < 400 and row["cost_usd"] is not None:
+        if (reservation_store.enabled() or context.governance_store is not None or context.credit_hold is not None) and status < 400 and row["cost_usd"] is not None:
             # Flat-price media has measured units on success, even without tokens.
             row = {**row, "cost_basis": "usage"}
         row = _record_budget(context, row)
@@ -644,4 +730,4 @@ def _record_row(context: UsageContext, status: int, units: int) -> None:
     except Exception as error:  # Accounting must never fail the work it describes.
         logger.warning("Usage could not be recorded (%s)", type(error).__name__)
     finally:
-        BudgetService.settle(context.reservation)
+        BudgetService.settle(context.reservation, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))

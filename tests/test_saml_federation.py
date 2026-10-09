@@ -171,7 +171,7 @@ def test_valid_assertion_uses_only_existing_account_and_bound_authority(register
     authority = Mock(side_effect=lambda assertion, operation: operation.context)
     service.identity_authority = authority
     response = callback(client, signer, claims, method)
-    assert response.status_code == 302 and response.location == "/"
+    assert response.status_code == 302 and urlsplit(response.location).path == "/"
     issue.assert_called_once_with("alice", TenantContext("alice", "org:one", "team:one", 2))
     assertion, operation = authority.call_args.args
     assert assertion.verified and operation.context.org_id == "org:one"
@@ -234,7 +234,7 @@ def test_missing_storage_and_session_fail_closed(registered, signer):
         assert b"private storage" not in response.data
     issue.assert_not_called()
     store.available = True
-    service.session_issuer = saml.issue_dashboard_session
+    service.session_issuer = Mock(side_effect=saml.SamlError("saml_session_unavailable", 503))
     response = callback(client, signer, claims)
     assert response.status_code == 503 and response.json["error"]["code"] == "saml_session_unavailable"
 
@@ -386,22 +386,19 @@ def test_application_callback_with_public_endpoint_registration(monkeypatch, tmp
             session["user"] = {"username": account, "is_admin": accounts[account]["is_admin"], "scopes": accounts[account]["scopes"],
                                "api_key_prefix": "synthetic", "session_id": "synthetic-session"}
             return True
-        service = saml.SamlFederation(saml.load_config(env), saml.SamlStore(store), session_issuer=issue, account_lookup=accounts.get, clock=lambda: NOW)
-        app.extensions["saml_federation"] = service
-        register_saml_federation_routes(app, app.extensions["csrf"])
+        service = app.extensions["saml_federation"]
+        service.config, service.store = saml.load_config(env), saml.SamlStore(store)
+        service.session_issuer, service.account_lookup, service.clock = issue, accounts.get, lambda: NOW
+        service.identity_authority = saml.stored_link_authority
         link(service, org_id=None, team_id=None, grants_revision=0)
         client = app.test_client()
-        # Exercise the existing guard first, then the required static allowlist integration.
-        blocked = client.get("/auth/saml/login")
-        assert blocked.status_code == 302 and urlsplit(blocked.location).path == "/login"
         guard = next(hook for hook in app.before_request_funcs[None] if hook.__name__ == "handle_redirects")
-        monkeypatch.setitem(guard.__globals__, "PRODUCT_PUBLIC_ENDPOINTS", guard.__globals__["PRODUCT_PUBLIC_ENDPOINTS"] | SAML_PUBLIC_ENDPOINTS)
         headers = next(hook for hook in app.after_request_funcs[None] if hook.__name__ == "add_response_headers")
         for auth in {guard.__globals__["AuthService"], headers.__globals__["AuthService"]}:
             monkeypatch.setattr(auth, "_load_user_by_username", accounts.get)
         claims = start(client)
         response = callback(client, signer, claims, "POST")
-        assert response.status_code == 302
+        assert response.status_code == 302 and urlsplit(response.location).path == "/"
         with client.session_transaction() as saved:
             assert saved["authenticated"] is True and saved["user"]["is_admin"] is False
             assert saved["user"]["scopes"] == ["chat"]

@@ -27,6 +27,7 @@ def register_payment_routes(app, csrf, *, service=None, context_resolver=None):
             return failed(error)
         if request.content_length is not None and request.content_length > payments.MAX_BODY:
             return failed(payments.PaymentError("invalid_payment_body", 400))
+        request.max_content_length = payments.MAX_BODY
         return None
 
     app.before_request_funcs.setdefault(None, []).insert(0, payment_gate)
@@ -45,9 +46,12 @@ def register_payment_routes(app, csrf, *, service=None, context_resolver=None):
             user = g.authenticated_user
             owner = str(user.get("id") or user.get("username") or "")
             context = context_resolver(user) if context_resolver else TenantContext(owner)
+            if context_resolver:
+                from services.credits_ledger import context_owner
+                owner = context_owner(context)
             if not request.is_json:
                 raise payments.PaymentError("invalid_payment_checkout", 400)
-            raw = request.stream.read(payments.MAX_BODY + 1)
+            raw = request.get_data(cache=True)
             if len(raw) > payments.MAX_BODY:
                 raise payments.PaymentError("invalid_payment_body", 400)
             try:
@@ -65,7 +69,7 @@ def register_payment_routes(app, csrf, *, service=None, context_resolver=None):
     def payment_webhook():
         try:
             # Signature validation always precedes parsing or reading identity.
-            raw = request.stream.read(payments.MAX_BODY + 1)
+            raw = request.get_data(cache=True)
             return jsonify(service.webhook(raw, request.headers.get("Stripe-Signature", "")))
         except payments.PaymentError as error:
             return failed(error)

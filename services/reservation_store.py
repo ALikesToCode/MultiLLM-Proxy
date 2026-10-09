@@ -138,12 +138,26 @@ def transition_fields(state, *, cost_usd=None, basis=None, input_tokens=None, ou
 
 def reconcile(store, identity, revision, cost_usd, *, admin, reason, evidence=None,
               authorized_adjustment=False, transition_id=None):
-    result = store.transition(identity, revision, "reconciled", cost_usd=cost_usd,
+    from services import tenant_governance
+    if tenant_governance.enabled() and tenant_governance.governance_reservation(identity):
+        try:
+            result = tenant_governance.store().call("reconcile", id=identity, revision=revision,
+                cost=None if cost_usd is None else tenant_governance.units(cost_usd), admin=admin,
+                reason=reason, evidence=evidence, authorized_adjustment=authorized_adjustment,
+                transition_id=transition_id or uuid.uuid4().hex)
+        except tenant_governance.GovernanceError as error:
+            raise ReservationError(error.code, error.status) from None
+    else:
+        result = store.transition(identity, revision, "reconciled", cost_usd=cost_usd,
                             admin=admin, reason=reason, evidence=evidence,
                             authorized_adjustment=authorized_adjustment,
                             basis="adjustment" if authorized_adjustment else "provider",
                             transition_id=transition_id or uuid.uuid4().hex, settlement_id=identity)
-    from services import usage_receipts
+    from services import credits_admission, usage_receipts
+    # Replaying the immutable transition also repairs a failed linked settlement.
+    # Credits operation IDs prevent charging twice if receipt persistence fails.
+    if result["reservation"]["state"] == "reconciled":
+        credits_admission.reconcile_reservation(result["reservation"], result["reservation"]["transition_id"])
     if result["applied"] and usage_receipts.enabled():
         row = result["reservation"]
         try:

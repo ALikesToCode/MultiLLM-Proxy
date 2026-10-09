@@ -91,8 +91,7 @@ class ParallelRoundTwoTest(UnifiedApiTestCase):
         def judge(*args, **kwargs):
             judging.wait(timeout=5)
             return Response(json.dumps(qa_tests.completion(qa_tests.grade(3))), content_type="application/json")
-        with patch("services.accounted_dispatch.budgeted", return_value=True), \
-             patch("services.request_accounting.budgeted", return_value=True), \
+        with patch("services.request_accounting.budgeted", return_value=True), \
              patch.object(BudgetService, "check_and_reserve", side_effect=reserve), \
              patch("routes.unified_images.dispatch_image_generation_raw", side_effect=raw) as generate, \
              patch("routes.unified._dispatch_unified_chat_candidate", side_effect=judge):

@@ -1,3 +1,4 @@
+import { organisationsEnabled, resolveAccountTenant, tenantStorageKey } from "./tenants-d1.mjs";
 /** Exact context bodies in R2, signed principal/session/revision handles in D1. */
 import { RoleplayTurnError } from "./roleplay/turn-runtime.mjs";
 import { mediaMac, mediaSecret, toBase64, toBase64Url } from "./media-signing.mjs";
@@ -60,7 +61,8 @@ async function roleplayScope(env, keyScope, session, policy) {
     env.PII_REDACTION_ENABLED ?? "", env.PII_REDACTION_POLICY_JSON ?? "",
     env.PROMPT_INJECTION_MODE ?? "", env.PROMPT_INJECTION_THRESHOLD ?? "", env.PROMPT_INJECTION_POLICY_JSON ?? "",
     env.SECRET_SCAN_ENABLED ?? "", env.SECRET_SCAN_DEFAULT ?? "", env.CONTEXT_PAGING_ENABLED ?? ""])));
-  return { principal: keyScope, session, revision };
+  const context = organisationsEnabled(env) ? await resolveAccountTenant(env.INTELLIGENCE_DB, env.ADMIN_USERNAME || "admin", env) : null;
+  return { principal: tenantStorageKey(keyScope, context), session, revision };
 }
 
 /** Attach verified identity only after authentication, on the private DO hop. */
@@ -322,7 +324,7 @@ export async function handleContextPageRequest(request, env, { authorize, store 
 }
 
 /** Private Container calls are reachable only through the authenticated state dispatcher. */
-export async function handleContextPageStateRequest(request, env) {
+export async function handleContextPageStateRequest(request, env, { tenantContext } = {}) {
   const url = new URL(request.url);
   if (url.origin !== "http://intelligence.internal" || url.pathname !== "/v1/managed-state/context-pages"
     || url.search || url.hash || url.username || url.password || request.method !== "POST") return failure(new ContextPageError("invalid_store_target", 400));
@@ -346,6 +348,9 @@ export async function handleContextPageStateRequest(request, env) {
     let offset = 0;
     for (const chunk of chunks) { input.set(chunk, offset); offset += chunk.length; }
     const body = JSON.parse(decoder.decode(input));
+    if (organisationsEnabled(env) && tenantContext && body.scope) body.scope = {
+      ...body.scope, principal: tenantStorageKey(body.scope.principal, tenantContext),
+    };
     const policy = retentionPolicySnapshot(body.retention_policy);
     if (body.granted !== true || !retentionAllowsContent(policy)) throw new ContextPageError("context_page_forbidden", 403);
     const store = new ContextPageStore(env);

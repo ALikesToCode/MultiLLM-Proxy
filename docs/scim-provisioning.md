@@ -8,7 +8,8 @@ the API and emits one warning without the value. Existing account creation is un
 ## Configuration and authentication
 
 Set `SCIM_ENABLED=true` only after applying the SCIM storage migration and configuring
-the account and tenant authorities. `AUTH_STORAGE_BACKEND` and
+the account and tenant authorities. The application registers the D1 store,
+durable account service and bearer-scoped organisation team authority. `AUTH_STORAGE_BACKEND` and
 `INTELLIGENCE_STORAGE_BACKEND` must both be `d1`, and
 `CONFIG_REVISION_SYNC_ENABLED=true` must be enabled for the Worker and Container.
 Security revisions expire within `CONFIG_SECURITY_TTL_SECONDS` (default and maximum:

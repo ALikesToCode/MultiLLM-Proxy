@@ -74,3 +74,13 @@ estimates, dispatch and finalization hooks. Flask uses the same domain through
 factories and database transactions. Neither adapter applies migrations automatically.
 Storage failure prevents new admissions; ambiguous settlement leaves the hold in place.
 Retention and any reconciliation of unknown holds require an operator policy.
+
+The application registers the verified tenant resolver and active membership-role
+reader. Tool discovery and execution intersect durable key grants with every
+configured organisation and team tool grant.
+
+Request accounting captures the verified workspace and its reservation authority
+so streamed completion can settle all components after the request context ends.
+Workspace budgets are checked before request credits. Shared cache, idempotency,
+hosted-state, context-page and usage records include the non-empty verified
+workspace namespace; legacy ownership bytes remain unchanged.

@@ -192,6 +192,8 @@ def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, securi
             protected = (is_api_request_path(request.path) and request.path.rstrip("/") not in {"/health", "/healthz"}
                 or request.endpoint == "proxy" or request.path in {"/mcp", "/mcp/", "/googleai/chat/completions",
                                                                      "/api/backends/chat-completions/generate"})
+            if request.endpoint == "payment_webhook":
+                protected = False
             if request.method != "OPTIONS" and protected and not sync.security_ready():
                 return jsonify({"error": {"code": "config_security_stale",
                     "message": "Security configuration freshness could not be verified"}}), 503, {"Cache-Control": "no-store"}
@@ -218,3 +220,88 @@ def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, securi
     register_alert_routes(app)
     app.extensions["gateway_alert_observer"] = observe
     app.extensions["gateway_extensions_registered"] = True
+
+
+def register_enterprise_features(app, csrf):
+    """Compose fixed enterprise authorities once without probing disabled storage."""
+    if app.extensions.get("enterprise_features_registered"):
+        return
+    from functools import partial
+    from services import credits_ledger, tenant_governance, tenant_hierarchy
+    from services.auth_service import AuthService
+    from services.credits_admission import register_credits_admission
+    from services.credits_payments import payment_callback
+    from services.enterprise_contract import legacy_tenant, register_enterprise_adapters
+    from services.saml_federation import SamlFederation, load_config, stored_link_authority
+    tenant = tenant_hierarchy.tenant_authority if tenant_hierarchy.enabled() else legacy_tenant
+
+    def identity(assertion, operation):
+        stored_link_authority(assertion, operation)
+        return tenant(operation)
+
+    saml = SamlFederation(load_config(callback_url=app.config.get("SAML_CALLBACK_URL")), identity_authority=identity)
+    callback = payment_callback()
+    app.extensions["enterprise_adapters"] = register_enterprise_adapters(
+        tenant=tenant, identity=identity if saml.config.enabled else None,
+        credit=register_credits_admission(app), payment=callback if credits_ledger.enabled() else None)
+    app.extensions["saml_federation"] = saml
+    tenant_governance.register_governance_collaborators(
+        tenant_resolver=lambda user: tenant_hierarchy.current_tenant(),
+        membership_role=tenant_hierarchy.membership_role, app=app)
+    from routes.saml_federation import register_saml_federation_routes
+    from routes.scim import register_scim_routes
+    from routes.credits import register_credits_routes
+    from routes.payments import register_payment_routes
+    from services.intelligence_d1_store import request_private_intelligence
+    from services.scim_provisioning import D1ScimStore, ScimService
+    scim_store = D1ScimStore(partial(request_private_intelligence, endpoint="scim"))
+    register_saml_federation_routes(app, csrf)
+    register_scim_routes(app, service=ScimService(scim_store, AuthService,
+        tenant_authority=partial(tenant_hierarchy.scim_team_authority, scim_store=scim_store)))
+    register_credits_routes(app, csrf)
+    register_payment_routes(app, csrf, service=_payment_service(callback),
+                           context_resolver=lambda user: tenant_hierarchy.current_tenant())
+    if tenant_governance.enabled():
+        _register_governance_tools(app)
+    app.extensions["enterprise_features_registered"] = True
+
+
+def _payment_service(callback):
+    import os
+    from functools import partial
+    from services.intelligence_d1_store import request_private_intelligence
+    from services.payment_billing import D1PaymentStore, PaymentBilling, SqlPaymentStore
+    from services.sqlite_store import storage_path
+    backend = os.environ.get("INTELLIGENCE_STORAGE_BACKEND", "").strip().lower()
+    store = D1PaymentStore(partial(request_private_intelligence, endpoint="payments")) if backend == "d1" else (
+        SqlPaymentStore(storage_path("USAGE_DB_PATH", "usage.sqlite3")) if backend in {"", "sqlite"} else None)
+    return PaymentBilling(store=store, callback=callback, permission=_payment_permission)
+
+
+def _payment_permission(context, owner):
+    from services.credits_ledger import context_owner
+    from services.tenant_hierarchy import enabled, membership_role
+    if owner != context_owner(context):
+        return False
+    if context.org_id is None:
+        return owner == context.principal_id
+    return enabled() and membership_role(context.principal_id, context.org_id) in {"billing", "admin"}
+
+
+def _register_governance_tools(app):
+    from flask import g
+    from services.deferred_tools import D1GrantReader, DeferredTools
+    from services.tenant_governance import grant_allowed
+    reader = D1GrantReader()
+
+    def grants(principal):
+        rows = reader(principal)
+        user = getattr(g, "authenticated_user", None)
+        if not isinstance(rows, list):
+            return rows
+        return [{**row, "allowed": int(grant_allowed(bool(row.get("allowed")), row.get("tool_name"),
+                                                     user=user, kind="tools"))} if isinstance(row, dict)
+                and type(row.get("allowed")) is int and row["allowed"] in {0, 1} else row
+                for row in rows]
+
+    app.extensions["deferred_tools"] = DeferredTools(grants)

@@ -4,6 +4,8 @@ import math
 import json
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
+import uuid
 from dataclasses import replace
 from typing import Callable
 
@@ -19,15 +21,24 @@ Attempt = Callable[[int], requests.Response]
 Outcome = Callable[[], UpstreamOutcome]
 
 
+_attempt_identity = ContextVar("managed_attempt_identity", default=None)
+
+
+def current_attempt_id():
+    return _attempt_identity.get()
+
+
 @contextmanager
-def isolated_managed_attempt(turn):
+def isolated_managed_attempt(turn, scoped_id=None):
     """Keep parallel attempt finalizers out of the parent managed turn."""
     from services.managed_turn import _turn
     local = replace(turn, finalizers=[], canary=None, canary_finalized=False, pages=list(turn.pages), paged_candidates=dict(turn.paged_candidates)) if turn else None
     token = _turn.set(local)
+    attempt_token = _attempt_identity.set(scoped_id or uuid.uuid4().hex)
     try:
         yield local
     finally:
+        _attempt_identity.reset(attempt_token)
         _turn.reset(token)
 
 

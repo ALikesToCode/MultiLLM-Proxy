@@ -34,12 +34,13 @@ def test_shared_vectors(store):
             assert error.value.status == 400
             continue
         values = vector['request']
+        apply = store.append_payment if vector.get('operation') == 'payment_append' else store.append
         if vector.get('error'):
             with pytest.raises(ledger.CreditsError) as error:
-                store.append(**values)
+                apply(**values)
             assert error.value.code == vector['error']
         else:
-            result = store.append(**values)
+            result = apply(**values)
             assert result['revision'] == vector['revision']
         if 'summary' in vector:
             summary = store.read(values['owner'])

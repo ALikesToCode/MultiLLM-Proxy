@@ -9,6 +9,7 @@ from functools import wraps
 
 from flask import Response, g, jsonify, request
 
+from error_handlers import APIError
 from services import gateway_batches as batches
 from services.retention_policy import request_policy, resolve_policy
 from services.cost_service import CostService
@@ -167,7 +168,7 @@ def pagination():
 
 
 def execute_batch_item(app):
-    from services.media_signing import read_principal
+    from services.media_signing import read_principal, bind_principal_tenant
     from routes.media_batches import principal_user
     from services.auth_service import AuthService
     header = request.headers.get("Authorization", "")
@@ -184,13 +185,17 @@ def execute_batch_item(app):
     if user is None or (started["batch"]["key_prefix"] and user.get("api_key_prefix") != started["batch"]["key_prefix"]):
         return {"status_code": 403, "body": {"error": {"code": "principal_rejected"}}, "cost_units": 0, "ambiguous": False}
     try:
-        return run_managed_item(app, user, started["item"], started["batch"])
+        tenant = bind_principal_tenant(claims, user)
+    except APIError as error:
+        return {"status_code": error.status_code, "body": error.payload, "cost_units": 0, "ambiguous": False}
+    try:
+        return run_managed_item(app, user, started["item"], started["batch"], tenant=tenant)
     except Exception:
         # The managed accounting finalizer has already kept an uncertain hold.
         return {"status_code": 502, "body": {}, "cost_units": None, "ambiguous": True}
 
 
-def run_managed_item(app, user, item, batch):
+def run_managed_item(app, user, item, batch, *, tenant=None):
     from route_helpers import _authorize_api_scope, provider_from_request_path
     from services import request_accounting
     from services.gateway_extensions import after_authentication
@@ -201,6 +206,11 @@ def run_managed_item(app, user, item, batch):
     with app.app_context(), app.test_request_context(item["url"], method="POST", json=item["body"],
             environ_base={"REMOTE_ADDR": batch["client_ip"]}, headers={"CF-Connecting-IP": batch["client_ip"], "Authorization": "BatchPrincipal managed-item"}):
         g.authenticated_user = user
+        from services.tenant_hierarchy import enabled as organisations_enabled
+        if organisations_enabled():
+            if tenant is None:
+                raise batches.BatchError(503, "tenant_storage_unavailable", "The verified batch workspace is unavailable.")
+            g.verified_tenant = g.tenant_context = tenant
         g.gateway_batch_execution = True
         g.multillm_content_retention = resolve_policy(key_id=str(user.get("id") or user["username"]),
                                                      key_hash=batch["key_hash"], route=item["url"])

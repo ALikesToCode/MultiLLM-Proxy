@@ -66,6 +66,8 @@ def register_saml_federation_routes(app, csrf):
         if set(values) != {"token", "state"} or any(len(values.getlist(key)) != 1 for key in values):
             raise SamlError("saml_request_invalid")
         browser_state_digest = session.get("saml_state_digest", "")
+        if not browser_state_digest and session.get("authenticated"):
+            raise SamlError("saml_assertion_replayed")
         original_session = deepcopy(dict(session))
         try:
             service.complete(values["token"], values["state"], browser_state_digest)
@@ -73,7 +75,6 @@ def register_saml_federation_routes(app, csrf):
             session.clear()
             session.update(original_session)
             raise
-        session["saml_state_digest"] = browser_state_digest
         return redirect("/", code=302)
 
     @app.route("/auth/saml/acs", methods=["GET", "POST"])

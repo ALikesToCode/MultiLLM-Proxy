@@ -1,5 +1,5 @@
 /** Atomic SCIM identity, account, team and security-revision storage. */
-import { boundedBody, USER_FIELDS, validUser } from "./control-users-d1.mjs";
+import { boundedBody, USER_FIELDS, validUser, scimAccountStatements } from "./control-users-d1.mjs";
 import { commitRevision, requireRevisionSchema, revisionSyncSettings } from "./config-revision.mjs";
 
 const PATH = "/v1/managed-state/scim";
@@ -124,16 +124,6 @@ function resourceStatements(db, body) {
   return [statement, casGuard(db, body)];
 }
 
-function accountStatements(db, body, priorAccount) {
-  if (!body.account) return [];
-  const { account, expected } = body;
-  if (expected === 0) return [db.prepare(`INSERT INTO control_users (${USER_FIELDS.join(",")}) VALUES (${USER_FIELDS.map(() => "?").join(",")})`)
-    .bind(...USER_FIELDS.map(key => account[key]))];
-  return [db.prepare(`UPDATE control_users SET api_key_hash=?,api_key_prefix=?,revoked_at=?
-    WHERE username=? AND is_admin=0 AND api_key_hash=? AND api_key_prefix=? AND revoked_at IS ?`)
-    .bind(account.api_key_hash, account.api_key_prefix, account.revoked_at, account.username,
-      priorAccount.api_key_hash, priorAccount.api_key_prefix, priorAccount.revoked_at), casGuard(db, body)];
-}
 
 async function prepareAccount(db, body, old) {
   if (body.kind !== "Users") return null;
@@ -180,9 +170,9 @@ async function put(db, body, collaborators) {
   }
   const priorAccount = await prepareAccount(db, body, old);
   const statements = resourceStatements(db, body);
-  statements.push(...accountStatements(db, body, priorAccount));
-  if (kind === "Users" && expected === 0) {
-    statements.push(...collaboratorStatements(collaborators.principalStatements, { org_id: org, resource: row }));
+  statements.push(...scimAccountStatements(db, body, priorAccount, () => casGuard(db, body)));
+  if (kind === "Users" && (expected === 0 || collaborators.membershipStatements)) {
+    statements.push(...collaboratorStatements(expected === 0 ? collaborators.principalStatements : collaborators.membershipStatements, { org_id: org, resource: row }));
   }
   if (kind === "Groups") {
     statements.push(...collaboratorStatements(collaborators.teamStatements, { org_id: org, resource: row, prior: old, deactivated: body.deactivate }));

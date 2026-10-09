@@ -351,3 +351,41 @@ def test_bootstrap_tenant_check_follows_environment_key_verification(monkeypatch
     assert auth.verify_api_key("synthetic-bootstrap") == {"username": "operator"}
     tenant.assert_called_once_with("operator")
     verified.assert_called_once_with("operator", "synthetic-bootstrap", None)
+
+
+
+def test_real_account_lookup_precedes_membership_write_transaction(store, monkeypatch):
+    auth = importlib.import_module("services.auth_service").AuthService
+    monkeypatch.setenv("AUTH_STORAGE_BACKEND", "")
+    with auth._connect() as db:
+        auth._ensure_users_schema(db)
+        db.execute("INSERT INTO users (username,api_key_hash,api_key_prefix,scopes,is_admin,created_at) VALUES (?,?,?,?,?,?)",
+                   ("alice", "synthetic-hash", "synthetic", '["chat"]', 0, "2026-10-09"))
+    real_store = th.TenantStore()
+    org, team = hierarchy(real_store)
+    assert member(real_store, org, team)["principal"] == "alice"
+
+
+def test_account_names_outside_the_opaque_format_keep_their_workspace(monkeypatch):
+    from services import media_signing, tenant_governance
+    from services.budget_service import principal_owner
+    name = "alice@example.com"
+    legacy = th._legacy(name)
+    assert th.principal_id("alice") == "alice"
+    assert th.principal_id(name) == legacy.principal_id and legacy.principal_id.startswith("principal:")
+    workspace = th.TenantContext(legacy.principal_id, "org1", "team1")
+    monkeypatch.setenv("ORGANISATIONS_ENABLED", "true")
+    monkeypatch.setenv("TENANT_GOVERNANCE_ENABLED", "true")
+    monkeypatch.setenv("MEDIA_SIGNING_SECRET", "synthetic-signing-secret")
+    app = Flask(__name__)
+    tenant_governance.register_governance_collaborators(tenant_resolver=lambda user: workspace, app=app)
+    with app.test_request_context("/v1/chat/completions"):
+        g.tenant_context = workspace
+        user = {"username": name}
+        assert tenant_governance.workspace_context(user) == workspace
+        assert principal_owner(user) != name
+        token = media_signing.issue_principal("batch", "job1", name, 60)
+        claims = media_signing.read_principal(token, "batch")
+    with app.test_request_context("/internal/batch"):
+        assert media_signing.bind_principal_tenant(claims, {"username": name}) == workspace
+        assert g.tenant_context == workspace

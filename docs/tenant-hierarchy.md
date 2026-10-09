@@ -99,11 +99,14 @@ replay an uncertain write. Standalone SQLite uses the configured account databas
 and serializes writes with an immediate transaction.
 
 Workspace identity does not introduce quotas, credits, payment collection, cost
-allocation or provider discounts. Existing cache, idempotency, hosted-state and
-usage ownership formats remain unchanged; a tenant binding alone does not isolate
-those records. Consumers must incorporate the verified namespace before using
-organisation isolation for shared records. Existing record ownership never moves
+allocation or provider discounts. Cache, idempotency, hosted-state, context-page
+and usage owners include the verified namespace when it is non-empty, isolating records
+between workspaces. With organisations disabled, their ownership formats remain
+byte-identical to the legacy formats. Existing record ownership never moves
 because an account selects a workspace. Audit and hierarchy rows are retained
 indefinitely; content-retention policies do not erase them. Deactivation keeps
 rows and continues to count toward the caps. There are no live-provider capability
 or metering guarantees from these APIs.
+
+The application registers the tenant authority and active membership-role reader
+for enterprise identity, payment permissions and governance collaborators.

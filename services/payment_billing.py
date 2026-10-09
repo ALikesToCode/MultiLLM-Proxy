@@ -288,7 +288,10 @@ class D1PaymentStore:
             return reply["result"]
         except PaymentError:
             raise
-        except Exception:
+        except Exception as error:
+            from services.intelligence_d1_store import PrivateIntelligenceError
+            if isinstance(error, PrivateIntelligenceError):
+                raise PaymentError(error.code, error.status) from None
             raise PaymentError() from None
 
 

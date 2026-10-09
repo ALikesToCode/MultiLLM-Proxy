@@ -122,6 +122,10 @@ def _principal() -> str | None:
 def cache_key(principal: str, path: str, payload: dict, *, policy: cache_policy.CachePolicy | None = None) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     identity = (principal, path, canonical)
+    from services.tenant_hierarchy import tenant_namespace
+    namespace = tenant_namespace()
+    if namespace:
+        identity += (namespace,)
     if policy is not None:
         identity += (cache_policy.ISOLATED_REVISION, cache_policy.policy_digest(policy))
     return hashlib.sha256("\x00".join(identity).encode("utf-8")).hexdigest()

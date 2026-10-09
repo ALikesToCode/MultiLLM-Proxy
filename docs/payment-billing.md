@@ -31,7 +31,7 @@ Payment routes require a migrated durable store. The private D1 domain is
 `http://intelligence.internal/v1/managed-state/payments`, with fixed reserve,
 save, find, claim and finish operations. `D1PaymentStore` accepts a private
 transport; `SqlPaymentStore` accepts an existing migrated SQLite database.
-Neither creates tables or falls back to memory. Missing tables, missing
+The application selects D1 when configured, otherwise the existing `USAGE_DB_PATH` SQLite store. Neither creates tables or falls back to memory. Missing tables, missing
 columns, unavailable storage or unconnected storage return JSON 503
 `payments_unavailable` before any processor request. Apply the additive payment
 migration through the normal migration process before enabling the flag.
@@ -50,9 +50,10 @@ Send a gateway key to `POST /v1/payments/checkout` with:
 ```
 
 The default permission grants only the verified key owner in the legacy
-single-principal scope. Organisation workspaces require the injected permission
-authority to verify a billing or admin role and an injected verified tenant
-context resolver. Client body fields cannot select a workspace. Gateway key
+single-principal scope. The registered permission authority verifies an active
+billing or admin workspace role using the same verified tenant context as
+request admission. A top-up funds that principal in that workspace, rather than
+the organisation as a whole. Client body fields cannot select a workspace. Gateway key
 scope enforcement also applies.
 
 Amounts are integer micro-USD, in whole cents: multiples of 10,000, from 500,000
@@ -91,7 +92,19 @@ Opening the URL allows payment at Stripe. Returning to the browser URL never
 credits a balance. The returned `pending` describes the checkout response,
 not a confirmed payment.
 
+The ledger charges requests only when `CREDITS_ENABLED=true` and
+`CREDITS_ENFORCEMENT` is `funded` (owners with a ledger revision above zero) or
+`all` (every authenticated owner, including administrators). The default `off`
+records top-ups without charging requests. Credit each principal before choosing
+`all`; insufficient credit returns JSON 402 `credits_insufficient` before dispatch.
+
 ## Processor evidence and reconciliation
+
+Refunds and disputes append negative `adjust` entries with actor
+`processor:stripe`, under the payment event's immutable operation ID. They may
+make balance and available credit negative after credit has been spent; new
+charged requests remain refused until the shortfall is covered. Only the verified
+payment callback can create processor entries.
 
 Configure Stripe to deliver these types to `POST /v1/payments/webhook`, and
 confirm them in the Stripe dashboard:
@@ -100,8 +113,9 @@ confirm them in the Stripe dashboard:
 - `checkout.session.async_payment_succeeded`: credit the delayed payment.
 - `checkout.session.async_payment_failed`: record failure without credit.
 - `charge.refunded`: append the increase in cumulative refunded amount.
-- `charge.dispute.created`: append a dispute compensation or hold through the
-  ledger callback, using the dispute ID as its stable operation identity.
+- `charge.dispute.created`: append a negative processor adjustment through the
+  ledger callback, using the dispute ID as its stable operation identity. A later
+  dispute win requires an operator adjustment.
 
 The webhook requires no gateway key and is CSRF-exempt. It reads raw bytes
 before parsing JSON, verifies every supported `v1` signature candidate with
@@ -123,10 +137,13 @@ original evidence hash or audit history.
 An atomic event claim precedes the immutable `PaymentEvent` callback. A
 completed replay returns 200 without invoking it again. Both session success
 types share one credit operation, cumulative refund notifications apply only
-their delta, and repeat dispute IDs share one compensation operation. An event
+their delta, and repeat dispute IDs share one adjustment operation. An event
 ID reused with different bytes returns 400 `payment_event_conflict`.
 
-The callback is the only credit authority. It must apply its immutable
+The registered credits callback applies verified top-ups and processor refunds
+or disputes to the same per-principal workspace owner as `GET /v1/credits`.
+Refunds after spending may make the balance negative and block new reservations.
+The callback is the only payment credit authority. It applies its immutable
 idempotency ID atomically, including when recovering from a process crash after
 ledger application but before the payment record is finalized. A missing,
 denied, failing or unbound callback leaves `pending_credit` evidence and returns

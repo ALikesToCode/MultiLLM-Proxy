@@ -212,3 +212,25 @@ test("native flat cache events release holds and ancestor errors retain the leve
   await assert.rejects(create().admit({ model: "openai:gpt", key_allowed: true, amount: 500_000 }),
     error => error.status === 429 && error.details.level === "organisation");
 });
+
+
+test("shared reconciliation vectors keep unknown holds and settle once", async t => {
+  const { call } = database(t);
+  const id = "tg_reconciliation";
+  await call(reserve("reconciliation"));
+  await call({ operation: "dispatch", id });
+  await call({ operation: "settle", id, cost: null });
+  const vectors = JSON.parse(readFileSync(new URL("./fixtures/governance_reconciliation.json", import.meta.url), "utf8"));
+  for (const vector of vectors) {
+    const values = Object.fromEntries(Object.entries(vector).filter(([key]) => !key.startsWith("expected_") && !["error", "status"].includes(key)));
+    const result = await call({ operation: "reconcile", id, ...values });
+    if (vector.error) { assert.equal(result.status, vector.status); assert.equal(result.error.code, vector.error); }
+    else {
+      assert.equal(result.status, 200); assert.equal(result.applied, vector.expected_applied);
+      assert.equal(result.reservation.state, vector.expected_state);
+      const totals = await call({ operation: "usage", context, role: "admin" });
+      assert.equal(totals.holds_micro_usd, vector.cost === null ? 400000 : 0);
+      assert.equal(totals.spent_micro_usd, vector.cost === null ? 0 : 100000);
+    }
+  }
+});

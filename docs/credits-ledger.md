@@ -133,6 +133,20 @@ and receipt errors must never trigger a second charge. Local tests exercise
 SQLite and a SQLite-backed D1 contract fake; they do not validate deployed D1,
 live provider metering or an operator's tariff.
 
+A billing member's top-up funds that member's own usage within the verified
+workspace; it does not fund the whole organisation.
+
+Verified Stripe payments use the dedicated private `payment_append` operation.
+The callback records a credit for a top-up, or a negative `adjust` for a refund or
+dispute, with the reserved `processor:stripe` actor. Processor adjustments can
+make balance negative after spending; new reservations remain denied. Ordinary
+admin writes cannot use any `processor:` actor. The immutable payment identity
+is replay-safe even after re-reading the current ledger revision. The callback
+retries only 412 revision conflicts, with at most three attempts, preserving the payment
+operation ID and amount. Its result advances the payment event revision, which
+is separate from the ledger revision. A failed callback leaves pending payment
+evidence for retry and never grants a second credit.
+
 Shared integer and idempotency vectors:
 
 ```json
@@ -152,6 +166,46 @@ Shared integer and idempotency vectors:
  {"request":{"owner":"overrun","kind":"commit","amount_microusd":150,"operation_id":"charge","revision":2,"scoped_id":"attempt","tariff_revision":1},"revision":3,"summary":{"balance_microusd":-50,"held_microusd":0,"available_microusd":-50}},
  {"request":{"owner":"overrun","kind":"reserve","amount_microusd":1,"operation_id":"denied","revision":3,"scoped_id":"next","tariff_revision":1},"error":"credits_insufficient"},
  {"request":{"owner":"overrun","kind":"credit","amount_microusd":100,"operation_id":"refill","revision":3},"revision":4,"summary":{"balance_microusd":50,"held_microusd":0,"available_microusd":50}},
- {"request":{"owner":"overrun","kind":"reserve","amount_microusd":1,"operation_id":"next","revision":4,"scoped_id":"next","tariff_revision":1},"revision":5,"summary":{"balance_microusd":50,"held_microusd":1,"available_microusd":49}}
+ {"request":{"owner":"overrun","kind":"reserve","amount_microusd":1,"operation_id":"next","revision":4,"scoped_id":"next","tariff_revision":1},"revision":5,"summary":{"balance_microusd":50,"held_microusd":1,"available_microusd":49}},
+ {"request":{"owner":"processor-tests","kind":"credit","amount_microusd":100,"operation_id":"fund","revision":0},"revision":1},
+ {"request":{"owner":"processor-tests","kind":"reserve","amount_microusd":100,"operation_id":"hold","revision":1,"scoped_id":"attempt","tariff_revision":1},"revision":2},
+ {"request":{"owner":"processor-tests","kind":"commit","amount_microusd":100,"operation_id":"spend","revision":2,"scoped_id":"attempt","tariff_revision":1},"revision":3},
+ {"request":{"owner":"processor-tests","kind":"adjust","amount_microusd":-100,"operation_id":"admin-spoof","revision":3,"actor":"processor:stripe","reason":"refund"},"error":"invalid_credits_request"},
+ {"operation":"payment_append","request":{"owner":"processor-tests","event_kind":"refund","amount_microusd":100,"operation_id":"refund:checkout","revision":2,"scoped_id":"checkout","processor_id":"stripe"},"error":"credits_revision_mismatch"},
+ {"operation":"payment_append","request":{"owner":"processor-tests","event_kind":"refund","amount_microusd":100,"operation_id":"refund:checkout","revision":3,"scoped_id":"checkout","processor_id":"stripe"},"revision":4,"summary":{"balance_microusd":-100,"held_microusd":0,"available_microusd":-100}},
+ {"operation":"payment_append","request":{"owner":"processor-tests","event_kind":"refund","amount_microusd":100,"operation_id":"refund:checkout","revision":4,"scoped_id":"checkout","processor_id":"stripe"},"revision":4,"summary":{"balance_microusd":-100,"revision":4}}
 ]
 ```
+
+## Request admission
+
+`CREDITS_ENABLED=true` enables the ledger without charging requests.
+`CREDITS_ENFORCEMENT` defaults to `off`; `funded` charges owners whose ledger
+revision is above zero, and `all` charges every authenticated owner, including
+administrators. Credit owners before selecting `all`. Empty or invalid settings
+are off, and enforcement has effect only while the ledger is enabled.
+
+The owner is the verified principal within the selected organisation and team.
+A member's payment funds that member's usage in that workspace. Legacy owners
+keep their existing format. Key and workspace budgets reserve first; credits
+reserve last against the same priced estimate, rounded up to integer micro-USD.
+The price revision is the first 12 hexadecimal digits of SHA-256 of the exact
+`MODEL_PRICING_USD_PER_MILLION` configuration, interpreted as an integer.
+
+Flask managed requests and native Worker generations use this admission policy.
+Insufficient credit returns JSON 402 `credits_insufficient`; an unpriced charged
+request returns 503 `credits_unpriced`. Authority failures return 503
+`credits_unavailable`. Revision conflicts allow at most three total attempts,
+rereading the revision with the same operation ID, scope and amount. An uncertain write is never retried.
+Measured usage commits its actual cost. Unknown usage records a reconciliation
+marker and retains its hold until an evidenced operator reconciliation.
+Pre-dispatch cancellation releases the original estimate once. Each hedged or
+batch attempt has a separate reservation; a cancelled hedge's credit estimate
+is released. Gateway estimates and measured costs are not provider invoices.
+
+Native generations and semantic embeddings use separate per-attempt credit reservations; cache hits release the generation estimate.
+
+Credit and governance admission runs after the idempotency claim and admission,
+at the same point as key-budget admission. A refusal dispatches no provider and
+leaves no open hold; its claim settles like a key-budget refusal. A caller who
+retries after a top-up must use a new `Idempotency-Key`.

@@ -138,7 +138,8 @@ def _prepare_holds(models, payload):
         raise APIError("Configure both candidate prices before hedging this route.", 503,
                        {"error": "unpriced_reservation"})
     try:
-        held = reservation_store.get_store().get(outer.reservation)
+        held = ({"state": "reserved" if not outer.dispatched else "dispatched", "estimate_usd": outer.estimate}
+                if outer.governance_store is not None else reservation_store.get_store().get(outer.reservation))
     except reservation_store.ReservationError as error:
         raise APIError("The durable usage reservation is unavailable.", 503,
                        {"error": error.code}) from error
@@ -151,7 +152,13 @@ def _prepare_holds(models, payload):
         raise APIError(decision.message, decision.status_code, {"error": decision.error})
     if decision.reservation is None:
         return None
-    return [outer.reservation, decision.reservation]
+    from services import credits_admission
+    try:
+        secondary_credit = credits_admission.reserve(costs[1], scoped_id=decision.reservation, context=outer.tenant)
+    except credits_admission.CreditAdmissionError:
+        BudgetService.settle(decision.reservation, before_dispatch=True, governance_store=outer.governance_store)
+        raise
+    return [(outer.reservation, outer.credit_hold), (decision.reservation, secondary_credit)]
 
 
 def _useful_response(response):
@@ -178,7 +185,9 @@ def _useful_response(response):
 class _Attempt:
     def __init__(self, model, position, hold, outer, expires, clock, changed):
         self.model, self.position = model, position
-        self.context = replace(outer, models=[model], selected=model, reservation=hold,
+        reservation, credit_hold = hold
+        self.context = replace(outer, models=[model], selected=model, reservation=reservation, credit_hold=credit_hold,
+                               dispatched=False,
                                finished=False, ambiguous=False, output_tokens=outer.output_tokens)
         self.owner = RequestCancellation()
         self.deadline = Deadline(expires, clock)
@@ -217,7 +226,10 @@ class _Attempt:
 
     def _dispatch_started(self):
         try:
-            BudgetService.mark_dispatched(self.context.reservation)
+            BudgetService.mark_dispatched(self.context.reservation,
+                **({"governance_store": self.context.governance_store} if self.context.governance_store is not None else {}))
+            accounting.credits_admission.mark_dispatched(self.context.credit_hold)
+            self.context.dispatched = True
         except reservation_store.ReservationError as error:
             raise APIError("The durable dispatch boundary is unavailable.", 503,
                            {"error": error.code}) from error
@@ -263,9 +275,14 @@ class _Attempt:
         self.context.ambiguous = self.context.ambiguous or (
             self.usage is None and (self.submissions > 0 or self.bridge.handed_off))
         if not self.bridge.handed_off and not self.submissions:
-            BudgetService.settle(self.context.reservation, before_dispatch=True)
+            accounting.credits_admission.release(self.context.credit_hold)
+            BudgetService.settle(self.context.reservation, before_dispatch=True, governance_store=self.context.governance_store)
             self.context.finished = True
             return
+        if not self.accepted and self.stopped.is_set():
+            accounting.credits_admission.release(self.context.credit_hold, cancelled=True)
+            accounting.tenant_governance.complete(self.context.reservation, {}, cancelled=True,
+                                                 authority=self.context.governance_store)
         status = self.response.status_code if self.response is not None else getattr(self.error, "status_code", 502)
         accounting._record(self.context, status, self.usage, None)
 
@@ -292,7 +309,7 @@ class _Attempt:
         g.managed_idempotency_claim = None
         g.gateway_admission_lease = None
         g.hedged_attempt = self
-        with isolated_managed_attempt(turn) as local_turn, activate_scope(affinity):
+        with isolated_managed_attempt(turn, self.context.reservation) as local_turn, activate_scope(affinity):
             try:
                 self.deadline.check()
                 if self.stopped.is_set():
@@ -449,7 +466,9 @@ class _Race:
                 if attempt.thread is not None and attempt.started:
                     attempt.thread.join()
                 elif not attempt.started:
-                    BudgetService.settle(attempt.context.reservation, before_dispatch=True)
+                    accounting.credits_admission.release(attempt.context.credit_hold)
+                    BudgetService.settle(attempt.context.reservation, before_dispatch=True,
+                                         governance_store=attempt.context.governance_store)
                     if attempt.lease is not None:
                         attempt.lease.release()
         if selected.error is not None:

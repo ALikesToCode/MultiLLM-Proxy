@@ -67,6 +67,16 @@ def integer(value, *, nonnegative=False):
     return value
 
 
+def enforcement(env: Mapping | None = None) -> str:
+    values = os.environ if env is None else env
+    raw = values.get('CREDITS_ENFORCEMENT', '')
+    mode = raw.strip().lower() if isinstance(raw, str) else 'invalid'
+    if mode not in {'', 'off', 'funded', 'all'}:
+        _warn('CREDITS_ENFORCEMENT')
+        mode = 'off'
+    return (mode or 'off') if enabled(values) else 'off'
+
+
 def label(value):
     if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_:.\-]{1,128}', value):
         raise CreditsError('invalid_credits_request', 400)
@@ -105,6 +115,8 @@ def request_fields(owner, kind, amount_microusd, operation_id, revision, *, scop
     for value in (scoped_id, reference, actor):
         if value is not None:
             label(value)
+    if actor is not None and actor.startswith('processor:'):
+        raise CreditsError('invalid_credits_request', 400)
     if kind in {'reserve', 'commit', 'release'}:
         label(scoped_id)
         integer(amount_microusd, nonnegative=True)
@@ -130,6 +142,27 @@ def request_fields(owner, kind, amount_microusd, operation_id, revision, *, scop
     return dict(owner=owner, kind=kind, amount_microusd=amount_microusd, operation_id=operation_id,
                 revision=revision, scoped_id=scoped_id, reference=reference, tariff_revision=tariff_revision,
                 actor=actor, reason=reason, unknown=unknown)
+
+
+def payment_fields(owner, event_kind, amount_microusd, operation_id, revision, *, scoped_id, processor_id):
+    if event_kind not in {'credit', 'refund', 'dispute'} or processor_id != 'stripe':
+        raise CreditsError('invalid_credits_request', 400)
+    integer(amount_microusd, nonnegative=True)
+    label(scoped_id)
+    fields = request_fields(owner, 'credit' if event_kind == 'credit' else 'adjust',
+                            amount_microusd if event_kind == 'credit' else -amount_microusd,
+                            operation_id, revision, scoped_id=scoped_id, actor=processor_id,
+                            reason=event_kind)
+    fields['actor'] = 'processor:' + processor_id
+    return fields
+
+
+def same_payment(existing, document):
+    """Payment evidence is immutable even when a retry observes a later ledger revision."""
+    before, after = json.loads(existing), json.loads(document)
+    before.pop('revision', None)
+    after.pop('revision', None)
+    return before == after
 
 
 def deltas(fields, entries):
@@ -202,11 +235,19 @@ class SqlCreditsLedger:
 
     def append(self, owner, kind, amount_microusd, operation_id, revision, **kwargs):
         fields = request_fields(owner, kind, amount_microusd, operation_id, revision, **kwargs)
+        return self._append(fields)
+
+    def append_payment(self, owner, event_kind, amount_microusd, operation_id, revision, **kwargs):
+        return self._append(payment_fields(owner, event_kind, amount_microusd, operation_id, revision, **kwargs), payment=True)
+
+    def _append(self, fields, *, payment=False):
+        owner, kind, amount_microusd, operation_id, revision = (fields[name] for name in
+            ('owner', 'kind', 'amount_microusd', 'operation_id', 'revision'))
         document = json.dumps(fields, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
         def write(db):
             existing = db.execute('SELECT * FROM credits_entries WHERE owner=? AND operation_id=?', (owner, operation_id)).fetchone()
             if existing:
-                if existing['document'] != document:
+                if existing['document'] != document and not (payment and same_payment(existing['document'], document)):
                     raise CreditsError('credits_conflict', 409)
                 return public_entry(existing)
             row = db.execute('SELECT * FROM credits_balances WHERE owner=?', (owner,)).fetchone()
@@ -221,7 +262,7 @@ class SqlCreditsLedger:
             integer(revision + 1, nonnegative=True)
             available = balance + bd - held - hd
             reservation = kind == 'reserve' and not fields['unknown']
-            enforced_spend = reservation or (kind == 'adjust' and amount_microusd < 0)
+            enforced_spend = reservation or (kind == 'adjust' and amount_microusd < 0 and not payment)
             if enforced_spend and (available < 0 or (reservation and balance - held <= 0)):
                 raise CreditsError('credits_insufficient', 409)
             db.execute('INSERT OR IGNORE INTO credits_balances(owner) VALUES (?)', (owner,))
@@ -284,6 +325,11 @@ class D1CreditsLedger:
         fields = request_fields(owner, kind, amount_microusd, operation_id, revision, **kwargs)
         return self._call('append', **fields)
 
+    def append_payment(self, owner, event_kind, amount_microusd, operation_id, revision, **kwargs):
+        payment_fields(owner, event_kind, amount_microusd, operation_id, revision, **kwargs)
+        return self._call('payment_append', owner=owner, event_kind=event_kind, amount_microusd=amount_microusd,
+                          operation_id=operation_id, revision=revision, **kwargs)
+
     def read(self, owner, *, cursor='0', limit=100):
         owner_id(owner)
         pagination(cursor, limit)
@@ -318,14 +364,18 @@ def _validate_entry(value):
 
 
 def _validate_private_result(operation, result, values):
-    name = 'entry' if operation == 'append' else 'summary'
+    append = operation in {'append', 'payment_append'}
+    name = 'entry' if append else 'summary'
     if set(result) != {'version', name}:
         raise CreditsError()
     value = result[name]
-    if operation == 'append':
+    if append:
         _validate_entry(value)
-        if (any(value[key] != values[key] for key in ('operation_id', 'kind', 'amount_microusd', 'scoped_id', 'tariff_revision'))
-                or value['revision'] != values['revision'] + 1):
+        expected = (payment_fields(**values) if operation == 'payment_append' else values)
+        valid_revision = (0 < value['revision'] <= values['revision'] + 1 if operation == 'payment_append'
+                          else value['revision'] == values['revision'] + 1)
+        if (any(value[key] != expected[key] for key in ('operation_id', 'kind', 'amount_microusd', 'scoped_id', 'tariff_revision'))
+                or not valid_revision):
             raise CreditsError()
         return value
     if not isinstance(value, dict) or set(value) != {'currency', 'balance_microusd', 'held_microusd', 'available_microusd', 'revision', 'entries', 'next_cursor'}:

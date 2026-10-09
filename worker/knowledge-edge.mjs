@@ -276,7 +276,8 @@ async function dispatch(env, operation, principal, payload, signal) {
     throw error;
   }
   if (decision.header) principal.secretScanHeader = decision.header;
-  const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes }, payload,
+  const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes,
+    ...(organisationsEnabled(env) && principal.tenant_context ? { tenant_context: principal.tenant_context } : {}) }, payload,
     secret_scan_mode: decision.mode, secret_scan_checked: true,
     ...(principal.retentionPolicy?.enabled ? { retention_policy: principal.retentionPolicy } : {}) });
   if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {

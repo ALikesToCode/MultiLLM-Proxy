@@ -1,6 +1,7 @@
 """Intersected workspace grants and durable multi-level monetary reservations."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -115,7 +116,8 @@ def workspace_context(user=None):
         return None
     try:
         context = collaborators().tenant_resolver(user)
-        if type(context) is not TenantContext or context.principal_id != str(user.get("username") or user.get("id") or ""):
+        from services.tenant_hierarchy import principal_id
+        if type(context) is not TenantContext or context.principal_id != principal_id(user.get("username") or user.get("id") or ""):
             raise GovernanceError("tenant_scope_denied", 403)
     except GovernanceError:
         raise
@@ -129,7 +131,12 @@ def context_dict(context):
 
 
 def membership_role(principal_id, org_id):
-    return collaborators().membership_role(principal_id, org_id)
+    try:
+        return collaborators().membership_role(principal_id, org_id)
+    except GovernanceError:
+        raise
+    except Exception:
+        raise GovernanceError() from None
 
 
 class D1GovernanceStore:
@@ -261,23 +268,23 @@ def governance_reservation(identity):
     return isinstance(identity, str) and identity.startswith("tg_")
 
 
-def dispatch(identity):
+def dispatch(identity, *, authority=None):
     if not governance_reservation(identity):
         return False
-    store().call("dispatch", id=identity)
+    (authority or store()).call("dispatch", id=identity)
     return True
 
 
-def complete(identity, row, *, before_dispatch=False, cached=False):
+def complete(identity, row, *, before_dispatch=False, cached=False, cancelled=False, authority=None):
     if not governance_reservation(identity):
         return False
     model = row.get("selected_model")
     model = model if isinstance(model, str) and re.fullmatch(r"[A-Za-z0-9._:/+@\-]{1,256}", model) else None
     cost = row.get("cost_usd")
     measured = cost is not None and row.get("cost_basis") == "usage" and not cached
-    store().call("settle", id=identity, cost=0 if before_dispatch or cached else units(cost) if measured else None,
+    (authority or store()).call("settle", id=identity, cost=0 if before_dispatch or cached or cancelled else units(cost) if measured else None,
         provider=model.split(":", 1)[0] if model and ":" in model else None, model=model,
-        price_basis="released" if before_dispatch else "cache" if cached else row.get("cost_basis"),
+        price_basis="released" if before_dispatch or cancelled else "cache" if cached else row.get("cost_basis"),
         before_dispatch=before_dispatch)
     return True
 
@@ -356,6 +363,8 @@ class SQLiteGovernanceStore:
                 return self._reserve(db, values)
             if operation in {"settle", "dispatch"}:
                 return self._settle(db, operation, values)
+            if operation == "reconcile":
+                return self._reconcile(db, values)
             if operation == "usage":
                 return self._usage(db, values)
             raise GovernanceError("invalid_governance_operation", 400)
@@ -453,6 +462,49 @@ class SQLiteGovernanceStore:
             revision=revision+1 WHERE id=?""", (state, cost, values.get("provider"), values.get("model"),
                                                values.get("price_basis"), values["id"]))
         return {"state": state}
+
+    def _reconcile(self, db, values):
+        from services.credits_ledger import context_owner
+        cost, revision, transition = values.get("cost"), values.get("revision"), values.get("transition_id")
+        if (not isinstance(values.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9_:.\-]{1,128}", values["id"])
+                or type(values.get("authorized_adjustment", False)) is not bool
+                or type(revision) is not int or not 0 <= revision < MAX_INTEGER
+                or not isinstance(transition, str) or not re.fullmatch(r"[a-f0-9]{32}", transition)
+                or cost is not None and (type(cost) is not int or not 0 <= cost < MAX_INTEGER)):
+            raise GovernanceError("invalid_governance_operation", 400)
+        if values.get("admin") is not True:
+            raise GovernanceError("admin_required", 403)
+        reason, evidence = values.get("reason"), values.get("evidence")
+        label = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+        adjustment = values.get("authorized_adjustment", False)
+        if (not isinstance(reason, str) or not re.fullmatch(label, reason)
+                or adjustment is not True and (not isinstance(evidence, str) or not re.fullmatch(label, evidence))
+                or adjustment is True and evidence is not None):
+            raise GovernanceError("reconciliation_evidence_required", 400)
+        document = json.dumps([values["id"], revision, cost, reason, evidence, adjustment], separators=(",", ":"))
+        fingerprint = "reconcile:" + hashlib.sha256(document.encode()).hexdigest()
+        row = db.execute("SELECT * FROM tenant_governance_reservations WHERE id=?", (values["id"],)).fetchone()
+        if row is None:
+            raise GovernanceError("reservation_conflict", 409)
+        previous = db.execute("SELECT actor,kind FROM tenant_governance_audit WHERE operation_id=?", (transition,)).fetchone()
+        if previous:
+            if previous["actor"] != row["id"] or previous["kind"] != fingerprint:
+                raise GovernanceError("reservation_conflict", 409)
+        elif row["revision"] != revision or row["state"] not in {"dispatched", "unknown"}:
+            raise GovernanceError("reservation_conflict", 409)
+        else:
+            db.execute("UPDATE tenant_governance_reservations SET state=?,charged=?,revision=revision+1,operation_id=? WHERE id=?",
+                       ("unknown" if cost is None else "settled", cost, transition, row["id"]))
+            db.execute("INSERT INTO tenant_governance_audit VALUES (?,?,?,?,?,?,?)",
+                       (transition, row["id"], row["org_id"], row["team_id"], revision + 1, fingerprint,
+                        datetime.now(timezone.utc).isoformat()))
+        context = TenantContext(row["principal_id"], row["org_id"], row["team_id"] or None)
+        return {"applied": previous is None, "reservation": {
+            "id": row["id"], "principal": context_owner(context), "day": row["day"], "month": row["month"],
+            "revision": revision + 1, "state": "unknown" if cost is None else "reconciled",
+            "cost_usd": None if cost is None else cost / 1_000_000, "transition_id": transition,
+            "settlement_id": row["id"], "basis": "adjustment" if adjustment else "provider",
+            "input_tokens": None, "output_tokens": None}}
 
     def _usage(self, db, values):
         context = TenantContext(**values["context"])

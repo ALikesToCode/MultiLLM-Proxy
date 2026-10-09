@@ -1091,6 +1091,17 @@ class AuthService:
         if not check_password_hash(user["api_key_hash"], api_key):
             return False
 
+        return cls.issue_dashboard_session(username, user=user)
+
+    @classmethod
+    def issue_dashboard_session(cls, username: str, *, user: Optional[Dict[str, Any]] = None) -> bool:
+        """Issue a fresh session from the account's current stored permissions."""
+        username = normalized_username(username)
+        if username is None:
+            return False
+        user = cls._load_user_by_username(username) if user is None else user
+        if not user or user.get("revoked_at") or key_controls.expired(user):
+            return False
         last_login = _utcnow()
         cls._update_login(username, last_login)
         user = cls._users[username]

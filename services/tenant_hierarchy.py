@@ -85,6 +85,11 @@ def _legacy(principal):
     return legacy_tenant(AuthorityOperation(context, "workspace", 0, "resolve"))
 
 
+def principal_id(principal):
+    """The TenantContext principal ID the tenant module uses for an account name."""
+    return _legacy(str(principal)).principal_id
+
+
 def private_call(document):
     """Reuse the bounded private transport, with one submission and no replay."""
     from services import intelligence_d1_store as transport
@@ -134,6 +139,10 @@ class TenantStore:
         if os.environ.get("INTELLIGENCE_STORAGE_BACKEND", "").strip() == "d1":
             return self._remote(operation, values)
         try:
+            # Account lookup may initialize schema on the same SQLite file.
+            # Accounts are revoked rather than removed during provisioning.
+            if operation == "member_set" and not self.principal_exists(_text(values.get("principal"))):
+                raise TenantError("principal_not_found", 404)
             path = storage_path("AUTH_DB_PATH", "auth.sqlite3")
             if not path.is_file():
                 raise TenantError("tenant_storage_unavailable", 503)
@@ -266,8 +275,6 @@ class TenantStore:
         org_id, principal, data = v["org_id"], _text(v.get("principal")), v.get("data")
         if not isinstance(data, dict) or not data or set(data) - {"role", "team_id", "status", "bind", "binding_revision"}:
             raise TenantError("invalid_request")
-        if not self.principal_exists(principal):
-            raise TenantError("principal_not_found", 404)
         row = self._one(db, "SELECT * FROM tenant_memberships WHERE org_id=? AND principal=?", (org_id, principal))
         self._cas(row, v.get("revision"))
         if row is None and db.execute("SELECT count(*) FROM tenant_memberships WHERE org_id=?", (org_id,)).fetchone()[0] >= 1000:
@@ -364,3 +371,68 @@ def tenant_context_hook():
 def verify_before_key_usage(principal):
     if enabled() and has_request_context():
         g.verified_tenant = resolve_principal(principal, store=current_app.extensions.get("tenant_store"))
+
+
+def _authority_store(store=None):
+    return store or (current_app.extensions.get("tenant_store") if has_request_context() else None) or TenantStore()
+
+
+def active_membership(principal_id, org_id, *, store=None):
+    """Read active membership and ancestors; a provisioner cannot manufacture a role."""
+    authority = _authority_store(store)
+    org = authority.request("org_get", org_id=org_id)
+    if org.get("status") != "active":
+        return None
+    members = authority.request("member_list", org_id=org_id)["members"]
+    member = next((row for row in members if row.get("status") == "active" and
+                   principal_id in {row["principal"], _legacy(row["principal"]).principal_id,
+                                    "account:" + hashlib.sha256(row["principal"].encode()).hexdigest()}), None)
+    if member and member.get("team_id") is not None:
+        teams = authority.request("team_list", org_id=org_id)["teams"]
+        if not any(row["id"] == member["team_id"] and row.get("status") == "active" for row in teams):
+            return None
+    return member
+
+
+def membership_role(principal_id, org_id, *, store=None):
+    if not enabled():
+        return None
+    member = active_membership(principal_id, org_id, store=store)
+    return member["role"] if member else None
+
+
+def tenant_authority(operation, *, store=None):
+    from services.enterprise_contract import AuthorityDenied
+    if type(operation) is not AuthorityOperation:
+        raise TypeError("AuthorityOperation required")
+    context = operation.context
+    if context.org_id is None:
+        return legacy_tenant(operation)
+    if not enabled():
+        raise AuthorityDenied("tenant_scope_denied")
+    try:
+        member = active_membership(context.principal_id, context.org_id, store=store)
+        if not member or member.get("team_id") != context.team_id:
+            raise AuthorityDenied("tenant_scope_denied")
+    except TenantError as error:
+        raise AuthorityDenied(error.code) from None
+    return context
+
+
+def scim_team_authority(operation, *, scim_store, store=None):
+    """Verify the bearer-scoped organisation and SCIM members before the atomic team write."""
+    from services.enterprise_contract import AuthorityDenied
+    if type(operation) is not AuthorityOperation or not enabled() or operation.context.org_id is None:
+        raise AuthorityDenied("tenant_scope_denied")
+    context = operation.context
+    try:
+        org = _authority_store(store).request("org_get", org_id=context.org_id)
+        if org.get("status") != "active":
+            raise AuthorityDenied("tenant_scope_denied")
+        if context.principal_id != "scim":
+            user = scim_store.get(context.org_id, "Users", operation.scoped_id)
+            if not user or user.get("userName") != context.principal_id or user.get("active") is not True:
+                raise AuthorityDenied("tenant_scope_denied")
+    except TenantError as error:
+        raise AuthorityDenied(error.code) from None
+    return context

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { contextOwner } from "./credits-d1.mjs";
+import { integerMicroUsd, reconcileCreditsReservation } from "./credits-admission.mjs";
 /** Private governance domain: intersected grants, CAS policy and atomic quota components. */
 import { TenantContext, AuthorityOperation, legacyTenant, MAX_INTEGER } from "./enterprise-contract.mjs";
 
@@ -7,6 +10,7 @@ const FIELDS = {
   get: ["org_id", "team_id"], put: ["org_id", "team_id", "actor", "revision", "policy"],
   policies: ["context"], usage: ["context", "role", "since", "until"],
   reserve: ["id", "context", "amount", "day", "month", "key_daily", "key_monthly", "base_day", "base_month"],
+  reconcile: ["id", "revision", "cost", "transition_id", "admin", "reason", "evidence", "authorized_adjustment"],
   dispatch: ["id"], settle: ["id", "cost", "provider", "model", "price_basis", "before_dispatch"],
 };
 const SCHEMA = [
@@ -78,7 +82,16 @@ function validate(body) {
   if (op === "usage") for (const key of ["since", "until"]) {
     if (body[key] !== undefined && (typeof body[key] !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body[key]))) fail();
   }
-  if (["reserve", "dispatch", "settle"].includes(op)) opaque(body.id);
+  if (["reserve", "dispatch", "settle", "reconcile"].includes(op)) opaque(body.id);
+  if (op === "reconcile") {
+    if (body.authorized_adjustment !== undefined && typeof body.authorized_adjustment !== "boolean") fail();
+    if (!integer(body.revision) || typeof body.transition_id !== "string" || !/^[a-f0-9]{32}$/.test(body.transition_id)
+        || body.cost !== null && !integer(body.cost)) fail();
+    if (body.admin !== true) fail("admin_required", 403);
+    const label = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value) && !/[\r\n]/.test(value);
+    if (!label(body.reason) || (body.authorized_adjustment === true ? body.evidence != null : !label(body.evidence)))
+      fail("reconciliation_evidence_required");
+  }
   if (op === "reserve") {
     for (const key of ["amount", "base_day", "base_month"]) if (!integer(body[key])) fail();
     for (const key of ["key_daily", "key_monthly"]) if (body[key] !== null && !integer(body[key])) fail();
@@ -196,6 +209,36 @@ async function settle(db, body) {
   if (!results[0].results.length) fail("reservation_conflict", 409);
   return { state };
 }
+async function reconcile(db, body, now) {
+  const adjustment = body.authorized_adjustment ?? false;
+  const fingerprint = "reconcile:" + createHash("sha256").update(JSON.stringify([
+    body.id, body.revision, body.cost, body.reason, body.evidence ?? null, adjustment])).digest("hex");
+  const row = await db.prepare("SELECT * FROM tenant_governance_reservations WHERE id=?").bind(body.id).first();
+  if (!row) fail("reservation_conflict", 409);
+  const readAudit = () => db.prepare("SELECT actor,kind FROM tenant_governance_audit WHERE operation_id=?").bind(body.transition_id).first();
+  const previous = await readAudit();
+  let applied = false;
+  if (!previous) {
+    if (row.revision !== body.revision || !["dispatched", "unknown"].includes(row.state)) fail("reservation_conflict", 409);
+    const results = await batch(db, [
+      db.prepare(`UPDATE tenant_governance_reservations SET state=?,charged=?,revision=revision+1,operation_id=?
+        WHERE id=? AND revision=? AND state IN ('dispatched','unknown')
+        AND NOT EXISTS (SELECT 1 FROM tenant_governance_audit WHERE operation_id=?) RETURNING id`)
+        .bind(body.cost === null ? "unknown" : "settled", body.cost, body.transition_id, body.id, body.revision, body.transition_id),
+      db.prepare(`INSERT OR IGNORE INTO tenant_governance_audit
+        SELECT ?,id,org_id,team_id,revision,?,? FROM tenant_governance_reservations WHERE id=? AND operation_id=?`)
+        .bind(body.transition_id, fingerprint, new Date(now).toISOString(), body.id, body.transition_id),
+    ]);
+    applied = results[0].results.length === 1;
+  }
+  const audit = previous ?? await readAudit();
+  if (audit?.actor !== body.id || audit?.kind !== fingerprint) fail("reservation_conflict", 409);
+  const principal = contextOwner(new TenantContext({ principal_id: row.principal_id, org_id: row.org_id, team_id: row.team_id || null }));
+  return { applied, reservation: { id: body.id, principal, day: row.day, month: row.month, revision: body.revision + 1,
+    state: body.cost === null ? "unknown" : "reconciled", cost_usd: body.cost === null ? null : body.cost / 1_000_000,
+    transition_id: body.transition_id, settlement_id: body.id, basis: adjustment ? "adjustment" : "provider",
+    input_tokens: null, output_tokens: null } };
+}
 async function usage(db, body) {
   const c = body.context, all = permitted(body.role, "all_usage");
   const where = "org_id=? AND (?='' OR team_id=?) AND (?=1 OR principal_id=?) AND day>=? AND day<=?";
@@ -256,6 +299,10 @@ export async function handleTenantGovernanceRequest(request, env, { now = Date.n
     if (["get", "put"].includes(body.operation)) result = await admin(db, body, now());
     else if (body.operation === "policies") result = await policies(db, body.context);
     else if (body.operation === "reserve") result = await reserve(db, body, now());
+    else if (body.operation === "reconcile") {
+      result = await reconcile(db, body, now());
+      if (result.reservation.cost_usd !== null) await reconcileCreditsReservation(env, result.reservation, body.transition_id);
+    }
     else if (body.operation === "usage") result = await usage(db, body);
     else result = await settle(db, body);
     return reply(result);
@@ -275,7 +322,7 @@ function defaultTenantResolver(event) {
 }
 /** Named native hooks consume trusted admission metadata; no caller header selects tenancy. */
 export function createGovernanceLifecycle(env, { call, tenant_resolver = defaultTenantResolver }) {
-  let id, finished = false;
+  let id, finished = false, authorised = false;
   const rpc = async (operation, values) => {
     const result = await call({ version: 1, operation, ...values });
     const failure = result.error ?? (result.decision?.allowed === false ? result.decision : null);
@@ -283,16 +330,25 @@ export function createGovernanceLifecycle(env, { call, tenant_resolver = default
       { ...(failure.level ? { level: failure.level } : {}), ...(failure.period ? { period: failure.period } : {}) });
     return result;
   };
+  const authorize = async event => {
+    if (!governanceEnabled(env) || authorised) return;
+    const context = await tenant_resolver(event);
+    if (!(context instanceof TenantContext)) fail("tenant_scope_denied", 403);
+    if (context.org_id === null) return;
+    const rows = (await rpc("policies", { context })).policies;
+    if (!intersectGrants(event.key_allowed === true, event.model, rows)) fail("model_not_allowed", 403);
+    for (const tool of event.tools ?? []) if (!intersectGrants(event.key_tools?.includes(tool) === true, tool, rows, "tools")) fail("tool_not_allowed", 403);
+    authorised = true;
+  };
   return {
+    authorize,
     async admit(event) {
-      if (!governanceEnabled(env)) return;
+      if (!governanceEnabled(env) || id) return;
       const context = await tenant_resolver(event);
       if (!(context instanceof TenantContext)) fail("tenant_scope_denied", 403);
       if (context.org_id === null) return;
-      const rows = (await rpc("policies", { context })).policies;
-      if (!intersectGrants(event.key_allowed === true, event.model, rows)) fail("model_not_allowed", 403);
-      for (const tool of event.tools ?? []) if (!intersectGrants(event.key_tools?.includes(tool) === true, tool, rows, "tools")) fail("tool_not_allowed", 403);
-      const candidateId = `tg_${crypto.randomUUID().replaceAll("-", "")}`;
+      await authorize(event);
+      const candidateId = event.scoped_id ?? `tg_${crypto.randomUUID().replaceAll("-", "")}`;
       const day = new Date().toISOString().slice(0, 10);
       await rpc("reserve", { id: candidateId, context, amount: event.amount, day, month: day.slice(0, 7),
         key_daily: event.key_daily ?? null, key_monthly: event.key_monthly ?? null,
@@ -302,11 +358,11 @@ export function createGovernanceLifecycle(env, { call, tenant_resolver = default
     async before_dispatch() { if (id && !finished) await rpc("dispatch", { id }); },
     async finalize(event) {
       if (!id || finished) return;
-      const row = event.usage ?? event, model = row.selected_model ?? null;
+      const row = event.usage ?? event, model = row.selected_model ?? (row.model ? `${row.provider}:${row.model}` : null);
       const cached = row.cost_basis === "cache";
       const released = event.handedOff === false;
       const measured = !event.cancellationOutcome?.ambiguous && row.cost_basis === "usage";
-      await rpc("settle", { id, cost: released || cached ? 0 : measured ? row.cost_micro_usd ?? null : null,
+      await rpc("settle", { id, cost: released || cached ? 0 : measured ? row.cost_micro_usd ?? (row.cost_usd == null ? null : integerMicroUsd(row.cost_usd)) : null,
         provider: model?.includes(":") ? model.split(":", 1)[0] : null, model,
         price_basis: cached ? "cache" : released ? "released" : row.cost_basis ?? null, before_dispatch: released && !cached });
       finished = true;

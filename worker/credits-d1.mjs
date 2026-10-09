@@ -36,6 +36,18 @@ export function creditsEnabled(env = {}, warn = message => console.warn(message)
   return true;
 }
 
+export function creditsEnforcement(env = {}, warn = message => console.warn(message)) {
+  const raw = env.CREDITS_ENFORCEMENT;
+  let mode = raw === undefined ? '' : typeof raw === 'string' ? raw.trim().toLowerCase() : 'invalid';
+  if (!['', 'off', 'funded', 'all'].includes(mode)) {
+    if (!warned.has('CREDITS_ENFORCEMENT')) {
+      warned.add('CREDITS_ENFORCEMENT'); warn('Invalid CREDITS_ENFORCEMENT; credits disabled');
+    }
+    mode = 'off';
+  }
+  return creditsEnabled(env, warn) ? mode || 'off' : 'off';
+}
+
 function integer(value, nonnegative = false) {
   if (!Number.isSafeInteger(value) || Math.abs(value) > MAX_AMOUNT || nonnegative && value < 0) {
     throw new CreditsError('invalid_credits_request', 400);
@@ -73,6 +85,7 @@ function requestFields(data) {
     throw new CreditsError('invalid_credits_request', 400);
   }
   for (const value of [scoped_id, reference, actor]) if (value !== null) label(value);
+  if (actor?.startsWith('processor:')) throw new CreditsError('invalid_credits_request', 400);
   if (['reserve', 'commit', 'release'].includes(kind)) { label(scoped_id); integer(amount_microusd, true); }
   if (['reserve', 'commit'].includes(kind) && !unknown) {
     if (tariff_revision === null) throw new CreditsError('credits_unpriced');
@@ -128,14 +141,34 @@ async function schema(db) {
 }
 
 export async function appendCredit(db, data) {
-  const fields = requestFields(data);
+  return appendFields(db, requestFields(data));
+}
+
+export async function appendPaymentCredit(db, data) {
+  const { owner, event_kind, amount_microusd, operation_id, revision, scoped_id, processor_id } = data;
+  if (!['credit', 'refund', 'dispute'].includes(event_kind) || processor_id !== 'stripe') {
+    throw new CreditsError('invalid_credits_request', 400);
+  }
+  integer(amount_microusd, true); label(scoped_id);
+  const fields = requestFields({ owner, kind: event_kind === 'credit' ? 'credit' : 'adjust',
+    amount_microusd: event_kind === 'credit' ? amount_microusd : -amount_microusd,
+    operation_id, revision, scoped_id, actor: processor_id, reason: event_kind });
+  fields.actor = `processor:${processor_id}`;
+  return appendFields(db, fields, true);
+}
+
+async function appendFields(db, fields, payment = false) {
   const document = documentFor(fields);
   try {
     await schema(db);
     const find = () => db.prepare('SELECT * FROM credits_entries WHERE owner=? AND operation_id=?')
       .bind(fields.owner, fields.operation_id).first();
     const replay = row => {
-      if (row.document !== document) throw new CreditsError('credits_conflict', 409);
+      if (row.document !== document) {
+        const prior = JSON.parse(row.document), current = JSON.parse(document);
+        delete prior.revision; delete current.revision;
+        if (!payment || documentFor(prior) !== documentFor(current)) throw new CreditsError('credits_conflict', 409);
+      }
       return publicEntry(row);
     };
     const existing = await find();
@@ -153,7 +186,7 @@ export async function appendCredit(db, data) {
     integer(balance + bd); integer(held + hd, true); integer(revision + 1, true);
     const available = balance + bd - held - hd;
     const reservation = fields.kind === 'reserve' && !fields.unknown;
-    const enforcedSpend = reservation || (fields.kind === 'adjust' && fields.amount_microusd < 0);
+    const enforcedSpend = reservation || (fields.kind === 'adjust' && fields.amount_microusd < 0 && !payment);
     if (enforcedSpend && (available < 0 || (reservation && balance - held <= 0))) {
       throw new CreditsError('credits_insufficient', 409);
     }
@@ -236,15 +269,17 @@ export async function handleCreditsRequest(request, env) {
   try {
     if (request.method !== 'POST') return reply({ error: { code: 'method_not_allowed' } }, 405);
     const body = await boundedBody(request);
-    if (!body || typeof body !== 'object' || Array.isArray(body) || body.version !== 1 || !['append', 'read'].includes(body.operation)) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || body.version !== 1 || !['append', 'payment_append', 'read'].includes(body.operation)) {
       throw new CreditsError('invalid_credits_request', 400);
     }
-    const required = body.operation === 'append' ? ['owner', 'kind', 'amount_microusd', 'operation_id', 'revision'] : ['owner'];
-    const optional = body.operation === 'append' ? ['scoped_id', 'reference', 'tariff_revision', 'actor', 'reason', 'unknown'] : ['cursor', 'limit'];
+    const required = body.operation === 'payment_append' ? ['owner', 'event_kind', 'amount_microusd', 'operation_id', 'revision', 'scoped_id', 'processor_id']
+      : body.operation === 'append' ? ['owner', 'kind', 'amount_microusd', 'operation_id', 'revision'] : ['owner'];
+    const optional = body.operation === 'payment_append' ? [] : body.operation === 'append' ? ['scoped_id', 'reference', 'tariff_revision', 'actor', 'reason', 'unknown'] : ['cursor', 'limit'];
     if (required.some(key => !(key in body)) || Object.keys(body).some(key => !['version', 'operation', ...required, ...optional].includes(key))) {
       throw new CreditsError('invalid_credits_request', 400);
     }
     const db = env.INTELLIGENCE_DB;
+    if (body.operation === 'payment_append') return reply({ entry: await appendPaymentCredit(db, body) });
     return body.operation === 'append' ? reply({ entry: await appendCredit(db, body) })
       : reply({ summary: await readCredits(db, body.owner, body) });
   } catch (error) {

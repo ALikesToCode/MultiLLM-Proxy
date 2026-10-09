@@ -205,6 +205,8 @@ class SamlStore:
         try:
             body = {"version": 1, "operation": operation, **values}
             if self._call is None:
+                if os.environ.get("INTELLIGENCE_STORAGE_BACKEND", "").strip().lower() != "d1":
+                    raise SamlError("saml_storage_unavailable", 503)
                 from services.intelligence_d1_store import request_private_intelligence
                 result = request_private_intelligence(body, endpoint=PRIVATE_ENDPOINT)
             else:
@@ -226,8 +228,12 @@ def lookup_gateway_account(account: str) -> dict | None:
 
 
 def issue_dashboard_session(account: str, context: TenantContext) -> bool:
-    """An explicit session collaborator is required when no standalone issuer exists."""
-    raise SamlError("saml_session_unavailable", 503)
+    """Use the password-login session issuer after verifying the linked account scope."""
+    from services.auth_service import AuthService
+    principal = account if OPAQUE.fullmatch(account) else "account:" + digest(account)
+    if type(context) is not TenantContext or context.principal_id != principal:
+        raise SamlError("saml_identity_denied", 403)
+    return AuthService.issue_dashboard_session(account)
 
 
 def _active_account(record: object, account: str, now: int) -> bool:

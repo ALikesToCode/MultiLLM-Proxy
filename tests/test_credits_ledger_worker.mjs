@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
-import { handleCreditsRequest, appendCredit, readCredits, registerCreditAuthority, creditsEnabled, contextOwner } from '../worker/credits-d1.mjs';
+import { handleCreditsRequest, appendCredit, appendPaymentCredit, readCredits, registerCreditAuthority, creditsEnabled, creditsEnforcement, contextOwner } from '../worker/credits-d1.mjs';
 import { AuthorityOperation, TenantContext, callAuthority, registerEnterpriseAdapters } from '../worker/enterprise-contract.mjs';
 
 const migration = readFileSync(new URL('../intelligence-migrations/0037_credits_ledger.sql', import.meta.url), 'utf8');
@@ -50,7 +50,7 @@ test('shared integer, insufficient and duplicate operation vectors', async t => 
   const { call } = database(t);
   for (const vector of vectors) {
     const request = vector.request ?? entry('credit', vector.invalid_amount, 'bad', 0);
-    const result = await call({ operation: 'append', ...request });
+    const result = await call({ operation: vector.operation ?? 'append', ...request });
     if ('invalid_amount' in vector) assert.equal(result.status, 400);
     else if (vector.error) assert.equal(result.error.code, vector.error);
     else assert.equal(result.entry.revision, vector.revision);
@@ -216,11 +216,25 @@ test('migration rehearsal, incomplete columns, audit and bounded pagination', as
 
 test('Python and D1 return identical ledger vectors', async t => {
   const { db } = database(t);
-  for (const vector of vectors.filter(vector => vector.request && !vector.error)) await appendCredit(db, vector.request);
-  const code = `import os,sys,json,tempfile\nfrom pathlib import Path\nsys.path.insert(0,os.getcwd())\nfrom services.credits_ledger import SqlCreditsLedger\ntext=Path('docs/credits-ledger.md').read_text()\nvectors=json.loads(text.split('\x60\x60\x60json\\n',1)[1].split('\x60\x60\x60',1)[0])\nwith tempfile.TemporaryDirectory() as d:\n store=SqlCreditsLedger(Path(d)/'credits.sqlite3',initialize=True)\n for v in vectors:\n  if 'request' in v and not v.get('error'): store.append(**v['request'])\n print(json.dumps(store.read('alice')))\n`;
+  for (const vector of vectors.filter(vector => vector.request && !vector.error)) {
+    await (vector.operation === 'payment_append' ? appendPaymentCredit : appendCredit)(db, vector.request);
+  }
+  const code = `import os,sys,json,tempfile\nfrom pathlib import Path\nsys.path.insert(0,os.getcwd())\nfrom services.credits_ledger import SqlCreditsLedger\ntext=Path('docs/credits-ledger.md').read_text()\nvectors=json.loads(text.split('\x60\x60\x60json\\n',1)[1].split('\x60\x60\x60',1)[0])\nwith tempfile.TemporaryDirectory() as d:\n store=SqlCreditsLedger(Path(d)/'credits.sqlite3',initialize=True)\n for v in vectors:\n  if 'request' in v and not v.get('error'): (store.append_payment if v.get('operation') == 'payment_append' else store.append)(**v['request'])\n print(json.dumps(store.read('alice')))\n`;
   const python = spawnSync('/home/mysterious/storage/github/MultiLLM-Proxy/.venv/bin/python', ['-I', '-c', code], {
     cwd: new URL('..', import.meta.url), encoding: 'utf8', timeout: 10000,
   });
   assert.equal(python.status, 0, python.stderr);
   assert.deepEqual(await readCredits(db, 'alice'), JSON.parse(python.stdout));
+});
+
+ test('enforcement parser is feature-gated and warns once without values', () => {
+  const warnings = [];
+  const warn = value => warnings.push(value);
+  for (const value of ['', 'off', 'funded', 'all', ' ALL ']) {
+    assert.equal(creditsEnforcement({ CREDITS_ENABLED: 'true', CREDITS_ENFORCEMENT: value }, warn), value.trim().toLowerCase() || 'off');
+  }
+  assert.equal(creditsEnforcement({ CREDITS_ENFORCEMENT: 'all' }, warn), 'off');
+  for (let n = 0; n < 2; n++) assert.equal(creditsEnforcement({ CREDITS_ENABLED: 'true', CREDITS_ENFORCEMENT: 'private-invalid' }, warn), 'off');
+  assert.equal(warnings.length, 1);
+  assert.ok(!warnings[0].includes('private-invalid'));
 });
