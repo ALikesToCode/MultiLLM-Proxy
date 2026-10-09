@@ -80,3 +80,8 @@ def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, securi
 
     for callback in callbacks:
         callback(app)
+
+    from routes.alerts import register_alert_routes
+    from services.gateway_alerts import observe
+    register_alert_routes(app)
+    app.extensions["gateway_alert_observer"] = observe
