@@ -6,6 +6,25 @@ from services.auth_service import AuthService
 from services.config_revision_sync import configure_sync, load_settings, supported_settings
 from services.provider_catalog_refresh import refresh_provider_catalog_revision
 
+AUTHENTICATED_HOOK_ORDER = (
+    "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
+    "responses_state_hook", "generation_deadline_hook", "idempotency_request_hook", "admit",
+)
+
+
+def order_authenticated_hooks(app):
+    """Keep policy boundaries independent of registrar invocation order."""
+    positions = {name: position for position, name in enumerate(AUTHENTICATED_HOOK_ORDER)}
+    app.extensions.setdefault("gateway_after_authentication", []).sort(
+        key=lambda hook: positions.get(hook.__name__, len(positions)))
+
+
+def register_authenticated_hook(app, hook):
+    hooks = app.extensions.setdefault("gateway_after_authentication", [])
+    if not any(existing.__name__ == hook.__name__ for existing in hooks):
+        hooks.append(hook)
+    order_authenticated_hooks(app)
+
 
 def after_authentication():
     """Run static post-authentication collaborators once before admission and dispatch."""
@@ -21,7 +40,7 @@ def after_authentication():
 
 
 def register_retention(app):
-    app.extensions.setdefault("gateway_after_authentication", []).append(request_policy_hook)
+    register_authenticated_hook(app, request_policy_hook)
 
 
 def request_policy_hook():
@@ -46,11 +65,35 @@ def register_hosted_responses(app, *, csrf=None):
     register_responses_state(app, csrf or app.extensions.get("csrf") or CSRFProtect())
 
 
+def managed_generation_request():
+    """Only gateway protocol views, never provider-prefixed passthrough."""
+    if request.method != "POST":
+        return False
+    if request.path in {"/v1/chat/completions", "/v1/messages", "/v1/responses",
+                        "/intelligence/v1/chat/completions"}:
+        return True
+    return False
+
+
+def register_injection_decision(app):
+    from services.prompt_injection_detection import register_prompt_injection
+    # No persisted route injection policy exists; key controls are supplied by
+    # the detector from the authenticated principal. The operator policy is the default.
+    register_prompt_injection(app, is_managed=managed_generation_request, route_policy=lambda: None)
+
+
+def register_batch_spillover(app):
+    from routes.gateway_batches import spillover_hook
+    register_authenticated_hook(app, spillover_hook)
+
+
 def gateway_callbacks(*, csrf=None):
     from functools import partial
     from middleware.admission import register_admission
     from middleware.rate_limit_headers import register_rate_limit_headers
-    return (register_retention, partial(register_hosted_responses, csrf=csrf), register_deadline, register_managed_idempotency,
+    from services.pii_redaction import register_pii_redaction
+    return (register_retention, register_injection_decision, register_batch_spillover, register_pii_redaction,
+            partial(register_hosted_responses, csrf=csrf), register_deadline, register_managed_idempotency,
             register_admission, register_cooldown_errors, register_rate_limit_headers)
 
 
@@ -88,12 +131,16 @@ def managed_policy_revision(payload):
 
 
 def register_managed_idempotency(app):
+    if app.extensions.get("gateway_managed_idempotency_registered"):
+        return
     from middleware.idempotency import register_idempotency
     from services.idempotency_store import IdempotencyStore
     register_idempotency(app, store=IdempotencyStore(), policy_revision=managed_policy_revision)
     from routes.responses_state import defer_hosted_idempotency
     finalizers = app.after_request_funcs[None]
-    finalizers[-1] = defer_hosted_idempotency(finalizers[-1])
+    finalizers[:] = [defer_hosted_idempotency(finalizer)
+                    if finalizer.__name__ == "finalize_managed_failure" else finalizer for finalizer in finalizers]
+    app.extensions["gateway_managed_idempotency_registered"] = True
 
 
 def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, security_refreshers=None):
@@ -132,6 +179,7 @@ def register_gateway_extensions(app, *, callbacks=(), revision_sync=None, securi
 
     for callback in callbacks:
         callback(app)
+    order_authenticated_hooks(app)
 
     from routes.alerts import register_alert_routes
     from services.gateway_alerts import observe

@@ -231,13 +231,17 @@ def pii_request_hook():
 
 
 def register_pii_redaction(app):
-    app.extensions.setdefault("gateway_after_authentication", []).append(pii_request_hook)
+    if app.extensions.get("pii_redaction_registered"):
+        return
+    from services.gateway_extensions import register_authenticated_hook
+    register_authenticated_hook(app, pii_request_hook)
+    app.extensions["pii_redaction_registered"] = True
 
     @app.after_request
     def finish_pii(response):
         from services.pii_stream import rehydrate_response
         context = current_context()
-        if context is not None and not context.closed:
+        if context is not None and not context.closed and not getattr(response, "multillm_pii_rehydrated", False):
             return rehydrate_response(response, context)
         return response
 

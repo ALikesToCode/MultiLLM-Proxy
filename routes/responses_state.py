@@ -181,6 +181,8 @@ def finish_hosted_response(response):
 
 
 def register_responses_state(app, csrf):
+    if app.extensions.get("responses_state_registered"):
+        return
     original_routes = Map([rule.empty() for rule in app.url_map.iter_rules()],
                           default_subdomain=app.url_map.default_subdomain,
                           host_matching=app.url_map.host_matching,
@@ -188,7 +190,9 @@ def register_responses_state(app, csrf):
                           merge_slashes=app.url_map.merge_slashes,
                           converters=app.url_map.converters)
     app.extensions["responses_state_store"] = state.ResponsesStateStore()
-    app.extensions.setdefault("gateway_after_authentication", []).append(responses_state_hook)
+    from services.gateway_extensions import register_authenticated_hook
+    register_authenticated_hook(app, responses_state_hook)
+    app.extensions["responses_state_registered"] = True
     app.after_request(finish_hosted_response)
 
     @app.route("/v1/responses/<response_id>", methods=["GET", "DELETE"])

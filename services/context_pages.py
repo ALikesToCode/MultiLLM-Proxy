@@ -273,3 +273,131 @@ class ContextPageService:
         if not isinstance(arguments, dict) or set(arguments) != {"page_id"}:
             raise ContextPageError("invalid_context_retrieve", 400)
         return self.retrieve(page_id=arguments["page_id"], **authority)
+
+
+def managed_authority():
+    """Resolve current request authority for dispatch and MCP retrieval."""
+    from flask import current_app, g, request
+    from route_helpers import request_api_key
+    from routes.knowledge_management import permits
+    from services.canary_traffic import authenticated_principal, session_identifier
+    from services.key_controls import model_patterns
+    from services.retention_policy import request_policy
+    from services.secret_firewall import scan_mode
+
+    authorize = current_app.extensions.get("context_page_authorize")
+    if authorize is not None:
+        authority = authorize()
+        if not isinstance(authority, dict) or not {"scope", "retention_policy", "granted"} <= authority.keys():
+            raise ContextPageError("context_paging_authority_unavailable")
+        return authority
+    user = getattr(g, "authenticated_user", None) or {}
+    principal = authenticated_principal(user)
+    session = session_identifier(request.get_json(silent=True) or {}, user)
+    key = request_api_key()
+    if not principal or not session or not key:
+        raise ContextPageError("context_paging_authority_unavailable")
+    retention = request_policy()
+    revision = json.dumps({"grants": user.get("scopes"), "models": model_patterns(user),
+                           "secret": scan_mode(user), "retention": retention.revision},
+                          sort_keys=True, separators=(",", ":"))
+    scope = PageScope(hashlib.sha256((principal + "\0" + key).encode()).hexdigest(),
+                      hashlib.sha256(session.encode()).hexdigest(), hashlib.sha256(revision.encode()).hexdigest())
+    return {"scope": scope, "retention_policy": retention, "granted": permits(user, "chat")}
+
+
+def managed_service():
+    from flask import current_app
+    service = current_app.extensions.get("context_page_service")
+    if service is None:
+        raise ContextPageError("context_paging_unavailable")
+    return service
+
+
+def prepare_managed_paging(payload):
+    """Strip the gateway capability only in the enabled managed pipeline."""
+    from services.retention_policy import request_policy
+    if not paging_enabled():
+        return payload, None
+    capabilities = payload.get("capabilities")
+    cleaned = {key: value for key, value in payload.items() if key != "capabilities"}
+    retention = request_policy()
+    if not capability_enabled(capabilities) or not retention.allows_content:
+        return cleaned, None
+    authority = managed_authority()
+    if authority["granted"] is not True:
+        raise ContextPageError("context_page_forbidden", 403)
+    return cleaned, PagingRequest(managed_service(), authority["scope"], list(capabilities), retention, True)
+
+
+def _page_managed_candidate(payload, source="chat", model=None):
+    """Page against the selected candidate before any lossy optimization."""
+    from services.managed_turn import current_turn
+    from services.protocol_translation import CHAT, translate_request
+    from services.rate_limit_service import RateLimitService
+    turn = current_turn()
+    if turn is None or turn.paging is None or not turn.paging.eligible():
+        return payload
+    # Nested protocol dispatches share one turn and reuse the paged view.
+    if turn.pages and any(tool.get("function", {}).get("name", tool.get("name")) == "multillm_context_retrieve"
+           for tool in payload.get("tools", []) if isinstance(tool, dict)):
+        return payload
+    candidate = model or payload.get("model")
+    if not isinstance(candidate, str) or ":" not in candidate or candidate.startswith(("auto:", "free:", "cascade:")):
+        return payload
+    body = {key: value for key, value in payload.items() if key not in {"routing", "session_tier", "optimization"}}
+    pivot = translate_request(body, source, CHAT) if source != CHAT else body
+    provider = candidate.split(":", 1)[0]
+    limit = RateLimitService._provider_limit(provider, "MAX_PROMPT_TOKENS", 128_000)
+    output = pivot.get("max_completion_tokens", pivot.get("max_tokens", 1024))
+    if type(output) is not int or output <= 0:
+        raise ContextPageError("invalid_context_messages", 400)
+    from services.context_optimizer import parse_optimization_options
+    options = parse_optimization_options(payload.get("optimization"), default_target_tokens=max(1, limit - output - 64))
+    target = min(options.target_input_tokens, limit - output - 64)
+    paging = turn.paging
+    cache_key = json.dumps([candidate, source, pivot, target], sort_keys=True, separators=(",", ":"))
+    result = turn.paged_candidates.get(cache_key)
+    if result is None:
+        result = paging.service.page_payload(pivot, scope=paging.scope, capabilities=paging.capabilities,
+            target_input_tokens=target, retention_policy=paging.retention_policy, managed=True,
+            protected_indices=options.preserve_message_indices)
+        turn.paged_candidates[cache_key] = result
+    for page in result.pages:
+        if page not in turn.pages:
+            turn.pages.append(page)
+    if not result.pages:
+        return payload
+    if source == CHAT:
+        return dict(result.payload)
+    translated = translate_request(result.payload, CHAT, source)
+    return {**payload, **translated}
+
+
+def expose_managed_pages(response, turn, *, complete):
+    """Expose retrieval handles only on classified complete JSON responses."""
+    if not turn.pages or not complete or response.mimetype != "application/json":
+        return response
+    body = json.loads(response.get_data())
+    if isinstance(body, dict):
+        body["context_pages"] = turn.pages
+        response.set_data(json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+    return response
+
+
+def paging_cache_bypass(payload):
+    return paging_enabled() and isinstance(payload, dict) and capability_enabled(payload.get("capabilities"))
+
+
+def managed_paging_eligible():
+    from services.managed_turn import current_turn
+    turn = current_turn()
+    return turn is not None and turn.paging is not None and turn.paging.eligible()
+
+
+def page_managed_candidate(payload, source="chat", model=None):
+    try:
+        return _page_managed_candidate(payload, source, model)
+    except ContextPageError as error:
+        from error_handlers import APIError
+        raise APIError("Context paging could not be completed.", error.status, {"error": error.code}) from error

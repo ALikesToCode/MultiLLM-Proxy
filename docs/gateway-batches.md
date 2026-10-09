@@ -45,6 +45,8 @@ The scheduler sends the Container an expiring, signed owner capability and an it
 
 Measured spend replaces each known hold. Missing usage, an uncertain provider result, lost transport, or an expired dispatched lease produces `outcome_unknown` and preserves the hold. That item is never dispatched again. Result-storage failures also retain the hold conservatively. Once measured plus held spend reaches the batch budget, further items fail `budget_exhausted`; an item that would exceed the remaining budget is also refused before dispatch. A pricing increase beyond its reserved estimate fails before dispatch. Finalization uses durable checkpoints so output assembly can continue after a scheduler interruption.
 
+Batch items cannot request context paging: with paging on, an item that sends the `multillm_context_retrieve` capability fails with 400 `context_paging_unsupported` before dispatch, because page handles belong to the caller's API key and stored work never holds that key.
+
 Zero-content retention rejects upload, batch creation and spillover with 400 `retention_conflict`. Current retention is checked again before executing stored work. Content lives only under the R2 `batches/` prefix; D1 stores ownership, opaque signing capability, control identifiers, status, spend, leases and content pointers. Scheduler warnings omit prompts, completions, credentials and transport details.
 
 ## Explicit asynchronous submission

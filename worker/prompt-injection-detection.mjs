@@ -1,4 +1,5 @@
 /** Deterministic metadata-only signals for explicit managed request boundaries. */
+import { boundedBody } from "./control-users-d1.mjs";
 export const INJECTION_HEADER = "X-MultiLLM-Injection-Action";
 export const MAX_INJECTION_BYTES = 1048576;
 export const MAX_INJECTION_FINDINGS = 256;
@@ -115,4 +116,16 @@ export async function recordPromptInjection(decision) {
   if (!decision?.action) return;
   const detail = { kind: "prompt_injection", mode: decision.mode, action: decision.action, ...decision.report };
   console.info("prompt_injection", detail);
+}
+
+/** The route supplies policies from its verified authority, never caller headers. */
+export async function prepareNativePromptInjection(request, env, authority) {
+  const policies = [authority.principal?.prompt_injection_policy, authority.promptInjectionPolicy];
+  if (resolveInjectionPolicy(env, { policies }).mode === "off") return null;
+  let payload;
+  try { payload = JSON.parse(await boundedBody(request.clone(), MAX_INJECTION_BYTES)); }
+  catch { return null; }
+  const decision = evaluatePromptInjection(payload, env, { policies });
+  await recordPromptInjection(decision);
+  return decision;
 }

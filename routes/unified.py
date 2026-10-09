@@ -52,7 +52,7 @@ from routes.tool_repair import with_chat_tool_repair, with_native_tool_repair
 from routes.unified_messages import register_unified_messages_routes
 from routes.media_edits import dispatch_reference_generation, has_reference_images
 from routes.unified_transport import send_configured_unified_provider_request
-from routes.unified_bridge import dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
+from routes.unified_bridge import _add_prompt_cache_headers, dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services import cloudflare_ai
@@ -92,6 +92,7 @@ from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.prompt_cache_affinity import affinity_auto_request, affinity_candidate
 from services.managed_turn import managed_pipeline, emit_managed_request, with_managed_idempotency, check_managed_candidate
 from services.managed_dispatch import execute_managed_attempt, observe_managed_response
+from services.context_pages import page_managed_candidate, managed_paging_eligible
 from services.responses_state import with_responses_state
 logger = logging.getLogger(__name__)
 
@@ -199,18 +200,6 @@ def _add_adaptive_context_headers(
     )
     response.headers["X-MultiLLM-Optimization-Cache-Misses"] = str(
         result.analysis_cache_misses
-    )
-    return response
-
-
-def _add_prompt_cache_headers(
-    response: Response,
-    decision: PromptCacheDecision,
-) -> Response:
-    response.headers["X-MultiLLM-Prompt-Cache"] = decision.status
-    response.headers["X-MultiLLM-Prompt-Cache-Mode"] = decision.mode
-    response.headers["X-MultiLLM-Prompt-Cache-Estimated-Tokens"] = str(
-        decision.estimated_input_tokens
     )
     return response
 
@@ -448,6 +437,7 @@ def _dispatch_unified_chat_candidate(
             app,
             payload.get("model"),
         )
+        payload = page_managed_candidate(payload, model=f"{provider}:{provider_model}")
         bridge_endpoint = chat_bridge_endpoint(provider, provider_model)
         if bridge_endpoint is not None:
             return _dispatch_bridged_chat(
@@ -478,7 +468,7 @@ def _dispatch_unified_chat_candidate(
             )
             headers_source = sanitize_nanogpt_subscription_headers(headers_source)
         adaptive_result = None
-        if adaptive_context:
+        if adaptive_context and not managed_paging_eligible():
             prompt_limit = RateLimitService._provider_limit(
                 provider,
                 "MAX_PROMPT_TOKENS",

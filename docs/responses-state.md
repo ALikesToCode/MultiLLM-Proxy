@@ -87,7 +87,8 @@ status, provider/model, parent, policy revision, expiry, body pointer, byte
 length and SHA-256; R2 bodies use the `responses-state/` prefix. The bounded
 private hop is `POST http://intelligence.internal/v1/managed-state/responses`.
 
-Zero-content retention returns 400 `retention_conflict` before dispatch for
+Zero-content retention, including request-local retention from PII redaction,
+returns 400 `retention_conflict` before dispatch for
 hosted opt-in and gateway continuation. It also forbids retrieval; explicit
 deletion remains available. Hosted storage introduces D1/R2 storage operations
 in addition to existing provider costs. No prompt or response content is logged.

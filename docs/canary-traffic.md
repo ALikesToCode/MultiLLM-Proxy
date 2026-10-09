@@ -80,12 +80,17 @@ candidate order; candidates rejected during validation are removed from the latt
 Unattempted candidates still need their normal validation if reached. Aggregate
 cohort counts retain only route/cohort/mode/count, with at most 800 counters per
 process. Counts reset on process restart and measure requests, not unique sessions.
-Native Worker dispatch supplies verified identity through `authenticatedPrincipal`
-and `sessionIdentifier`, applies `prepareCanary` before eligibility, and observes
-the resulting order through its request lifecycle. Forwarded requests use the
+Native direct Worker routes dispatch one explicitly selected provider and do not
+resolve auto routes, so they do not assign cohorts or reorder candidates. The
+Worker persists private canary policies and observes only verified cohort and
+mode metadata supplied by a routing authority. Forwarded requests use the
 Container assignment. Neither runtime stores session plaintext, principal,
 HMAC output, prompts, responses or credentials for this feature.
 
 Shadow mode has the baseline request's cost. Live mode can select a more expensive
 approved model; existing budgets still apply. Cohort counts do not establish
 quality, statistical significance, provider capabilities or exact billing.
+
+Managed request metrics retain only the canary route ID, cohort and mode. They
+contain no session or principal, and enabled canary routes bypass generation caches
+so a cached selection cannot override the current cohort or eligibility checks.

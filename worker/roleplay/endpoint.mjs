@@ -1,6 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 import { clientContextHeaders } from "../client-headers.mjs";
+import { roleplayPIIRetention, resolvePIIPolicy, PIIRedactionError } from "../pii-redaction.mjs";
+import { contextPagingEligible, pageContextMessages, ROLEPLAY_KEY_SCOPE_HEADER, ROLEPLAY_PAGE_SCOPE_HEADER,
+  withRoleplayGatewayAuthority } from "../context-pages-d1.mjs";
 import { TurnTraceJournal } from "./turn-trace.mjs";
 import { handleOperatorMemory } from "./operator-memory.mjs";
 import {
@@ -20,6 +23,7 @@ import {
 } from "./checkpoint.mjs";
 import {
   prepareRoleplayCandidates,
+  prepareRoleplayPagingCandidates,
   resolveRoleplayContextPolicy,
   shouldPreserveFullGeneration,
 } from "./capacity.mjs";
@@ -89,16 +93,17 @@ import {
 } from "./turn-runtime.mjs";
 export { isRoleplayPath, scopePublicRoleplaySessionId };
 
-export { handleRoleplayEdgeRequest } from "./edge.mjs";
+import { handleRoleplayEdgeRequest as roleplayEdgeRequest } from "./edge.mjs";
+export const handleRoleplayEdgeRequest = (request, env) => withRoleplayGatewayAuthority(request, env, roleplayEdgeRequest);
 const INTERNAL_OUTPUT_MODE_HEADER = "X-MultiLLM-Roleplay-Output-Mode";
 
-async function preparePromptInjection(payload, env) {
+async function preparePromptInjection(payload, env, record = true) {
   const mode = env.PROMPT_INJECTION_MODE;
   if (mode === undefined || mode === null || typeof mode === "string" && ["", "off"].includes(mode.trim().toLowerCase())) return null;
   // Load the fixed opt-in collaborator only when the operator enables inspection.
   const { evaluatePromptInjection, recordPromptInjection } = await import("../prompt-injection-detection.mjs");
   const decision = evaluatePromptInjection(payload, env);
-  await recordPromptInjection(decision);
+  if (record) await recordPromptInjection(decision);
   return decision;
 }
 
@@ -106,8 +111,9 @@ function applyPromptInjectionHeader(headers, decision) {
   if (decision?.action) headers.set("X-MultiLLM-Injection-Action", decision.action);
 }
 
-function injectionResponse(response, decision) {
+function injectionResponse(response, decision, noStore = false) {
   applyPromptInjectionHeader(response.headers, decision);
+  if (noStore) response.headers.set("Cache-Control", "no-store");
   return response;
 }
 
@@ -138,7 +144,8 @@ export class RoleplaySession extends DurableObject {
   }
 
   async fetch(request) {
-    const retention = resolveRoleplayRetention(this.env, request);
+    let retention = resolveRoleplayRetention(this.env, request);
+    let piiZero = false;
     await this.traces.ready;
     const pathname = new URL(request.url).pathname;
     if (pathname === "/operator/timeline" && request.method === "GET") {
@@ -161,8 +168,29 @@ export class RoleplaySession extends DurableObject {
     if (pathname !== "/turn" || request.method !== "POST") {
       return errorResponse("Method not allowed", 405, "method_not_allowed");
     }
+    if (this.env.PROMPT_INJECTION_MODE || this.env.PII_REDACTION_ENABLED) {
+      const payload = await request.clone().json().catch(() => null);
+      if (payload === null) return retentionResponse(await this.enqueueTurn(request, this.settings, retention), retention);
+      const injection = await preparePromptInjection(payload, this.env, false);
+      if (injection?.action === "blocked") {
+        await preparePromptInjection(payload, this.env);
+        return injectionResponse(errorResponse("Prompt injection heuristics exceeded the configured threshold", 422, "prompt_injection_suspected"), injection);
+      }
+      const prior = retention;
+      try { retention = await roleplayPIIRetention(payload, this.env, request.headers.get(ROLEPLAY_KEY_SCOPE_HEADER) ?? "", retention); }
+      catch (error) {
+        if (!(error instanceof PIIRedactionError)) throw error;
+        return injectionResponse(errorResponse("Required PII transformation failed before provider dispatch", 502,
+          "pii_redaction_failed"), injection, true);
+      }
+      piiZero = retention !== prior;
+    }
     if (retentionAllowsContent(retention)) this.refreshSessionAlarm();
-    return retentionResponse(await this.enqueueTurn(request, this.settings, retention), retention);
+    const completed = await this.enqueueTurn(request, this.settings, retention);
+    const piiNoStore = piiZero || Boolean(this.env.PII_REDACTION_ENABLED && completed.headers.get("Cache-Control") === "no-store");
+    const response = retentionResponse(completed, retention);
+    if (piiNoStore) response.headers.set("Cache-Control", "no-store");
+    return response;
   }
 
   async enqueueTurn(request, settings, retention = resolveRoleplayRetention(this.env, request)) {
@@ -176,6 +204,7 @@ export class RoleplaySession extends DurableObject {
           trace.metrics({ queueMs });
           const result = await this.handleTurn(turnRequest, settings, queueMs, trace, retention, tierScope);
           applyPromptInjectionHeader(result.response.headers, tierScope.injection);
+          if (tierScope.pii) result.response.headers.set("Cache-Control", "no-store");
           result.response.headers.set("X-Roleplay-Trace-ID", trace.id);
           result.completion = Promise.resolve(result.completion).then(async (completion) => {
             if (completion?.persistenceFailed) await trace.finish(false, "persistence_failed");
@@ -194,31 +223,48 @@ export class RoleplaySession extends DurableObject {
       catch (storageError) { error = storageError; }
       await trace.finish(false, error.code || "turn_failed");
       if (error instanceof RoleplayTurnError || error instanceof SessionTierError) {
-        return injectionResponse(errorResponse(error.message, error.status, error.code), tierScope.injection);
+        return injectionResponse(errorResponse(error.message, error.status, error.code), tierScope.injection, tierScope.pii);
       }
       if (error instanceof RoleplayRequestError) {
         return injectionResponse(errorResponse(
           error.message,
           error.status,
           error.status === 413 ? "request_too_large" : "invalid_request",
-        ), tierScope.injection);
+        ), tierScope.injection, tierScope.pii);
       }
       logRoleplayError("roleplay_session_turn_failed", error);
       return injectionResponse(errorResponse(
         "Roleplay turn could not be completed",
         502,
         "roleplay_unavailable",
-      ), tierScope.injection);
+      ), tierScope.injection, tierScope.pii);
     }
   }
 
   async handleTurn(request, settings, queueMs = 0, trace = null, retention = resolveRoleplayRetention(this.env, request), tierScope = { turn: null }) {
-    const stateRepository = createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates);
+    const contentRepository = createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates);
+    const piiKeyScope = request.headers.get(ROLEPLAY_KEY_SCOPE_HEADER) ?? "";
+    const piiPolicy = resolvePIIPolicy(this.env, { route: "/v1/roleplay/chat/completions", keyScope: piiKeyScope });
+    let transportChecked = !piiPolicy;
+    const onPIIDecision = decision => {
+      transportChecked = true;
+      if (decision.cacheable === false || decision.replayable === false) {
+        retention = Object.freeze({ enabled: true, mode: "zero" });
+        tierScope.pii = true;
+      }
+    };
+    const stateRepository = !piiPolicy ? contentRepository : {
+      get loaded() { return contentRepository.loaded; }, load: () => contentRepository.load(),
+      save: async (state, metadata) => {
+        if (!transportChecked) return state;
+        return createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates).save(state, metadata);
+      },
+    };
     const scanCounts = [0, 0];
     const applyScanHeader = headers => {
       if (scanCounts.some(Boolean)) headers.set(SECRET_SCAN_HEADER, `redacted=${scanCounts[0]}; observed=${scanCounts[1]}`);
     };
-    settings = { ...settings, clientHeaders: clientContextHeaders(request.headers, "opencode"), onSecretScan: decision => {
+    settings = { ...settings, piiKeyScope, onPIIDecision, clientHeaders: clientContextHeaders(request.headers, "opencode"), onSecretScan: decision => {
       if (!decision.report || decision.blocked) return;
       scanCounts[0] += decision.action === "redacted" ? decision.report.high : 0;
       scanCounts[1] += decision.report.heuristic + (decision.action === "observed" ? decision.report.high : 0);
@@ -389,6 +435,15 @@ export class RoleplaySession extends DurableObject {
           profile: {},
         };
     let conversation = mergeSessionMessages(memoryState, parsed);
+    await roleplayPIIRetention({ messages: buildRoleplayMessages(memoryState, parsed, conversation, true) },
+      this.env, piiKeyScope, retention, decision => { if (decision.redacted) onPIIDecision(decision); });
+    const paging = { env: this.env, managed: true, capabilities: parsed.contextCapabilities ?? [], retentionPolicy: retention };
+    const pagingEnabled = contextPagingEligible(paging);
+    const pagingCandidates = pagingEnabled ? await prepareRoleplayPagingCandidates(candidates, parsed.maxTokens,
+      { ...settings, hardInputTokens: contextPolicy.hardInputTokens || Infinity }, {
+      ...paging, scope: JSON.parse(request.headers.get(ROLEPLAY_PAGE_SCOPE_HEADER) ?? "null"),
+      messages: buildRoleplayMessages(memoryState, parsed, conversation, true), estimateTokens, pageMessages: pageContextMessages,
+    }) : null;
     const fullConversation = conversation;
     let generationState = memoryState;
     let persistedConversation = conversation;
@@ -402,6 +457,7 @@ export class RoleplaySession extends DurableObject {
       parsed,
       conversation,
       capacitySettings,
+      pagingCandidates?.[0]?.contextPlan,
     );
     const checkpointMessageCount = checkpoint.matched
       ? state.compactionCheckpoint?.messageCount ?? 0
@@ -563,7 +619,7 @@ export class RoleplaySession extends DurableObject {
       estimatedInputTokens,
       plan.estimatedTokens + checkpointSavedTokens,
     );
-    let generationCandidates = prepareRoleplayCandidates(
+    let generationCandidates = pagingCandidates ?? prepareRoleplayCandidates(
       candidates,
       estimatedInputTokens,
       parsed.maxTokens,
@@ -709,7 +765,7 @@ export class RoleplaySession extends DurableObject {
       response.body &&
       contentType.toLowerCase().includes("text/event-stream")
     ) {
-      responseHeaders.set("Cache-Control", "no-cache, no-transform");
+      responseHeaders.set("Cache-Control", tierScope.pii ? "no-store" : "no-cache, no-transform");
       const observed = createObservedStream({
         onProgress: (progress) => trace?.progress(progress),
         upstreamBody: tierTurn ? tierTurn.observe(response).body : response.body,

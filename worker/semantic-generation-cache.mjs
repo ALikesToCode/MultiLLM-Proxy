@@ -3,6 +3,8 @@ import { digest, MAX_BODY_BYTES, completeCacheBody } from "./generation-cache-d1
 import { SemanticCacheD1, validVector, vectorSimilarity, schemaMissing, schemaErrorResponse } from "./semantic-cache-d1.mjs";
 import { retentionAllowsContent } from "./retention-policy.mjs";
 import { cacheServedEvent } from "./exact-generation-cache.mjs";
+import { createReservationLifecycle, handleReservationsRequest, reservationSettings } from "./reservations-d1.mjs";
+import { recordNativeUsage } from "./usage-ledger-d1.mjs";
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 const MODEL = /^[a-z][a-z0-9-]*:[A-Za-z0-9@][A-Za-z0-9._:/+@-]{0,255}$/;
 const VOLATILE = /\b(?:today|tomorrow|yesterday|now|current|latest|live|weather|stock|real.?time)\b/i;
@@ -123,6 +125,7 @@ async function paidEmbedding(env, authority, request, policy, text, price, colla
     status = validVector(vector) ? 200 : 502;
     return validVector(vector) ? vector : null;
   } finally {
+    if (request.signal.aborted) status = 499;
     controller.abort(); request.signal.removeEventListener("abort", abort);
     const actual = result?.usage?.prompt_tokens ?? result?.usage?.input_tokens;
     const measured = Number.isSafeInteger(actual) && actual >= 0;
@@ -208,3 +211,75 @@ export async function prepareSemanticCache(request, env, authority, context, col
   };
 }
 export const semanticCacheServedEvent = cacheServedEvent;
+
+/** Reuse only the already authenticated direct provider transport and its origin. */
+export function createNativeSemanticCollaborators(request, env, ctx, authority, fetcher, context) {
+  let account = authority.principal;
+  const sameProvider = model => MODEL.test(model) && model.split(":", 1)[0] === authority.provider;
+  const allowed = (model, patterns) => patterns == null || (Array.isArray(patterns) ? patterns : String(patterns).split(","))
+    .some(pattern => new RegExp("^" + pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*") + "$", "i").test(model));
+  const ledgerPrincipal = async () => context.principal ?? `edge:${await digest(`native-admin:${authority.principal.id}`)}`;
+  return {
+    async embeddingAllowed(model) {
+      if (!sameProvider(model) || request.signal.aborted) return false;
+      if (env.INTELLIGENCE_DB) {
+        const stored = await env.INTELLIGENCE_DB.prepare(`SELECT allowed_models, revoked_at, expires_at,
+          daily_budget_usd, monthly_budget_usd FROM control_users WHERE username = ? AND is_admin = 1`)
+          .bind(authority.principal.id).first();
+        if (stored) account = { ...authority.principal, ...stored };
+      }
+      return !account.revoked_at && (!account.expires_at || Date.parse(account.expires_at) > Date.now())
+        && allowed(model, account.allowed_models ?? account.model_allowlist);
+    },
+    async reserveEmbedding(model, price) {
+      const limits = { daily_budget_usd: account.daily_budget_usd ?? null, monthly_budget_usd: account.monthly_budget_usd ?? null };
+      const budgeted = Object.values(limits).some(value => value !== null);
+      if (budgeted && !reservationSettings(env).enabled) return false;
+      const lifecycle = createReservationLifecycle(env, { call: async body => {
+        const response = await handleReservationsRequest(new Request("http://intelligence.internal/v1/reservations", {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+        }), env);
+        return response.json();
+      }, identity: async () => {
+        if (!budgeted) return limits;
+        const day = new Date().toISOString().slice(0, 10), principal = await ledgerPrincipal();
+        const baseline = await env.INTELLIGENCE_DB.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN day = ? THEN cost_usd ELSE 0 END), 0) AS day_spent_usd,
+          COALESCE(SUM(cost_usd), 0) AS month_spent_usd FROM usage_daily WHERE principal = ? AND day >= ? AND day <= ?`)
+          .bind(day, principal, `${day.slice(0, 7)}-01`, day).first();
+        if (!baseline) throw Error("semantic_embedding_budget_unavailable");
+        return { principal, estimate_usd: price, ...limits, ...baseline };
+      } });
+      await lifecycle.admit({ model });
+      return lifecycle;
+    },
+    async embed(model, text, { signal, reservation }) {
+      await reservation?.before_dispatch();
+      if (signal.aborted) throw new DOMException("Embedding canceled", "AbortError");
+      const target = new URL(request.url);
+      target.pathname = target.pathname.replace(/\/chat\/completions$/, "/embeddings");
+      target.search = "";
+      const headers = new Headers(request.headers);
+      for (const name of ["content-length", "idempotency-key", "x-multillm-cache", "x-multillm-deadline-ms", "x-multillm-internal-deadline-ms"]) headers.delete(name);
+      headers.set("content-type", "application/json"); headers.set("cache-control", "no-store");
+      const embeddingAuthority = { ...authority, provider: model.split(":", 1)[0],
+        route: authority.route.replace(/\/chat\/completions$/, "/embeddings") };
+      const response = await fetcher(new Request(target, { method: "POST", headers, signal, redirect: "manual",
+        body: JSON.stringify({ model: model.slice(model.indexOf(":") + 1), input: text }) }), env, embeddingAuthority);
+      const bytes = await boundedBytes(response.body, MAX_BODY_BYTES);
+      if (!response.ok || !bytes) throw Error("semantic_embedding_failed");
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    },
+    async accountEmbedding(event) {
+      const handedOff = event.submission_outcome !== "before-dispatch";
+      const outcome = event.status === 200 ? "success" : event.status === 499 ? "canceled" : "transport_error";
+      try {
+        await recordNativeUsage(env, { ...event, principal: await ledgerPrincipal(), requestId: crypto.randomUUID(),
+          model: event.model.slice(event.model.indexOf(":") + 1), outcome,
+          ttft_ms: null, usage_basis: event.cost_basis === "usage" ? "measured" : "estimated" }, ctx);
+      } finally {
+        await event.reservation?.finalize({ ...event, handedOff, outcome });
+      }
+    },
+  };
+}

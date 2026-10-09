@@ -3,7 +3,7 @@ import io
 import json
 
 import pytest
-from flask import Flask, g, jsonify
+from flask import Flask, g, jsonify, request
 from flask_wtf.csrf import CSRFProtect
 
 from error_handlers import init_error_handlers
@@ -263,6 +263,35 @@ class RegisteredBatchTests(UnifiedApiTestCase):
         assert len(seen) == mark.call_count == 1
         assert start.call_args.args == ("item_start",)
         assert seen[0]["model"] == "mimo-v2.5"
+
+    def test_registered_item_runs_the_route_response_finalizers(self):
+        finalized = []
+        def record(response):
+            finalized.append(request.path)
+            return response
+        self.app.after_request(record)
+        def send(**kwargs):
+            reply = self._chat_response()
+            body = json.loads(reply.content)
+            body["usage"] = {"prompt_tokens": 4, "completion_tokens": 2}
+            reply._content = json.dumps(body).encode()
+            return reply
+        with patch.object(self.service, "call", return_value={"item": self.item, "batch": self.batch}), \
+             patch.object(self.app_module.ProxyService, "make_request", side_effect=send):
+            response = self.internal()
+        assert response.json["status_code"] == 200, response.json
+        assert finalized.count("/v1/chat/completions") == 1
+
+    def test_registered_item_refuses_context_paging_before_provider(self):
+        item = {**self.item, "body": {**self.item["body"], "capabilities": ["multillm_context_retrieve"]}}
+        with patch.dict(os.environ, {"CONTEXT_PAGING_ENABLED": "true"}), \
+             patch.object(self.service, "call", return_value={"item": item, "batch": self.batch}), \
+             patch.object(self.app_module.ProxyService, "make_request") as send:
+            response = self.internal()
+        assert response.json["status_code"] == 400, response.json
+        assert response.json["body"]["error"]["code"] == "context_paging_unsupported"
+        assert response.json["ambiguous"] is False and response.json["cost_units"] == 0
+        send.assert_not_called()
 
     def test_registered_execution_enforces_owner_permissions_before_provider(self):
         restricted = {**self.user, "allowed_models": ["openai:other"]}

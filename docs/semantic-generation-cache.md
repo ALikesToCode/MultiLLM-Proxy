@@ -112,7 +112,7 @@ normal dispatch once; they never fabricate a success or grant a generation retry
 
 The Flask Chat Completions cache decorator handles semantic lookup and storage. Its
 fixed private transport uses `/v1/state/semantic-cache` on `intelligence.internal`.
-The private Worker state dispatcher must pass validated operations to
+The private Worker state dispatcher passes validated operations to
 `handleSemanticCache`. This private handler is not a public route.
 
 Native Worker integrations use `prepareSemanticCache` after authentication, retention
@@ -130,5 +130,14 @@ unknown submissions retain their hold. All four collaborators are required; a mi
 collaborator bypasses lookup. `reserveEmbedding` returns `false` to deny admission,
 or a reservation (including `null` for an unbudgeted principal). Embedding and private
 storage operations have two-second deadlines in the Worker.
-Use `cleanupSemanticCache` in scheduled maintenance. The Worker module does not mount
-public routes or automatically select a provider transport.
+Scheduled maintenance runs at most three cleanup pages of 100 entries while the
+semantic cache is enabled. Native direct routes use an embedding model from the
+same provider through their authenticated transport. A cross-provider embedding
+model bypasses native semantic lookup because the direct route has no authorized
+transport for that provider. The storage module does not mount public routes.
+
+In managed Chat Completions, exact and shared cache lookup precedes semantic lookup.
+A semantic hit completes the current keyed idempotency claim and releases the
+generation reservation at zero cost. Requests opting into context retrieval,
+PII-redacted requests, injection-flagged requests in log mode and enabled canary
+routes bypass generation reuse.

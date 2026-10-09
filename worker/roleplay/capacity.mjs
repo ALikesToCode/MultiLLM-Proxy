@@ -265,7 +265,8 @@ export async function prepareRoleplayPagingCandidates(candidates, requestedOutpu
   const pageCache = new Map();
   let noFit;
   for (const candidate of candidates) {
-    const inputBudget = candidateInputCapacity(candidate, requestedOutputTokens, settings);
+    const inputBudget = Math.min(settings.hardInputTokens ?? Infinity,
+      candidateInputCapacity(candidate, requestedOutputTokens, settings));
     let contextPlan;
     try {
       contextPlan = await context.pageMessages({ ...context, inputBudget, pageCache });

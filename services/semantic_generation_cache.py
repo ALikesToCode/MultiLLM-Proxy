@@ -319,6 +319,22 @@ class PreparedSemanticCache:
             _warn_once("storage_unavailable")
 
 
+def reuse_bypass(payload):
+    """Dynamic cohorts, flagged content and retrieval handles never replay generations."""
+    from services.context_pages import paging_cache_bypass
+    if paging_cache_bypass(payload) or getattr(g, "prompt_injection_action", None) == "logged":
+        return True
+    if getattr(g, "multillm_canary", None) is not None:
+        return True
+    from services.canary_traffic import enabled
+    if enabled() and isinstance(payload, dict):
+        from services.auto_route_service import AutoRouteService
+        model = payload.get("model")
+        route = AutoRouteService.get_route(model) if AutoRouteService.is_auto_route(model) else None
+        return route is not None and route.canary.enabled
+    return False
+
+
 def prepare_request(payload, principal):
     config, retention = settings(), request_policy()
     policy = config.policy or {}
@@ -326,7 +342,7 @@ def prepare_request(payload, principal):
     key_scope = str(user.get("id") or user.get("username") or "")
     if (not config.enabled or not principal or request.method != "POST" or not retention.allows_content
             or request.path not in policy.get("routes", []) and key_scope not in policy.get("keys", [])
-            or not eligible(payload) or "no-store" in request.headers.get("Cache-Control", "").lower()):
+            or reuse_bypass(payload) or not eligible(payload) or "no-store" in request.headers.get("Cache-Control", "").lower()):
         return None
     model = policy["embedding_model"]
     price = CostService.estimate(model, MAX_TOKENS, 0)
@@ -334,7 +350,8 @@ def prepare_request(payload, principal):
         return None
     def current():
         resolved = exact.shared_policy(payload)
-        if resolved is None or settings() != config or not embedding_allowed(model):
+        if (resolved is None or settings() != config or not embedding_allowed(model)
+                or reuse_bypass(payload) or not request_policy().allows_content):
             return None
         return partition(principal, request.path, payload,
             {"policy": cache_policy.policy_digest(resolved), "retention": retention.revision,

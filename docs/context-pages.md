@@ -49,6 +49,13 @@ The route returns `page_id`, `sha256`, `expires_at`, `messages`, and `body_base6
 use `Cache-Control: private, no-store`. Retrieving does not dispatch a provider call;
 the client chooses whether to include restored content in a later generation.
 
+Roleplay also pages before compaction when the client declares retrieval capability.
+Retrieve its handles with the same roleplay key and
+`GET /v1/context/pages/cp_...?roleplay_session_id=<X-Roleplay-Session-ID>`.
+The Worker verifies the roleplay session, current policy and retention for this
+request; managed handles without that parameter continue to the authenticated Flask
+route. The separate authorities prevent one service from accepting another's handles.
+
 With the flag off, the same request keeps its original history and does not write
 pages. A client without the capability also keeps its existing behavior. Zero-content
 retention disables paging before any storage call and denies retrieval of existing
@@ -65,6 +72,9 @@ pages for that request. Changing policy does not delete earlier retained objects
 - HTTP 413 `context_window_exceeded` means protected content and handles cannot fit
   the candidate window after reserving output and safety tokens. Nothing is silently
   truncated. Oversized pages/session content also return 413.
+- Batch items can't request paging and fail with HTTP 400 `context_paging_unsupported`
+  before dispatch: page handles belong to the caller's API key, which stored batch work
+  never holds.
 - HTTP 404 covers disabled retrieval, absent, expired, foreign, or stale-revision
   handles. HTTP 403 covers missing current grants or zero retention.
 - HTTP 503 JSON reports unavailable D1 tables, R2 bindings, signing configuration,
@@ -77,3 +87,11 @@ change. Configure an R2 lifecycle rule for `context-pages/` according to retenti
 policy: expiry denies access immediately, but physical storage cleanup follows that
 rule. D1 metadata may be retained for operations; expired metadata does not count
 against the active session allowance. No prompt or retrieved body is logged.
+
+Managed Chat Completions, Responses and Messages requests page before lossy optimization.
+Paging requires the same current chat grant, session and policy revision for generation
+and retrieval. Enabled paging strips `capabilities` before dispatch; zero retention
+skips page storage. Classified complete JSON responses expose `context_pages`.
+Pages are written before provider dispatch so their signed handles can enter the
+request. A later failed generation cannot retract those pages with the current
+storage interface; normal grant, policy and expiry checks still govern retrieval.

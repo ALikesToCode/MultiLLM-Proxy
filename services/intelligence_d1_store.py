@@ -35,8 +35,12 @@ _ENDPOINTS = {
     "shadow_eval": "http://intelligence.internal/v1/shadow-eval",
     "alerts": "http://intelligence.internal/v1/state/alerts",
     "reservations": "http://intelligence.internal/v1/reservations",
+    "context-pages": "http://intelligence.internal/v1/managed-state/context-pages",
 }
 _MAX_BYTES = 262144
+_ENDPOINT_MAX_BYTES = {"context-pages": 2 * 1024 * 1024}
+_RESPONSE_MAX_BYTES = {_ENDPOINTS["context-pages"]: _ENDPOINT_MAX_BYTES["context-pages"],
+                       _ENDPOINTS["cascades"]: 524288}
 _TIMEOUT = (2, 3)
 _DEADLINE_SECONDS = 5
 # Every authenticated request waits on an account lookup, and the first call after
@@ -199,7 +203,7 @@ def _submit(url, body, stopped, deadline, results, slots, success_statuses, time
                 stream=True,
             ) as response:
                 result = _decode_response(response, stopped, deadline, success_statuses,
-                                          524288 if url == _ENDPOINTS["cascades"] else _MAX_BYTES)
+                                          _RESPONSE_MAX_BYTES.get(url, _MAX_BYTES))
         results.put_nowait((True, result))
     except Exception as error:
         failure = (
@@ -231,7 +235,7 @@ def request_private_intelligence(payload, *, endpoint="store"):
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise storage_unavailable() from None
     slots = _ENDPOINT_SLOTS.get(endpoint, _TRANSPORT_SLOTS)
-    if len(body) > _MAX_BYTES:
+    if len(body) > _ENDPOINT_MAX_BYTES.get(endpoint, _MAX_BYTES):
         raise storage_unavailable()
     if not slots.acquire(blocking=False):
         _record(endpoint, exhausted=True)

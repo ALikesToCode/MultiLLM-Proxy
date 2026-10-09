@@ -28,6 +28,9 @@ class ManagedTurn:
     tier_metadata: dict | None = None
     finalizers: list = field(default_factory=list)
     submitted: bool = False
+    paging: object = None
+    pages: list = field(default_factory=list)
+    paged_candidates: dict = field(default_factory=dict)
 
 
 _turn: ContextVar[ManagedTurn | None] = ContextVar(
@@ -115,6 +118,9 @@ def contract_payload(payload):
     from services import output_schema_validation
 
     hidden = set()
+    from services.context_pages import paging_enabled
+    if paging_enabled():
+        hidden.add("capabilities")
     if output_schema_validation.enabled(current_app.config):
         hidden.add(output_schema_validation.OPTION)
     if protocol_extras.enabled():
@@ -127,16 +133,19 @@ def contract_payload(payload):
 def _prepare(payload, source):
     turn = current_turn()
     cleaned = payload
+    from services.context_pages import prepare_managed_paging, page_managed_candidate
+    if turn is not None and turn.paging is None:
+        cleaned, turn.paging = prepare_managed_paging(payload)
     tier_enabled = session_tiers.settings().enabled
     if protocol_extras.enabled() and (turn is None or turn.carrier is None):
         # Gateway metadata is not part of the protocol carrier. Validate extras
         # before preparing a session lane or copying a provider request.
         metadata = {
             key: value
-            for key, value in payload.items()
+            for key, value in cleaned.items()
             if key == "routing" or tier_enabled and key == "session_tier"
         }
-        body = {key: value for key, value in payload.items() if key not in metadata}
+        body = {key: value for key, value in cleaned.items() if key not in metadata}
         carrier = protocol_extras.request_to_ir(body, source)
         from routes.unified_bridge import record_conversion
 
@@ -147,6 +156,7 @@ def _prepare(payload, source):
         }
         if turn is not None:
             turn.carrier = carrier
+    cleaned = page_managed_candidate(cleaned, source)
     if tier_enabled and "session_tier" in cleaned:
         if turn is not None:
             turn.tier_metadata = cleaned["session_tier"]
@@ -331,7 +341,8 @@ def _finish_turn(turn, response):
     finalizers, turn.finalizers = turn.finalizers, []
     for finish in finalizers:
         finish(complete)
-    return response
+    from services.context_pages import expose_managed_pages
+    return expose_managed_pages(response, turn, complete=complete)
 
 
 def managed_pipeline(dispatch):
@@ -341,8 +352,12 @@ def managed_pipeline(dispatch):
     @wraps(dispatch)
     def prepared(app, auth, metrics, proxy, payload, *args, **kwargs):
         source = current_turn().source
+        from services.context_pages import ContextPageError
         try:
             payload = _prepare(payload, source)
+        except ContextPageError as error:
+            from error_handlers import APIError
+            raise APIError("Context paging could not be completed.", error.status, {"error": error.code}) from error
         except TranslationError as error:
             from routes.protocol_bridge import translation_api_error
 
@@ -471,8 +486,15 @@ def bounded_managed_timeout(timeout):
 def cache_response_allowed(response):
     from services.shared_generation_cache import shared_enabled
 
+    from services.semantic_generation_cache import settings as semantic_settings
+    from services.context_pages import paging_enabled
+    from services.canary_traffic import enabled as canary_enabled
     if (
-        not shared_enabled()
+        not semantic_settings().enabled
+        and not paging_enabled()
+        and not canary_enabled()
+        and getattr(g, "prompt_injection_action", None) is None
+        and not shared_enabled()
         and current_deadline() is None
         and getattr(g, "managed_idempotency_claim", None) is None
     ):

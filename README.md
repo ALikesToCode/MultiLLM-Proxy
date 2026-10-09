@@ -94,6 +94,17 @@ store data name the D1 migration to apply before enabling them.
 - [Deferred tool discovery](docs/deferred-tools.md): `DEFERRED_TOOLS_ENABLED` adds `multillm.tools.discover` to the MCP endpoints, with per-principal tool grants (migration 0018).
 - [Protocol extras](docs/protocol-extras.md): `PROTOCOL_EXTRAS_ENABLED` keeps reviewed protocol-specific fields, such as Messages `top_k`, through translation; they reach a provider only if it admits the field.
 - [Sticky session tiers](docs/session-tiers.md): `SESSION_TIER_MODE=sticky` keeps a session's approved model tier stable through tool calls in the main, delegation and aux lanes (migration 0021).
+- [Hosted Responses state](docs/responses-state.md): `HOSTED_RESPONSES_ENABLED` lets a managed `/v1/responses` request with `gateway_state: true` keep its completed response under a gateway ID, continue from it with `previous_response_id`, and read or delete it later (migration 0028).
+- [Gateway batches](docs/gateway-batches.md): `GATEWAY_BATCHES_ENABLED` adds OpenAI-compatible `/v1/files` and `/v1/batches` with a required spend budget, and `BATCH_SPILLOVER_ENABLED` turns a chat request sent with `X-MultiLLM-Priority: batch` and `Prefer: respond-async` into a one-item batch (migration 0027).
+- [Observability exports](docs/observability-exports.md): `OBSERVABILITY_EXPORTERS_JSON` sends content-free request observations to the Langfuse or Helicone collectors you name.
+- [Context pages](docs/context-pages.md): `CONTEXT_PAGING_ENABLED` lets a client that sends the `multillm_context_retrieve` capability replace older conversation turns with exact, owner-scoped page handles it can retrieve later (migration 0024).
+- [Semantic generation cache](docs/semantic-generation-cache.md): `SEMANTIC_CACHE_ENABLED` with `SEMANTIC_CACHE_POLICY_JSON` reuses a stored answer for a near-identical final user message on opted-in routes or accounts, under strict matching and a per-lookup embedding spend cap (migration 0026).
+- [Canary traffic](docs/canary-traffic.md): `CANARY_TRAFFIC_ENABLED` splits an auto route's sessions into baseline and candidate cohorts, in shadow or live mode, from a reviewed policy (migration 0025).
+- [Bandit recommendations](docs/bandit-recommendations.md): `BANDIT_MODE` proposes a reviewed one-step route order change from stored evaluation results, without calling providers.
+- [Local inference](docs/local-inference.md): `OLLAMA_BASE_URL`, `VLLM_BASE_URL`, `LM_STUDIO_BASE_URL`, `LLAMA_CPP_BASE_URL` and `SGLANG_BASE_URL` add explicitly configured OpenAI-compatible local servers as providers.
+- [PII redaction](docs/pii-rehydration.md): `PII_REDACTION_ENABLED` with `PII_REDACTION_POLICY_JSON` replaces detected emails, phone numbers and card numbers with request-local placeholders before dispatch and restores them in JSON and streamed responses.
+- [Prompt injection heuristics](docs/prompt-injection.md): `PROMPT_INJECTION_MODE=log` or `block` scores managed requests for injection and jailbreak patterns before dispatch.
+- [Reset-aware pool scheduling](docs/pool-reset-scheduling.md): `POOL_RESET_SCHEDULING_ENABLED` skips pooled accounts whose quota is freshly exhausted and prefers the earliest reset, using only data the gateway already receives.
 
 ## Setup
 

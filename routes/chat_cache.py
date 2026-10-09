@@ -188,26 +188,28 @@ def cached_chat_completion(view):
         mode, max_age = request_mode()
         settings = _settings()
         if mode is None or request.method != "POST":
-            return view(*args, **kwargs)
+            return semantic_wrapper(*args, **kwargs)
         if not retention.allows_content:
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         payload = request.get_json(silent=True)
+        if semantic.reuse_bypass(payload):
+            return _mark(view(*args, **kwargs), "bypass")
         principal = _principal()
         if not settings["enabled"] or principal is None or not request_is_cacheable(payload):
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         revision = cache_policy.policy_revision()
         policy = None
         use_shared = shared_cache.shared_enabled()
         if use_shared and revision in {cache_policy.LEGACY_REVISION, cache_policy.ISOLATED_REVISION}:
             policy = shared_cache.shared_policy(payload)
             if policy is None:
-                return _mark(view(*args, **kwargs), "bypass")
+                return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         elif revision == cache_policy.ISOLATED_REVISION:
             policy = cache_policy.resolve_policy(payload)
             if policy is None:
-                return _mark(view(*args, **kwargs), "bypass")
+                return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         elif revision != cache_policy.LEGACY_REVISION:
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         key = cache_key(principal, request.path, payload, policy=policy)
         policy_digest = cache_policy.policy_digest(policy) if policy is not None else None
         shared = shared_response_cache() if use_shared else None
@@ -221,7 +223,9 @@ def cached_chat_completion(view):
             if entry is not None:
                 response = _hit(entry)
                 return _shared_headers(response, "hit") if use_shared else response
-        response = view(*args, **kwargs)
+        response = semantic_wrapper(*args, **kwargs)
+        if isinstance(response, Response) and response.headers.get("X-MultiLLM-Cache-Backend") == "semantic-d1-r2":
+            return response
         current = shared_cache.shared_policy(payload) if use_shared else None
         unchanged = (current is not None and cache_policy.policy_digest(current) == policy_digest) if use_shared else (
             policy_digest is None or cache_policy.policy_is_current(payload, policy_digest))
@@ -230,9 +234,9 @@ def cached_chat_completion(view):
         return _shared_headers(response, "miss") if use_shared else _mark(response, "miss")
 
     @wraps(view)
-    def wrapper(*args, **kwargs):
+    def semantic_wrapper(*args, **kwargs):
         if not semantic.settings().enabled:
-            return exact_wrapper(*args, **kwargs)
+            return view(*args, **kwargs)
         payload = request.get_json(silent=True)
         try:
             prepared = semantic.prepare_request(payload, _principal())
@@ -241,9 +245,9 @@ def cached_chat_completion(view):
                 "message": "The semantic generation cache schema is missing. Apply its migration before enabling it."}),
                 status=503, content_type="application/json")
         except Exception:
-            return exact_wrapper(*args, **kwargs)
+            return view(*args, **kwargs)
         if prepared is None:
-            return exact_wrapper(*args, **kwargs)
+            return view(*args, **kwargs)
         mode, max_age = request_mode()
         if max_age is None:
             match = _MAX_AGE.search(request.headers.get("Cache-Control", "").lower())
@@ -257,7 +261,7 @@ def cached_chat_completion(view):
                     status=503, content_type="application/json")
             if entry is not None and (max_age is None or entry[2] <= max_age):
                 return semantic.semantic_hit(entry)
-        response = exact_wrapper(*args, **kwargs)
+        response = view(*args, **kwargs)
         if isinstance(response, Response):
             prepared.save(response, {
                 "content_type": "application/json",
@@ -267,7 +271,7 @@ def cached_chat_completion(view):
             })
         return response
 
-    return wrapper
+    return exact_wrapper
 
 
 def clear() -> None:

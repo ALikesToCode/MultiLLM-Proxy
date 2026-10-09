@@ -130,3 +130,12 @@ export async function preparePayload(payload, env = {}, { route = "", keyScope =
     throw new PIIRedactionError();
   }
 }
+
+/** Inspect before paging or persistence; the reversible map remains transport-local. */
+export async function roleplayPIIRetention(payload, env, keyScope, retention, onDecision = () => {}) {
+  const prepared = await preparePayload(payload, env, { route: "/v1/roleplay/chat/completions", keyScope });
+  const redacted = Boolean(prepared.context);
+  prepared.context?.close();
+  onDecision({ redacted, skipped: prepared.skipped, cacheable: !redacted, replayable: !redacted });
+  return redacted ? Object.freeze({ enabled: true, mode: "zero" }) : retention;
+}

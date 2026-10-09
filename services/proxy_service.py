@@ -3468,9 +3468,10 @@ class ProxyService:
                     force_raw_passthrough=force_raw_passthrough,
                 )
                 from services.credential_context import dispatch_context, observation_context
+                from services.pool_reset_schedule import response_usage_observation
                 CredentialPool.record_headers(api_provider, headers, response.status_code,
                     **(cooldown_context or dispatch_context(api_provider, data, url)),
-                    **observation_context(response))
+                    **observation_context(response), **response_usage_observation(response))
                 return response
 
             # Check if this is a streaming request

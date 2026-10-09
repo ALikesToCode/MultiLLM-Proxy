@@ -2,6 +2,9 @@
 import { RoleplayTurnError } from "./roleplay/turn-runtime.mjs";
 import { mediaMac, mediaSecret, toBase64, toBase64Url } from "./media-signing.mjs";
 import { retentionAllowsContent, retentionPolicySnapshot } from "./retention-policy.mjs";
+import { resolveRetentionPolicy } from "./retention-policy.mjs";
+import { extractBearerToken, isAuthorizedRoleplayToken, isDerivedRoleplaySessionId,
+  isValidRoleplaySessionId, scopePublicRoleplaySessionId } from "./roleplay/compatibility.mjs";
 
 export const MAX_PAGE_BYTES = 65536;
 export const MAX_SESSION_BYTES = 1048576;
@@ -47,6 +50,60 @@ export function contextPagingEligible({ env, managed, capabilities, retentionPol
 
 const sha256 = async body => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", body)),
   byte => byte.toString(16).padStart(2, "0")).join("");
+
+export const ROLEPLAY_KEY_SCOPE_HEADER = "X-MultiLLM-Roleplay-Key-Scope";
+export const ROLEPLAY_PAGE_SCOPE_HEADER = "X-MultiLLM-Roleplay-Page-Scope";
+
+async function roleplayScope(env, keyScope, session, policy) {
+  const revision = await sha256(encoder.encode(JSON.stringify([policy,
+    env.CONTENT_RETENTION_ENABLED ?? "", env.CONTENT_RETENTION_POLICY_JSON ?? "",
+    env.PII_REDACTION_ENABLED ?? "", env.PII_REDACTION_POLICY_JSON ?? "",
+    env.PROMPT_INJECTION_MODE ?? "", env.PROMPT_INJECTION_THRESHOLD ?? "", env.PROMPT_INJECTION_POLICY_JSON ?? "",
+    env.SECRET_SCAN_ENABLED ?? "", env.SECRET_SCAN_DEFAULT ?? "", env.CONTEXT_PAGING_ENABLED ?? ""])));
+  return { principal: keyScope, session, revision };
+}
+
+/** Attach verified identity only after authentication, on the private DO hop. */
+export async function withRoleplayGatewayAuthority(request, env, handler) {
+  const pii = ["true", "1", "yes", "on"].includes(String(env.PII_REDACTION_ENABLED ?? "").trim().toLowerCase());
+  if (!pii && !contextPagingEnabled(env)) return handler(request, env);
+  const token = extractBearerToken(request);
+  if (!(await isAuthorizedRoleplayToken(token, env))) return handler(request, env);
+  const keyScope = await sha256(encoder.encode(token));
+  const binding = env.ROLEPLAY_SESSION;
+  if (!binding?.getByName) return handler(request, env);
+  return handler(request, { ...env, ROLEPLAY_SESSION: {
+    getByName(session, options) {
+      const stub = binding.getByName(session, options);
+      return { async fetch(internal) {
+        const headers = new Headers(internal.headers);
+        headers.set(ROLEPLAY_KEY_SCOPE_HEADER, keyScope);
+        const policy = resolveRetentionPolicy(env, { keyHash: keyScope,
+          keyId: env.ADMIN_USERNAME || "admin", route: new URL(request.url).pathname,
+          header: request.headers.get("X-MultiLLM-Retention") ?? "" });
+        headers.set(ROLEPLAY_PAGE_SCOPE_HEADER, JSON.stringify(await roleplayScope(env, keyScope, session, policy)));
+        return stub.fetch(new Request(internal, { headers }));
+      } };
+    },
+  } });
+}
+
+/** Roleplay handles use their existing authenticated session authority. */
+export async function handleRoleplayContextPageRequest(request, env) {
+  const url = new URL(request.url);
+  const publicSession = url.searchParams.get("roleplay_session_id");
+  if (!contextPagingEnabled(env) || !publicSession || !url.pathname.startsWith("/v1/context/pages/")) return null;
+  return handleContextPageRequest(request, env, { authorize: async () => {
+    const token = extractBearerToken(request);
+    if (!(await isAuthorizedRoleplayToken(token, env))) throw new ContextPageError("unauthorized", 401);
+    if (!isValidRoleplaySessionId(publicSession)) throw new ContextPageError("context_page_not_found", 404);
+    const keyScope = await sha256(encoder.encode(token));
+    const session = isDerivedRoleplaySessionId(publicSession) ? publicSession : await scopePublicRoleplaySessionId(publicSession, token);
+    const retentionPolicy = resolveRetentionPolicy(env, { keyHash: keyScope, keyId: env.ADMIN_USERNAME || "admin",
+      route: "/v1/roleplay", header: request.headers.get("X-MultiLLM-Retention") ?? "" });
+    return { scope: await roleplayScope(env, keyScope, session, retentionPolicy), granted: true, retentionPolicy };
+  } });
+}
 
 function completeGroup(group) {
   const pending = new Set();

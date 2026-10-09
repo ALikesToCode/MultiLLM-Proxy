@@ -37,15 +37,18 @@ Matching either an exact route or a key scope enables the selected detectors. An
 empty detector list disables transformation. Flask scopes use the authenticated
 user ID, falling back to the username. Native roleplay transport consumes the
 authenticated scope supplied as `settings.piiKeyScope`; it never infers a scope
-from a caller header. Route opt-in applies to all authenticated callers on that
+from a caller header. Worker roleplay scopes are SHA-256 fingerprints of the
+authenticated token, set on the private Durable Object hop; caller scope headers
+are overwritten. Route opt-in applies to all authenticated callers on that
 route. Each list accepts at most 512 strings, each at most 256 characters; the
 policy JSON accepts at most 64 KiB.
 
 Managed Flask routes are `/v1/chat/completions`, `/v1/messages`, `/v1/responses`,
 and `/intelligence/v1/chat/completions`. Native roleplay uses
 `/v1/roleplay/chat/completions`. Raw passthrough is never transformed. Register
-the Flask request hook after authentication and retention policy, before
-idempotency claims and generation-cache lookup. Forward both configuration
+the Flask request hook after authentication, retention, injection checks and
+batch spillover, before hosted Responses state, idempotency claims and
+generation-cache lookup. Forward both configuration
 variables to the Flask Container when using it behind the Worker.
 
 ## Detector coverage
@@ -102,7 +105,9 @@ recovered. A trailing incomplete prefix is never emitted as successful text.
 ## Cache, replay, and operating limits
 
 Redacted Flask requests use request-local zero-content retention, which bypasses
-the exact and shared generation caches. An `Idempotency-Key` on a request that
+the exact, shared and semantic generation caches. Hosted opt-in or continuation
+on such a request returns HTTP 400 `retention_conflict` before state storage.
+An `Idempotency-Key` on a request that
 actually requires redaction returns HTTP 400, `pii_idempotency_unsupported`, before
 dispatch or replay. Requests with no PII retain their existing behavior.
 

@@ -1,6 +1,8 @@
 /** Bounded shared-cache maintenance and content-free alert delivery. */
 import { cleanupGenerationCache } from "./generation-cache-d1.mjs";
 import { generationCacheSettings } from "./exact-generation-cache.mjs";
+import { semanticCacheSettings } from "./semantic-generation-cache.mjs";
+import { cleanupSemanticCache } from "./semantic-cache-d1.mjs";
 import { alertSettings, runAlertDelivery } from "./alert-delivery.mjs";
 
 const CACHE_BATCHES = 3;
@@ -38,13 +40,25 @@ export function alertTransport(destination, options) {
 
 /** Scheduled work is registered only when a feature that needs it is enabled. */
 export function scheduledMaintenanceEnabled(env) {
-  return generationCacheSettings(env).enabled || alertSettings(env).enabled;
+  return generationCacheSettings(env).enabled || alertSettings(env).enabled || semanticCacheSettings(env).enabled;
 }
 
-export async function runScheduledMaintenance(env, { cleanup = cleanupGenerationCache, deliver = runAlertDelivery,
+export async function runScheduledMaintenance(env, { cleanup = cleanupGenerationCache, cleanupSemantic = cleanupSemanticCache, deliver = runAlertDelivery,
   collect = rules => collectAlertAggregates(env, rules), transport = alertTransport } = {}) {
   const result = { cache_batches: 0, alerts: null };
   const tasks = [];
+  if (semanticCacheSettings(env).enabled) tasks.push((async () => {
+    result.semantic_cache_batches = 0;
+    try {
+      let cursor;
+      for (let batch = 0; batch < CACHE_BATCHES; batch++) {
+        const page = await cleanupSemantic(env, { limit: 100, cursor });
+        result.semantic_cache_batches++;
+        cursor = page.cursor;
+        if (!cursor) break;
+      }
+    } catch { console.warn(JSON.stringify({ event: "semantic_cache_cleanup_failed" })); }
+  })());
   if (generationCacheSettings(env).enabled) tasks.push((async () => {
     try {
       let cursor;

@@ -238,3 +238,28 @@ def record_result_observation(
         if isinstance(retry_after_seconds, (int, float)) and not isinstance(retry_after_seconds, bool):
             if 0 < retry_after_seconds <= 31_622_400:
                 record_pool_usage(provider, key, [{"remaining": 0, "resets_in_ms": retry_after_seconds * 1000}], model=model, quota_bucket=quota_bucket)
+
+
+def response_usage_observation(response):
+    """Read bounded rate-limit windows already present in the received headers."""
+    if not settings().enabled:
+        return {}
+    headers = getattr(response, "headers", {})
+    windows = []
+    for resource in ("requests", "tokens"):
+        remaining = headers.get("x-ratelimit-remaining-" + resource)
+        reset = headers.get("x-ratelimit-reset-" + resource)
+        if not isinstance(remaining, str) or not isinstance(reset, str) or max(len(remaining), len(reset)) > 128:
+            continue
+        try:
+            quota = float(remaining)
+            parts = re.findall(r"([0-9]+(?:\.[0-9]+)?)(ms|s|m|h|d)", reset)
+            if not parts or "".join(number + unit for number, unit in parts) != reset:
+                continue
+            seconds = sum(float(number) * {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+                          for number, unit in parts)
+            if math.isfinite(quota) and quota >= 0 and 0 < seconds <= 31_622_400:
+                windows.append({"remaining": quota, "resets_in_ms": seconds * 1000})
+        except (ValueError, OverflowError):
+            continue
+    return {"usage_windows": windows} if windows else {}

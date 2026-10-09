@@ -72,7 +72,8 @@ def register_gateway_batch_routes(app) -> None:
     # Gate before the application's authentication redirect and CSRF middleware.
     # This touches only the newly registered endpoints.
     app.before_request_funcs.setdefault(None, []).insert(0, gate_disabled_routes)
-    app.extensions.setdefault("gateway_after_authentication", []).insert(1, spillover_hook)
+    from services.gateway_extensions import register_authenticated_hook
+    register_authenticated_hook(app, spillover_hook)
 
     def guarded(view):
         authenticated = api_authenticate_only(view)
@@ -196,6 +197,7 @@ def run_managed_item(app, user, item, batch):
     from services.generation_deadline import Deadline
     from services.request_cancellation import RequestCancellation
     from services.rate_limit_service import RateLimitService
+    from services.context_pages import paging_cache_bypass
     with app.app_context(), app.test_request_context(item["url"], method="POST", json=item["body"],
             environ_base={"REMOTE_ADDR": batch["client_ip"]}, headers={"CF-Connecting-IP": batch["client_ip"], "Authorization": "BatchPrincipal managed-item"}):
         g.authenticated_user = user
@@ -218,6 +220,10 @@ def run_managed_item(app, user, item, batch):
                 refused = batch_error(batches.BatchError(400, "retention_conflict", "Zero-content retention cannot execute stored batches."))
             if refused is None:
                 refused = after_authentication()
+            if refused is None and paging_cache_bypass(item["body"]):
+                # Page handles bind to the caller's API key, which stored work never holds.
+                refused = batch_error(batches.BatchError(400, "context_paging_unsupported",
+                                                         "Batch items cannot request context paging."))
             if refused is None and batches.estimate_item(item) > item["estimate_units"]:
                 refused = batch_error(batches.BatchError(400, "price_changed", "Current estimated price exceeds the reserved batch hold."))
             if refused is None:
@@ -245,7 +251,9 @@ def dispatch_managed_view(app):
         return view()
     # Skip only API-key authentication. All managed dispatch, cache, schema and
     # accounting wrappers remain; capture the context before finish clears g.
-    response = app.make_response(_call_accounted(dispatch, (), {}))
+    # The registered response finalizers (admission, idempotency, hosted state,
+    # PII restoration) run as they would for the route itself.
+    response = app.process_response(app.make_response(_call_accounted(dispatch, (), {})))
     return response, captured[0] if captured else None
 
 

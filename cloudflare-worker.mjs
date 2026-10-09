@@ -1,4 +1,4 @@
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled } from "./worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest } from "./worker/gateway-extensions.mjs";
 import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
@@ -1971,6 +1971,9 @@ export default {
         );
       }
     }
+
+    const roleplayPage = await handleRoleplayContextPageRequest(request, env);
+    if (roleplayPage) return applyCorsHeaders(request, roleplayPage, env);
 
     if (kimiCodePath) {
       try {

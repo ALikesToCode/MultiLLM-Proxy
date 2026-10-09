@@ -26,6 +26,8 @@ from routes.knowledge import register_knowledge_routes
 from routes.documentation import register_documentation_routes
 from routes.free_routes import register_free_routes
 from routes.gateway_mcp import register_gateway_mcp_routes
+from routes.gateway_batches import register_gateway_batch_routes
+from routes.context_pages import register_context_page_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.status_page import register_status_routes
@@ -148,6 +150,15 @@ def create_app() -> Flask:
     register_documentation_routes(app, AuthService, ProxyService)
     register_usage_routes(app, csrf)
     register_gateway_extensions(app, callbacks=gateway_callbacks(csrf=csrf))
+    register_gateway_batch_routes(app)
+    from functools import partial
+    from route_helpers import api_authenticate_only
+    from services.context_pages import ContextPageService, PrivatePageStore, managed_authority
+    from services.intelligence_d1_store import request_private_intelligence
+    app.extensions["context_page_service"] = ContextPageService(PrivatePageStore(
+        partial(request_private_intelligence, endpoint="context-pages")))
+    register_context_page_routes(app, service=app.extensions["context_page_service"],
+                                 authorize=managed_authority, authenticate=api_authenticate_only)
     # Restore the dashboard's recent requests from the durable ledger in the background.
     usage_ledger.start(MetricsService.get_instance())
 

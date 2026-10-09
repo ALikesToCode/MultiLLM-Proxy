@@ -91,3 +91,9 @@ observations. Reset timestamps are accepted up to one year after observation.
 TTL expiration, missing evidence and capacity eviction restore existing account
 selection; these observations are scheduling advice, not a quota accounting
 authority. They cannot certify provider metering or live reset behavior.
+
+With scheduling enabled, raw credential dispatch and both NanoGPT pools consume
+paired `x-ratelimit-remaining-requests` / `x-ratelimit-reset-requests` and token
+headers from responses already received. Reset durations use `ms`, `s`, `m`, `h`
+or `d`; incomplete or invalid pairs are ignored. No request is added and response
+bodies are not read for these observations.

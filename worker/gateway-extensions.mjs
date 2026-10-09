@@ -11,6 +11,9 @@ import { nativeReservationLifecycle, reservationSettings, ReservationError } fro
 export { runScheduledMaintenance, scheduledMaintenanceEnabled } from "./scheduled-maintenance.mjs";
 export { handleResponsesStateRequest, responsesStateEnabled } from "./responses-state-d1.mjs";
 import { UpstreamCancellation } from "./upstream-cancellation.mjs";
+import { prepareSemanticCache, semanticCacheSettings, createNativeSemanticCollaborators } from "./semantic-generation-cache.mjs";
+import { createNativeObservabilityHook, observabilityEnabled } from "./observability-export.mjs";
+import { prepareNativePromptInjection, resolveInjectionPolicy, applyInjectionHeader } from "./prompt-injection-detection.mjs";
 
 let warned = false;
 export function nativeMetricsEnabled(env) {
@@ -108,7 +111,14 @@ function generationPath(request, path) {
 async function dispatchWithNativeHooks(request, env, authority, fetcher, state) {
   const { lifecycle, context, owner, hook, reservation, cacheEnabled, race } = state;
   const cache = cacheEnabled ? await race(() => prepareNativeCache(request, env, authority, context)) : null;
-  const hit = await race(() => cache?.lookup());
+  let hit = await race(() => cache?.lookup());
+  if (!hit && state.semanticEnabled) {
+    const semanticRequest = new Request(request.clone(), { signal: owner.controller.signal });
+    state.semantic = await race(() => prepareSemanticCache(semanticRequest, env, authority, context,
+      authority.semanticCollaborators ?? createNativeSemanticCollaborators(request, env, state.ctx, authority, fetcher, context)));
+    hit = await race(() => state.semantic?.lookup());
+    if (hit?.status >= 400) throw new NativeGenerationRejection(hit);
+  }
   owner.throwIfAborted();
   await race(() => reservation?.admit({ ...context, cacheServed: Boolean(hit) }));
   owner.throwIfAborted();
@@ -132,29 +142,48 @@ async function dispatchWithNativeHooks(request, env, authority, fetcher, state) 
 async function runNativeLifecycle(request, env, ctx, authority, fetcher, registrations, settings, hook) {
   const owner = hook.owner;
   const race = action => hook.deadline ? hook.deadline.run(action, owner) : action();
-  let context, lifecycle, resolveDone;
+  let context, lifecycle, resolveDone, classified;
   const reservation = settings.reservations ? nativeReservationLifecycle(request, env, authority) : null;
-  const finish = event => lifecycle.finalize({ ...event, cancellationOutcome: owner.outcome, handedOff: owner.handedOff });
+  const finish = async event => {
+    await lifecycle.finalize({ ...event, cancellationOutcome: owner.outcome, handedOff: owner.handedOff });
+    classified = event;
+  };
   try {
-    context = await race(() => nativeContext(request, env, authority, settings.metrics));
+    context = await race(() => nativeContext(request, env, authority, settings.metrics || settings.observability));
+    const injection = settings.injection ? await race(() => prepareNativePromptInjection(request, env, authority)) : null;
+    if (injection?.action === "blocked") {
+      hook.deadline?.stop(); owner.complete();
+      const response = Response.json({ error: { code: "prompt_injection_suspected",
+        message: "Prompt injection heuristics exceeded the configured threshold" } }, { status: 422 });
+      applyInjectionHeader(response.headers, injection);
+      return response;
+    }
+    if (["baseline", "candidate"].includes(authority.canary?.cohort)
+        && ["shadow", "live"].includes(authority.canary?.mode)) {
+      context = { ...context, canary: { cohort: authority.canary.cohort, mode: authority.canary.mode } };
+    }
     ctx?.waitUntil?.(new Promise(resolve => { resolveDone = resolve; }));
     lifecycle = createGatewayLifecycle([...registrations, { finalize: event => reservation?.finalize(event) }, { async finalize(event) {
-      try { if (settings.metrics) await recordNativeUsage(env, event); }
+      try { if (settings.metrics) await recordNativeUsage(env,
+        settings.semantic && event.cost_basis === "cache" ? { ...event, cost_basis: null } : event, ctx); }
       finally { hook.deadline?.stop(); resolveDone?.(); }
     } }]);
     await race(() => lifecycle.authorize(context));
     await race(() => lifecycle.admit(context));
     const state = { lifecycle: { ...lifecycle, finalize: finish }, context, owner, hook, reservation,
-      cacheEnabled: settings.cache, race };
+      cacheEnabled: settings.cache, semanticEnabled: settings.semantic, race, ctx };
     const dispatch = () => dispatchWithNativeHooks(request, env, authority, fetcher, state);
     const identity = settings.admission ? { principal_hash: await principalHash((env.ADMIN_USERNAME || "admin").trim()),
       model_group: context.modelGroup, request_id: context.requestId,
       deadline_ms: Date.now() + (hook.deadline?.remainingMs() ?? 86_400_000) } : null;
     const response = await race(() => identity ? runWithAdmission(identity, env, dispatch,
       { signal: owner.controller.signal, onLost: error => owner.close(error) }) : dispatch());
-    if (response.headers.get("X-MultiLLM-Cache") === "hit") return response;
-    return await observeNativeResponse(response, context, { env, metrics: settings.metrics,
-      signal: hook.deadline ? request.signal : owner.controller.signal, finalize: finish });
+    applyInjectionHeader(response.headers, injection);
+    if (["hit", "semantic-hit"].includes(response.headers.get("X-MultiLLM-Cache"))) return response;
+    const observed = await observeNativeResponse(response, context, { env, metrics: settings.metrics,
+      canary: context.canary, signal: hook.deadline ? request.signal : owner.controller.signal, finalize: finish });
+    return state.semantic ? await state.semantic.store(observed, { canStore: () => classified?.outcome === "success"
+      && !owner.outcome?.ambiguous && !request.signal.aborted }) : observed;
   } catch (error) {
     hook.deadline?.stop();
     await owner.close("interrupted");
@@ -176,16 +205,19 @@ export async function nativeGenerationFetch(request, env, ctx, authority, fetche
   const rejection = revision?.requireFreshSecurity();
   if (rejection) { authority.deadlineHook?.deadline?.stop(); return rejection; }
   const settings = { metrics: nativeMetricsEnabled(env), admission: admissionSettings(env).enabled,
-    cache: generationCacheSettings(env).enabled, reservations: reservationSettings(env).enabled };
+    cache: generationCacheSettings(env).enabled, reservations: reservationSettings(env).enabled,
+    semantic: semanticCacheSettings(env).enabled, observability: observabilityEnabled(env),
+    injection: resolveInjectionPolicy(env).mode !== "off" };
   const registrations = collaborators.filter(hook => typeof hook.enabled === "function" ? hook.enabled(env)
     : hook.flag ? ["true", "1", "yes", "on"].includes(String(env[hook.flag] ?? "").trim().toLowerCase()) : settings.metrics);
+  if (settings.observability) registrations.push(createNativeObservabilityHook(env, ctx));
   let hook;
   try { hook = authority.deadlineHook ?? generationDeadlineHook(request, env, { onOutcome: authority.onCancellationOutcome,
     protocol: path.endsWith("/messages") ? "anthropic" : path.endsWith("/responses") ? "responses" : "chat" }); }
   catch (error) { const response = generationErrorResponse(error); if (response) return response; throw error; }
   if (authority.onCancellationOutcome) hook.owner.onOutcome = authority.onCancellationOutcome;
   if (!settings.metrics && !settings.admission && !revision && !resolveRetentionPolicy(env).enabled
-      && !registrations.length && !settings.cache && !settings.reservations && !hook.deadline) {
+      && !registrations.length && !settings.cache && !settings.reservations && !settings.semantic && !settings.injection && !hook.deadline) {
     return dispatchNative(request, env, authority, fetcher, hook.owner);
   }
   return runNativeLifecycle(request, env, ctx, authority, fetcher, registrations, settings, hook);
@@ -204,5 +236,8 @@ export function withNativeMetrics(response, env) {
 
 const CACHE_RESPONSE_HEADERS = new Set(["x-multillm-cache", "x-multillm-cache-backend", "x-multillm-usage-basis", "x-multillm-provider-calls", "age"]);
 export function nativeCacheHeader(name, headers, env) {
-  return generationCacheSettings(env).enabled && headers.get("X-MultiLLM-Cache-Backend") === "d1-r2" && CACHE_RESPONSE_HEADERS.has(name);
+  if (name === "x-multillm-injection-action") return resolveInjectionPolicy(env).mode !== "off";
+  return CACHE_RESPONSE_HEADERS.has(name) && (generationCacheSettings(env).enabled && headers.get("X-MultiLLM-Cache-Backend") === "d1-r2"
+    || semanticCacheSettings(env).enabled && headers.get("X-MultiLLM-Cache-Backend") === "semantic-d1-r2");
 }
+export { handleRoleplayContextPageRequest } from "./context-pages-d1.mjs";

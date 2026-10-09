@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import g, has_request_context, jsonify, request
+from flask import Response, g, has_request_context, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from error_handlers import APIError
@@ -20,6 +20,18 @@ from services.conversion_diagnostics import (
 from services.protocol_translation import CHAT, PROTOCOLS, TranslationError
 from services.protocol_extras import managed_request_report
 from services.managed_turn import emit_managed_request
+
+
+def _add_prompt_cache_headers(
+    response: Response,
+    decision,
+) -> Response:
+    response.headers["X-MultiLLM-Prompt-Cache"] = decision.status
+    response.headers["X-MultiLLM-Prompt-Cache-Mode"] = decision.mode
+    response.headers["X-MultiLLM-Prompt-Cache-Estimated-Tokens"] = str(
+        decision.estimated_input_tokens
+    )
+    return response
 
 
 def diagnostics_requested() -> bool:

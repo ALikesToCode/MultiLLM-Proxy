@@ -483,11 +483,13 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 response = send_to_url(url)
 
             if configured_nanogpt_key:
+                from services.pool_reset_schedule import response_usage_observation
                 NanoGPTKeyPool.record_result(
                     configured_nanogpt_key,
                     response.status_code,
                     **dispatch_context(api_provider, request_data, url, config=app.config),
                     **observation_context(response),
+                    **response_usage_observation(response),
                     check_ttl_seconds=app.config[
                         "NANOGPT_KEY_CHECK_TTL_SECONDS"
                     ],

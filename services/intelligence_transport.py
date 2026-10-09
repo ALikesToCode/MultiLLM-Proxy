@@ -343,6 +343,8 @@ class IntelligenceTransport:
     ):
         provider, model = candidate["model"].split(":", 1)
         adapter = self.adapter(candidate, media=path is not None)
+        from services.context_pages import page_managed_candidate
+        payload = page_managed_candidate(payload, model=candidate["model"]) if path is None else payload
         body = dict(payload, model=model)
         if path is None:
             body = apply_glm_5_reasoning_policy(body, provider, model)
@@ -411,7 +413,9 @@ class IntelligenceTransport:
 
         def record_response(response):
             if provider == "nanogpt":
+                from services.pool_reset_schedule import response_usage_observation
                 NanoGPTUnifiedKeyPool.record_result(token, response.status_code, **scope,
-                    **observation_context(response, cancelled=cancelled.is_set()))
+                    **observation_context(response, cancelled=cancelled.is_set()),
+                    **response_usage_observation(response))
 
         return Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)

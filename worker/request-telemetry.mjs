@@ -157,7 +157,11 @@ function finalEvent(response, context, options, parsed, reason, duration, ttft) 
   const status = outcome === "canceled" ? 499 : outcome === "transport_error" ? 502
     : outcome === "unknown" && response.status < 400 ? 520
     : outcome === "upstream_error" && response.status < 400 ? 502 : response.status;
-  return { ...context, status, outcome, duration_ms: duration, ttft_ms: ttft, ...usage,
+  const cohort = options.canary ?? context.canary;
+  const canary = cohort && ["baseline", "candidate"].includes(cohort.cohort) && ["shadow", "live"].includes(cohort.mode)
+    ? { cohort: cohort.cohort, mode: cohort.mode } : null;
+  const { canary: _unverifiedCohort, ...metadata } = context;
+  return { ...metadata, ...(canary ? { canary } : {}), status, outcome, duration_ms: duration, ttft_ms: ttft, ...usage,
     usage_basis: basis, cost_usd: cost, cost_basis: cost === null ? null : estimated ? "estimate" : "usage" };
 }
 

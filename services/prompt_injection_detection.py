@@ -185,14 +185,27 @@ def record_security_event(decision):
 
 def register_prompt_injection(app, *, is_managed, route_policy=None):
     """Inject route eligibility after authentication/retention and before identity/admission."""
+    if app.extensions.get("prompt_injection_registered"):
+        return
     def prompt_injection_request_hook():
         # Off must avoid eligibility checks and JSON parsing as well as scanning.
         if resolve_policy()[0] == "off" or not is_managed():
             return None
         from services.secret_firewall import protect_managed_payload
+        from error_handlers import APIError
         policy = route_policy() if route_policy is not None else None
-        protect_managed_payload(request.get_json(silent=True), user=getattr(g, "authenticated_user", None),
-                                route_policy=policy)
+        try:
+            protect_managed_payload(request.get_json(silent=True), user=getattr(g, "authenticated_user", None),
+                                    route_policy=policy)
+        except APIError as error:
+            # Internal batch items invoke hooks in a nested request context,
+            # rather than Flask's outer exception dispatcher.
+            if not getattr(g, "gateway_batch_execution", False):
+                raise
+            from flask import jsonify
+            return jsonify(error.to_dict()), error.status_code
         return None
 
-    app.extensions.setdefault("gateway_after_authentication", []).append(prompt_injection_request_hook)
+    from services.gateway_extensions import register_authenticated_hook
+    register_authenticated_hook(app, prompt_injection_request_hook)
+    app.extensions["prompt_injection_registered"] = True
