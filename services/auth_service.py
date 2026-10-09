@@ -22,6 +22,12 @@ from config import load_numbered_env_values
 from error_handlers import APIError
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_api_key, image_relay_specs
+from providers.local_inference import (
+    LOCAL_INFERENCE_PROVIDERS,
+    local_credential_env_names,
+    local_inference_base_urls,
+    local_provider_allows_keyless,
+)
 from services.credential_pool import CredentialPool
 from services.auth_primitives import (
     DEFAULT_ADMIN_SCOPES,
@@ -672,6 +678,11 @@ class AuthService:
     @classmethod
     def get_api_key(cls, provider: str, *, model: str | None = None, quota_bucket: str | None = None) -> Optional[str]:
         """Get API key for a provider."""
+        if provider in LOCAL_INFERENCE_PROVIDERS:
+            if provider not in local_inference_base_urls():
+                return None
+            return next((key for name in local_credential_env_names(provider)
+                         if (key := usable_credential(os.environ.get(name), name))), None)
         if CredentialPool.pooled(provider):
             pooled = CredentialPool.select(provider, model=model, quota_bucket=quota_bucket)
             if pooled:
@@ -688,7 +699,14 @@ class AuthService:
     @classmethod
     def provider_credential_env_names(cls, provider: str) -> tuple[str, ...]:
         """Return safe environment-variable names for dashboard setup guidance."""
+        if provider in LOCAL_INFERENCE_PROVIDERS:
+            return local_credential_env_names(provider)
         return provider_credential_env_names(provider)
+
+    @staticmethod
+    def provider_requires_api_key(provider: str, base_urls) -> bool:
+        """Local servers may be keyless only for an explicitly configured endpoint."""
+        return not local_provider_allows_keyless(provider, base_urls)
 
     @classmethod
     def get_api_keys(cls, provider: str) -> List[str]:
