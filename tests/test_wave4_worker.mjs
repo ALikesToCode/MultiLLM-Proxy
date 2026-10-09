@@ -134,7 +134,8 @@ test("all flags on cache hit releases a reservation and makes no provider call",
 
 test("all flags on deadline after handoff retains unknown hold and bypasses cache", async t => {
   const f = fixture(t);
-  const res = await nativeGenerationFetch(request({ "X-MultiLLM-Cache": "on", "X-MultiLLM-Deadline-Ms": "20" }), f.env, {}, f.authority, () => new Promise(() => {}));
+  // The fetcher never settles, so the deadline fires after handoff; 1000 ms leaves room for setup on slow runners.
+  const res = await nativeGenerationFetch(request({ "X-MultiLLM-Cache": "on", "X-MultiLLM-Deadline-Ms": "1000" }), f.env, {}, f.authority, () => new Promise(() => {}));
   assert.equal(res.status, 504); await res.text();
   assert.equal(reservations(f)[0].state, "unknown"); assert.equal(f.objects.size, 0);
 });
