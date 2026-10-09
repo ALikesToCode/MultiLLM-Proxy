@@ -8,7 +8,7 @@ from services.provider_catalog_refresh import refresh_provider_catalog_revision
 
 AUTHENTICATED_HOOK_ORDER = (
     "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
-    "responses_state_hook", "generation_deadline_hook", "idempotency_request_hook", "admit",
+    "responses_state_hook", "generation_deadline_hook", "latency_slo_request_hook", "idempotency_request_hook", "admit",
 )
 
 
@@ -93,7 +93,7 @@ def gateway_callbacks(*, csrf=None):
     from middleware.rate_limit_headers import register_rate_limit_headers
     from services.pii_redaction import register_pii_redaction
     return (register_retention, register_injection_decision, register_batch_spillover, register_pii_redaction,
-            partial(register_hosted_responses, csrf=csrf), register_deadline, register_managed_idempotency,
+            partial(register_hosted_responses, csrf=csrf), register_deadline, register_latency_slo, register_managed_idempotency,
             register_admission, register_cooldown_errors, register_rate_limit_headers)
 
 
@@ -123,6 +123,17 @@ def generation_limits_ms():
 def register_deadline(app):
     from services.generation_deadline import register_generation_deadline
     register_generation_deadline(app, verify_internal=verified_internal_transport, limits_ms=generation_limits_ms)
+
+
+def latency_slo_candidate_policy(payload):
+    """Read-only collaborator returns candidates after eligibility and approved lane selection."""
+    callback = current_app.extensions.get("latency_slo_candidate_policy")
+    return callback(payload) if callback is not None else None
+
+
+def register_latency_slo(app):
+    from services.latency_slo import register_latency_slo as register
+    register(app, is_managed=managed_generation_request, candidates=latency_slo_candidate_policy)
 
 
 def managed_policy_revision(payload):

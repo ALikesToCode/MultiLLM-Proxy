@@ -12,7 +12,7 @@ from tests.test_managed_idempotency import Authority
 from tests import unified_api_test_case as fixtures
 
 ORDER = ["request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
-         "responses_state_hook", "generation_deadline_hook", "idempotency_request_hook", "admit"]
+         "responses_state_hook", "generation_deadline_hook", "latency_slo_request_hook", "idempotency_request_hook", "admit"]
 FLAGS = ("HOSTED_RESPONSES_ENABLED", "GATEWAY_BATCHES_ENABLED", "BATCH_SPILLOVER_ENABLED",
          "CONTEXT_PAGING_ENABLED", "SEMANTIC_CACHE_ENABLED", "CANARY_TRAFFIC_ENABLED", "BANDIT_MODE",
          "PII_REDACTION_ENABLED", "PROMPT_INJECTION_MODE", "POOL_RESET_SCHEDULING_ENABLED",
