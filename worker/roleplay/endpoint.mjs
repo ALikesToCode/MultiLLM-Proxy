@@ -5,6 +5,8 @@ import { roleplayPIIRetention, resolvePIIPolicy, PIIRedactionError } from "../pi
 import { contextPagingEligible, pageContextMessages, ROLEPLAY_KEY_SCOPE_HEADER, ROLEPLAY_PAGE_SCOPE_HEADER,
   withRoleplayGatewayAuthority } from "../context-pages-d1.mjs";
 import { TurnTraceJournal } from "./turn-trace.mjs";
+import { prepareRoleplayCanary, injectRoleplayCanary, protectRoleplayAttempt, protectRoleplayContinuation,
+  canaryCompletion, finalizeRoleplayStream, finalizeRoleplayResponse, prepareCanaryCandidates } from "../context-canary.mjs";
 import { handleOperatorMemory } from "./operator-memory.mjs";
 import {
   recoveryTemplate, preserveRecovery, handleRecoverySnapshot, resolveRoleplayRetention,
@@ -269,6 +271,7 @@ export class RoleplaySession extends DurableObject {
       scanCounts[0] += decision.action === "redacted" ? decision.report.high : 0;
       scanCounts[1] += decision.report.heuristic + (decision.action === "observed" ? decision.report.high : 0);
     } };
+    const canary = await prepareRoleplayCanary(this.env, { keyScope: piiKeyScope, trace });
     const turnStartedAt = performance.now();
     let compactionMs = 0;
     const payload = await request.json();
@@ -612,9 +615,9 @@ export class RoleplaySession extends DurableObject {
           parsed,
           conversation,
         );
-    const estimatedInputTokens = canReuseInitialAnalysis
+    const estimatedInputTokens = (canReuseInitialAnalysis
       ? plan.estimatedTokens
-      : estimateTokens(roleplayMessages);
+      : estimateTokens(roleplayMessages)) + (canary?.inputTokens ?? 0);
     const estimatedInputBefore = Math.max(
       estimatedInputTokens,
       plan.estimatedTokens + checkpointSavedTokens,
@@ -628,6 +631,7 @@ export class RoleplaySession extends DurableObject {
         ? { messages: roleplayMessages, estimateTokens }
         : null,
     );
+    generationCandidates = prepareCanaryCandidates(generationCandidates, canary, roleplayMessages, estimateTokens, settings);
     if (tierTurn) generationCandidates = tierTurn.select(generationCandidates);
     if (!generationCandidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "context_too_large");
@@ -644,11 +648,11 @@ export class RoleplaySession extends DurableObject {
 
     const recovery = recoveryTemplate(payload, roleplayMessages, retention);
     trace?.phase("connecting");
-    const attempted = await attemptRoleplayCandidates(
+    const attempted = await protectRoleplayAttempt(await attemptRoleplayCandidates(
       state,
       generationCandidates,
       (candidate) =>
-        applyRoleplayPromptCache(
+        injectRoleplayCanary(applyRoleplayPromptCache(
           buildUpstreamPayload(
             parsed,
             candidate,
@@ -660,12 +664,12 @@ export class RoleplaySession extends DurableObject {
           settings,
           parsed.promptCache,
           candidate.contextPlan?.estimatedInputTokens ?? estimatedInputTokens,
-        ),
+        ), canary),
       this.env,
       settings,
       request.signal,
       idempotencyKey,
-    );
+    ), canary, request.signal);
     state = attempted.state;
     if (attempted.terminalResponse) {
       await tierTurn?.finish(null, { success: false,
@@ -704,7 +708,7 @@ export class RoleplaySession extends DurableObject {
     const continuation = createRoleplayContinuation({
       state,
       candidate,
-      messages: selectedMessages,
+      messages: canary ? canary.messages(selectedMessages) : selectedMessages,
       parsed,
       env: this.env,
       settings,
@@ -712,6 +716,7 @@ export class RoleplaySession extends DurableObject {
       idempotencyKey,
       refusalFallbackCandidates,
     });
+    protectRoleplayContinuation(continuation, canary, request.signal);
     const selectionReason = candidate.selectionReason || (parsed.routing.mode !== "provider-priority" ? parsed.routing.mode :
       (state.stats[candidate.key]?.successes ?? 0) < 2
         ? "exploration"
@@ -795,6 +800,7 @@ export class RoleplaySession extends DurableObject {
         detectRefusal: continuation.classifyRefusal,
         refusalFallbackEnabled: continuation.refusalFallbackEnabled,
         onComplete: async (completion) => {
+          completion = canaryCompletion(completion, canary);
           await preserveRecovery(this.ctx.storage, recovery, completion, trace?.id, retention);
           const {
             success,
@@ -859,7 +865,7 @@ export class RoleplaySession extends DurableObject {
         },
       });
       return {
-        response: new Response(observed.stream, {
+        response: new Response(finalizeRoleplayStream(observed.stream, canary), {
           status: response.status,
           statusText: response.statusText,
           headers: responseHeaders,
@@ -923,6 +929,7 @@ export class RoleplaySession extends DurableObject {
         };
       }
     }
+    completionResult = canaryCompletion(completionResult, canary);
     const disposition = roleplayCompletionDisposition({
       success: completionResult.success,
       reason: completionResult.reason,
@@ -966,11 +973,11 @@ export class RoleplaySession extends DurableObject {
     await preserveRecovery(this.ctx.storage, recovery, completionResult, trace?.id, retention);
     applyScanHeader(responseHeaders);
     return {
-      response: new Response(responseBytes, {
+      response: finalizeRoleplayResponse(new Response(responseBytes, {
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
-      }),
+      }), canary),
       completion: Promise.resolve(),
     };
   }
