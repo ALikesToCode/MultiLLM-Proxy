@@ -15,6 +15,17 @@ const limit = value => Number.isSafeInteger(value) && value >= 0 && value <= MAX
 const fields = (body, names) => object(body) && Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
 const matches = (pattern, value) => typeof value === "string" && pattern.test(value);
 
+export async function principalHash(username) {
+  const bytes = await crypto.subtle.digest("SHA-256",
+    new TextEncoder().encode(`multillm-admission:v1:${username.trim()}`));
+  return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function admissionModelGroup(provider, model) {
+  const group = typeof model === "string" ? `${provider}:${model}` : provider;
+  return GROUP.test(group) ? group : provider || "default";
+}
+
 export function admissionSettings(env = {}) {
   const flag = String(env.ADMISSION_ENABLED ?? "").trim().toLowerCase();
   if (["", "false", "0"].includes(flag)) return { enabled: false };

@@ -38,7 +38,7 @@ from services.auth_service import AuthService
 from services.cache_service import CacheService
 from services.image_relay_catalog import ImageRelayCatalogRefresh
 from services.provider_catalog_refresh import ProviderCatalogAutoRefresh
-from services.gateway_extensions import register_gateway_extensions
+from services.gateway_extensions import gateway_callbacks, register_gateway_extensions
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 from services import usage_ledger
@@ -147,7 +147,7 @@ def create_app() -> Flask:
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
     register_usage_routes(app, csrf)
-    register_gateway_extensions(app)
+    register_gateway_extensions(app, callbacks=gateway_callbacks())
     # Restore the dashboard's recent requests from the durable ledger in the background.
     usage_ledger.start(MetricsService.get_instance())
 

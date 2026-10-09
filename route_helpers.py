@@ -214,6 +214,8 @@ def request_api_key() -> Optional[str]:
 def stream_upstream_response(upstream_response: Any) -> Response:
     """Stream an upstream entity body unchanged and release its connection."""
 
+    from services.request_cancellation import attach_stream_owner, bind_cancellation
+
     raw_response = getattr(upstream_response, "raw", None)
     raw_read1 = getattr(raw_response, "read1", None)
     try:
@@ -234,6 +236,8 @@ def stream_upstream_response(upstream_response: Any) -> Response:
             if raw_response is None and hasattr(upstream_response, "_content_consumed"):
                 upstream_response._content_consumed = True
             close()
+
+    cancellation = bind_cancellation(upstream_response, close_owner=close_once, replace_close=False)
 
     def generate():
         try:
@@ -259,6 +263,13 @@ def stream_upstream_response(upstream_response: Any) -> Response:
                 for chunk in upstream_response.iter_content(chunk_size=64 * 1024):
                     if chunk:
                         yield chunk
+            cancellation.complete()
+        except GeneratorExit:
+            cancellation.cancel()
+            raise
+        except BaseException:
+            cancellation.fail()
+            raise
         finally:
             close_once()
 
@@ -280,7 +291,7 @@ def stream_upstream_response(upstream_response: Any) -> Response:
         headers=response_headers,
     )
     response.call_on_close(close_once)
-    return response
+    return attach_stream_owner(response, upstream_response)
 
 
 def is_api_request_path(path: str) -> bool:
@@ -510,7 +521,8 @@ def _authenticate_api_request():
         authenticated_user.get("username"),
     )
     g.authenticated_user = authenticated_user
-    return None
+    from services.gateway_extensions import after_authentication
+    return after_authentication()
 
 
 def request_body_limit(limit: Callable[[], int]) -> Callable:

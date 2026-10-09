@@ -670,10 +670,10 @@ class AuthService:
         cls._load_provider_api_keys()
 
     @classmethod
-    def get_api_key(cls, provider: str) -> Optional[str]:
+    def get_api_key(cls, provider: str, *, model: str | None = None, quota_bucket: str | None = None) -> Optional[str]:
         """Get API key for a provider."""
         if CredentialPool.pooled(provider):
-            pooled = CredentialPool.select(provider)
+            pooled = CredentialPool.select(provider, model=model, quota_bucket=quota_bucket)
             if pooled:
                 return pooled
         for env_key in provider_api_key_env_names(provider):

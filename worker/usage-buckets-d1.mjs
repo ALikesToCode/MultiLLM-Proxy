@@ -1,11 +1,35 @@
 /** Opt-in strict bucket serialization; the ledger owner injects transaction writers. */
-import { validRow } from "./usage-ledger-d1.mjs";
 
 export const BUCKET_FIELDS = Object.freeze(["ordinary_input_tokens", "cache_read_input_tokens", "cache_write_input_tokens",
   "ordinary_input_cost_microusd", "cache_read_input_cost_microusd", "cache_write_input_cost_microusd", "output_cost_microusd",
   "bucket_basis", "bucket_source"]);
 const BASE_FIELDS = Object.freeze(["at", "principal", "key_prefix", "kind", "endpoint", "requested_model", "selected_model",
   "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id"]);
+const KINDS = new Set(["chat", "responses", "images", "videos", "embeddings", "audio", "proxy"]);
+const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
+const ENDPOINT = /^\/[A-Za-z0-9._~:/@+-]{0,255}$/;
+const REQUEST_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const CONTROL = /[\x00-\x1f\x7f]/;
+const AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+const fields = (body, names) => Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
+const text = (value, maximum) => typeof value === "string" && value.length > 0 && value.length <= maximum && !CONTROL.test(value);
+const optional = (value, test) => value === null || test(value);
+const count = (value, maximum = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(value) && value >= 0 && value <= maximum;
+const timestamp = value => typeof value === "string" && AT.test(value) && Number.isFinite(Date.parse(value));
+
+export function validBaseUsageRow(row) {
+  return row !== null && typeof row === "object" && !Array.isArray(row) && fields(row, BASE_FIELDS)
+    && timestamp(row.at) && text(row.principal, 256) && optional(row.key_prefix, value => text(value, 64))
+    && KINDS.has(row.kind) && typeof row.endpoint === "string" && ENDPOINT.test(row.endpoint)
+    && optional(row.requested_model, value => typeof value === "string" && MODEL.test(value))
+    && optional(row.selected_model, value => typeof value === "string" && MODEL.test(value))
+    && Number.isSafeInteger(row.status) && row.status >= 100 && row.status <= 599
+    && count(row.latency_ms, 86_400_000) && optional(row.input_tokens, count) && optional(row.output_tokens, count)
+    && optional(row.cost_usd, value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000)
+    && (row.cost_basis === null || row.cost_basis === "usage" || row.cost_basis === "estimate")
+    && optional(row.request_id, value => typeof value === "string" && REQUEST_ID.test(value));
+}
+
 const warned = new Set();
 const warn = name => { if (!warned.has(name)) { warned.add(name); console.warn(`Invalid ${name}; prompt cache buckets disabled`); } };
 export function usageBucketsEnabled(env) {
@@ -27,7 +51,7 @@ export function usageBucketsEnabled(env) {
 export function serializeUsageBuckets(row, env) {
   if (!row || typeof row !== "object" || Array.isArray(row)) throw new TypeError("invalid usage row");
   const base = Object.fromEntries(BASE_FIELDS.map(name => [name, row[name]]));
-  if (!validRow(base)) throw new TypeError("invalid usage row");
+  if (!validBaseUsageRow(base)) throw new TypeError("invalid usage row");
   const allowed = new Set([...BASE_FIELDS, ...BUCKET_FIELDS]);
   if (Object.keys(row).some(name => !allowed.has(name))) throw new TypeError("invalid usage fields");
   if (!usageBucketsEnabled(env)) return base;

@@ -1,8 +1,8 @@
 # Native edge request metrics
 
 `NATIVE_EDGE_METRICS_ENABLED` defaults to false. Unset, empty and `false` values preserve
-existing native responses, headers, streams, ledger writes and logs. No lifecycle hook
-runs. Set the Worker variable to `true` to enable observation; values are trimmed and
+existing native responses, headers, streams, ledger writes and logs. Metrics hooks
+stay off; other collaborators use their own flags. Set the Worker variable to `true` to enable observation; values are trimmed and
 case-insensitive. A malformed setting disables the feature and emits one content-free
 warning per isolate. For example:
 
@@ -98,3 +98,22 @@ there is no dynamic import, executable configuration or discovery. Finalization 
 every collaborator even if one fails, then reports the failure without changing response
 bytes. Other gateway features attach to native dispatch as code-registered
 collaborators on these hooks.
+
+Native registration checks revision security freshness before resolving the immutable
+retention policy, acquiring admission and dispatching. Retention uses the authenticated
+bootstrap username and key digest with the public route, ignoring caller identity headers.
+Admission shares the Flask username digest and provider-prefixed model group; forwarded
+requests acquire only in Flask. Native metrics keep their separate ledger principal.
+Collaborators declare a code-supplied `enabled(env)` predicate or `flag` name. Existing
+metrics collaborators without a gate retain the metrics flag. No configuration can
+supply executable hooks.
+
+Native cancellation cleanup always runs, even with the opt-in flags off. Request abort
+reaches provider fetch and its body owner; admission loss closes the same owner.
+Cancellation outcomes accompany finalization, and admission releases once. Revision
+polling runs through scheduled work and native request background work. Strict native
+security installers read all account pages with every control column and validate model
+overrides; authority failures cannot certify freshness. Bootstrap admin authentication
+continues to use its environment key. Native routes do not consume automatic routes or
+provider catalog copies, so those ordinary domains have no native installer. With all
+opt-in flags off, normal bytes, headers, storage writes and logs remain unchanged.

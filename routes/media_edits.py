@@ -270,7 +270,7 @@ def dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_se
                 upstream_path="v1/images/edits", raw_body=raw_body, primary_origin=origin,
                 secondary_origin=app.config["AIHUBMIX_BACKUP_BASE_URL"] if provider == "aihubmix" else None)
 
-        upstream, attempts = _request_with_provider_token_rotation(app, auth_service_cls, proxy_service_cls, provider, send)
+        upstream, attempts = _request_with_provider_token_rotation(app, auth_service_cls, proxy_service_cls, provider, send, model=provider_model)
         status = upstream.status_code
         downstream = upstream if isinstance(upstream, Response) else stream_upstream_response(upstream)
         failure = getattr(upstream, "multillm_transport_failure", None)

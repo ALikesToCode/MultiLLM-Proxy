@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
-from flask import Response
+from flask import Response, g, has_request_context
 
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
@@ -30,6 +31,7 @@ class CancellationContext:
     def __init__(self, close: Callable[[], Any], *, on_outcome=None):
         self._close = close
         self._on_outcome = on_outcome
+        self._lock = threading.Lock()
         self.handed_off = False
         self.closed = False
         self.outcome: CancellationOutcome | None = None
@@ -38,12 +40,13 @@ class CancellationContext:
         self.handed_off = True
 
     def _finish(self, reason: str, upstream: UpstreamOutcome) -> None:
-        if self.closed:
-            return
-        self.closed = True
-        self.outcome = CancellationOutcome(
-            reason, self.handed_off and reason != "complete", upstream,
-        )
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            self.outcome = CancellationOutcome(
+                reason, self.handed_off and reason != "complete", upstream,
+            )
         try:
             self._close()
         except Exception as error:
@@ -121,7 +124,46 @@ class CancellationIterator(Iterator[T], Generic[T]):
             self.context.close()
 
 
-def bind_cancellation(response, *, on_outcome=None) -> CancellationContext:
+class RequestCancellation:
+    """Request-local collaborators; renewal loss cannot authorize another dispatch."""
+
+    def __init__(self):
+        self.contexts = []
+        self.lost = False
+        self._lock = threading.Lock()
+
+    def bind(self, context):
+        with self._lock:
+            self.contexts.append(context)
+            lost = self.lost
+        if lost:
+            context.cancel()
+
+    def cancel(self, error=None):
+        with self._lock:
+            self.lost = True
+            contexts = tuple(self.contexts)
+        for context in contexts:
+            context.cancel()
+
+
+def owned_stream_lines(upstream):
+    """Preserve native line parsing while marking upstream EOF before cleanup."""
+    return CancellationIterator(lambda: iter(upstream.iter_lines()), bind_cancellation(upstream))
+
+
+def attach_stream_owner(downstream, upstream):
+    """Own hidden upstream resources even before the lazy body starts."""
+    context = bind_cancellation(upstream)
+    source = downstream.response
+    downstream.response = CancellationIterator(lambda: iter(source), context,
+                                                close_source=getattr(source, "close", None))
+    downstream.multillm_cancellation = context
+    downstream.call_on_close(context.close)
+    return downstream
+
+
+def bind_cancellation(response, *, on_outcome=None, close_owner=None, replace_close=True) -> CancellationContext:
     """Share close ownership with existing transport, WSGI and preflight owners.
 
     Flask bodies must themselves own hidden provider resources. A transport
@@ -131,11 +173,22 @@ def bind_cancellation(response, *, on_outcome=None) -> CancellationContext:
     if isinstance(context, CancellationContext):
         return context
     # Test doubles and some adapters have no close(); ownership still applies.
-    close = getattr(response, "close", None)
+    status = getattr(response, "status_code", None)
+    rejected = type(status) is int and 400 <= status < 500
+    if on_outcome is None and has_request_context() and not rejected:
+        from services.request_accounting import cancellation_observer
+        on_outcome = cancellation_observer()
+    close = close_owner or getattr(response, "close", None)
     context = CancellationContext(close if callable(close) else (lambda: None), on_outcome=on_outcome)
     context.handoff()
+    if has_request_context():
+        owner = getattr(g, "gateway_cancellation", None)
+        if owner is None:
+            owner = g.gateway_cancellation = RequestCancellation()
+        owner.bind(context)
     response.multillm_cancellation = context
-    response.close = context.close
+    if replace_close:
+        response.close = context.close
     if isinstance(response, Response):
         source = response.response
         response.response = CancellationIterator(

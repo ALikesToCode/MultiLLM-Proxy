@@ -36,6 +36,15 @@ export function retentionAllowsContent(policy) {
   return !policy?.enabled || policy.mode !== "zero";
 }
 
+// Private service bindings transport snapshots, never caller-selected identities.
+export function retentionPolicySnapshot(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).length !== 2 || !MODES.has(value.mode) || typeof value.enabled !== "boolean") {
+    throw new TypeError("invalid_retention_policy");
+  }
+  return Object.freeze({ mode: value.mode, enabled: value.enabled });
+}
+
 export async function retentionRequestId(value) {
   if (!value) return "";
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));

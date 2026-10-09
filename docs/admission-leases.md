@@ -11,12 +11,15 @@ unlimited even when the flag is true. There is no default heavy-model gate.
 Enable with `ADMISSION_ENABLED=true` and, for example:
 
 ```json
-{"principal": 4, "model_groups": {"heavy": 1, "fast": 3}}
+{"principal": 4, "model_groups": {"auto:intelligence": 1, "openai:gpt-4.1": 3}}
 ```
 
-`principal` limits all active requests for one authenticated key identity across its
+`principal` limits all active requests for one authenticated account identity across its
 model groups. Each `model_groups` entry limits that same principal within the named
-**authorized** group. Missing or zero limits are unlimited. Limits are integers from
+group. Provider-prefixed routes use `<provider>:<body.model>`; managed `/v1/`
+routes use the requested model ID unchanged. Missing or invalid models use the
+provider name, or `default` for managed routes. Models absent from the map are
+limited only by `principal`. Missing or zero limits are unlimited. Limits are integers from
 0 through 10,000; at most 256 group entries are accepted. Unknown fields disable the
 configuration. These are concurrency limits, not RPM, token or upstream quota limits.
 Both applicable limits are checked atomically before dispatch. Lowering a limit does
@@ -24,9 +27,12 @@ not revoke existing work; new acquisitions wait for capacity.
 
 The authentication/routing registrar supplies an `AdmissionIdentity` (Python) or an
 explicit object (Worker) with `principal_hash`, `model_group`, `request_id`, and
-`deadline_ms`. The principal is a stable opaque SHA-256 identity for the authenticated
-key, shared between runtimes. Do not supply raw keys, usernames, caller headers or
-unverified body fields. Resolve/authorize the group before admission. The request ID
+`deadline_ms`. The principal is lowercase SHA-256 of UTF-8
+`multillm-admission:v1:<username>`, using the authenticated, stripped account username.
+The admin key resolves to `ADMIN_USERNAME` (default `admin`) in both runtimes.
+Only the digest enters the authority; raw keys and usernames never do. Derive the
+group from the requested model for capacity accounting; dispatch still applies the
+existing model authorization. The request ID
 must identify one generation, including both runtimes when forwarding. The deadline
 is a Unix timestamp in milliseconds, after now and at most 24 hours away; the registrar
 must supply the actual eventual generation deadline, not a new deadline on renewal.

@@ -91,6 +91,7 @@ class UsageContext:
     finished: bool = False
     # Served from the response cache: no provider was called, so nothing is charged.
     cached: bool = False
+    ambiguous: bool = False
 
 
 def classify() -> Optional[str]:
@@ -357,10 +358,24 @@ def _clean_model(value: Any) -> Optional[str]:
     return value if isinstance(value, str) and MODEL_ID.fullmatch(value) else None
 
 
+def cancellation_observer():
+    """Capture accounting before lazy streams outlive Flask's request context."""
+    context = getattr(g, "usage_context", None)
+    if not isinstance(context, UsageContext):
+        return None
+
+    def observe(outcome):
+        if outcome.ambiguous and not context.finished:
+            context.ambiguous = True
+    return observe
+
+
 def _record(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> None:
     if context.finished:
         return
     context.finished = True
+    if context.ambiguous:
+        status, usage, units = 499, None, None
     if context.path in DEFERRED_PATHS:
         BudgetService.settle(context.reservation)
         return

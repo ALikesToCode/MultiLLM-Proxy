@@ -10,6 +10,7 @@ import { watchImportedSkills } from "./skills.mjs";
 import { SYNC_REQUEST_BYTES } from "./skills-validation.mjs";
 import { MemoStore } from "./memo-store.mjs";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
+import { retentionPolicySnapshot } from "../retention-policy.mjs";
 
 // Refusals are answers; unexpected faults and server-side failures are logged.
 function failure(event, error) {
@@ -60,8 +61,11 @@ export class KnowledgeHandoffs extends DurableObject {
     try {
       if (request.method !== "POST" || new URL(request.url).pathname !== "/dispatch") fail("not_found", "Unknown handoff route.", 404);
       const body = await readJson(request, 40 * 1024);
-      fields(body, ["operation", "payload"], ["operation", "payload"]);
-      return reply(this.handoffs.call(body.operation, body.payload));
+      fields(body, ["operation", "payload", "retention_policy"], ["operation", "payload"]);
+      let policy;
+      try { if (body.retention_policy !== undefined) policy = retentionPolicySnapshot(body.retention_policy); }
+      catch { fail("invalid_request", "Invalid retention policy."); }
+      return reply(this.handoffs.call(body.operation, body.payload, Date.now(), policy));
     } catch (error) { return failure("knowledge_handoffs_failed", error); }
   }
 }

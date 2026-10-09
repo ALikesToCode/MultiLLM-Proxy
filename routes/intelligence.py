@@ -18,6 +18,7 @@ from services.intelligence_gateway import ChatGateway
 from services.intelligence_output import sse
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_transport import IntelligenceTransport
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted, settings as cooldown_settings
 from services.tool_repair_runtime import HEADER, repair_mode, summary_header
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,9 @@ def stream_response(gateway):
         try:
             for event in gateway.events():
                 put(sse(event))
+            put("data: [DONE]\n\n")
+        except (ModelCooldownExhausted, ModelCooldownCapacity) as error:
+            put(sse(gateway.decorate(error.to_dict())))
             put("data: [DONE]\n\n")
         except GatewayError as error:
             put(sse(gateway.decorate(error.envelope())))
@@ -186,18 +190,29 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
             metrics,
             cancelled=CallerCancellation(request.environ),
         )
+        admission_deadline = getattr(g, "gateway_generation_deadline", None)
+        if admission_deadline is not None:
+            gateway.deadline = min(gateway.deadline, admission_deadline)
+            g.gateway_cancellation.bind(gateway)
         if cascade_deadline is not None:
             gateway.deadline = min(gateway.deadline, cascade_deadline)
             gateway.tool_repair.mode = "repair"
         else:
             gateway.tool_repair.mode = repair_mode(request.headers, app.config)
         if parsed.payload.get("stream"):
+            if cooldown_settings().enabled:
+                gateway.prepare_credentials()
             return _cascade_stream(gateway, cascade_deadline) if cascade_deadline is not None else stream_response(gateway)
         result = list(gateway.events())
         response = Response(json.dumps(result[-1]), content_type="application/json")
         if parsed.payload.get("tools"):
             response.headers[HEADER] = summary_header(gateway.tool_repair.buffer.report)
         return response
+    except (ModelCooldownExhausted, ModelCooldownCapacity):
+        if gateway is not None:
+            gateway.cancel()
+            gateway.settle()
+        raise
     except GatewayError as error:
         return error_response(error, gateway)
     except Exception:
@@ -211,7 +226,7 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
 
 def normalize_gateway_error(response):
     """Keep authentication, scope and outer admission failures on the same contract."""
-    if response.status_code < 400 or response.is_streamed:
+    if response.status_code < 400 or response.is_streamed or getattr(g, "gateway_cooldown_error", False):
         return response
     body = response.get_json(silent=True)
     if isinstance(body, dict) and isinstance(body.get("error"), dict):

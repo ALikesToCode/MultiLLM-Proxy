@@ -6,11 +6,11 @@
  */
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { BUCKET_FIELDS, bucketInsertStatement, recordUsageWithBuckets, usageBucketsEnabled, validBaseUsageRow as validRow } from "./usage-buckets-d1.mjs";
 
 // Upper bounds in milliseconds of the usage_daily latency buckets; the last bucket is open.
 export const LATENCY_BUCKETS = Object.freeze([250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000]);
 const BUCKET_COLUMNS = [...LATENCY_BUCKETS.map(bound => `lat_le_${bound}`), "lat_gt_120000"];
-const KINDS = new Set(["chat", "responses", "images", "videos", "embeddings", "audio", "proxy"]);
 const GROUPS = Object.freeze({ day: "day", model: "model", principal: "principal" });
 const EVENT_COLUMNS = ["id", "at", "principal", "key_prefix", "kind", "endpoint", "requested_model", "selected_model",
   "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id"];
@@ -23,9 +23,6 @@ const MAX_ANALYTICS_POINTS = 250;
 const CONTROL = /[\x00-\x1f\x7f]/;
 const AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
-const ENDPOINT = /^\/[A-Za-z0-9._~:/@+-]{0,255}$/;
-const REQUEST_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const BATCH_ID = /^[0-9a-f]{32}$/;
 
 const reply = (value, status = 200) => Response.json(value.error
@@ -34,7 +31,6 @@ const reply = (value, status = 200) => Response.json(value.error
 const fields = (body, names) => Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
 const text = (value, maximum) => typeof value === "string" && value.length > 0 && value.length <= maximum && !CONTROL.test(value);
 const optional = (value, test) => value === null || test(value);
-const count = (value, maximum = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 const timestamp = value => typeof value === "string" && AT.test(value) && Number.isFinite(Date.parse(value));
 const day = value => typeof value === "string" && DAY.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
 
@@ -43,18 +39,7 @@ export const latencyBucket = latency => {
   return index < 0 ? LATENCY_BUCKETS.length : index;
 };
 
-export function validRow(row) {
-  return row !== null && typeof row === "object" && !Array.isArray(row) && fields(row, ROW_FIELDS)
-    && timestamp(row.at) && text(row.principal, 256) && optional(row.key_prefix, value => text(value, 64))
-    && KINDS.has(row.kind) && typeof row.endpoint === "string" && ENDPOINT.test(row.endpoint)
-    && optional(row.requested_model, value => typeof value === "string" && MODEL.test(value))
-    && optional(row.selected_model, value => typeof value === "string" && MODEL.test(value))
-    && Number.isSafeInteger(row.status) && row.status >= 100 && row.status <= 599
-    && count(row.latency_ms, 86_400_000) && optional(row.input_tokens, count) && optional(row.output_tokens, count)
-    && optional(row.cost_usd, value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000)
-    && (row.cost_basis === null || row.cost_basis === "usage" || row.cost_basis === "estimate")
-    && optional(row.request_id, value => typeof value === "string" && REQUEST_ID.test(value));
-}
+export { validBaseUsageRow as validRow } from "./usage-buckets-d1.mjs";
 
 const field = name => `json_extract(value, '$.${name}')`;
 const APPLIED = "EXISTS (SELECT 1 FROM usage_batches WHERE id = ?2 AND token = ?3)";
@@ -96,16 +81,20 @@ function mirror(env, rows) {
   } catch (error) { logFailure("usage_analytics_failed", error); }
 }
 
-async function record(db, env, body) {
-  if (!fields(body, ["version", "operation", "batch", "rows"]) || typeof body.batch !== "string" || !BATCH_ID.test(body.batch)
-    || !Array.isArray(body.rows) || body.rows.length < 1 || body.rows.length > MAX_ROWS || !body.rows.every(validRow)) return null;
+function validBatch(body) {
+  return fields(body, ["version", "operation", "batch", "rows"]) && typeof body.batch === "string" && BATCH_ID.test(body.batch)
+    && Array.isArray(body.rows) && body.rows.length >= 1 && body.rows.length <= MAX_ROWS;
+}
+
+async function record(db, env, body, insertEvents = INSERT_EVENTS) {
+  if (!validBatch(body) || (insertEvents === INSERT_EVENTS && !body.rows.every(validRow))) return null;
   const rows = body.rows.map(row => ({ ...row, bucket: latencyBucket(row.latency_ms) }));
   const token = crypto.randomUUID();
   const json = JSON.stringify(rows);
   // One transaction: a batch ID seen before inserts nothing, so a retried flush is not counted twice.
   const [applied] = await db.batch([
     db.prepare("INSERT OR IGNORE INTO usage_batches (id, token, at) VALUES (?1, ?2, ?3)").bind(body.batch, token, new Date().toISOString()),
-    db.prepare(INSERT_EVENTS).bind(json, body.batch, token),
+    db.prepare(insertEvents).bind(json, body.batch, token),
     db.prepare(UPSERT_DAILY).bind(json, body.batch, token),
   ]);
   const duplicate = applied.meta.changes !== 1;
@@ -139,7 +128,7 @@ async function summary(db, body) {
   return { version: 1, rows: results.map(row => summaryRow(group, row)) };
 }
 
-async function recent(db, body) {
+async function recent(db, body, env) {
   if (!fields(body, ["version", "operation", "since", "principal", "before", "limit"]) || !timestamp(body.since)
     || !optional(body.principal, value => text(value, 256)) || !optional(body.before, value => Number.isSafeInteger(value) && value > 0)
     || !Number.isSafeInteger(body.limit) || body.limit < 1 || body.limit > MAX_PAGE) return null;
@@ -147,7 +136,8 @@ async function recent(db, body) {
   let filters = "";
   if (body.principal !== null) filters += ` AND principal = ?${values.push(body.principal)}`;
   if (body.before !== null) filters += ` AND id < ?${values.push(body.before)}`;
-  const { results } = await db.prepare(`SELECT ${EVENT_COLUMNS.join(", ")} FROM usage_events
+  const columns = usageBucketsEnabled(env) ? [...EVENT_COLUMNS, ...BUCKET_FIELDS] : EVENT_COLUMNS;
+  const { results } = await db.prepare(`SELECT ${columns.join(", ")} FROM usage_events
     WHERE at >= ?1${filters} ORDER BY id DESC LIMIT ?2`).bind(...values).all();
   return { version: 1, rows: results };
 }
@@ -186,7 +176,14 @@ export async function handleUsageLedgerRequest(request, env) {
   const operation = Object.hasOwn(OPERATIONS, body.operation) ? OPERATIONS[body.operation] : null;
   if (!operation) return reply({ error: "invalid_request" }, 400);
   try {
-    const result = operation === record ? await record(env.INTELLIGENCE_DB, env, body) : await operation(env.INTELLIGENCE_DB, body);
+    if (operation === record && usageBucketsEnabled(env)) {
+      if (!validBatch(body)) return reply({ error: "invalid_request" }, 400);
+      return await recordUsageWithBuckets(env, body, {
+        recordBase: legacy => record(env.INTELLIGENCE_DB, env, legacy),
+        recordExtended: extended => record(env.INTELLIGENCE_DB, env, extended, bucketInsertStatement()),
+      });
+    }
+    const result = operation === record ? await record(env.INTELLIGENCE_DB, env, body) : await operation(env.INTELLIGENCE_DB, body, env);
     return result ? reply(result) : reply({ error: "invalid_request" }, 400);
   } catch (error) {
     logFailure("usage_ledger_failed", error, { operation: body.operation });

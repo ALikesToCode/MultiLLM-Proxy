@@ -257,7 +257,7 @@ def dispatch_media_candidate(app, auth_service_cls, metrics_service_cls, proxy_s
                                                   params={}, data=body, api_provider=provider, use_cache=False,
                                                   timeout_override=media.operation.timeout, force_raw_passthrough=True)
 
-        upstream, attempts = _request_with_provider_token_rotation(app, auth_service_cls, proxy_service_cls, provider, send)
+        upstream, attempts = _request_with_provider_token_rotation(app, auth_service_cls, proxy_service_cls, provider, send, model=provider_model)
         status = upstream.status_code
         if native_gemini and status == 200 and not isinstance(upstream, Response):
             reply = gemini_audio.read_reply(upstream)

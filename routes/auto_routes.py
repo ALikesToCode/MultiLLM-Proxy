@@ -6,6 +6,7 @@ from collections.abc import Callable
 from flask import Response, g, has_request_context, jsonify, request
 
 from error_handlers import APIError
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from providers.registry import get_registry
 from services import cloudflare_ai
 from services.auto_route_service import AutoRoute, AutoRouteService
@@ -179,6 +180,8 @@ def dispatch_auto_route(
         priority = priorities[candidate]
         try:
             validate_candidate(candidate)
+        except (ModelCooldownExhausted, ModelCooldownCapacity):
+            raise
         except (APIError, ValueError) as error:
             logger.info(
                 "Skipping unavailable auto route candidate %s (%s)",
