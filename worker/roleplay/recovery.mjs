@@ -1,10 +1,14 @@
 import { errorResponse, jsonResponse, readBoundedBytes } from "./transport.mjs";
 import { createVisibleRoleplayContentCollector } from "./reasoning-output.mjs";
+import { retentionAllowsContent, retentionResponse } from "../retention-policy.mjs";
+export { resolveRoleplayRetention, retentionResponse, retentionRequestId, retentionAllowsContent } from "../retention-policy.mjs";
+export { createRetentionStateRepository } from "./session-storage.mjs";
 
 const KEY = "operator_recovery_v1";
 const MAX_BYTES = 100_000;
 
-export function recoveryTemplate(payload, messages) {
+export function recoveryTemplate(payload, messages, retentionPolicy = null) {
+  if (!retentionAllowsContent(retentionPolicy)) return null;
   if (payload.recovery_enabled !== true) return null;
   const result = { model: payload.model || "roleplay:auto", messages,
     routing: payload.routing, reasoning_effort: payload.reasoning_effort,
@@ -16,7 +20,8 @@ export function recoveryTemplate(payload, messages) {
   return new TextEncoder().encode(JSON.stringify(result)).byteLength <= 60_000 ? result : null;
 }
 
-export async function preserveRecovery(storage, template, result, traceId) {
+export async function preserveRecovery(storage, template, result, traceId, retentionPolicy = null) {
+  if (!retentionAllowsContent(retentionPolicy)) return;
   if (!template || result.success) return;
   const visible = createVisibleRoleplayContentCollector();
   const partial = typeof result.visiblePartial === "string" ? result.visiblePartial
@@ -29,7 +34,9 @@ export async function preserveRecovery(storage, template, result, traceId) {
   await storage.put(KEY, snapshot);
 }
 
-export async function handleRecoverySnapshot(session, request) {
+export async function handleRecoverySnapshot(session, request, retentionPolicy = null) {
+  if (!retentionAllowsContent(retentionPolicy)) return retentionResponse(
+    errorResponse("Durable conversation recovery is unavailable under zero retention", 409, "recovery_unavailable"), retentionPolicy);
   if (session.pendingTurns) return errorResponse("Wait for the active turn to settle", 409, "session_busy");
   let slot;
   try {

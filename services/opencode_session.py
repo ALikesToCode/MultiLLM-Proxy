@@ -83,3 +83,22 @@ def with_opencode_request_session(
         session = f"multillm_request_{uuid.uuid4()}"
     result["X-Opencode-Session"] = session
     return result
+
+
+def reusable_prefix_digest(payload) -> str | None:
+    """Hash the opening and tool schema separately from a caller's session ID."""
+    if not isinstance(payload, dict):
+        return None
+    opening_payload = {key: payload[key] for key in ("messages", "input", "system", "instructions") if key in payload}
+    anchor = _conversation_anchor(opening_payload)
+    if anchor is None:
+        return None
+    try:
+        encoded = json.dumps([anchor, payload.get("tools"), payload.get("tool_choice")],
+                             sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+                             allow_nan=False).encode("utf-8")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return None
+    if len(encoded) > MAX_SESSION_BODY_BYTES:
+        return None
+    return hashlib.sha256(encoded).hexdigest()

@@ -10,6 +10,7 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 
+from services import retention_policy
 from services.knowledge_native import NATIVE_OPERATIONS
 from services.secret_firewall import protect_payload, scan_mode
 
@@ -152,12 +153,18 @@ def dispatch(operation, user, payload=None):
         if operation == "status":
             return setup_status()
         raise KnowledgeError("setup_needed", "The private Knowledge service has not been connected.")
+    # The request's retention snapshot travels with the envelope; zero refuses saves before content leaves.
+    retention = retention_policy.request_policy()
+    if operation == "handoffs.save" and not retention.allows_content:
+        raise KnowledgeError("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409)
     # Sync is scanned per file by the private Skills handler, including decoded base64.
     if operation != "skills.sync":
         payload = protect_payload(payload or {}, provider="knowledge", user=user, knowledge=True)
     envelope = {"version": 1, "operation": operation,
                 "principal": principal_for(user), "payload": payload,
                 "secret_scan_mode": scan_mode(user, knowledge=True), "secret_scan_checked": True}  # nosec B105 - a flag, not a password
+    if retention.enabled:
+        envelope["retention_policy"] = {"mode": retention.mode, "enabled": True}
     body = json.dumps(envelope, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(body) > (SYNC_REQUEST_BYTES if operation == "skills.sync" else MAX_REQUEST_BYTES):
         raise KnowledgeError("request_too_large", "The Knowledge sync request exceeds 8 MiB." if operation == "skills.sync" else "The Knowledge request exceeds 64 KiB.", 413)

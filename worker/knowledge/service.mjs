@@ -14,6 +14,7 @@ import { getMemos } from "./memos.mjs";
 import { parseMemoPurge } from "./memo-store.mjs";
 import { logFailure } from "../log.mjs";
 import { protectPayload } from "../secret-firewall.mjs";
+import { resolveRetentionPolicy, retentionAllowsContent, retentionKnowledgeOptions, retentionPolicySnapshot } from "../retention-policy.mjs";
 
 const OPERATIONS = new Set(["status", "context", "search", "artifact", "sources.create", "sources.update",
   "sources.refresh", "jobs.cancel", "policy.update", "product_sites.get", "product_sites.update", "memos.stats", "memos.purge", "skills.find", "skills.get", "skills.sync", "skills.discover", "skills.preview", "skills.import", "skills.report", ...HANDOFF_OPERATIONS, ...ALEXANDRIA_OPERATIONS, ...NATIVE_OPERATIONS]);
@@ -101,10 +102,19 @@ async function artifactResult(env, authority, id, corpus) {
 }
 
 export async function dispatchKnowledge(env, envelope, options = {}) {
-  fields(envelope, ["version", "operation", "principal", "payload", "secret_scan_mode", "secret_scan_checked"], ["version", "operation", "principal", "payload"]);
+  fields(envelope, ["version", "operation", "principal", "payload", "secret_scan_mode", "secret_scan_checked", "retention_policy"], ["version", "operation", "principal", "payload"]);
   if (envelope.version !== 1 || !OPERATIONS.has(envelope.operation)) fail("unknown_operation", "Unknown Knowledge operation.", 404);
   const { operation, principal, payload } = envelope;
   authorize(principal, READ.has(operation) ? "knowledge:read" : "knowledge:manage");
+  let retentionPolicy;
+  try {
+    retentionPolicy = envelope.retention_policy === undefined
+      ? options.retentionPolicy ?? resolveRetentionPolicy(env, { keyId: principal.id })
+      : retentionPolicySnapshot(envelope.retention_policy);
+  } catch { fail("invalid_request", "Invalid retention policy."); }
+  if (operation === "handoffs.save" && !retentionAllowsContent(retentionPolicy)) {
+    fail("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409);
+  }
   if (envelope.secret_scan_mode !== undefined && !["off", "block"].includes(envelope.secret_scan_mode)) fail("invalid_request", "Invalid secret scan mode.");
   if (envelope.secret_scan_checked !== undefined && typeof envelope.secret_scan_checked !== "boolean") fail("invalid_request", "Invalid secret scan marker.");
   // Only the private service binding accepts this marker from authenticated ingress.
@@ -115,16 +125,16 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
     options.onSecretScan?.(decision);
     if (decision.blocked) fail("secret_detected", `High-confidence secrets detected: ${JSON.stringify(decision.report.types)}`, 422);
   }
-  if (HANDOFF_OPERATIONS.includes(operation)) return dispatchHandoff(env, principal, operation, payload);
+  if (HANDOFF_OPERATIONS.includes(operation)) return dispatchHandoff(env, principal, operation, payload, retentionPolicy);
   if (operation.startsWith("skills.")) return dispatchSkills(env, operation, principal, payload, options);
   const authority = options.authority || getAuthority(env);
   if (ALEXANDRIA_OPERATIONS.includes(operation)) return dispatchAlexandria(env, authority, principal, operation, payload, options);
   if (NATIVE_OPERATIONS.includes(operation)) return dispatchNative(env, authority, principal, operation, payload, options);
   if (operation === "status") { fields(payload, []); return status(env, authority); }
   if (operation === "context" || operation === "search") {
-    return retrieveKnowledge(env, authority, principal, parseQuery(payload), {
+    return retrieveKnowledge(env, authority, principal, parseQuery(payload), retentionKnowledgeOptions(retentionPolicy, {
       ...options, schedule: (id, signal, artifactId) => scheduleSource(env, authority, id, signal, artifactId),
-    });
+    }));
   }
   if (operation === "artifact") { fields(payload, ["id"], ["id"]); return artifactResult(env, authority, payload.id, options.corpus); }
   if (operation === "product_sites.get" || operation === "product_sites.update") return authority.call(operation, payload);

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import g, has_request_context, jsonify, request
+from flask import Response, g, has_request_context, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from error_handlers import APIError
@@ -15,9 +15,23 @@ from routes.protocol_bridge import (
 )
 from services import key_controls
 from services.conversion_diagnostics import (
-    BODY_LIMIT, combine_reports, report_headers, request_report,
+    BODY_LIMIT, combine_reports, report_headers,
 )
-from services.protocol_translation import CHAT, PROTOCOLS, TranslationError, translate_request
+from services.protocol_translation import CHAT, PROTOCOLS, TranslationError
+from services.protocol_extras import managed_request_report
+from services.managed_turn import emit_managed_request
+
+
+def _add_prompt_cache_headers(
+    response: Response,
+    decision,
+) -> Response:
+    response.headers["X-MultiLLM-Prompt-Cache"] = decision.status
+    response.headers["X-MultiLLM-Prompt-Cache-Mode"] = decision.mode
+    response.headers["X-MultiLLM-Prompt-Cache-Estimated-Tokens"] = str(
+        decision.estimated_input_tokens
+    )
+    return response
 
 
 def diagnostics_requested() -> bool:
@@ -34,7 +48,7 @@ def record_conversion(report: dict) -> None:
 
 def record_request_conversion(payload: dict, source: str, target: str) -> None:
     if diagnostics_requested():
-        record_conversion(request_report(payload, source, target))
+        record_conversion(managed_request_report(payload, source, target))
 
 
 def with_chat_conversion_report(view):
@@ -56,7 +70,7 @@ def dispatch_translated_protocol(
     """Serve Responses or Messages through an explicit Chat dispatcher collaborator."""
     record_request_conversion(payload, protocol, CHAT)
     try:
-        chat_payload = translate_request(payload, protocol, CHAT)
+        chat_payload = emit_managed_request(payload, protocol, CHAT)
     except TranslationError as error:
         raise translation_api_error(error) from error
     if "routing" in payload:
@@ -102,5 +116,5 @@ def register_conversion_routes(app, csrf) -> None:
         if not key_controls.model_allowed(g.authenticated_user, model):
             raise APIError("This API key is not allowed to use the requested model", 403,
                            {"error": "model_not_allowed"})
-        report = request_report(payload, source, target)
+        report = managed_request_report(payload, source, target)
         return jsonify(report), 400 if report["fidelity"] == "unsupported" else 200

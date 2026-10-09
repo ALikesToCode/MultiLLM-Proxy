@@ -52,7 +52,7 @@ from routes.tool_repair import with_chat_tool_repair, with_native_tool_repair
 from routes.unified_messages import register_unified_messages_routes
 from routes.media_edits import dispatch_reference_generation, has_reference_images
 from routes.unified_transport import send_configured_unified_provider_request
-from routes.unified_bridge import dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
+from routes.unified_bridge import _add_prompt_cache_headers, dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
 from services import cloudflare_ai
@@ -64,10 +64,11 @@ from services.media_storage import persist_image_response
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.cascade_config import is_cascade
-from routes.cascade_deadline import bounded_timeout, check_candidate
+from services.managed_turn import bounded_managed_timeout as bounded_timeout
 from routes.cascades import dispatch_unified_cascade, register_cascade_admin_routes, validate_cascade_target
 from services.context_optimizer import ContextOptimizationResult
 from services.model_registry import ModelRegistry
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from routes.provider_credentials import (
     NanoGPTKeyPool,
     _provider_token,
@@ -88,15 +89,18 @@ from services.provider_prompt_cache import (
 from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
-
+from services.prompt_cache_affinity import affinity_auto_request, affinity_candidate
+from services.managed_turn import managed_pipeline, emit_managed_request, with_managed_idempotency, check_managed_candidate
+from services.managed_dispatch import execute_managed_attempt, observe_managed_response
+from services.context_pages import page_managed_candidate, managed_paging_eligible
+from services.responses_state import with_responses_state
 logger = logging.getLogger(__name__)
-
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 
 
 def _resolve_enabled_model(app, model_id: str):
-    check_candidate(model_id)
+    check_managed_candidate(model_id)
     provider, provider_model = ModelRegistry.parse_model_id(model_id)
     adapter = get_adapter(provider, app.config["API_BASE_URLS"])
     if not adapter:
@@ -200,18 +204,6 @@ def _add_adaptive_context_headers(
     return response
 
 
-def _add_prompt_cache_headers(
-    response: Response,
-    decision: PromptCacheDecision,
-) -> Response:
-    response.headers["X-MultiLLM-Prompt-Cache"] = decision.status
-    response.headers["X-MultiLLM-Prompt-Cache-Mode"] = decision.mode
-    response.headers["X-MultiLLM-Prompt-Cache-Estimated-Tokens"] = str(
-        decision.estimated_input_tokens
-    )
-    return response
-
-
 def _merge_request_headers(headers: dict, additions: Mapping[str, str]) -> None:
     existing = {name.lower() for name in headers}
     for name, value in additions.items():
@@ -231,7 +223,7 @@ def _validate_direct_image_target(
             f"Image generation is not supported for provider: {provider}",
             status_code=400,
         )
-    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider, model=model_id.split(":", 1)[1])
     return provider
 
 
@@ -246,7 +238,8 @@ def _validate_direct_chat_target(
     if not judge_candidate_allowed(model_id):
         raise APIError("Model is excluded from routed image judging", status_code=503)
     provider, _, _ = _resolve_enabled_model(app, model_id)
-    _provider_token(app, auth_service_cls, proxy_service_cls, provider)
+    upstream = _apply_nanogpt_speed_routing(app, provider, {"model": model_id.split(":", 1)[1]}, request.headers)
+    _provider_token(app, auth_service_cls, proxy_service_cls, provider, model=upstream["model"])
     return provider
 
 
@@ -284,13 +277,14 @@ def validate_unified_chat_target(
                 candidate,
             )
             return "auto"
+        except (ModelCooldownExhausted, ModelCooldownCapacity):
+            raise
         except (APIError, ValueError):
             continue
     raise APIError(
         f"No configured provider is available for auto route: {route.id}",
         status_code=503,
     )
-
 
 def _send_native_request(
     app,
@@ -307,6 +301,7 @@ def _send_native_request(
     request_timeout=None,
 ):
     """Send one body to a provider's native Responses or Messages endpoint."""
+    from services.managed_turn import prepare_dispatch_kwargs
     raw_body = json.dumps(body).encode("utf-8")
 
     def send_request(token: str):
@@ -336,9 +331,9 @@ def _send_native_request(
             # The managed transport rewrites streams as Chat Completions chunks;
             # only the raw transport keeps a native event stream intact.
             request_kwargs["force_raw_passthrough"] = True
-        if request_timeout is not None:
+        if request_timeout is not None or getattr(g, "generation_deadline", None) is not None:
             request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
-        return proxy_service_cls.make_request(**request_kwargs)
+        return execute_managed_attempt(lambda: proxy_service_cls.make_request(**prepare_dispatch_kwargs(request_kwargs, ENDPOINT_PROTOCOLS[endpoint])), f"{provider}:{provider_model}", token)
 
     return _request_with_provider_token_rotation(
         app,
@@ -346,6 +341,7 @@ def _send_native_request(
         proxy_service_cls,
         provider,
         send_request,
+        model=body.get("model"),
     )
 
 
@@ -370,7 +366,7 @@ def _dispatch_bridged_chat(
     target = ENDPOINT_PROTOCOLS[endpoint]
     record_request_conversion(payload, CHAT, target)
     try:
-        body = translate_request(_copy_request_payload(payload, provider_model), CHAT, target)
+        body = emit_managed_request(_copy_request_payload(payload, provider_model), CHAT, target)
     except TranslationError as error:
         raise translation_api_error(error) from error
     cache_decision = apply_prompt_cache_policy(
@@ -408,6 +404,7 @@ def _dispatch_bridged_chat(
         target=CHAT,
         stream=bool(payload.get("stream")),
     )
+    observe_managed_response(downstream, response, stream=bool(payload.get("stream")))
     return _add_credential_attempt_headers(
         _add_prompt_cache_headers(downstream, cache_decision),
         provider,
@@ -415,6 +412,7 @@ def _dispatch_bridged_chat(
     )
 
 
+@affinity_candidate
 @with_chat_tool_repair
 def _dispatch_unified_chat_candidate(
     app,
@@ -440,6 +438,7 @@ def _dispatch_unified_chat_candidate(
             app,
             payload.get("model"),
         )
+        payload = page_managed_candidate(payload, model=f"{provider}:{provider_model}")
         bridge_endpoint = chat_bridge_endpoint(provider, provider_model)
         if bridge_endpoint is not None:
             return _dispatch_bridged_chat(
@@ -470,7 +469,7 @@ def _dispatch_unified_chat_candidate(
             )
             headers_source = sanitize_nanogpt_subscription_headers(headers_source)
         adaptive_result = None
-        if adaptive_context:
+        if adaptive_context and not managed_paging_eligible():
             prompt_limit = RateLimitService._provider_limit(
                 provider,
                 "MAX_PROMPT_TOKENS",
@@ -514,6 +513,7 @@ def _dispatch_unified_chat_candidate(
 
         # Held in a cell so a NanoGPT pay-as-you-go refusal can resend an
         # un-suffixed body through the same rotation.
+        from services.managed_turn import prepare_dispatch_kwargs
         outbound = {"data": _encode(upstream_payload)}
 
         def send_request(token: str):
@@ -549,16 +549,16 @@ def _dispatch_unified_chat_candidate(
                 "api_provider": provider,
                 "use_cache": False,
             }
-            if request_timeout is not None:
+            if request_timeout is not None or getattr(g, "generation_deadline", None) is not None:
                 request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
-            return send_configured_unified_provider_request(
+            return execute_managed_attempt(lambda: send_configured_unified_provider_request(
                 proxy_service_cls,
-                request_kwargs,
+                prepare_dispatch_kwargs(request_kwargs),
                 provider=provider,
                 runtime_config=app.config,
                 upstream_path=upstream_path,
                 request_headers=headers_source,
-            )
+            ), f"{provider}:{provider_model}", token)
 
         response, credential_attempts = _request_with_provider_token_rotation(
             app,
@@ -566,6 +566,7 @@ def _dispatch_unified_chat_candidate(
             proxy_service_cls,
             provider,
             send_request,
+            model=upstream_payload.get("model"),
             billing_refusal_is_routing=nanogpt_model_has_speed_suffix(
                 upstream_payload.get("model")
             ),
@@ -580,6 +581,7 @@ def _dispatch_unified_chat_candidate(
                 proxy_service_cls,
                 provider,
                 send_request,
+                model=upstream_payload.get("model"),
             )
             credential_attempts += retry_attempts
 
@@ -592,6 +594,7 @@ def _dispatch_unified_chat_candidate(
         )
 
         if isinstance(response, Response):
+            observe_managed_response(response, response, stream=bool(payload.get("stream")))
             return _add_credential_attempt_headers(
                 _add_prompt_cache_headers(
                     _add_adaptive_context_headers(response, adaptive_result),
@@ -610,6 +613,7 @@ def _dispatch_unified_chat_candidate(
                 headers=copy_raw_provider_response_headers(response.headers),
             )
         mark_transport_failure(downstream_response, response)
+        observe_managed_response(downstream_response, response, stream=bool(payload.get("stream")))
         return _add_credential_attempt_headers(
             _add_prompt_cache_headers(
                 _add_adaptive_context_headers(
@@ -634,8 +638,9 @@ def _dispatch_unified_chat_candidate(
         )
         raise
 
-
+@managed_pipeline
 @sample_chat_dispatch
+@affinity_auto_request
 def dispatch_unified_chat_completion(
     app,
     auth_service_cls,
@@ -748,7 +753,7 @@ def _dispatch_native_protocol(
     """Pass a Responses or Messages body to a provider that speaks it natively."""
     start_time = time.time()
     headers_source = request.headers
-    upstream_payload = _copy_request_payload(payload, provider_model)
+    upstream_payload = emit_managed_request(_copy_request_payload(payload, provider_model), ENDPOINT_PROTOCOLS[endpoint], ENDPOINT_PROTOCOLS[endpoint])
     if endpoint == RESPONSES_ENDPOINT:
         upstream_payload = apply_glm_5_reasoning_policy(
             upstream_payload,
@@ -810,7 +815,8 @@ def _dispatch_translated_protocol(
         dispatch_chat=dispatch_unified_chat_completion,
     )
 
-
+@with_responses_state
+@managed_pipeline
 def dispatch_protocol_request(
     app,
     auth_service_cls,
@@ -937,6 +943,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     @with_chat_conversion_report
+    @with_managed_idempotency
     @cached_chat_completion
     def unified_chat_completions():
         payload = json_object_body()

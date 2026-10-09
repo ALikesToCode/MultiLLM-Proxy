@@ -92,3 +92,14 @@ export class SkillsIndex {
     return results.sort((a, b) => b.score - a.score || a.skill_id.localeCompare(b.skill_id)).slice(0, request.limit);
   }
 }
+
+
+/** Rank an already-authorized tool catalogue locally; never request embeddings. */
+export function rankToolDefinitions(definitions, query) {
+  const words = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+  const tokens = words(query);
+  const scored = definitions.map(tool => ({ tool, score: [["name", 3], ["title", 2], ["description", 1]]
+    .reduce((sum, [field, weight]) => sum + weight * [...words(tool[field] ?? "")].filter(term => tokens.has(term)).length, 0) }));
+  return scored.filter(item => item.score > 0).sort((a, b) => b.score - a.score
+    || (a.tool.name < b.tool.name ? -1 : a.tool.name > b.tool.name ? 1 : 0)).map(item => item.tool);
+}

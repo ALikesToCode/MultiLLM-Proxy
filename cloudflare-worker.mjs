@@ -1,3 +1,6 @@
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest, handleRealtimeRequest } from "./worker/gateway-extensions.mjs";
+import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
+import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 import { collectContainerEnv } from "./worker/container-env.mjs";
@@ -8,6 +11,7 @@ import { handleAiOutbound } from "./worker/ai-outbound.mjs";
 import { handleMediaOutbound } from "./worker/media-outbound.mjs";
 import { serveSignedMediaFile, signedMediaFileId } from "./worker/media-files.mjs";
 import { MediaJobWorkflow } from "./worker/media-workflow.mjs";
+import { AdmissionCoordinator } from "./worker/admission-do.mjs";
 import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "./worker/knowledge-edge.mjs";
 import { withAccessIdentity } from "./worker/access-sso.mjs";
 import { runScheduledShadowEval } from "./worker/shadow-eval-schedule.mjs";
@@ -41,6 +45,7 @@ import { withJanitorGlmReasoningNormalization } from "./worker/janitor-reasoning
 
 
 export { RoleplaySession };
+export { AdmissionCoordinator };
 export { MediaJobWorkflow };
 
 import { CORS_ALLOWED_METHODS, CORS_DEFAULT_HEADERS, CORS_EXPOSE_HEADERS } from "./worker/cors-policy.mjs";
@@ -522,13 +527,13 @@ function buildLinkApiUpstreamHeaders(request, protocol, upstreamPathname, upstre
   return headers;
 }
 
-function copyLinkApiResponseHeaders(headers) {
+function copyLinkApiResponseHeaders(headers, env) {
   const responseHeaders = new Headers();
 
   for (const [header, value] of headers.entries()) {
     const normalized = header.toLowerCase();
     if (
-      LINKAPI_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      nativeCacheHeader(normalized, headers, env) || LINKAPI_RESPONSE_HEADER_WHITELIST.has(normalized) ||
       LINKAPI_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
     ) {
       responseHeaders.set(header, value);
@@ -609,13 +614,13 @@ function buildCodexEasyUpstreamHeaders(request, upstreamToken) {
   return headers;
 }
 
-function copyCodexEasyResponseHeaders(headers) {
+function copyCodexEasyResponseHeaders(headers, env) {
   const responseHeaders = new Headers();
 
   for (const [header, value] of headers.entries()) {
     const normalized = header.toLowerCase();
     if (
-      CODEX_EASY_RESPONSE_HEADER_WHITELIST.has(normalized) ||
+      nativeCacheHeader(normalized, headers, env) || CODEX_EASY_RESPONSE_HEADER_WHITELIST.has(normalized) ||
       CODEX_EASY_RESPONSE_HEADER_PREFIXES.some((prefix) => normalized.startsWith(prefix))
     ) {
       responseHeaders.set(header, value);
@@ -1446,7 +1451,7 @@ function createOpencodeStreamResponse(upstreamResponse) {
   });
 }
 
-async function handleDirectOpencodeRequest(request, env, requestUrl) {
+async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
   const providedToken = extractOpencodeCallerToken(request);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
@@ -1467,41 +1472,43 @@ async function handleDirectOpencodeRequest(request, env, requestUrl) {
     );
   }
 
-  const reasoningMetadataPromise = resolveOpencodeChatMetadata(
-    request,
-    requestUrl.pathname,
-  );
   const callerAuth = opencodeCallerUpstreamAuth(request);
   const upstreamToken = env.OPENCODE_GO_API_KEY || env.OPENCODE_API_KEY;
   if (!upstreamToken && !callerAuth.authorization && !callerAuth.apiKey) {
     return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
-  request = await withOpencodeGlmReasoning(request, requestUrl.pathname);
+  const generationSetup = nativeGenerationSetup(request, env);
+  const reasoningMetadataPromise = generationSetup.run(() => resolveOpencodeChatMetadata(
+    request,
+    requestUrl.pathname,
+  ));
+
+  request = await generationSetup.run(() => withOpencodeGlmReasoning(request, requestUrl.pathname));
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl, env, upstreamPath), {
     method: request.method,
-    headers: await withOpencodeRequestSession(request, buildOpencodeUpstreamHeaders(
+    headers: await generationSetup.run(() => withOpencodeRequestSession(request, buildOpencodeUpstreamHeaders(
       request,
       upstreamPath,
       upstreamToken,
       callerAuth,
-    )),
+    ))),
     body: bodyAllowed ? request.body : undefined,
     redirect: "manual",
     signal: request.signal,
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
-    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   if (isOpencodeNativeRequest(requestUrl.pathname, request.method)) {
     const downstreamResponse = new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers, env),
     });
     return applyCorsHeaders(
       request,
@@ -1580,7 +1587,7 @@ async function authorizeContainerOpencodeRequest(request, env, requestUrl) {
   return null;
 }
 
-async function handleDirectLinkApiRequest(request, env, requestUrl) {
+async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
   const providedToken = extractLinkApiCallerToken(request, requestUrl);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildLinkApiUnauthorizedResponse(), env);
@@ -1593,12 +1600,13 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
 
   const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env);
   const protocol = getLinkApiProtocol(upstreamUrl.pathname);
+  const generationSetup = nativeGenerationSetup(request, env);
   let normalizedRequest;
   try {
-    normalizedRequest = await withDefaultGptImageModeration(
+    normalizedRequest = await generationSetup.run(() => withDefaultGptImageModeration(
       request,
       upstreamUrl.pathname,
-    );
+    ));
   } catch (error) {
     if (!(error instanceof GPTImageModerationError)) {
       throw error;
@@ -1627,23 +1635,23 @@ async function handleDirectLinkApiRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
-    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   return applyCorsHeaders(
     request,
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyLinkApiResponseHeaders(upstreamResponse.headers),
+      headers: copyLinkApiResponseHeaders(upstreamResponse.headers, env),
     }),
     env,
   );
 }
 
-async function handleDirectCodexEasyRequest(request, env, requestUrl) {
+async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
   const providedToken = extractBearerToken(request);
   if (!(await timingSafeTokenMatch(providedToken, env.ADMIN_API_KEY))) {
     return applyCorsHeaders(request, buildUnauthorizedResponse(), env);
@@ -1659,9 +1667,10 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
     return applyCorsHeaders(request, buildMissingCodexEasyKeyResponse(), env);
   }
 
+  const generationSetup = nativeGenerationSetup(request, env);
   let normalizedRequest;
   try {
-    normalizedRequest = await withDefaultGptImageModeration(request, upstreamPath);
+    normalizedRequest = await generationSetup.run(() => withDefaultGptImageModeration(request, upstreamPath));
   } catch (error) {
     if (!(error instanceof GPTImageModerationError)) {
       throw error;
@@ -1685,17 +1694,17 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl) {
     signal: normalizedRequest.signal,
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
-  const upstreamResponse = await firewallFetch(upstreamRequest, env, {
-    route: requestUrl.pathname, principal: { id: env.ADMIN_USERNAME || "admin" },
+  const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
-  });
+  }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
   return applyCorsHeaders(
     request,
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
-      headers: copyCodexEasyResponseHeaders(upstreamResponse.headers),
+      headers: copyCodexEasyResponseHeaders(upstreamResponse.headers, env),
     }),
     env,
   );
@@ -1826,7 +1835,12 @@ MultiLLMProxyContainer.outboundByHost = {
 
 export default {
   async scheduled(controller, env, ctx) {
+    tickNativeRevisionSync(env, ctx);
+    if (scheduledMaintenanceEnabled(env)) ctx.waitUntil(runScheduledMaintenance(env));
     const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+    if (batchesEnabled(env)) ctx.waitUntil(runScheduledBatches(env, container).catch(() => {
+      console.warn(JSON.stringify({ event: "gateway_batch_schedule_failed" }));
+    }));
     ctx.waitUntil(runScheduledShadowEval(env, container));
     ctx.waitUntil(runScheduledHealth(controller, env, container).catch((error) => {
       logStructuredError("scheduled_health_failed", error);
@@ -1876,6 +1890,9 @@ export default {
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
     }
+
+    const realtimeResponse = await handleRealtimeRequest(request, env, ctx);
+    if (realtimeResponse) return realtimeResponse.status === 101 ? realtimeResponse : applyCorsHeaders(request, realtimeResponse, env);
 
     if (requestUrl.pathname === "/status.prometheus" || requestUrl.pathname === "/v1/metrics/prometheus") {
       if (!prometheusEnabled(env.PROMETHEUS_ENABLED)) {
@@ -1958,6 +1975,9 @@ export default {
       }
     }
 
+    const roleplayPage = await handleRoleplayContextPageRequest(request, env);
+    if (roleplayPage) return applyCorsHeaders(request, roleplayPage, env);
+
     if (kimiCodePath) {
       try {
         const response = await handleDirectKimiCodeRequest(request, env, requestUrl);
@@ -1982,8 +2002,10 @@ export default {
 
     if (codexEasyPath) {
       try {
-        return await handleDirectCodexEasyRequest(request, env, requestUrl);
+        return await handleDirectCodexEasyRequest(request, env, requestUrl, ctx);
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("direct_codex_easy_fetch_failed", error);
         return applyCorsHeaders(
           request,
@@ -2001,8 +2023,10 @@ export default {
 
     if (linkapiPath) {
       try {
-        return await handleDirectLinkApiRequest(request, env, requestUrl);
+        return await handleDirectLinkApiRequest(request, env, requestUrl, ctx);
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("direct_linkapi_fetch_failed", error);
         return applyCorsHeaders(
           request,
@@ -2021,7 +2045,7 @@ export default {
     if (opencodePath) {
       try {
         if (env.OPENCODE_EDGE_FETCH === "true") {
-          return await handleDirectOpencodeRequest(request, env, requestUrl);
+          return await handleDirectOpencodeRequest(request, env, requestUrl, ctx);
         }
         const rejected = await authorizeContainerOpencodeRequest(
           request,
@@ -2036,6 +2060,8 @@ export default {
           requestUrl.pathname,
         );
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("opencode_edge_auth_failed", error);
         return applyCorsHeaders(
           request,
@@ -2054,11 +2080,12 @@ export default {
     try {
       const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
       const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
-      const headers = new Headers(request.headers);
+      const headers = forwardedGenerationHeaders(request, env);
       // Client copies of the Access identity headers never reach the Container.
       await withAccessIdentity(request, env, headers);
       headers.delete("content-length");
       headers.delete("host");
+      withForwardedCorrelation(headers, env);
       headers.set("x-forwarded-proto", requestUrl.protocol.slice(0, -1));
       headers.set("x-forwarded-host", requestUrl.host);
       headers.set("x-multillm-external-origin", requestUrl.origin);
@@ -2074,7 +2101,10 @@ export default {
         signal: request.signal,
         ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
       });
-      const response = await container.fetch(forwardedRequest);
+      let response = await container.fetch(forwardedRequest);
+      if (requestUrl.pathname === "/v1/metrics/prometheus") {
+        response = await withNativeMetrics(response, env);
+      }
       if (await isContainerPackageStartupFailure(response)) {
         logStructuredError("container_start_failed_response", new Error("Container unavailable"));
         if (rootPath) {
@@ -2104,6 +2134,8 @@ export default {
         env,
       );
     } catch (error) {
+      const deadlineResponse = generationErrorResponse(error);
+      if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
       if (rootPath) {
         logStructuredError("container_fetch_failed", error);
         return buildRootFallbackResponse();

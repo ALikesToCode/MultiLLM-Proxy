@@ -250,8 +250,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
     def test_budget_stop_keeps_the_first_image(self):
         decisions = iter([BudgetDecision(True), BudgetDecision(True), BudgetDecision(True),
                           BudgetDecision(False, error="budget_exceeded", status_code=429, message="Synthetic budget spent")])
-        with patch("services.accounted_dispatch.budgeted", return_value=True), \
-             patch("services.request_accounting.budgeted", return_value=True), \
+        with patch("services.request_accounting.budgeted", return_value=True), \
              patch.object(BudgetService, "check_and_reserve", side_effect=lambda *args: next(decisions)):
             response, generations, judges, _ = self.generate([3])
         self.assertEqual(response.status_code, 200)
@@ -292,8 +291,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
             return result
         decisions = iter([BudgetDecision(True)] * 3 + [
             BudgetDecision(False, error="budget_exceeded", status_code=429, message="Synthetic budget spent")])
-        with patch("services.accounted_dispatch.budgeted", return_value=True), \
-             patch("services.request_accounting.budgeted", return_value=True), \
+        with patch("services.request_accounting.budgeted", return_value=True), \
              patch.object(qa_routes, "_one_image", side_effect=ordered), \
              patch.object(BudgetService, "check_and_reserve", side_effect=lambda *args: next(decisions)):
             response, generations, judges, _ = self.generate([9], n=2)
@@ -308,7 +306,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
         body = {"defaults": {"model": MODEL}, "items": [
             {"prompt": "A square", "quality_check": {"judge_model": JUDGE}},
             {"prompt": "Two circles", "n": 2}]}
-        with patch("services.accounted_dispatch.budgeted", return_value=True), \
+        with patch("services.request_accounting.budgeted", return_value=True), \
              patch.object(BudgetService, "check_and_reserve", return_value=BudgetDecision(True)) as reserve:
             response, generations, judges, _ = self.generate([9], path="/v1/images/batch", body=body)
         self.assertEqual(response.status_code, 200)
@@ -355,8 +353,7 @@ class ImageQualityRoutesTest(UnifiedApiTestCase):
     def test_retry_judge_budget_stop_is_reported(self):
         decisions = iter([BudgetDecision(True)] * 4 + [
             BudgetDecision(False, error="budget_exceeded", status_code=429, message="Synthetic budget spent")])
-        with patch("services.accounted_dispatch.budgeted", return_value=True), \
-             patch("services.request_accounting.budgeted", return_value=True), \
+        with patch("services.request_accounting.budgeted", return_value=True), \
              patch.object(BudgetService, "check_and_reserve", side_effect=lambda *args: next(decisions)):
             response, generations, judges, _ = self.generate([3])
         self.assertEqual(response.status_code, 200)

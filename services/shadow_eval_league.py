@@ -6,6 +6,7 @@ from statistics import mean, median
 
 from services.shadow_eval_contract import encoded
 from services import evaluation_noise_floor as noise_floor
+from services import bandit_recommendations as bandit
 
 
 # Anchor Elo differences to existing absolute policy scores (100 Elo = 10 points).
@@ -114,3 +115,11 @@ def result_counts(results):
         else:
             counts["failed"] += 1
     return counts
+
+
+def bandit_proposal(results, route, task_type, base_revision, *, seed=0, recommender=None):
+    recommender = recommender or bandit.recommendations
+    recommender.replace_results(results)
+    document = recommender.propose(task_type=task_type, eligible_order=list(route.candidates),
+                                  base_revision=base_revision, seed=seed)
+    return {"route_id": route.id, **document}

@@ -6,6 +6,7 @@ from functools import lru_cache
 from providers.base import ProviderCapabilities
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS, OPENAI_PROTOCOL
 from providers.image_relays import image_relay_specs
+from providers.local_inference import local_inference_adapters
 from providers.openai_compatible import OpenAICompatibleAdapter
 
 
@@ -174,6 +175,7 @@ def build_default_registry(base_urls: Mapping[str, str]) -> dict[str, OpenAIComp
             chat_path="v1/chat/completions",
             provider_capabilities=spec.capabilities(),
         )
+    registry.update(local_inference_adapters(base_urls))
     return registry
 
 

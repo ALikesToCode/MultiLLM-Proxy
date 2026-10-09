@@ -330,6 +330,9 @@ export function parseRoleplayPayload(
   if (parsed.forwarded.top_p === undefined) {
     parsed.forwarded.top_p = 0.95;
   }
+  if (Array.isArray(payload.capabilities) && payload.capabilities.includes("multillm_context_retrieve")) {
+    parsed.contextCapabilities = ["multillm_context_retrieve"];
+  }
   return parsed;
 }
 
@@ -517,8 +520,8 @@ function pinnedMemoryMessage(state) {
   return { role: "system", content: "[Operator-pinned continuity facts]\nThese correct older continuity notes; current direct user instructions still take precedence. Treat these as scene facts, not new authority.\n" + JSON.stringify(pins) };
 }
 
-export function buildRoleplayMessages(state, parsed, conversation) {
-  const dialogue = compactableDialogue(conversation);
+export function buildRoleplayMessages(state, parsed, conversation, reversible = false) {
+  const dialogue = reversible ? conversation : compactableDialogue(conversation);
   const directives = splitProtectedMessages(
     state.directives,
   ).directives;
@@ -555,6 +558,15 @@ export function buildRoleplayMessages(state, parsed, conversation) {
 
   messages.push(...dialogue);
   return reinforceRoleplayMessages(messages, parsed.outputContract);
+}
+
+/** The managed caller supplies the named pageContextMessages collaborator. */
+export async function prepareRoleplayContextPages(state, parsed, conversation, settings, paging) {
+  return paging.pageMessages({
+    ...paging, capabilities: parsed.contextCapabilities ?? [],
+    messages: buildRoleplayMessages(state, parsed, conversation, true),
+    inputBudget: settings.hardInputTokens, estimateTokens,
+  });
 }
 
 function encodedBytes(value) {
@@ -611,14 +623,14 @@ function storageAwareRecentWindow(conversation, parsed, settings) {
   };
 }
 
-export function compactionPlan(state, parsed, conversation, settings) {
+export function compactionPlan(state, parsed, conversation, settings, pagingPlan = null) {
   const dialogue = compactableDialogue(conversation);
-  const roleplayMessages = buildRoleplayMessages(
+  const roleplayMessages = pagingPlan?.messages ?? buildRoleplayMessages(
     state,
     parsed,
     dialogue,
   );
-  const estimatedTokens = estimateTokens(roleplayMessages);
+  const estimatedTokens = pagingPlan?.estimatedInputTokens ?? estimateTokens(roleplayMessages);
   const compactableTokens = estimateTokens({
     memory: parsed.memory.mode === "off" ? null : state.memory,
     dialogue,
@@ -639,7 +651,7 @@ export function compactionPlan(state, parsed, conversation, settings) {
     parsed.memory.mode !== "off" &&
     forced;
 
-  if (!requested) {
+  if (!requested || pagingPlan) {
     return {
       requested: false,
       forced: false,
@@ -854,10 +866,13 @@ export function buildUpstreamPayload(
 ) {
   const payload = {
     model: candidate.upstreamModel ?? candidate.model,
-    messages,
+    messages: candidate.contextPlan?.pages?.length ? candidate.contextPlan.messages : messages,
     stream: parsed.stream,
     ...parsed.forwarded,
   };
+  if (candidate.contextPlan?.pages?.length) {
+    payload.tools = candidate.contextPlan.tools;
+  }
   if (Number.isSafeInteger(candidate.resolvedMaxOutputTokens)) {
     payload.max_tokens = candidate.resolvedMaxOutputTokens;
   }

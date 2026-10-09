@@ -1,0 +1,82 @@
+[
+  {
+    "revision": 2,
+    "cost": null,
+    "transition_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "expected_state": "unknown",
+    "expected_applied": true
+  },
+  {
+    "revision": 2,
+    "cost": null,
+    "transition_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "expected_state": "unknown",
+    "expected_applied": false
+  },
+  {
+    "revision": 3,
+    "cost": 100000,
+    "transition_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "admin": false,
+    "reason": "review",
+    "evidence": "provider-check",
+    "error": "admin_required",
+    "status": 403
+  },
+  {
+    "revision": 2,
+    "cost": 100000,
+    "transition_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "error": "reservation_conflict",
+    "status": 409
+  },
+  {
+    "revision": 3,
+    "cost": 100000,
+    "transition_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "expected_state": "reconciled",
+    "expected_applied": true
+  },
+  {
+    "revision": 3,
+    "cost": 100000,
+    "transition_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "expected_state": "reconciled",
+    "expected_applied": false
+  },
+  {
+    "revision": 3,
+    "cost": 200000,
+    "transition_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "error": "reservation_conflict",
+    "status": 409
+  },
+  {
+    "revision": 4,
+    "cost": 100000,
+    "transition_id": "cccccccccccccccccccccccccccccccc",
+    "admin": true,
+    "reason": "review",
+    "evidence": "provider-check",
+    "error": "reservation_conflict",
+    "status": 409
+  }
+]

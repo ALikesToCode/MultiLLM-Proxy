@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 CORS_ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
 CORS_DEFAULT_HEADERS = (
-    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, "
+    "Authorization, Content-Type, Accept, Origin, X-Requested-With, X-MultiLLM-Tool-Repair, X-MultiLLM-Conversion-Report, X-MultiLLM-Retention, X-MultiLLM-Deadline-Ms, If-Match, "
     "X-Api-Key, X-Goog-Api-Key, X-MultiLLM-Api-Key, Anthropic-Version, "
     "Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, "
-    "Idempotency-Key, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
+    "Idempotency-Key, X-MultiLLM-Priority, Prefer, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, OpenAI-Beta, OpenAI-Organization, "
     "OpenAI-Project, Moderation, Moderation-Model, Redaction, X-App-Name, "
     "X-Billing-Mode, X-BYOK-Provider, X-Client-Request-ID, X-Encryption-Key, "
     "X-Encryption-Passphrase, X-Fal-Object-Lifecycle-Preference, X-PAYMENT, "
@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
+    "Retry-After, Location, ETag, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Idempotency, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
@@ -50,7 +50,7 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "
     "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, "
-    "X-MultiLLM-Cache, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
+    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Canary-Cohort, X-MultiLLM-Injection-Action, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
     "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
@@ -214,6 +214,8 @@ def request_api_key() -> Optional[str]:
 def stream_upstream_response(upstream_response: Any) -> Response:
     """Stream an upstream entity body unchanged and release its connection."""
 
+    from services.request_cancellation import attach_stream_owner, bind_cancellation
+
     raw_response = getattr(upstream_response, "raw", None)
     raw_read1 = getattr(raw_response, "read1", None)
     try:
@@ -234,6 +236,8 @@ def stream_upstream_response(upstream_response: Any) -> Response:
             if raw_response is None and hasattr(upstream_response, "_content_consumed"):
                 upstream_response._content_consumed = True
             close()
+
+    cancellation = bind_cancellation(upstream_response, close_owner=close_once, replace_close=False)
 
     def generate():
         try:
@@ -259,6 +263,13 @@ def stream_upstream_response(upstream_response: Any) -> Response:
                 for chunk in upstream_response.iter_content(chunk_size=64 * 1024):
                     if chunk:
                         yield chunk
+            cancellation.complete()
+        except GeneratorExit:
+            cancellation.cancel()
+            raise
+        except BaseException:
+            cancellation.fail()
+            raise
         finally:
             close_once()
 
@@ -280,7 +291,7 @@ def stream_upstream_response(upstream_response: Any) -> Response:
         headers=response_headers,
     )
     response.call_on_close(close_once)
-    return response
+    return attach_stream_owner(response, upstream_response)
 
 
 def is_api_request_path(path: str) -> bool:
@@ -510,7 +521,8 @@ def _authenticate_api_request():
         authenticated_user.get("username"),
     )
     g.authenticated_user = authenticated_user
-    return None
+    from services.gateway_extensions import after_authentication
+    return after_authentication()
 
 
 def request_body_limit(limit: Callable[[], int]) -> Callable:

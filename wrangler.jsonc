@@ -54,6 +54,10 @@
 			{
 				"name": "ROLEPLAY_SESSION",
 				"class_name": "RoleplaySession"
+			},
+			{
+				"name": "ADMISSION_COORDINATOR",
+				"class_name": "AdmissionCoordinator"
 			}
 		]
 	},
@@ -68,6 +72,12 @@
 			"tag": "v2",
 			"new_sqlite_classes": [
 				"RoleplaySession"
+			]
+		},
+		{
+			"tag": "v3_admission",
+			"new_sqlite_classes": [
+				"AdmissionCoordinator"
 			]
 		}
 	],
