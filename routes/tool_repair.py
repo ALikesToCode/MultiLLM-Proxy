@@ -11,6 +11,10 @@ from routes.protocol_bridge import ENDPOINT_PROTOCOLS, as_flask_response, transl
 from services.protocol_translation import CHAT, translate_request
 from services.tool_repair_runtime import HEADER, SKIP_REASK, log_report, repair_completion, repair_mode, summary_header
 from services.tool_repair_stream import ToolCallBuffer, repair_sse
+from services.output_schema_validation import (
+    MAX_BODY_BYTES, OutputValidationError, output_contents, prepare_validation, validate_contents, violation,
+)
+from services.free_json_contract import JsonOutputError, parse_json_output
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
@@ -174,4 +178,53 @@ def with_native_tool_repair(dispatch):
             return response
         return translate_downstream_response(repaired, source=CHAT, target=source,
                                              stream=bool(payload.get("stream")), request_payload=payload)
+    return wrapped
+
+
+def _validate_managed_response(upstream, contract, protocol):
+    response = as_flask_response(upstream)
+    if response.status_code >= 400:
+        return response
+    try:
+        if response.mimetype == "text/event-stream":
+            raise violation("unexpected_stream")
+        chunks, size = [], 0
+        for chunk in response.iter_encoded():
+            size += len(chunk)
+            if size > MAX_BODY_BYTES:
+                raise violation("body_limit")
+            chunks.append(chunk)
+        body = b"".join(chunks)
+        try:
+            envelope = parse_json_output(body.decode("utf-8"))
+        except (JsonOutputError, UnicodeError):
+            raise violation("invalid_response") from None
+        validate_contents(output_contents(envelope, protocol), contract)
+        response.set_data(body)
+        return response
+    except OutputValidationError:
+        response.close()
+        raise
+    except Exception:
+        response.close()
+        raise violation("invalid_response") from None
+
+
+def with_managed_output_validation(dispatch, *, protocol=None):
+    """Wrap the outer managed dispatcher, before routing and upstream handoff."""
+    @wraps(dispatch)
+    def wrapped(app, auth, metrics, proxy, payload, *args, **kwargs):
+        try:
+            prepared, contract = prepare_validation(payload, app.config)
+        except OutputValidationError as error:
+            return Response(json.dumps(error.body()), status=error.status, content_type="application/json")
+        response = dispatch(app, auth, metrics, proxy, prepared, *args, **kwargs)
+        if contract is None:
+            return response
+        endpoint = kwargs.get("endpoint") or (args[0] if args else None)
+        selected = protocol or ENDPOINT_PROTOCOLS.get(endpoint, "chat")
+        try:
+            return _validate_managed_response(response, contract, selected)
+        except OutputValidationError as error:
+            return Response(json.dumps(error.body()), status=error.status, content_type="application/json")
     return wrapped
