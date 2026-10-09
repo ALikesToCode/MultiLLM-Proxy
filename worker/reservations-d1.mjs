@@ -1,3 +1,4 @@
+import { retentionRequestId } from "./retention-policy.mjs";
 /** Private, atomic monetary holds and injected request lifecycle. */
 const SCALE = 10_000_000_000;
 const MAX_UNITS = Number.MAX_SAFE_INTEGER;
@@ -9,7 +10,7 @@ const warned = new Set();
 const FIELDS = {
   reserve: ["id", "principal", "estimate_usd", "daily_budget_usd", "monthly_budget_usd", "day_spent_usd", "month_spent_usd"],
   transition: ["id", "revision", "state", "transition_id", "settlement_id", "cost_usd", "basis", "input_tokens", "output_tokens",
-    "admin", "evidence", "authorized_adjustment", "reason"],
+    "admin", "evidence", "authorized_adjustment", "reason", "handoff_not_started"],
   get: ["id"], audit: ["id"], summary: ["principal"],
 };
 export class ReservationError extends Error {
@@ -157,7 +158,8 @@ function transitionFields(body) {
 }
 export async function transitionUsage(db, body, now) {
   const fields = transitionFields(body);
-  const doc = document({ id: body.id, revision: body.revision, state: body.state, ...fields });
+  if (body.handoff_not_started !== undefined && (body.handoff_not_started !== true || body.state !== "settled" || fields.basis !== "released")) fail();
+  const doc = document({ id: body.id, revision: body.revision, state: body.state, ...fields, ...(body.handoff_not_started ? { handoff_not_started: true } : {}) });
   const row = await db.prepare("SELECT * FROM usage_reservations WHERE id=?").bind(body.id).first();
   if (!row) fail("reservation_not_found", 404);
   const previous = await db.prepare("SELECT document FROM usage_reservation_transitions WHERE transition_id=?").bind(body.transition_id).first();
@@ -167,7 +169,7 @@ export async function transitionUsage(db, body, now) {
   }
   const legal = (row.state === "reserved" && body.state === "dispatched")
     || (row.state === "reserved" && body.state === "settled" && fields.basis === "released")
-    || (row.state === "dispatched" && ["unknown", "settled"].includes(body.state) && fields.basis !== "released")
+    || (row.state === "dispatched" && ["unknown", "settled"].includes(body.state) && (fields.basis !== "released" || body.handoff_not_started === true))
     || (row.state === "unknown" && body.state === "reconciled");
   if (row.revision !== body.revision || !legal) fail("reservation_conflict", 409);
   const { charged_units, basis, input_tokens, output_tokens, settlement_id, evidence, reason } = fields;
@@ -250,14 +252,15 @@ export async function handleReservationsRequest(request, env, { now = Date.now }
 }
 /** One instance per native request. Identity and pricing come from verified admission. */
 export function createReservationLifecycle(env, { call, identity }) {
-  let reservation;
+  let reservation, finalEvent;
+  let dispatching;
   const transition = async (state, fields = {}) => {
     const result = await call({ version: 1, operation: "transition", id: reservation.id, revision: reservation.revision,
       state, transition_id: crypto.randomUUID().replaceAll("-", ""), ...fields });
     if (result.error) throw new ReservationError(result.error.code, result.error.code === "reservation_conflict" ? 409 : 503);
     reservation = result.reservation;
   };
-  return {
+  const hooks = {
     enabled: env => reservationSettings(env).enabled,
     async admit(context) {
       if (!reservationSettings(env).enabled) return;
@@ -266,14 +269,18 @@ export function createReservationLifecycle(env, { call, identity }) {
       const result = await call({ version: 1, operation: "reserve", id: crypto.randomUUID().replaceAll("-", ""), ...values });
       if (result.error) throw new ReservationError(result.error.code, result.error.code === "budget_exceeded" ? 429 : 503);
       reservation = result.reservation;
+      if (finalEvent) await hooks.finalize(finalEvent);
     },
     async before_dispatch() {
-      if (reservation?.state === "reserved") await transition("dispatched");
+      if (reservation?.state === "reserved") await (dispatching = transition("dispatched"));
     },
     async finalize(context) {
+      finalEvent = context;
+      await dispatching;
       if (!reservation || !ACTIVE.has(reservation.state) || reservation.state === "unknown") return;
-      if (reservation.state === "reserved") {
-        await transition("settled", { cost_usd: 0, basis: "released", settlement_id: reservation.id });
+      if (reservation.state === "reserved" || context.handedOff === false) {
+        await transition("settled", { cost_usd: 0, basis: "released", settlement_id: reservation.id,
+          ...(reservation.state === "dispatched" ? { handoff_not_started: true } : {}) });
         return;
       }
       const row = context.usage ?? context;
@@ -285,4 +292,95 @@ export function createReservationLifecycle(env, { call, identity }) {
           output_tokens: context.cancellationOutcome?.ambiguous ? null : row.output_tokens ?? null });
     },
   };
+  return hooks;
+}
+
+function nativePrice(table, provider, model, input, output, units) {
+  if (typeof model !== "string") return null;
+  const qualified = (model.includes(":") ? model : `${provider}:${model}`).toLowerCase();
+  const rate = table?.[qualified] ?? table?.[`${qualified.split(":")[0]}:*`] ?? table?.["*"];
+  if (!rate || typeof rate !== "object") return null;
+  const flat = Object.hasOwn(rate, "request") && !["input", "output", "input_cost_per_million", "output_cost_per_million"].some(k => Object.hasOwn(rate, k));
+  const amount = value => (typeof value === "number" || typeof value === "string" && value.trim()) ? Number(value) : NaN;
+  const rates = [flat ? 0 : amount(rate.input ?? rate.input_cost_per_million),
+    flat ? 0 : amount(rate.output ?? rate.output_cost_per_million), Object.hasOwn(rate, "request") ? amount(rate.request) : 0];
+  if (!rates.every(n => Number.isFinite(n) && n >= 0)) return null;
+  const cost = (input * rates[0] + output * rates[1]) * units / 1_000_000 + units * rates[2];
+  return Number.isFinite(cost) && cost <= MAX_UNITS / SCALE ? cost : null;
+}
+
+async function boundedReservationBody(request) {
+  const reader = request.clone().body?.getReader();
+  if (!reader) throw new ReservationError("unpriced_reservation");
+  let size = 0;
+  const parts = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 65536) throw new ReservationError("unpriced_reservation");
+      parts.push(value);
+    }
+    const bytes = new Uint8Array(size); let offset = 0;
+    for (const part of parts) { bytes.set(part, offset); offset += part.byteLength; }
+    return { body: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), size };
+  } finally { void reader.cancel().catch(() => {}); }
+}
+
+async function nativeReservationIdentity(request, env, authority, context) {
+  let principal = authority.principal;
+  if (!principal?.id) throw new ReservationError();
+  // Native bootstrap authentication uses the environment; stored controls are optional metadata.
+  if (principal.daily_budget_usd === undefined && principal.monthly_budget_usd === undefined
+      && env.INTELLIGENCE_DB && env.ADMIN_API_KEY) {
+    const stored = await env.INTELLIGENCE_DB.prepare(`SELECT daily_budget_usd, monthly_budget_usd FROM control_users
+      WHERE username = ? AND is_admin = 1 AND revoked_at IS NULL`).bind(principal.id).first();
+    principal = { ...principal, ...stored };
+  }
+  const limits = { daily_budget_usd: principal.daily_budget_usd ?? null, monthly_budget_usd: principal.monthly_budget_usd ?? null };
+  if (limits.daily_budget_usd === null && limits.monthly_budget_usd === null) return limits;
+  const identity = `edge:${await retentionRequestId(`native-admin:${principal.id}`)}`;
+  let estimate = 0;
+  if (!context.cacheServed) {
+    const { body, size } = await boundedReservationBody(request);
+    const models = authority.eligibleModels ?? [context.model];
+    const raw = env.MODEL_PRICING_USD_PER_MILLION;
+    if (typeof raw !== "string" || raw.length > 65536) throw new ReservationError("unpriced_reservation");
+    const table = JSON.parse(raw);
+    const outputs = [body.max_tokens, body.max_completion_tokens, body.max_output_tokens, body.generationConfig?.maxOutputTokens].filter(n => n != null);
+    if (outputs.some(n => !Number.isSafeInteger(n) || n < 0)) throw new ReservationError("unpriced_reservation");
+    const units = body.n ?? 1;
+    if (!Number.isSafeInteger(units) || units < 1 || units > 100) throw new ReservationError("unpriced_reservation");
+    const costs = models.map(model => nativePrice(table, authority.provider, model, size, outputs.length ? Math.max(...outputs) : 1024, units));
+    if (!costs.length || costs.some(cost => cost === null)) throw new ReservationError("unpriced_reservation");
+    estimate = Math.max(...costs);
+  }
+  const day = new Date().toISOString().slice(0, 10);
+  const baseline = await env.INTELLIGENCE_DB.prepare(`SELECT COALESCE(SUM(CASE WHEN day = ? THEN cost_usd ELSE 0 END), 0) AS day_spent_usd,
+    COALESCE(SUM(cost_usd), 0) AS month_spent_usd FROM usage_daily WHERE principal = ? AND day >= ? AND day <= ?`)
+    .bind(day, identity, `${day.slice(0, 7)}-01`, day).first();
+  if (!baseline) throw new ReservationError();
+  return { principal: identity, estimate_usd: estimate, ...limits,
+    day_spent_usd: baseline.day_spent_usd, month_spent_usd: baseline.month_spent_usd };
+}
+
+async function boundedReservationOperation(action) {
+  let timer;
+  try {
+    return await Promise.race([Promise.resolve().then(action), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new ReservationError()), 3000);
+    })]);
+  } catch (error) { throw error instanceof ReservationError ? error : new ReservationError(); }
+  finally { clearTimeout(timer); }
+}
+
+/** Only server-verified principal metadata can impose native monetary limits. */
+export function nativeReservationLifecycle(request, env, authority) {
+  return createReservationLifecycle(env, { call: body => boundedReservationOperation(async () => {
+    const response = await handleReservationsRequest(new Request("http://intelligence.internal/v1/reservations", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }), env);
+    return response.json();
+  }), identity: context => boundedReservationOperation(() => nativeReservationIdentity(request, env, authority, context)) });
 }

@@ -183,6 +183,7 @@ def with_native_tool_repair(dispatch):
 
 def _validate_managed_response(upstream, contract, protocol):
     response = as_flask_response(upstream)
+    envelope = None
     if response.status_code >= 400:
         return response
     try:
@@ -199,10 +200,12 @@ def _validate_managed_response(upstream, contract, protocol):
             envelope = parse_json_output(body.decode("utf-8"))
         except (JsonOutputError, UnicodeError):
             raise violation("invalid_response") from None
-        validate_contents(output_contents(envelope, protocol), contract)
         response.set_data(body)
+        validate_contents(output_contents(envelope, protocol), contract)
         return response
     except OutputValidationError:
+        from services.managed_turn import preserve_validation_accounting
+        preserve_validation_accounting(response, envelope)
         response.close()
         raise
     except Exception:
@@ -214,17 +217,24 @@ def with_managed_output_validation(dispatch, *, protocol=None):
     """Wrap the outer managed dispatcher, before routing and upstream handoff."""
     @wraps(dispatch)
     def wrapped(app, auth, metrics, proxy, payload, *args, **kwargs):
-        try:
-            prepared, contract = prepare_validation(payload, app.config)
-        except OutputValidationError as error:
-            return Response(json.dumps(error.body()), status=error.status, content_type="application/json")
-        response = dispatch(app, auth, metrics, proxy, prepared, *args, **kwargs)
-        if contract is None:
-            return response
         endpoint = kwargs.get("endpoint") or (args[0] if args else None)
         selected = protocol or ENDPOINT_PROTOCOLS.get(endpoint, "chat")
         try:
+            prepared, contract = prepare_validation(payload, app.config)
+        except OutputValidationError as error:
+            return _output_validation_error(error, selected)
+        response = dispatch(app, auth, metrics, proxy, prepared, *args, **kwargs)
+        if contract is None:
+            return response
+        try:
             return _validate_managed_response(response, contract, selected)
         except OutputValidationError as error:
-            return Response(json.dumps(error.body()), status=error.status, content_type="application/json")
+            return _output_validation_error(error, selected)
     return wrapped
+
+
+def _output_validation_error(error, protocol):
+    body = error.body()
+    if protocol == "messages":
+        body = {"type": "error", "error": {**body["error"], "type": "api_error"}}
+    return Response(json.dumps(body), status=error.status, content_type="application/json")

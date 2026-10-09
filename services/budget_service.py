@@ -296,7 +296,7 @@ class BudgetService:
         current = store.get(reservation)
         if current["state"] not in {"reserved", "dispatched"}:
             return
-        if cached and current["state"] == "reserved":
+        if current["state"] == "reserved" and (cached or row.get("status", 200) >= 400):
             cls.settle(reservation, before_dispatch=True)
             return
         if current["state"] == "reserved":

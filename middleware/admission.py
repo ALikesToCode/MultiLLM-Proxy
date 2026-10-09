@@ -116,7 +116,11 @@ def register_admission(app):
         identity = request_identity(settings)
         if identity is None or not settings.limited(identity.model_group):
             return None
-        owner = g.gateway_cancellation = RequestCancellation()
+        owner = getattr(g, "gateway_cancellation", None)
+        if owner is None:
+            owner = g.gateway_cancellation = RequestCancellation()
+        from services.generation_deadline import check_deadline
+        check_deadline()
         try:
             lease = app.extensions["admission_client"].acquire(identity, on_lost=owner.cancel)
             if lease is not None:
