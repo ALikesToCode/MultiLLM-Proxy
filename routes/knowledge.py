@@ -192,7 +192,8 @@ def _mcp_tool(identifier, params):
             "error": {"code": "insufficient_scope", "message": "The key is not authorized for this Knowledge tool."},
         })}]})
     try:
-        mcp.check_contract_pin(tool_name, request.headers.get("X-MultiLLM-MCP-Contract"), definition=entry["definition"])
+        mcp.check_contract_pin(tool_name, request.headers.get("X-MultiLLM-MCP-Contract"), definition=entry["definition"],
+                               user=g.authenticated_user, arguments=params.get("arguments", {}))
     except KnowledgeError as error:
         return _rpc_error(identifier, error.code, error.message, error.status)
     arguments = params.get("arguments", {})
@@ -255,13 +256,19 @@ def _mcp():
         return _mcp_initialize(identifier, params)
     if method == "ping":
         return _rpc_result(identifier, {})
-    if method == "tools/list":
+    if method == "tools/list" or method == "multillm.tools.discover" and mcp.deferred_tools.enabled():
         try:
             toolsets = mcp.requested_toolsets(request.args.get("toolsets"))
         except ValueError:
             return _rpc_error(identifier, -32602, f"Unknown toolset. Use any of: {', '.join(mcp.TOOLSETS)}.")
-        return _rpc_result(identifier, mcp.discovery_for_user(
-            g.authenticated_user, toolsets, entries=_CATALOGUE["tools"]))
+        try:
+            if method == "multillm.tools.discover":
+                return _rpc_result(identifier, mcp.deferred_discovery(
+                    g.authenticated_user, params, toolsets, entries=_CATALOGUE["tools"]))
+            return _rpc_result(identifier, mcp.discovery_for_user(
+                g.authenticated_user, toolsets, entries=_CATALOGUE["tools"]))
+        except KnowledgeError as error:
+            return _rpc_error(identifier, error.code, error.message, error.status)
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     return _mcp_tool(identifier, params)
