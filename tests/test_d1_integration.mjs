@@ -24,7 +24,8 @@ const bundled = await build({ stdin: { resolveDir: process.cwd(), sourcefile: "p
 
 async function privateStore(t, skip = []) {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: bundled.outputFiles[0].text,
-    compatibilityDate: "2026-07-30", host: "127.0.0.1", port: 0, d1Databases: ["INTELLIGENCE_DB"] }));
+    compatibilityDate: "2026-07-30", compatibilityFlags: ["nodejs_compat"], host: "127.0.0.1", port: 0,
+    d1Databases: ["INTELLIGENCE_DB"] }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("INTELLIGENCE_DB");
   await applyMigrations(db, { skip });
