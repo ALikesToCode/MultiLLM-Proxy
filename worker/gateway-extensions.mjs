@@ -10,6 +10,7 @@ import { generationDeadlineHook, createGenerationDeadline, forwardedDeadlineHead
 import { nativeReservationLifecycle, reservationSettings, ReservationError } from "./reservations-d1.mjs";
 export { runScheduledMaintenance, scheduledMaintenanceEnabled } from "./scheduled-maintenance.mjs";
 export { handleResponsesStateRequest, responsesStateEnabled } from "./responses-state-d1.mjs";
+export { handleRealtimeRequest } from "./realtime.mjs";
 import { UpstreamCancellation } from "./upstream-cancellation.mjs";
 import { prepareSemanticCache, semanticCacheSettings, createNativeSemanticCollaborators } from "./semantic-generation-cache.mjs";
 import { createNativeObservabilityHook, observabilityEnabled } from "./observability-export.mjs";

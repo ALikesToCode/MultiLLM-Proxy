@@ -1,4 +1,4 @@
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest } from "./worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest, handleRealtimeRequest } from "./worker/gateway-extensions.mjs";
 import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
@@ -1890,6 +1890,9 @@ export default {
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
     }
+
+    const realtimeResponse = await handleRealtimeRequest(request, env, ctx);
+    if (realtimeResponse) return realtimeResponse.status === 101 ? realtimeResponse : applyCorsHeaders(request, realtimeResponse, env);
 
     if (requestUrl.pathname === "/status.prometheus" || requestUrl.pathname === "/v1/metrics/prometheus") {
       if (!prometheusEnabled(env.PROMETHEUS_ENABLED)) {

@@ -22,7 +22,7 @@ from flask import Response, current_app, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
-from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger
+from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
 from services.usage_types import StreamUsageObserver, UsageObservation
@@ -93,6 +93,7 @@ class UsageContext:
     # Served from the response cache: no provider was called, so nothing is charged.
     cached: bool = False
     ambiguous: bool = False
+    stream_cost: Any = None
 
 
 def classify() -> Optional[str]:
@@ -270,6 +271,16 @@ def begin() -> Optional[Response]:
                            start_ns=time.time_ns(), units=_image_units(kind, payload),
                            trace=telemetry_export.trace_context(request.headers.get("traceparent")))
     context.input_tokens, context.output_tokens = _token_estimates(payload)
+    if payload and payload.get("stream") is True and stream_cost_breaker.enabled() and (
+            user.get(stream_cost_breaker.CAP_FIELD) is not None or user.get("max_stream_cost_usd") is not None):
+        protocol = ("anthropic" if request.path.endswith("/messages") else
+                    "responses" if request.path.endswith("/responses") else "chat")
+        qualified = [_qualified(candidate, provider) for model in models for candidate in _candidates(model)]
+        try:
+            context.stream_cost = stream_cost_breaker.prepare(
+                user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol)
+        except APIError as error:
+            return _error(error.status_code, error.payload["error"], "Stream cost enforcement refused this request.")
     if budgeted(user):
         qualified = [_qualified(model, provider) for model in models]
         estimate = (reservation_price(qualified, context.input_tokens, context.output_tokens, context.units)
@@ -385,7 +396,9 @@ def cancellation_observer():
 
     def observe(outcome):
         if outcome.ambiguous and not context.finished:
-            context.ambiguous = True
+            state = context.stream_cost
+            if state is None or state.final_usage is None:
+                context.ambiguous = True
     return observe
 
 
@@ -437,7 +450,8 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
         logger.warning("Usage could not be recorded (%s)", type(error).__name__)
     finally:
         # The settled cost is counted before the in-flight estimate is released.
-        BudgetService.settle(context.reservation)
+        if context.stream_cost is None or context.stream_cost.final_usage is not None or reservation_store.enabled():
+            BudgetService.settle(context.reservation)
 
 
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
@@ -460,6 +474,10 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
             cost = price([selected] if selected else qualified, observation.input_tokens,
                          observation.output_tokens, context.units)
             basis = observation.storage_basis(cost)
+    if context.stream_cost is not None and usage is not None:
+        breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)
+        cost = breakdown["cost_usd"]
+        basis = usage.storage_basis(cost)
     prefix = context.user.get("api_key_prefix")
     row = {
         "at": usage_ledger.utc_timestamp(),
@@ -496,6 +514,10 @@ def _capture(context: UsageContext) -> None:
     context.request_id = request_id if isinstance(request_id, str) and REQUEST_ID.fullmatch(request_id) else None
     selected = getattr(g, "multillm_model", None)
     context.selected = selected if isinstance(selected, str) else None
+    if context.stream_cost is not None:
+        owner = getattr(g, "gateway_cancellation", None)
+        if owner is not None:
+            context.stream_cost.cancel = owner.cancel
 
 
 class _SniffedStream:
@@ -542,6 +564,8 @@ def finish(result: Any) -> Any:
         _record(context, 500, None, None)
         return result
     context.cached = response.headers.get("X-MultiLLM-Cache") == "hit"
+    if context.cached:
+        context.stream_cost = None
     if response.is_streamed:
         event_stream = (response.mimetype or "") == "text/event-stream"
         json_stream = (response.mimetype or "").endswith("json")
@@ -551,8 +575,14 @@ def finish(result: Any) -> Any:
             usage = observed if event_stream else _json_tail_usage(tail) if json_stream else None
             if event_stream and context.selected is None:
                 context.selected = _sse_model(tail)
-            _record(context, status, usage, None)
+            if context.stream_cost is not None:
+                usage = context.stream_cost.final_usage
+                if usage is None:
+                    context.ambiguous = True
+            _record(context, 499 if context.stream_cost is not None and context.stream_cost.exceeded else status, usage, None)
 
+        if event_stream and not context.cached:
+            response.response = stream_cost_breaker.wrap_stream(response.response, context.stream_cost)
         response.response = _SniffedStream(response.response, closed, event_stream=event_stream)
         return response
     body = _json_body(response)
