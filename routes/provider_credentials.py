@@ -15,7 +15,7 @@ from services.nanogpt_key_pool import (
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool as NanoGPTKeyPool
 
 
-def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str, *, model=None, quota_bucket=None) -> str:
+def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str, *, model=None, quota_bucket=None) -> str | None:
     context = selection_context(provider, model, config=app.config, quota_bucket=quota_bucket)
     if provider == "googleai":
         token = auth_service_cls.get_google_token()
@@ -42,6 +42,10 @@ def _provider_token(app, auth_service_cls, proxy_service_cls, provider: str, *, 
     else:
         token = auth_service_cls.get_api_key(provider, **context)
     if not token:
+        # Only an explicitly configured local inference server may be called without a key.
+        requires_key = getattr(auth_service_cls, "provider_requires_api_key", None)
+        if requires_key is not None and not requires_key(provider, app.config.get("API_BASE_URLS", {})):
+            return None
         raise AutoRouteCandidateUnavailable(
             f"API key not configured for {provider}",
         )

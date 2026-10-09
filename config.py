@@ -11,6 +11,7 @@ from providers.aihubmix import (
 from providers.cline_pass import CLINE_API_BASE_URL
 from providers.codex_everywhere import codex_everywhere_base_urls
 from providers.image_relays import image_relay_base_urls
+from providers.local_inference import local_inference_base_urls
 from providers.nanogpt import nanogpt_text_base_url
 
 
@@ -212,6 +213,7 @@ class Config:
         'gemma': 'https://generativelanguage.googleapis.com/v1beta',
         **codex_everywhere_base_urls(),
         **image_relay_base_urls(),
+        **local_inference_base_urls(),
     }
     
     # Provider-specific timeouts (connect_timeout, read_timeout)
