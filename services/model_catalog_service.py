@@ -11,6 +11,7 @@ from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
 from services.media_catalog import image_profile, is_speech_or_embedding_model, is_video_model
 from services.model_registry import ModelRegistry
+from services.model_precision import catalog_precision_metadata
 from services.provider_catalog_metadata import (
     model_supports_tools,
     model_supports_vision,
@@ -33,7 +34,7 @@ def _model_provider_metadata(
     model_id: str,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    normalized = dict(metadata or {})
+    normalized = catalog_precision_metadata(metadata, provider)
     endpoint = opencode_model_endpoint(model_id) if provider == "opencode" else None
     if endpoint:
         normalized.update(

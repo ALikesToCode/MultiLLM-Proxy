@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from flask import request
 from config import Config
 from services import rate_limit_d1
+from middleware.rate_limit_headers import capture_admission
 from services.sqlite_store import connect, storage_path
 
 logger = logging.getLogger(__name__)
@@ -323,15 +324,20 @@ class RateLimitService:
         rpm_limit: int,
         daily_limit: int,
         metadata: Dict[str, Any],
+        *, minute_tokens=0, connection=None,
     ) -> Optional[LimitDecision]:
         """The first exceeded limit, checked in the same order by every ledger."""
+        retry_after = capture_admission(
+            metadata, minute_count, minute_tokens, daily_count,
+            token_limited, _utcnow(), connection=connection,
+        )
         if minute_count >= rpm_limit:
             return LimitDecision(
                 False,
                 status_code=429,
                 error="rate_limit_exceeded",
                 message="Request-per-minute limit exceeded.",
-                retry_after=60,
+                retry_after=retry_after or 60,
                 metadata=metadata,
             )
         if token_limited:
@@ -340,7 +346,7 @@ class RateLimitService:
                 status_code=429,
                 error="token_rate_limit_exceeded",
                 message="Token-per-minute limit exceeded.",
-                retry_after=60,
+                retry_after=retry_after or 60,
                 metadata=metadata,
             )
         if daily_count >= daily_limit:
@@ -349,7 +355,7 @@ class RateLimitService:
                 status_code=429,
                 error="daily_budget_exceeded",
                 message="Daily request budget exceeded.",
-                retry_after=60 * 60,
+                retry_after=retry_after or 60 * 60,
                 metadata=metadata,
             )
         return None
@@ -444,6 +450,7 @@ class RateLimitService:
                     rpm_limit,
                     daily_limit,
                     metadata,
+                    minute_tokens=minute_tokens,
                 )
                 if denial is not None:
                     return denial
@@ -484,6 +491,8 @@ class RateLimitService:
                 rpm_limit,
                 daily_limit,
                 metadata,
+                minute_tokens=minute_tokens,
+                connection=connection,
             )
             if denial is not None:
                 connection.rollback()
@@ -628,6 +637,7 @@ class RateLimitService:
                     rpm_limit,
                     daily_limit,
                     metadata,
+                    minute_tokens=minute_tokens,
                 )
                 if denial is not None:
                     return denial
@@ -688,6 +698,8 @@ class RateLimitService:
                 rpm_limit,
                 daily_limit,
                 metadata,
+                minute_tokens=minute_tokens,
+                connection=connection,
             )
             if denial is not None:
                 connection.rollback()
@@ -810,6 +822,7 @@ class RateLimitService:
                     rpm_limit,
                     daily_limit,
                     metadata,
+                    minute_tokens=minute_tokens,
                 )
                 if denial is not None:
                     return denial
@@ -851,6 +864,8 @@ class RateLimitService:
                 rpm_limit,
                 daily_limit,
                 metadata,
+                minute_tokens=minute_tokens,
+                connection=connection,
             )
             if denial is not None:
                 connection.rollback()

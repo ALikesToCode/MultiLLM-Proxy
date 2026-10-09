@@ -86,8 +86,11 @@ _STATEFUL_FIELDS = {
 
 
 def messages_request_to_chat(payload: Mapping[str, Any]) -> dict:
+    from services.protocol_extras import validate_request_extras
+
     if not isinstance(payload, Mapping):
         raise TranslationError("The request body must be a JSON object")
+    validate_request_extras(payload, "messages")
     for field, feature in _STATEFUL_FIELDS.items():
         if payload.get(field):
             raise TranslationError(
@@ -439,8 +442,11 @@ def _output_format(payload: Mapping[str, Any]) -> dict | None:
 
 
 def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
+    from services.protocol_extras import validate_request_extras
+
     if not isinstance(payload, Mapping):
         raise TranslationError("The request body must be a JSON object")
+    validate_request_extras(payload, "chat")
     if payload.get("n") not in (None, 1):
         raise TranslationError("Anthropic Messages returns one choice; n must be 1", param="n")
     if payload.get("audio") or "audio" in (payload.get("modalities") or []):
@@ -745,6 +751,9 @@ def _apply_thinking(body: dict, payload: Mapping[str, Any]) -> None:
 def messages_response_to_chat(
     payload: Mapping[str, Any], *, model: str | None = None, **_: Any
 ) -> dict:
+    from services.protocol_extras import validate_response_extras
+
+    validate_response_extras(payload)
     texts: list[str] = []
     reasoning: list[str] = []
     calls: list[dict] = []
@@ -797,6 +806,9 @@ def messages_response_to_chat(
 def chat_response_to_messages(
     payload: Mapping[str, Any], *, model: str | None = None, **_: Any
 ) -> dict:
+    from services.protocol_extras import validate_response_extras
+
+    validate_response_extras(payload)
     message, finish = first_chat_choice(payload)
     content: list[dict] = []
     reasoning = message_reasoning(message)
@@ -850,6 +862,10 @@ def _message_id(value: Any) -> str:
 
 
 def _anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
+    from services import prompt_cache_cost
+
+    if prompt_cache_cost.enabled():
+        return prompt_cache_cost.anthropic_to_chat(dict(usage))
     def count(key: str) -> int:
         value = usage.get(key)
         return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
@@ -862,6 +878,10 @@ def _anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
 
 
 def _chat_usage_to_anthropic(usage: Any) -> dict:
+    from services import prompt_cache_cost
+
+    if prompt_cache_cost.enabled():
+        return prompt_cache_cost.chat_to_anthropic(usage)
     numbers = usage_numbers(usage)
     return {
         "input_tokens": max(0, numbers["prompt"] - numbers["cached"] - numbers["cache_write"]),

@@ -4,6 +4,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from services.model_precision import configured_preference, precision_metadata
+
 CATALOG_METADATA_FIELDS = frozenset(
     {
         "object",
@@ -236,6 +238,9 @@ def sanitize_provider_metadata(item: Any) -> dict[str, Any] | None:
             continue
         if len(encoded.encode("utf-8")) <= _METADATA_MAX_BYTES:
             metadata[key] = decoded
+
+    if configured_preference():
+        metadata.update(precision_metadata(item))
 
     if not metadata:
         return None

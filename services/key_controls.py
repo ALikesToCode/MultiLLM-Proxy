@@ -10,10 +10,16 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
+from flask import current_app, has_app_context
+from werkzeug.security import check_password_hash
+
 from error_handlers import APIError
+from services import user_store, stream_cost_breaker
+from services.auth_primitives import build_api_key_prefix, normalized_username
 
 CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate")
 MAX_BUDGET_USD = 1_000_000_000
@@ -112,7 +118,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize an administrator's controls; unknown fields are refused."""
     if not isinstance(payload, Mapping):
         raise APIError("Key controls must be a JSON object", 400)
-    unknown = set(payload) - set(CONTROL_FIELDS)
+    unknown = set(payload) - set(CONTROL_FIELDS) - ({"max_stream_cost_usd"} if stream_cost_breaker.enabled() else set())
     if unknown:
         raise APIError(f"Unknown key control: {sorted(unknown)[0][:64]}", 400)
     mode = payload.get("secret_scan_mode")
@@ -141,6 +147,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         "expires_at": expires_at.isoformat() if expires_at else None,
         "secret_scan_mode": mode,
         "shadow_eval_rate": rate,
+        **stream_cost_breaker.validated_control(payload),
     }
 
 
@@ -157,6 +164,7 @@ def from_storage(row: Mapping[str, Any]) -> dict[str, Any]:
     rate = row.get("shadow_eval_rate") if hasattr(row, "get") else row_value(row, "shadow_eval_rate")
     if type(rate) in (int, float) and 0 <= rate <= 0.2:
         controls["shadow_eval_rate"] = float(rate)
+    controls.update(stream_cost_breaker.storage_control(row))
     return controls
 
 
@@ -178,6 +186,7 @@ def public(controls: Mapping[str, Any]) -> dict[str, Any]:
         "expires_at": controls.get("expires_at"),
         "secret_scan_mode": controls.get("secret_scan_mode"),
         "shadow_eval_rate": controls.get("shadow_eval_rate"),
+        **stream_cost_breaker.public_control(controls),
     }
 
 
@@ -203,20 +212,27 @@ def model_allowed(user: Mapping[str, Any], model: Any) -> bool:
     """Whether a model ID matches the key's allowlist; ``*`` matches any characters."""
     patterns = model_patterns(user)
     if patterns is None:
-        return True
-    if not isinstance(model, str) or not model.strip():
-        return False
-    candidate = model.strip().lower()
-    return any(_glob(pattern.lower()).match(candidate) for pattern in patterns)
+        allowed = True
+    elif not isinstance(model, str) or not model.strip():
+        allowed = False
+    else:
+        candidate = model.strip().lower()
+        allowed = any(_glob(pattern.lower()).match(candidate) for pattern in patterns)
+    from services.tenant_governance import grant_allowed
+    return grant_allowed(allowed, model, user=user)
 
 
 def provider_allowed(user: Mapping[str, Any], provider: str) -> bool:
     """Whether a request that names no model may reach a provider namespace."""
     patterns = model_patterns(user)
     if patterns is None:
-        return True
-    provider = provider.strip().lower()
-    return any(pattern in {"*", f"{provider}:*"} for pattern in patterns)
+        allowed = True
+        candidate = provider.strip().lower() if isinstance(provider, str) else ""
+    else:
+        candidate = provider.strip().lower()
+        allowed = any(pattern in {"*", f"{candidate}:*"} for pattern in patterns)
+    from services.tenant_governance import grant_allowed
+    return grant_allowed(allowed, f"{candidate}:*", user=user)
 
 
 def expires_at(user: Mapping[str, Any]) -> Optional[datetime]:
@@ -268,3 +284,88 @@ def client_ip(request) -> Optional[str]:
         except ValueError:
             pass
     return request.remote_addr
+
+
+LEGACY_AUTH = object()
+_security_lock = threading.RLock()
+_security_copies: dict[Any, dict[str, dict[str, Any]]] = {}
+
+
+def _security_user(auth, row):
+    """Reject malformed authority records before permissive legacy decoding."""
+    if not isinstance(row, dict) or set(row) != set(user_store.USER_FIELDS) | ({stream_cost_breaker.CAP_FIELD} if stream_cost_breaker.enabled() else set()):
+        raise ValueError("Incomplete security account")
+    stream_cost_breaker.d1_row(row)
+    if normalized_username(row["username"]) != row["username"]:
+        raise ValueError("Invalid security account identity")
+    if not row["api_key_hash"] or not row["api_key_prefix"] or not re.fullmatch(r"[A-Za-z0-9:_.,-]{0,512}", row["scopes"]):
+        raise ValueError("Invalid security account metadata")
+    for name in ("created_at", "last_login", "last_used_at", "rotated_at", "revoked_at"):
+        if row[name] is not None and _parse_time(row[name]) is None:
+            raise ValueError("Invalid security account timestamp")
+    if row["created_at"] is None:
+        raise ValueError("Missing security account timestamp")
+    models = row["allowed_models"]
+    if models is not None and (not models or not all(MODEL_PATTERN.fullmatch(item) for item in models.split(","))):
+        raise ValueError("Invalid security model grants")
+    controls = validate({name: row[name] for name in CONTROL_FIELDS})
+    if any(row[name] is not None and controls[name] is None for name in CONTROL_FIELDS):
+        raise ValueError("Invalid security account controls")
+    return auth._row_to_user(row)
+
+
+def refresh_security_copy(auth, revision):
+    """Install the shared account/grant authority, invalidating all verified-key memos.
+
+    The poller confirms the committed counters after loading every page; a write racing
+    this copy cannot certify either security domain. No local or legacy-column fallback.
+    """
+    if not user_store.using_d1():
+        raise ValueError("Security account authority requires D1")
+    users, after = {}, None
+    while True:
+        response = user_store._call("list", after=after, limit=user_store.PAGE_SIZE)
+        if not isinstance(response, dict) or set(response) != {"version", "users"} or type(response["version"]) is not int or response["version"] != 1:
+            raise ValueError("Invalid security account envelope")
+        page = response["users"]
+        if not isinstance(page, list) or len(page) > user_store.PAGE_SIZE:
+            raise ValueError("Invalid security account page")
+        for row in page:
+            user = _security_user(auth, row)
+            name = user["username"]
+            if name in users or after is not None and name <= after:
+                raise ValueError("Invalid security account pagination")
+            users[name] = user
+            after = name
+        if len(page) < user_store.PAGE_SIZE:
+            break
+    with _security_lock:
+        auth._forget_verified_keys()
+        _security_copies[auth] = users
+        auth._users = dict(users)
+        auth._rebuild_api_key_prefix_index()
+
+
+def verify_revisioned_key(auth, api_key, remote_addr):
+    """Verify against the installed account/grant copy, serialized with refreshes."""
+    sync = current_app.extensions.get("config_revision_sync") if has_app_context() else None
+    if sync is None or not sync.settings.enabled:
+        return LEGACY_AUTH
+    with _security_lock:
+        if not sync.security_ready() or auth not in _security_copies:
+            raise APIError("Security configuration freshness could not be verified", 503,
+                           {"error": {"code": "config_security_stale"}})
+        users = _security_copies[auth]
+        remembered = auth._remembered_username(api_key)
+        user = users.get(remembered) if remembered else None
+        if not user or user.get("revoked_at"):
+            prefix = build_api_key_prefix(api_key)
+            user = next((row for row in users.values() if row["api_key_prefix"] == prefix
+                         and not row.get("revoked_at") and check_password_hash(row["api_key_hash"], api_key)), None)
+            if user is None:
+                return None
+            auth._remember_key(api_key, user["username"])
+        username = user["username"]
+        auth._users[username] = user
+        auth._update_key_usage(username, remote_addr)
+        return auth._public_user(username, user)

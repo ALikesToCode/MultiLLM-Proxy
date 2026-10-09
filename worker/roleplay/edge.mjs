@@ -3,7 +3,7 @@ import { getRoleplaySettings, roleplayCatalog, ROLEPLAY_SAFE_FALLBACK_STATUSES }
 import { ROLEPLAY_PUBLIC_MODEL_ALIASES } from "./model-selection.mjs";
 import { RoleplayRequestError } from "./memory.mjs";
 import { errorResponse, jsonResponse, logRoleplayError, readBoundedBytes } from "./transport.mjs";
-import { handleRoleplayOperatorRequest } from "./operator-edge.mjs";
+import { handleRoleplayOperatorRequest, roleplayRetentionHeaders } from "./operator-edge.mjs";
 import { clientContextHeaders, withClientDefaults, withOpencodeSession } from "../client-headers.mjs";
 
 const JANITOR_ORIGINS = new Set([
@@ -204,6 +204,7 @@ export async function handleRoleplayEdgeRequest(request, env) {
       withClientDefaults(clientContextHeaders(request.headers, "opencode"), env),
       session.id,
     );
+    await roleplayRetentionHeaders(env, request, providedToken, headers);
     headers.set("Content-Type", "application/json");
     if (idempotencyKey) {
       headers.set("Idempotency-Key", idempotencyKey);

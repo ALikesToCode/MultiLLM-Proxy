@@ -229,8 +229,8 @@ def test_secret_firewall_failure_is_not_swallowed(context):
 
 def test_budget_denial_keeps_best(context, monkeypatch):
     g.authenticated_user = {'username': 'synthetic', 'daily_budget_usd': 1}
-    from services import accounted_dispatch as dispatch_module
-    monkeypatch.setattr(dispatch_module, 'budgeted', lambda user: True)
+    from services import request_accounting as accounting_module
+    monkeypatch.setattr(accounting_module, 'budgeted', lambda user: True)
     decisions = iter([BudgetDecision(True, reservation='synthetic-reservation'), BudgetDecision(False, status_code=402, error='budget_exceeded', message='Synthetic budget denial')])
     monkeypatch.setattr(BudgetService, 'check_and_reserve', lambda *args: next(decisions))
     response, calls = run(CONFIG, [answer('partial', 'length')])

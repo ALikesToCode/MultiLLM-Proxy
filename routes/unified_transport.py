@@ -14,6 +14,7 @@ from providers.aihubmix import (
 )
 from providers.image_relays import image_relay_backup_base_url
 from route_helpers import copy_raw_provider_response_headers
+from services.request_cancellation import bind_cancellation
 
 IMAGE_GENERATION_TIMEOUT = (10, 600)
 
@@ -29,15 +30,20 @@ def send_unified_provider_request(
     request_headers: Mapping[str, Any],
 ):
     """Send one unified request with bounded, replay-safe origin fallback."""
+    def send_owned_request(kwargs):
+        response = proxy_service_cls.make_request(**kwargs)
+        bind_cancellation(response)
+        return response
+
     secondary_origin = secondary_origin or image_relay_backup_base_url(provider)
     if secondary_origin is None and provider != "aihubmix":
-        return proxy_service_cls.make_request(**request_kwargs)
+        return send_owned_request(request_kwargs)
     if secondary_origin is None:
         raise APIError("AIHubMix backup origin is not configured", status_code=500)
 
     return request_with_origin_fallback(
-        lambda origin: proxy_service_cls.make_request(
-            **{
+        lambda origin: send_owned_request(
+            {
                 **request_kwargs,
                 "url": build_aihubmix_url(origin, upstream_path),
             }
@@ -158,4 +164,4 @@ def normalized_aihubmix_image_response(
             headers=copy_raw_provider_response_headers(response.headers),
         )
     finally:
-        response.close()
+        bind_cancellation(response).complete()

@@ -197,6 +197,8 @@ class RouteHealth:
 
     @classmethod
     def reset(cls) -> None:
+        from services.latency_slo import observations
+        observations.clear()
         with cls._lock:
             cls._entries = OrderedDict()
             cls._dirty = set()
@@ -266,6 +268,8 @@ class RouteHealth:
                      tokens_per_second: float | None = None, now: float | None = None) -> None:
         """A streamed generation's time to first visible output and its visible output rate."""
         current_time = time.time() if now is None else now
+        from services.latency_slo import record_observation
+        record_observation(candidate, ttft_ms=ttft_ms, tokens_per_second=tokens_per_second, now=current_time)
         observed = {
             "ewma_ttft_ms": ttft_ms if _number(ttft_ms, maximum=3_600_000) else None,
             "ewma_tps": tokens_per_second if _number(tokens_per_second, maximum=1_000_000) else None,
@@ -360,7 +364,7 @@ class RouteHealth:
         configured = tuple(candidates)
         settings = ordering_settings()
         if settings.mode_for(route_id) != "health" or len(configured) < 2:
-            return RouteOrder(configured, "priority")
+            return cls._latency_order(route_id, RouteOrder(configured, "priority"))
         current_time = time.time() if now is None else now
         costs = cls._cost_penalties(configured) if settings.cost_weight else {}
         with cls._lock:
@@ -400,7 +404,12 @@ class RouteHealth:
                 ordered.remove(probe)
                 ordered.insert(0, probe)
                 mode = "health-probe"
-        return RouteOrder(tuple(ordered), mode)
+        return cls._latency_order(route_id, RouteOrder(tuple(ordered), mode))
+
+    @staticmethod
+    def _latency_order(route_id: str, order: RouteOrder) -> RouteOrder:
+        from services.latency_slo import order_auto_candidates
+        return RouteOrder(order_auto_candidates(route_id, order.candidates), order.mode)
 
     # Public summaries ---------------------------------------------------------
 

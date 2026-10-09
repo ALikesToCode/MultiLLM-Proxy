@@ -12,6 +12,12 @@ from services.intelligence_contract import (
     integer,
 )
 from services.model_registry import ModelRegistry
+from services.model_precision import (
+    configured_preference,
+    prefer_precision,
+    validate_preference,
+)
+from services.provider_catalog_service import ProviderCatalogService
 from services.route_health import RouteHealth
 
 DEFAULT_POLICY = {
@@ -114,9 +120,15 @@ def validate_model(raw):
 
 
 def validate_policy(raw):
-    if not isinstance(raw, dict) or set(raw) - set(DEFAULT_POLICY):
+    if not isinstance(raw, dict) or set(raw) - (
+        set(DEFAULT_POLICY) | {"precision_preference"}
+    ):
         raise ValueError("Invalid intelligence policy")
     policy = {**copy.deepcopy(DEFAULT_POLICY), **copy.deepcopy(raw)}
+    if "precision_preference" in policy:
+        policy["precision_preference"] = validate_preference(
+            policy["precision_preference"]
+        )
     if type(policy["version"]) is not int or policy["version"] != 1:
         raise ValueError("Unsupported policy version")
     for key in ("enabled", "allow_paid_overage"):
@@ -174,14 +186,17 @@ def validate_policy(raw):
     return policy
 
 
-def eligible(candidate, allow_paid, config):
+def eligible(candidate, allow_paid, config, *, model_status=None):
     provider = candidate["model"].split(":", 1)[0]
-    return (
+    model_status = model_status or ModelRegistry.get_model_status
+    allowed = (
         all(candidate[key] for key in ("enabled", "entitled", "privacy_allowed"))
         and (candidate["billing"] != "payg" or allow_paid)
-        and ModelRegistry.get_model_status(candidate["model"]) != "disabled"
+        and model_status(candidate["model"]) != "disabled"
         and get_adapter(provider, config["API_BASE_URLS"]) is not None
     )
+    from services.tenant_governance import eligibility_allowed
+    return eligibility_allowed(allowed, candidate["model"])
 
 
 def input_reservation(candidate, request):
@@ -204,7 +219,8 @@ def expected_reply_ms(candidate, request, now=None):
     return first_ms + tokens * 1000 / max(rate, 1)
 
 
-def select_candidates(policy, request, config):
+def select_candidates(policy, request, config, *, session_tier=None, model_status=None,
+                      apply_latency=True):
     candidates = []
     for priority, candidate in enumerate(policy["candidates"]):
         if request.explicit and candidate["model"] != request.payload["model"]:
@@ -212,7 +228,8 @@ def select_candidates(policy, request, config):
         if candidate["model"].split(":", 1)[0] not in CHAT_PROVIDERS:
             continue
         if not eligible(
-            candidate, request.allow_paid, config
+            candidate, request.allow_paid, config,
+            **({"model_status": model_status} if model_status is not None else {})
         ) or not request.required <= set(candidate.get("capabilities", [])):
             continue
         if request.required & {"vision", "audio"} and not candidate.get(
@@ -240,7 +257,38 @@ def select_candidates(policy, request, config):
             return (-score, -candidate.get("quality_tier", 0), *speed, priority)
         return (priority, -score, *speed)
 
-    return [candidate for _, candidate in sorted(candidates, key=rank)]
+    def apply_session_tier(choices):
+        if session_tier is not None and not request.explicit:
+            choices = session_tier.select(choices)
+        if not apply_latency:
+            return choices
+        from services.latency_slo import selection_candidates
+        return selection_candidates(choices, route="auto:intelligence",
+                                    output_tokens=request.output_tokens, auto=not request.explicit,
+                                    lane_selected=session_tier is not None)
+
+    ranked = sorted(candidates, key=rank)
+    if request.explicit or request.profile == "balanced":
+        return apply_session_tier([candidate for _, candidate in ranked])
+    preference = (
+        validate_preference(policy["precision_preference"])
+        if "precision_preference" in policy
+        else configured_preference()
+    )
+    if not preference or len(ranked) < 2:
+        return apply_session_tier([candidate for _, candidate in ranked])
+    metadata = {
+        f"{model.provider}:{model.model_id}": model.metadata
+        for model in ProviderCatalogService.list_models()
+    }
+    # Every original ranking dimension precedes precision. A quality tier also
+    # separates fast-profile ties without altering their existing relative order.
+    return apply_session_tier(prefer_precision(
+        ranked,
+        preference,
+        lambda item: (*rank(item)[:-1], item[1].get("quality_tier", 0)),
+        metadata,
+    ))
 
 
 def model_advertisement(policy, config=None):

@@ -1,3 +1,5 @@
+import { prepareCandidateContext } from "./candidate-context.mjs";
+
 const FAMILY_LIMITS = {
   kimi: {
     contextWindow: 262_144,
@@ -196,11 +198,28 @@ export function prepareRoleplayCandidates(
   estimatedInputTokens,
   requestedOutputTokens,
   settings,
+  context = null,
 ) {
   const prepared = candidates.flatMap((candidate) => {
+    const contextPlan = context
+      ? prepareCandidateContext({
+          contextWindow: candidate.contextWindow,
+          messages: context.messages,
+          outputReserveTokens: candidateOutputCeiling(
+            candidate,
+            requestedOutputTokens,
+            settings.contextReplyReserveTokens,
+          ),
+          safetyTokens: settings.contextSafetyTokens,
+          estimateTokens: context.estimateTokens,
+        })
+      : null;
+    if (contextPlan && !contextPlan.fit) return [];
+    const candidateInputTokens =
+      contextPlan?.estimatedInputTokens ?? estimatedInputTokens;
     const availableOutputTokens =
       candidate.contextWindow -
-      estimatedInputTokens -
+      candidateInputTokens -
       settings.contextSafetyTokens;
     if (availableOutputTokens < 1) {
       return [];
@@ -215,7 +234,10 @@ export function prepareRoleplayCandidates(
     );
     return [
       {
-        candidate: { ...candidate, resolvedMaxOutputTokens },
+        candidate: {
+          ...candidate, resolvedMaxOutputTokens,
+          ...(contextPlan ? { contextPlan } : {}),
+        },
         clamped:
           requestedOutputTokens !== null &&
           resolvedMaxOutputTokens < requestedOutputTokens,
@@ -235,4 +257,31 @@ export function shouldPreserveFullGeneration(plan, parsed, policy) {
     !plan.manualForced &&
     plan.estimatedTokens <= policy.hardInputTokens
   );
+}
+
+/** Prepare reversible views before provider dispatch, with no output retry. */
+export async function prepareRoleplayPagingCandidates(candidates, requestedOutputTokens, settings, context) {
+  const prepared = [];
+  const pageCache = new Map();
+  let noFit;
+  for (const candidate of candidates) {
+    const inputBudget = Math.min(settings.hardInputTokens ?? Infinity,
+      candidateInputCapacity(candidate, requestedOutputTokens, settings));
+    let contextPlan;
+    try {
+      contextPlan = await context.pageMessages({ ...context, inputBudget, pageCache });
+    } catch (error) {
+      if (error.code !== "context_window_exceeded") throw error;
+      noFit = error;
+      continue;
+    }
+    // An ineligible request keeps the full view; never apply omission here.
+    const available = candidate.contextWindow - contextPlan.estimatedInputTokens - settings.contextSafetyTokens;
+    if (available < 1) continue;
+    prepared.push({ ...candidate, contextPlan, resolvedMaxOutputTokens: Math.min(
+      candidateOutputCeiling(candidate, requestedOutputTokens, candidate.maxOutputTokens), available,
+    ) });
+  }
+  if (!prepared.length && noFit) throw noFit;
+  return prepared;
 }

@@ -14,6 +14,10 @@ from services.release_status import deployment_status, compatibility_probes
 
 
 def register_workbench_routes(app):
+    from routes.prompt_templates import register_prompt_template_routes
+
+    register_prompt_template_routes(app)
+
     @app.after_request
     def private_workbench(response):
         if request.path.startswith(("/workbench", "/admin/workbench/")):

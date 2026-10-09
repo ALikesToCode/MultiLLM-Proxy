@@ -33,13 +33,19 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
   - Nineteen AI
   - Chutes AI
 - 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
+- 🔍 [Provider authenticity diagnostics](docs/provider-authenticity.md) give bounded, content-free conformance signals for each provider
 - 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
 - 🔄 Four-state provider recovery with bounded parallel half-open probes
+- 🩺 [Upstream outcomes](docs/upstream-outcomes.md) separate valid responses, credential rejection, throttling and ambiguous transport failure in circuit recovery
 - 📊 Request, latency, response-class, and configured cost telemetry
+- 📈 Opt-in Prometheus scrapes for public route health and admin-only request window metrics
 - 🚀 Streaming support for compatible providers
+- 🛂 Opt-in [first-event stream validation](docs/stream-preflight.md) before an `auto:` route commits to a provider
 - 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
+- 🪟 Opt-in [candidate-specific roleplay context](docs/roleplay-candidate-context.md) fits protected fallback history to each model window
 - ⚡ Configurable timeouts and retry mechanisms per provider
 - 🔄 Automatic parameter handling and compatibility checks
+- 🧮 [`/v1/messages/count_tokens`](docs/token-counting.md) can use explicitly configured native provider counts, with labeled local estimates otherwise
 
 The rationale for selectively adopting OmniRoute-style operational features
 without replacing MultiLLM's provider adapters is documented in
@@ -50,6 +56,69 @@ synthetic comparisons, private session timelines, continuity editing, independen
 branches, explicit interrupted-response recovery, and Worker/Container release
 checks. [External PostgreSQL and encrypted backups](docs/control-plane-storage.md)
 keep control-plane settings independent of ephemeral Container storage.
+
+### Opt-in gateway features
+
+Most of these stay off until a setting or request header enables them, or an
+operator runs a script. Partial usage accounting and the authenticated OpenAPI
+document are always on. Each document lists its settings, and features that
+store data name the D1 migration to apply before enabling them.
+
+- [Cache policy isolation](docs/cache-policy.md): `RESPONSE_CACHE_POLICY_REVISION` keys cached chat responses by the current route and guardrail policy.
+- [Partial usage and unknown cost](docs/usage-uncertainty.md): the usage ledger records a missing token count or price as unknown instead of zero.
+- [Conversion fidelity diagnostics](docs/conversion-fidelity.md): sending `X-MultiLLM-Conversion-Report: 1` returns headers that rate a chat, responses or messages translation and list the affected fields.
+- [OpenAPI contract](docs/openapi.md): `GET /openapi.json` returns the client API description to authenticated callers.
+- [Versioned prompt templates](docs/prompt-templates.md): `PROMPT_TEMPLATES_ENABLED` adds admin-published templates and a render endpoint.
+- [Capability probes](docs/capability-probes.md): an operator script checks tool calls, JSON schema output and vision on selected models.
+- [Configuration snapshots](docs/config-snapshots.md): `CONFIG_SNAPSHOTS_ENABLED` adds reviewed, revisioned auto-route changes with a diff and audit records.
+- [Health probe cost forecast](docs/probe-cost-forecast.md): an offline script bounds the API calls and spend of a probe plan.
+- [Three-arm evaluation](docs/evaluation-noise-floor.md): `SHADOW_EVAL_NOISE_FLOOR_ENABLED` compares a candidate against two replays of the production model, and an offline script replays routing cost.
+- [Quantization and precision preferences](docs/model-precision.md): `MODEL_PRECISION_PREFERENCE` orders catalog and intelligence candidates by model precision.
+- [Upstream Retry-After advice](docs/retry-advice.md): `UPSTREAM_RETRY_AFTER_ADVICE_ENABLED` waits for a provider's bounded reset hint before an already-permitted retry.
+- [Native edge request metrics](docs/edge-request-metrics.md): `NATIVE_EDGE_METRICS_ENABLED` records native Worker generations in the usage ledger and Prometheus without double-counting forwarded requests.
+- [Prompt cache usage and cost](docs/prompt-cache-cost.md): `PROMPT_CACHE_USAGE_BUCKETS_ENABLED` records ordinary input, cache-read, cache-write and output tokens and costs separately (migration 0016).
+- [Model-scoped credential cooldown](docs/model-cooldown.md): `MODEL_COOLDOWN_ENABLED` rests a pooled key for one model or quota bucket instead of the whole provider.
+- [Zero-content retention](docs/zero-content-retention.md): `CONTENT_RETENTION_ENABLED` lets a policy or `X-MultiLLM-Retention: zero` keep request content out of caches, samples, roleplay memory and Knowledge memos.
+- [Revision-aware configuration sync](docs/config-revision-sync.md): `CONFIG_REVISION_SYNC_ENABLED` reloads configuration from committed revisions and fails closed when key controls can't be verified (migration 0017).
+- [Shared concurrency admission](docs/admission-leases.md): `ADMISSION_ENABLED` limits concurrent generations per account and model group across the Worker and Containers.
+- [Disconnect-aware cancellation](docs/request-cancellation.md): a client disconnect closes the upstream request once and records the usage as unknown, not zero.
+- [Rate-limit headers](docs/rate-limit-headers.md): `RATE_LIMIT_HEADERS_ENABLED` adds `X-MultiLLM-RateLimit-*` headers for the gateway's own request counters.
+- [MCP contract digests](docs/mcp-contract-drift.md): `MCP_CONTRACT_DIGESTS_ENABLED` adds schema digests to `/mcp` discovery and rejects a call whose pinned digest no longer matches.
+- [Prompt cache affinity](docs/prompt-cache-affinity.md): `PROMPT_CACHE_AFFINITY_ENABLED` sends a managed automatic route back to the credential that last completed the same reusable prompt prefix, so provider prompt caches are reused, without overriding eligibility.
+- [Generation deadlines](docs/generation-deadline.md): `X-MultiLLM-Deadline-Ms` gives one generation a single time budget across setup, admission, retries, preflight and streaming, capped by `GENERATION_DEADLINE_MAX_MS`.
+- [Shared generation cache](docs/shared-generation-cache.md): `GENERATION_CACHE_SHARED_ENABLED` with `GENERATION_CACHE_BACKEND=d1-r2` shares exact, deterministic, complete responses between Containers and the Worker, isolated by account and policy (migration 0019).
+- [Gateway alerts](docs/gateway-alerts.md): `GATEWAY_ALERTS_ENABLED` sends content-free webhook alerts for spend, unpriced usage, open circuits, exhausted pools and provider failures (migration 0022).
+- [Managed request idempotency](docs/managed-idempotency.md): `MANAGED_IDEMPOTENCY_ENABLED` accepts `Idempotency-Key` on managed non-streaming chat and replays a completed response instead of generating again (migration 0023).
+- [Usage reservations](docs/usage-reservations.md): `USAGE_RESERVATIONS_ENABLED` keeps a budget hold when a provider call's outcome or usage is uncertain, until it is settled or reconciled (migration 0020).
+- [Output schema validation](docs/output-schema-validation.md): `OUTPUT_SCHEMA_VALIDATION_ENABLED` lets a managed request ask the gateway to check the response against a JSON schema and return 502 when it does not match.
+- [Deferred tool discovery](docs/deferred-tools.md): `DEFERRED_TOOLS_ENABLED` adds `multillm.tools.discover` to the MCP endpoints, with per-principal tool grants (migration 0018).
+- [Protocol extras](docs/protocol-extras.md): `PROTOCOL_EXTRAS_ENABLED` keeps reviewed protocol-specific fields, such as Messages `top_k`, through translation; they reach a provider only if it admits the field.
+- [Sticky session tiers](docs/session-tiers.md): `SESSION_TIER_MODE=sticky` keeps a session's approved model tier stable through tool calls in the main, delegation and aux lanes (migration 0021).
+- [Hosted Responses state](docs/responses-state.md): `HOSTED_RESPONSES_ENABLED` lets a managed `/v1/responses` request with `gateway_state: true` keep its completed response under a gateway ID, continue from it with `previous_response_id`, and read or delete it later (migration 0028).
+- [Gateway batches](docs/gateway-batches.md): `GATEWAY_BATCHES_ENABLED` adds OpenAI-compatible `/v1/files` and `/v1/batches` with a required spend budget, and `BATCH_SPILLOVER_ENABLED` turns a chat request sent with `X-MultiLLM-Priority: batch` and `Prefer: respond-async` into a one-item batch (migration 0027).
+- [Observability exports](docs/observability-exports.md): `OBSERVABILITY_EXPORTERS_JSON` sends content-free request observations to the Langfuse or Helicone collectors you name.
+- [Context pages](docs/context-pages.md): `CONTEXT_PAGING_ENABLED` lets a client that sends the `multillm_context_retrieve` capability replace older conversation turns with exact, owner-scoped page handles it can retrieve later (migration 0024).
+- [Semantic generation cache](docs/semantic-generation-cache.md): `SEMANTIC_CACHE_ENABLED` with `SEMANTIC_CACHE_POLICY_JSON` reuses a stored answer for a near-identical final user message on opted-in routes or accounts, under strict matching and a per-lookup embedding spend cap (migration 0026).
+- [Canary traffic](docs/canary-traffic.md): `CANARY_TRAFFIC_ENABLED` splits an auto route's sessions into baseline and candidate cohorts, in shadow or live mode, from a reviewed policy (migration 0025).
+- [Bandit recommendations](docs/bandit-recommendations.md): `BANDIT_MODE` proposes a reviewed one-step route order change from stored evaluation results, without calling providers.
+- [Local inference](docs/local-inference.md): `OLLAMA_BASE_URL`, `VLLM_BASE_URL`, `LM_STUDIO_BASE_URL`, `LLAMA_CPP_BASE_URL` and `SGLANG_BASE_URL` add explicitly configured OpenAI-compatible local servers as providers.
+- [PII redaction](docs/pii-rehydration.md): `PII_REDACTION_ENABLED` with `PII_REDACTION_POLICY_JSON` replaces detected emails, phone numbers and card numbers with request-local placeholders before dispatch and restores them in JSON and streamed responses.
+- [Prompt injection heuristics](docs/prompt-injection.md): `PROMPT_INJECTION_MODE=log` or `block` scores managed requests for injection and jailbreak patterns before dispatch.
+- [Reset-aware pool scheduling](docs/pool-reset-scheduling.md): `POOL_RESET_SCHEDULING_ENABLED` skips pooled accounts whose quota is freshly exhausted and prefers the earliest reset, using only data the gateway already receives.
+- [Latency SLO admission](docs/latency-slo.md): `LATENCY_SLO_MODE=reject` or `reroute` with `LATENCY_SLO_POLICY_JSON` predicts deadline risk from recent model measurements and can reject requests or reroute eligible automatic selections before dispatch.
+- [Hedged auto requests](docs/hedged-requests.md): `HEDGED_REQUESTS_ENABLED` with `HEDGED_REQUESTS_POLICY_JSON` races at most two candidates on auto routes explicitly marked idempotent-safe, and accounts for every attempt.
+- [Realtime WebSocket transport](docs/realtime.md): `REALTIME_ENABLED` with `REALTIME_PROVIDERS_JSON` bridges authenticated OpenAI-compatible Realtime sockets directly in the Worker, under a per-session cost cap (migration 0029).
+- [Stream cost breaker](docs/stream-cost-breaker.md): `STREAM_COST_BREAKER_ENABLED` lets a key carry `max_stream_cost_usd`, and stops a stream with the protocol's error when its observed or conservatively estimated cost would pass the cap (migration 0030).
+- [Learned provider cooldowns](docs/learned-cooldown.md): `LEARNED_COOLDOWN_MODE=shadow` or `apply` with `LEARNED_COOLDOWN_POLICY_JSON` narrows a bounded cooldown interval from natural throttle and recovery observations, without probes (migration 0031).
+- [Context-leak canary tokens](docs/context-canary.md): `CONTEXT_CANARY_MODE=log` or `block` with `CONTEXT_CANARY_POLICY_JSON` detects opted-in disclosure of a request-specific marker. It does not claim complete leak detection.
+- [Signed usage receipts](docs/usage-receipts.md): `USAGE_RECEIPTS_ENABLED` with a reviewed Ed25519 key writes a hash-chained receipt per settled usage event that its owner can fetch and verify, keeping unknown cost explicit (migration 0032).
+- [Enterprise integration contracts](docs/enterprise-contracts.md): typed identity, tenancy, quota and credit boundaries for later organisation, SSO and payment modules. `ENTERPRISE_PREVIEW_ENABLED` shows a read-only administrator preview; nothing else activates.
+- [Organisations and teams](docs/tenant-hierarchy.md): `ORGANISATIONS_ENABLED` adds optional organisation and team membership with a workspace identity the server verifies, and keeps each workspace's caches, idempotency, hosted state and usage separate (migration 0033).
+- [Tenant governance](docs/tenant-governance.md): `TENANT_GOVERNANCE_ENABLED` intersects organisation, team and key grants, reserves organisation and team budgets together with the key's, and attributes usage to the verified workspace (migration 0034).
+- [SAML federation](docs/saml-federation.md): `SAML_ENABLED` with `SAML_BROKER_URL`, `SAML_TRUST_CONFIG_JSON` and `SAML_CALLBACK_URL` signs gateway accounts in to the dashboard through an explicitly trusted SAML broker, only for subjects an administrator has linked to an account (migration 0035).
+- [SCIM provisioning](docs/scim-provisioning.md): `SCIM_ENABLED` with `SCIM_TRUST_CONFIG_JSON` provisions scoped users and organisation teams through SCIM 2.0; it needs D1 storage and security revision sync (migration 0036).
+- [Gateway credits](docs/credits-ledger.md): `CREDITS_ENABLED` keeps an append-only ledger of credits, holds and settlements, separate from usage estimates. `CREDITS_ENFORCEMENT=funded` or `all` makes requests reserve and settle credits (migration 0037).
+- [Top-ups](docs/payment-billing.md): `PAYMENTS_ENABLED` with `PAYMENT_PROCESSOR_CONFIG_JSON` and `PAYMENT_WEBHOOK_KEY_REF` creates Stripe Checkout top-ups and credits explicit USD payments only from verified, idempotent webhooks (migration 0038).
 
 ## Setup
 

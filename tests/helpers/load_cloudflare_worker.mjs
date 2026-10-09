@@ -214,8 +214,14 @@ export async function roleplayModuleUrl() {
       readFile(streamingUrl, "utf8"),
       readFile(endpointUrl, "utf8"),
     ]);
-  const compatibilityDataUrl = dataModuleUrl(compatibilitySource);
-  const capacityDataUrl = dataModuleUrl(capacitySource);
+  const compatibilityDataUrl = dataModuleUrl(compatibilitySource.replace(
+    'from "../retention-policy.mjs";',
+    `from "${new URL("../../worker/retention-policy.mjs", import.meta.url)}";`,
+  ));
+  const candidateContextUrl = new URL("../../worker/roleplay/candidate-context.mjs", import.meta.url);
+  const capacityDataUrl = dataModuleUrl(
+    capacitySource.replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`),
+  );
   const validationDataUrl = dataModuleUrl(validationSource);
   const messageValidationDataUrl = dataModuleUrl(
     messageValidationSource.replace(
@@ -389,6 +395,9 @@ export async function roleplayModuleUrl() {
   );
   const transportDataUrl = dataModuleUrl(
     transportSource
+      .replace('from "../upstream-cancellation.mjs";', `from "${new URL("../../worker/upstream-cancellation.mjs", import.meta.url)}";`)
+      .replace('from "../pii-rehydration.mjs";', `from "${new URL("../../worker/pii-rehydration.mjs", import.meta.url)}";`)
+      .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
       .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
       .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace(
@@ -483,6 +492,11 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('import("../prompt-injection-detection.mjs")', `import("${new URL("../../worker/prompt-injection-detection.mjs", import.meta.url)}")`)
+    .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
+    .replace('from "../context-pages-d1.mjs";', `from "${new URL("../../worker/context-pages-d1.mjs", import.meta.url)}";`)
+    .replace('from "../context-canary.mjs";', `from "${new URL("../../worker/context-canary.mjs", import.meta.url)}";`)
+    .replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`)
     .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./recovery.mjs";', `from "${new URL("../../worker/roleplay/recovery.mjs", import.meta.url)}";`)
@@ -670,7 +684,7 @@ export async function loadRoleplayStreamingModule() {
   );
 }
 
-export async function loadWorkerModule() {
+export async function loadWorkerModule({ transformSource = source => source } = {}) {
   const workerUrl = new URL("../../cloudflare-worker.mjs", import.meta.url);
   const opencodeReasoningUrl = new URL(
     "../../worker/opencode/reasoning-response.mjs",
@@ -720,7 +734,8 @@ export async function loadWorkerModule() {
       `from "${dataModuleUrl(reasoningOutputSource)}";`,
     ),
   );
-  const patchedSource = source
+  const patchedSource = transformSource(source)
+    .replace('from "./worker/native-config-sync.mjs";', `from "${new URL("../../worker/native-config-sync.mjs", import.meta.url)}";`)
     .replace('from "./worker/shadow-eval-schedule.mjs";', `from "${new URL("../../worker/shadow-eval-schedule.mjs", import.meta.url)}";`)
     .replace('from "./worker/cors-policy.mjs";', `from "${new URL("../../worker/cors-policy.mjs", import.meta.url)}";`)
     .replace('from "./worker/secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
@@ -735,6 +750,9 @@ export async function loadWorkerModule() {
     .replace('from "./worker/health-schedule.mjs";', `from "${new URL("../../worker/health-schedule.mjs", import.meta.url)}";`)
     .replace('from "./worker/status-page.mjs";', `from "${new URL("../../worker/status-page.mjs", import.meta.url)}";`)
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
+    .replace('from "./worker/admission-do.mjs";', `from "${new URL("../../worker/admission-do.mjs", import.meta.url)}";`)
+    .replace('from "./worker/gateway-extensions.mjs";', `from "${new URL("../../worker/gateway-extensions.mjs", import.meta.url)}";`)
+    .replace('from "./worker/batch-jobs.mjs";', `from "${new URL("../../worker/batch-jobs.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode/reasoning-request.mjs";', `from "${new URL("../../worker/opencode/reasoning-request.mjs", import.meta.url)}";`)
