@@ -320,7 +320,7 @@ class RegisteredManagedRouteTests(UnifiedApiTestCase):
         body["model"] = "mimo:mimo-v2.5"
         with patch.object(self.app_module.ProxyService, "make_request", return_value=self._chat_response('{"count":2}')) as send:
             response = self.client.post("/v1/chat/completions", json=body, headers=headers)
-        assert response.status_code == 200 and send.call_count == 1
+        assert response.status_code == 200 and send.call_count == 1, (send.call_count, response.get_data(as_text=True)[:2000])
         assert OPTION not in json.loads(send.call_args.kwargs["data"])
         with patch.object(self.app_module.ProxyService, "make_request", return_value=self._chat_response("private-response-canary")) as send:
             response = self.client.post("/v1/chat/completions", json=body, headers=headers)
@@ -339,7 +339,7 @@ class RegisteredManagedRouteTests(UnifiedApiTestCase):
             body["model"] = "mimo:mimo-v2.5"
             with patch.object(self.app_module.ProxyService, "make_request", return_value=self._chat_response('{"count":2}')) as send:
                 response = self.client.post(path, json=body, headers=headers)
-            assert response.status_code == 200 and send.call_count == 1
+            assert response.status_code == 200 and send.call_count == 1, (send.call_count, response.get_data(as_text=True)[:2000])
             assert OPTION not in json.loads(send.call_args.kwargs["data"])
             with patch.object(self.app_module.ProxyService, "make_request") as send:
                 response = self.client.post(path, json={**body, "stream": True}, headers=headers)
@@ -360,5 +360,5 @@ class RegisteredManagedRouteTests(UnifiedApiTestCase):
             body["model"] = model
             with patch.object(self.app_module.ProxyService, "make_request", return_value=upstream) as send:
                 response = self.client.post(path, json=body, headers=headers)
-            assert response.status_code == 200 and response.data == upstream.content and send.call_count == 1
+            assert response.status_code == 200 and response.data == upstream.content and send.call_count == 1, (send.call_count, response.get_data(as_text=True)[:2000])
             assert OPTION not in json.loads(send.call_args.kwargs["data"])
