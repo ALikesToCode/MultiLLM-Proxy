@@ -2,6 +2,7 @@
 import { handleIdempotencyRequest } from "./idempotency-d1.mjs";
 import { handleResponsesStateRequest } from "./responses-state-d1.mjs";
 import { handleContextPageStateRequest } from "./context-pages-d1.mjs";
+import { handleUsageReceiptStoreRequest } from "./usage-receipts.mjs";
 
 export function handleManagedStateRequest(request, env, { reservations, toolGrants } = {}) {
   const url = new URL(request.url);
@@ -12,6 +13,7 @@ export function handleManagedStateRequest(request, env, { reservations, toolGran
   if (url.pathname === "/v1/managed-state/idempotency") return handleIdempotencyRequest(request, env);
   if (url.pathname === "/v1/managed-state/responses") return handleResponsesStateRequest(request, env);
   if (url.pathname === "/v1/managed-state/context-pages") return handleContextPageStateRequest(request, env);
+  if (url.pathname === "/v1/managed-state/usage-receipts") return handleUsageReceiptStoreRequest(request, env);
   if (url.pathname === "/v1/managed-state/reservations" && reservations) return reservations(request, env);
   if (url.pathname === "/v1/managed-state/tool-grants" && toolGrants) return toolGrants(request, env);
   return Response.json({ version: 1, error: { code: "not_found", message: "Managed storage operation not found." } }, { status: 404 });
