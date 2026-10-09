@@ -55,7 +55,8 @@ def limits(user: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
 
 
 def budgeted(user: Mapping[str, Any]) -> bool:
-    return any(limit is not None for limit in limits(user))
+    from services.tenant_governance import workspace_context
+    return workspace_context(user) is not None or any(limit is not None for limit in limits(user))
 
 
 @dataclass
@@ -201,6 +202,10 @@ class BudgetService:
     @classmethod
     def check_and_reserve(cls, user: Mapping[str, Any], estimate_usd: Optional[float],
                           now: Optional[datetime] = None) -> BudgetDecision:
+        from services.tenant_governance import reserve_budget
+        governance = reserve_budget(user, estimate_usd, now, cls)
+        if governance is not None:
+            return governance
         daily, monthly = limits(user)
         if daily is None and monthly is None:
             return BudgetDecision(True)
@@ -278,6 +283,9 @@ class BudgetService:
     @classmethod
     def mark_dispatched(cls, reservation):
         """Persist before provider submission; failure must prevent submission."""
+        from services.tenant_governance import dispatch
+        if dispatch(reservation):
+            return
         if not reservation or not reservation_store.enabled():
             return
         store = reservation_store.get_store()
@@ -290,6 +298,9 @@ class BudgetService:
     @classmethod
     def complete(cls, reservation, row, *, cached=False):
         """Replace a hold only with measured cost; uncertain completion retains it."""
+        from services.tenant_governance import complete
+        if complete(reservation, row, cached=cached):
+            return
         if not reservation or not reservation_store.enabled():
             return
         store = reservation_store.get_store()
@@ -314,6 +325,9 @@ class BudgetService:
         """Release an in-flight estimate; the settled cost arrives through `record_cost`."""
         if not reservation:
             return
+        from services.tenant_governance import complete
+        if complete(reservation, {}, before_dispatch=before_dispatch):
+            return
         if reservation_store.enabled():
             if before_dispatch:
                 store = reservation_store.get_store()
@@ -336,6 +350,8 @@ class BudgetService:
         Call before handing the row to the ledger, which then reports it as stored or
         dropped exactly once.
         """
+        from services.tenant_governance import capture_cost
+        capture_cost(row)
         with cls._lock:
             state = cls._principals.setdefault(str(row["principal"]), _Principal())
             _add(state.pending, row)
