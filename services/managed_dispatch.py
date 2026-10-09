@@ -3,6 +3,8 @@
 import math
 import json
 import time
+from contextlib import contextmanager
+from dataclasses import replace
 from typing import Callable
 
 import requests
@@ -17,10 +19,25 @@ Attempt = Callable[[int], requests.Response]
 Outcome = Callable[[], UpstreamOutcome]
 
 
+@contextmanager
+def isolated_managed_attempt(turn):
+    """Keep parallel attempt finalizers out of the parent managed turn."""
+    from services.managed_turn import _turn
+    local = replace(turn, finalizers=[], pages=list(turn.pages), paged_candidates=dict(turn.paged_candidates)) if turn else None
+    token = _turn.set(local)
+    try:
+        yield local
+    finally:
+        _turn.reset(token)
+
+
 def execute_managed_attempt(send, model, credential):
     """Capture the actual dispatch credential; headers alone never bind affinity."""
     from services.prompt_cache_affinity import current_scope
     from services.managed_turn import before_provider_submission
+    hedged = getattr(g, "hedged_attempt", None) if has_request_context() else None
+    if hedged is not None:
+        hedged.before_submission()
     before_provider_submission()
     scope = current_scope()
     try:
@@ -29,6 +46,8 @@ def execute_managed_attempt(send, model, credential):
         if scope is not None:
             scope.observer(model, credential)(classify_upstream_outcome(transport_failure="interrupted"))
         raise
+    if hedged is not None:
+        hedged.capture(response)
     from services.pii_redaction import current_context
     context = current_context()
     if context is not None:
@@ -219,6 +238,8 @@ def retry_managed_attempt(
     available; absent one, per-attempt timeouts remain the transport's policy.
     None means that the original response/error must finish normally.
     """
+    if has_request_context() and getattr(g, "hedged_attempt", None) is not None:
+        return None
     classified = outcome()
     if not classified.replay_permission or retry_count >= max_retries:
         return None
