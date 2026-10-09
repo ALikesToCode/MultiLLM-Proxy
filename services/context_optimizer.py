@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from services.context_analysis_cache import ContextAnalysisCache, ImagePromptSpan
+from services.context_pages import PagingRequest
 
 EARLIER_IMAGE_PROMPT_PLACEHOLDER = (
     "[Earlier image-generation prompt omitted by MultiLLM context optimizer; "
@@ -127,6 +128,7 @@ class ContextOptimizationResult:
     reasons: tuple[str, ...]
     analysis_cache_hits: int
     analysis_cache_misses: int
+    pages: tuple[dict[str, Any], ...] = ()
 
 
 def estimate_payload_tokens(payload: Mapping[str, Any]) -> int:
@@ -478,6 +480,7 @@ def optimize_chat_payload(
     default_target_tokens: int,
     summary_digest: Mapping[str, list[str]] | None = None,
     defer_required_target: bool = False,
+    context_paging: PagingRequest | None = None,
 ) -> ContextOptimizationResult:
     if not isinstance(payload, Mapping):
         raise ContextOptimizationError("Request body must be a JSON object")
@@ -491,6 +494,23 @@ def optimize_chat_payload(
     )
     optimized_payload = copy.deepcopy(dict(payload))
     optimized_payload.pop("optimization", None)
+    if context_paging is not None and context_paging.eligible():
+        before = estimate_payload_tokens(optimized_payload)
+        paged = context_paging.service.page_payload(
+            optimized_payload, scope=context_paging.scope,
+            capabilities=context_paging.capabilities,
+            target_input_tokens=options.target_input_tokens,
+            retention_policy=context_paging.retention_policy, managed=context_paging.managed,
+            protected_indices=options.preserve_message_indices,
+        )
+        after = estimate_payload_tokens(paged.payload)
+        return ContextOptimizationResult(
+            payload=dict(paged.payload), options=options, status="paged" if paged.pages else "unchanged",
+            estimated_input_before=before, estimated_input_after=after,
+            image_prompts_compacted=0, messages_summarized=0, summary_source_messages=(),
+            needs_summary=False, target_met=after <= options.target_input_tokens,
+            reasons=(), analysis_cache_hits=0, analysis_cache_misses=0, pages=paged.pages,
+        )
     messages = optimized_payload["messages"]
     before_tokens = estimate_payload_tokens(optimized_payload)
     triggered = before_tokens > options.trigger_input_tokens
