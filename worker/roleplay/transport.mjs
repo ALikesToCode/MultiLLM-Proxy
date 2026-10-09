@@ -1,5 +1,7 @@
 import { UpstreamCancellation, readBoundedUpstreamBytes } from "../upstream-cancellation.mjs";
 import { firewallFetch, isSecretScanBlock } from "../secret-firewall.mjs";
+import { piiFetch, isPIIFailure } from "../pii-rehydration.mjs";
+import { resolvePIIPolicy } from "../pii-redaction.mjs";
 import {
   buildProviderHeaders,
   isSafeFallbackStatus,
@@ -578,22 +580,26 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
       signal: controller.signal,
     };
     cancellation.handoff();
-    const response = useOpenCodeContainer
+    const piiOptions = { route: "/v1/roleplay/chat/completions", keyScope: settings.piiKeyScope ?? "", onDecision: settings.onPIIDecision };
+    const submit = checked => piiFetch(checked, env, piiOptions, async transformed =>
+      useOpenCodeContainer ? containerNamespace.getByName("primary").fetch(transformed)
+        : fetch(transformed.url, { ...requestInit, headers: transformed.headers, body: await transformed.text() }));
+    const response = useOpenCodeContainer && !resolvePIIPolicy(env, piiOptions)
       ? await containerNamespace.getByName("primary").fetch(
           new Request(
             "https://roleplay.internal/opencode/v1/chat/completions",
             requestInit,
           ),
         )
-      : await firewallFetch(new Request(candidate.endpoint, requestInit), env, {
+      : await firewallFetch(new Request(useOpenCodeContainer ? "https://roleplay.internal/opencode/v1/chat/completions" : candidate.endpoint, requestInit), env, {
           route: "/v1/roleplay/chat/completions", provider: candidate.provider,
           onDecision: settings.onSecretScan,
           principal: { id: env.ADMIN_USERNAME || "admin" },
-        }, async checked => fetch(checked.url, { ...requestInit, headers: checked.headers, body: await checked.text() }));
+        }, submit);
     cancellation.headersReceived();
-    const ownedResponse = isSecretScanBlock(response)
+    const ownedResponse = isSecretScanBlock(response) || isPIIFailure(response)
       ? response : cancellation.wrapResponse(response);
-    if (isSecretScanBlock(response)) cancellation.complete();
+    if (isSecretScanBlock(response) || isPIIFailure(response)) cancellation.complete();
     cancellation.throwIfAborted();
     const headerMs = performance.now() - startedAt;
     return {
@@ -777,7 +783,7 @@ export async function requestCompaction(
       }
 
       const { response } = attempted;
-      if (isSecretScanBlock(response)) {
+      if (isSecretScanBlock(response) || isPIIFailure(response)) {
         attempted.cleanup();
         return { blockedResponse: response };
       }
@@ -908,7 +914,7 @@ export async function attemptRoleplayCandidates(
       };
     }
 
-    if (isSecretScanBlock(attempted.response)) {
+    if (isSecretScanBlock(attempted.response) || isPIIFailure(attempted.response)) {
       attempted.cleanup();
       return { state: nextState, terminalResponse: attempted.response };
     }
