@@ -116,6 +116,8 @@ def cosine(one, two):
 
 
 def partition(principal, path, payload, revisions, policy):
+    from services.shared_generation_cache import namespace_principal
+    principal = namespace_principal(principal)
     messages = [*payload["messages"][:-1], {**payload["messages"][-1], "content": None}]
     invariant = {**payload, "messages": messages}
     return {"principal_hash": digest(principal),

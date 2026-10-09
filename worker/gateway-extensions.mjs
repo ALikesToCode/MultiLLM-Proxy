@@ -1,4 +1,8 @@
+import { governanceEnabled, GovernanceError } from "./tenant-governance-d1.mjs";
+import { creditsEnforcement } from "./credits-d1.mjs";
+import { CreditsAdmissionError } from "./credits-admission.mjs";
 /** Static registration boundary for native dispatch; later integrations supply named hooks. */
+import { organisationsEnabled, resolveAccountTenant, tenantNamespace, TenantError } from "./tenants-d1.mjs";
 import { generationCacheSettings, prepareNativeCache, cacheServedEvent } from "./exact-generation-cache.mjs";
 import { createGatewayLifecycle } from "./gateway-lifecycle.mjs";
 import { observeNativeResponse, appendNativeMetrics, PARSER_LIMIT } from "./request-telemetry.mjs";
@@ -72,6 +76,7 @@ async function nativeContext(request, env, authority, metrics) {
     .map(([name, state]) => [name, state.revision])) : {};
   return Object.freeze({ provider: authority.provider, principal,
     model: typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,223}$/.test(model) ? model : null,
+    ...((organisationsEnabled(env) || authority.tenantContext) ? { tenantContext: authority.tenantContext, tenantNamespace: tenantNamespace(authority.tenantContext) } : {}),
     modelGroup: admissionModelGroup(authority.provider, model),
     requestId: crypto.randomUUID(), endpoint: authority.route, startedAt, retentionPolicy, cacheRevisions });
 }
@@ -82,8 +87,10 @@ class NativeGenerationRejection extends Error {
 }
 
 export function generationErrorResponse(error) {
+  if (error instanceof GovernanceError) return Response.json({ error: { code: error.code,
+    message: "Workspace governance denied generation", ...error.details } }, { status: error.status });
   return error instanceof GenerationDeadlineExceeded || error instanceof InvalidGenerationDeadline
-    || error instanceof ReservationError || error instanceof AdmissionError || error instanceof NativeGenerationRejection ? error.response() : null;
+    || error instanceof CreditsAdmissionError || error instanceof ReservationError || error instanceof AdmissionError || error instanceof NativeGenerationRejection ? error.response() : null;
 }
 
 export function forwardedGenerationHeaders(request, env, deadline = createGenerationDeadline(request, env)) {
@@ -277,7 +284,7 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
     }
     policies = await prepareNativePolicies(request, env, authority, context, settings, hook, race);
     request = policies.request; authority = policies.authority; context = policies.context;
-    reservation = settings.reservations ? nativeReservationLifecycle(policies.dispatchRequest, env, authority) : null;
+    reservation = (settings.reservations || settings.enterprise) ? nativeReservationLifecycle(policies.dispatchRequest, env, authority) : null;
     if (["baseline", "candidate"].includes(authority.canary?.cohort)
         && ["shadow", "live"].includes(authority.canary?.mode)) {
       context = { ...context, canary: { cohort: authority.canary.cohort, mode: authority.canary.mode } };
@@ -285,8 +292,10 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
     ctx?.waitUntil?.(new Promise(resolve => { resolveDone = resolve; }));
     lifecycle = createGatewayLifecycle([...registrations, ...nativeFinalizers(env, ctx, settings, reservation,
       () => { hook.deadline?.stop(); resolveDone?.(); })]);
+    await race(() => reservation?.authorize?.(context));
     await race(() => lifecycle.authorize(context));
     await race(() => lifecycle.admit(context));
+    if (settings.enterprise) await race(() => reservation.admit(context));
     const state = { ...policies, lifecycle: { ...lifecycle, finalize: finish }, context, owner, hook, reservation,
       cacheEnabled: settings.cache, semanticEnabled: settings.semantic, race, ctx, accounting };
     const dispatch = () => dispatchWithNativeHooks(request, env, authority, fetcher, state);
@@ -313,6 +322,7 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
     await owner.close("interrupted");
     const rejection = error instanceof ContextCanaryError ? Response.json({ error: { code: error.code,
       message: "Managed response inspection stopped generation" } }, { status: 502 }) : generationErrorResponse(error);
+    if (!lifecycle && reservation) await reservation.finalize({ ...context, handedOff: false });
     if (lifecycle) await finish({ ...context, status: rejection?.status ?? (request.signal.aborted ? 499 : 502),
       outcome: request.signal.aborted ? "canceled" : "transport_error", input_tokens: null, output_tokens: null,
       duration_ms: Math.max(0, Math.round(performance.now() - context.startedAt)), ttft_ms: null, cost_usd: null, cost_basis: null });
@@ -324,12 +334,25 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
 export async function nativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators = []) {
   const path = authority.route ?? new URL(request.url).pathname;
   if (!generationPath(request, path)) return fetcher(request, env, authority);
+  let enterprise = authority.authenticated === true && (governanceEnabled(env) || creditsEnforcement(env) !== "off");
+  if ((organisationsEnabled(env) || enterprise) && authority.authenticated === true) {
+    try {
+      const tenantContext = await resolveAccountTenant(env.INTELLIGENCE_DB, authority.principal?.id ?? authority.keyId, env);
+      authority = { ...authority, tenantContext, tenantNamespace: tenantNamespace(tenantContext) };
+    } catch (error) {
+      authority.deadlineHook?.deadline?.stop();
+      if (error instanceof TenantError) return error.response();
+      throw error;
+    }
+  }
+  enterprise = authority.authenticated === true && (creditsEnforcement(env) !== "off"
+    || governanceEnabled(env) && authority.tenantContext?.org_id != null);
   // The route has already authenticated the bootstrap key. Only public route metadata is trusted.
   const revision = nativeRevisionConsumer(env);
   tickNativeRevisionSync(env, ctx);
   const rejection = revision?.requireFreshSecurity();
   if (rejection) { authority.deadlineHook?.deadline?.stop(); return rejection; }
-  const settings = { metrics: nativeMetricsEnabled(env), admission: admissionSettings(env).enabled,
+  const settings = { enterprise, metrics: nativeMetricsEnabled(env), admission: admissionSettings(env).enabled,
     cache: generationCacheSettings(env).enabled, reservations: reservationSettings(env).enabled,
     semantic: semanticCacheSettings(env).enabled, observability: observabilityEnabled(env),
     injection: resolveInjectionPolicy(env).mode !== "off",
@@ -346,7 +369,7 @@ export async function nativeGenerationFetch(request, env, ctx, authority, fetche
   catch (error) { const response = generationErrorResponse(error); if (response) return response; throw error; }
   if (authority.onCancellationOutcome) hook.owner.onOutcome = authority.onCancellationOutcome;
   if (!settings.metrics && !settings.admission && !revision && !resolveRetentionPolicy(env).enabled
-      && !registrations.length && !settings.cache && !settings.reservations && !settings.semantic && !settings.injection && !settings.latency && !settings.streamCost && !settings.canary && !hook.deadline) {
+      && !registrations.length && !settings.cache && !settings.reservations && !settings.enterprise && !settings.semantic && !settings.injection && !settings.latency && !settings.streamCost && !settings.canary && !hook.deadline) {
     return dispatchNative(request, env, authority, fetcher, hook.owner);
   }
   return runNativeLifecycle(request, env, ctx, authority, fetcher, registrations, settings, hook);

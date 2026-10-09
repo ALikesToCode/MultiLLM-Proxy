@@ -8,7 +8,7 @@ from services import enterprise_contract as contracts
 
 
 def register_enterprise_preview_routes(app):
-    app.extensions["enterprise_adapters"] = contracts.register_enterprise_adapters()
+    app.extensions.setdefault("enterprise_adapters", contracts.register_enterprise_adapters())
 
     def disabled_enterprise_preview():
         if request.path != "/admin/enterprise/preview":

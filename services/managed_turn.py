@@ -346,8 +346,12 @@ def capture_submission_guard():
             raise GatewayError("cancelled", "The caller cancelled the request.", 499)
         if context is not None:
             from services.budget_service import BudgetService
+            from services import credits_admission
 
-            BudgetService.mark_dispatched(context.reservation)
+            BudgetService.mark_dispatched(context.reservation,
+                **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+            credits_admission.mark_dispatched(context.credit_hold)
+            context.dispatched = True
 
     return deadline, submit
 

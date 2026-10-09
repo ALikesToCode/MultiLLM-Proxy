@@ -1,3 +1,4 @@
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 /** Principal-owned metadata and bounded immutable continuation bodies. */
 import { boundedBody } from "./control-users-d1.mjs";
 
@@ -133,7 +134,7 @@ async function put(db, bucket, body, now) {
   return reply("responses_store_unavailable", 503);
 }
 
-export async function handleResponsesStateRequest(request, env) {
+export async function handleResponsesStateRequest(request, env, { tenantContext } = {}) {
   const url = new URL(request.url);
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || url.pathname !== PATH
       || url.search || url.hash || url.username || url.password) return reply("not_found", 404);
@@ -144,6 +145,7 @@ export async function handleResponsesStateRequest(request, env) {
     body = JSON.parse(await boundedBody(request, MAX_DOCUMENT_BYTES));
     if (!validBody(body)) throw Error();
   } catch { return reply("invalid_responses_state_request", 400); }
+  if (organisationsEnabled(env) && tenantContext && body.owner) body.owner = tenantStorageKey(body.owner, tenantContext);
   const db = env.INTELLIGENCE_DB, bucket = env.multillm_media;
   if (!db || !bucket) return reply("responses_store_unavailable", 503);
   const now = Math.floor(Date.now() / 1000);

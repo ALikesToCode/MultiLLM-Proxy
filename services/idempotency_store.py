@@ -60,6 +60,8 @@ def request_fingerprint(principal, method, path, key, body, revision):
         raise GatewayError("invalid_idempotency_key", "Idempotency-Key requires 1 to 128 safe ASCII characters.")
     if not isinstance(principal, str) or not principal or len(principal) > 256:
         raise unavailable()
+    from services.shared_generation_cache import namespace_principal
+    principal = namespace_principal(principal)
     try:
         scope = hashlib.sha256(_canonical([principal, method, path, key])).hexdigest()
         digest = hashlib.sha256(_canonical([body, revision])).hexdigest()

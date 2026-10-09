@@ -113,6 +113,12 @@ store data name the D1 migration to apply before enabling them.
 - [Context-leak canary tokens](docs/context-canary.md): `CONTEXT_CANARY_MODE=log` or `block` with `CONTEXT_CANARY_POLICY_JSON` detects opted-in disclosure of a request-specific marker. It does not claim complete leak detection.
 - [Signed usage receipts](docs/usage-receipts.md): `USAGE_RECEIPTS_ENABLED` with a reviewed Ed25519 key writes a hash-chained receipt per settled usage event that its owner can fetch and verify, keeping unknown cost explicit (migration 0032).
 - [Enterprise integration contracts](docs/enterprise-contracts.md): typed identity, tenancy, quota and credit boundaries for later organisation, SSO and payment modules. `ENTERPRISE_PREVIEW_ENABLED` shows a read-only administrator preview; nothing else activates.
+- [Organisations and teams](docs/tenant-hierarchy.md): `ORGANISATIONS_ENABLED` adds optional organisation and team membership with a workspace identity the server verifies, and keeps each workspace's caches, idempotency, hosted state and usage separate (migration 0033).
+- [Tenant governance](docs/tenant-governance.md): `TENANT_GOVERNANCE_ENABLED` intersects organisation, team and key grants, reserves organisation and team budgets together with the key's, and attributes usage to the verified workspace (migration 0034).
+- [SAML federation](docs/saml-federation.md): `SAML_ENABLED` with `SAML_BROKER_URL`, `SAML_TRUST_CONFIG_JSON` and `SAML_CALLBACK_URL` signs gateway accounts in to the dashboard through an explicitly trusted SAML broker, only for subjects an administrator has linked to an account (migration 0035).
+- [SCIM provisioning](docs/scim-provisioning.md): `SCIM_ENABLED` with `SCIM_TRUST_CONFIG_JSON` provisions scoped users and organisation teams through SCIM 2.0; it needs D1 storage and security revision sync (migration 0036).
+- [Gateway credits](docs/credits-ledger.md): `CREDITS_ENABLED` keeps an append-only ledger of credits, holds and settlements, separate from usage estimates. `CREDITS_ENFORCEMENT=funded` or `all` makes requests reserve and settle credits (migration 0037).
+- [Top-ups](docs/payment-billing.md): `PAYMENTS_ENABLED` with `PAYMENT_PROCESSOR_CONFIG_JSON` and `PAYMENT_WEBHOOK_KEY_REF` creates Stripe Checkout top-ups and credits explicit USD payments only from verified, idempotent webhooks (migration 0038).
 
 ## Setup
 

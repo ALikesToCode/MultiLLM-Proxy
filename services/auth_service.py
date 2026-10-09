@@ -943,6 +943,8 @@ class AuthService:
 
     @classmethod
     def _update_key_usage(cls, username: str, remote_addr: Optional[str] = None) -> None:
+        from services.tenant_hierarchy import verify_before_key_usage
+        verify_before_key_usage(username)
         user = cls._users.get(username)
         if not user:
             return
@@ -1003,6 +1005,8 @@ class AuthService:
             and admin_api_key
             and hmac.compare_digest(api_key, admin_api_key)
         ):
+            from services.tenant_hierarchy import verify_before_key_usage
+            verify_before_key_usage(default_username)
             return cls._verify_bootstrap_admin(default_username, api_key, remote_addr)
 
         if api_key.startswith(KEY_NAMESPACE):
@@ -1087,6 +1091,17 @@ class AuthService:
         if not check_password_hash(user["api_key_hash"], api_key):
             return False
 
+        return cls.issue_dashboard_session(username, user=user)
+
+    @classmethod
+    def issue_dashboard_session(cls, username: str, *, user: Optional[Dict[str, Any]] = None) -> bool:
+        """Issue a fresh session from the account's current stored permissions."""
+        username = normalized_username(username)
+        if username is None:
+            return False
+        user = cls._load_user_by_username(username) if user is None else user
+        if not user or user.get("revoked_at") or key_controls.expired(user):
+            return False
         last_login = _utcnow()
         cls._update_login(username, last_login)
         user = cls._users[username]

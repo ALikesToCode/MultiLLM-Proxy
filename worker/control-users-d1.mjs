@@ -305,3 +305,15 @@ export async function handleControlUsersRequest(request, env) {
     return reply({ error: "storage_unavailable" }, 503);
   }
 }
+
+/** Statements only: the SCIM authority commits accounts and identities in one batch. */
+export function scimAccountStatements(db, body, priorAccount, guard) {
+  if (!body.account) return [];
+  const { account, expected } = body;
+  if (expected === 0) return [db.prepare(`INSERT INTO control_users (${USER_FIELDS.join(",")}) VALUES (${USER_FIELDS.map(() => "?").join(",")})`)
+    .bind(...USER_FIELDS.map(key => account[key]))];
+  return [db.prepare(`UPDATE control_users SET api_key_hash=?,api_key_prefix=?,revoked_at=?
+    WHERE username=? AND is_admin=0 AND api_key_hash=? AND api_key_prefix=? AND revoked_at IS ?`)
+    .bind(account.api_key_hash, account.api_key_prefix, account.revoked_at, account.username,
+      priorAccount.api_key_hash, priorAccount.api_key_prefix, priorAccount.revoked_at), guard()];
+}

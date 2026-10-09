@@ -295,6 +295,8 @@ def register_media_batch_routes(app, csrf, auth_service_cls, validate_image_mode
             raise APIError("The batch owner's account no longer exists", status_code=403,
                            payload={"error": "principal_rejected"})
         g.authenticated_user = user
+        from services.media_signing import bind_principal_tenant
+        bind_principal_tenant(claims, user)
         # Key controls apply when an item runs, not only at submission: an allowlist or
         # budget changed since then is honoured, and each item is recorded in the ledger.
         started = time.perf_counter()

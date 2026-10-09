@@ -1,9 +1,13 @@
+import { governanceEnabled, GovernanceError } from "./tenant-governance-d1.mjs";
+import { creditsEnforcement } from "./credits-d1.mjs";
+import { CreditsAdmissionError } from "./credits-admission.mjs";
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 /** Native semantic lookup after authentication and policy, before generation dispatch. */
 import { digest, MAX_BODY_BYTES, completeCacheBody } from "./generation-cache-d1.mjs";
 import { SemanticCacheD1, validVector, vectorSimilarity, schemaMissing, schemaErrorResponse } from "./semantic-cache-d1.mjs";
 import { retentionAllowsContent } from "./retention-policy.mjs";
 import { cacheServedEvent } from "./exact-generation-cache.mjs";
-import { createReservationLifecycle, handleReservationsRequest, reservationSettings } from "./reservations-d1.mjs";
+import { createReservationLifecycle, nativeReservationLifecycle, handleReservationsRequest, reservationSettings } from "./reservations-d1.mjs";
 import { recordNativeUsage } from "./usage-ledger-d1.mjs";
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 const MODEL = /^[a-z][a-z0-9-]*:[A-Za-z0-9@][A-Za-z0-9._:/+@-]{0,255}$/;
@@ -63,6 +67,7 @@ export async function semanticPartition(principal, provider, route, payload, con
     retention_config: env.CONTENT_RETENTION_POLICY_JSON ?? "", retention_enabled: env.CONTENT_RETENTION_ENABLED ?? "",
     secret_policy: env.SECRET_SCAN_DEFAULT ?? "redact", secret_enabled: env.SECRET_SCAN_ENABLED ?? "",
     security: context.semanticSecurity ?? {}};
+  if (organisationsEnabled(env)) principal = tenantStorageKey(principal, context.tenantContext);
   return {principal_hash: await digest(principal), partition_hash: await digest(JSON.stringify(canonical(invariant))),
     model_revision: await digest(JSON.stringify([policy.embedding_model, policy.model_revision ?? "1"]))};
 }
@@ -174,7 +179,10 @@ export async function prepareSemanticCache(request, env, authority, context, col
   }
   let vector;
   try {vector = await paidEmbedding(env, authority, request, policy, payload.messages.at(-1).content, price, collaborators);}
-  catch {warn("embedding_unavailable"); return null;}
+  catch (error) {
+    if (error instanceof CreditsAdmissionError || error instanceof GovernanceError) throw error;
+    warn("embedding_unavailable"); return null;
+  }
   if (!vector || request.signal.aborted) return null;
   const unchanged = async () => semanticCacheSettings(env).enabled && retentionAllowsContent(context.retentionPolicy)
     && JSON.stringify(await current()) === JSON.stringify(identity) && !request.signal.aborted
@@ -235,6 +243,25 @@ export function createNativeSemanticCollaborators(request, env, ctx, authority, 
       const limits = { daily_budget_usd: account.daily_budget_usd ?? null, monthly_budget_usd: account.monthly_budget_usd ?? null };
       const budgeted = Object.values(limits).some(value => value !== null);
       if (budgeted && !reservationSettings(env).enabled) return false;
+      if (governanceEnabled(env) || creditsEnforcement(env) !== "off") {
+        const embeddingRequest = new Request(request.url, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: model.slice(model.indexOf(":") + 1), input: "" }) });
+        const legacyPrincipal = await ledgerPrincipal();
+        const principal = organisationsEnabled(env) ? tenantStorageKey(legacyPrincipal, authority.tenantContext) : legacyPrincipal;
+        const day = new Date().toISOString().slice(0, 10);
+        const baseline = budgeted ? await env.INTELLIGENCE_DB.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN day=? THEN cost_usd ELSE 0 END),0) AS day_spent_usd,
+          COALESCE(SUM(cost_usd),0) AS month_spent_usd FROM usage_daily WHERE principal=? AND day>=? AND day<=?`)
+          .bind(day, principal, `${day.slice(0,7)}-01`, day).first() : { day_spent_usd: 0, month_spent_usd: 0 };
+        if (!baseline) throw Error("semantic_embedding_budget_unavailable");
+        const lifecycle = nativeReservationLifecycle(embeddingRequest, env, { ...authority, principal: account }, {
+          identity: async () => ({ principal, estimate_usd: price, ...limits, ...baseline }),
+        });
+        const event = { ...context, model: model.slice(model.indexOf(":")+1), provider: authority.provider };
+        await lifecycle.authorize(event); await lifecycle.admit(event);
+        let handedOff = false;
+        return { ...lifecycle, get handedOff() { return handedOff; }, handoff() { handedOff = true; } };
+      }
       const lifecycle = createReservationLifecycle(env, { call: async body => {
         const response = await handleReservationsRequest(new Request("http://intelligence.internal/v1/reservations", {
           method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -264,6 +291,7 @@ export function createNativeSemanticCollaborators(request, env, ctx, authority, 
       headers.set("content-type", "application/json"); headers.set("cache-control", "no-store");
       const embeddingAuthority = { ...authority, provider: model.split(":", 1)[0],
         route: authority.route.replace(/\/chat\/completions$/, "/embeddings") };
+      reservation?.handoff?.();
       const response = await fetcher(new Request(target, { method: "POST", headers, signal, redirect: "manual",
         body: JSON.stringify({ model: model.slice(model.indexOf(":") + 1), input: text }) }), env, embeddingAuthority);
       const bytes = await boundedBytes(response.body, MAX_BODY_BYTES);
@@ -271,10 +299,10 @@ export function createNativeSemanticCollaborators(request, env, ctx, authority, 
       return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     },
     async accountEmbedding(event) {
-      const handedOff = event.submission_outcome !== "before-dispatch";
+      const handedOff = typeof event.reservation?.handedOff === "boolean" ? event.reservation.handedOff : event.submission_outcome !== "before-dispatch";
       const outcome = event.status === 200 ? "success" : event.status === 499 ? "canceled" : "transport_error";
       try {
-        await recordNativeUsage(env, { ...event, principal: await ledgerPrincipal(), requestId: crypto.randomUUID(),
+        await recordNativeUsage(env, { ...event, ...(authority.tenantContext ? { tenantContext: authority.tenantContext } : {}), principal: await ledgerPrincipal(), requestId: crypto.randomUUID(),
           model: event.model.slice(event.model.indexOf(":") + 1), outcome,
           ttft_ms: null, usage_basis: event.cost_basis === "usage" ? "measured" : "estimated" }, ctx);
       } finally {
