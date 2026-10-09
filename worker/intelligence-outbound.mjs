@@ -11,6 +11,7 @@ import { handleRouteHealthRequest } from "./route-health-d1.mjs";
 import { handleUsageLedgerRequest } from "./usage-ledger-d1.mjs";
 import { handleShadowEvalRequest } from "./shadow-eval-d1.mjs";
 import { handleMediaJobsRequest } from "./media-jobs.mjs";
+import { handleReservationsRequest } from "./reservations-d1.mjs";
 import { handleManagedStateRequest } from "./managed-state-dispatch.mjs";
 
 /** Domain operations reachable only through the container's private outbound handler. */
@@ -23,6 +24,7 @@ export function handleIntelligenceOutbound(request, env) {
     return Response.json({ error: { code: "method_not_allowed", message: "Use POST for storage operations." } },
       { status: 405, headers: { Allow: "POST" } });
   }
+  if (url.pathname === "/v1/reservations") return handleReservationsRequest(request, env);
   if (url.pathname === "/v1/admission") return handleAdmissionRequest(request, env);
   if (url.pathname === "/v1/store") return handleIntelligenceStoreRequest(request, env);
   if (url.pathname === "/v1/auth") return handleIntelligenceAuthRequest(request, env);

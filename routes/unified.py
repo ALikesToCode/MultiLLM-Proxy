@@ -64,7 +64,7 @@ from services.media_storage import persist_image_response
 from services.auth_service import AuthService
 from services.auto_route_service import AutoRouteService
 from services.cascade_config import is_cascade
-from routes.cascade_deadline import bounded_timeout, check_candidate
+from services.managed_turn import bounded_managed_timeout as bounded_timeout
 from routes.cascades import dispatch_unified_cascade, register_cascade_admin_routes, validate_cascade_target
 from services.context_optimizer import ContextOptimizationResult
 from services.model_registry import ModelRegistry
@@ -90,16 +90,16 @@ from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.prompt_cache_affinity import affinity_auto_request, affinity_candidate
+from services.managed_turn import managed_pipeline, emit_managed_request, with_managed_idempotency, check_managed_candidate
 from services.managed_dispatch import execute_managed_attempt, observe_managed_response
 
 logger = logging.getLogger(__name__)
-
 
 RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 
 
 def _resolve_enabled_model(app, model_id: str):
-    check_candidate(model_id)
+    check_managed_candidate(model_id)
     provider, provider_model = ModelRegistry.parse_model_id(model_id)
     adapter = get_adapter(provider, app.config["API_BASE_URLS"])
     if not adapter:
@@ -297,7 +297,6 @@ def validate_unified_chat_target(
         status_code=503,
     )
 
-
 def _send_native_request(
     app,
     auth_service_cls,
@@ -342,7 +341,7 @@ def _send_native_request(
             # The managed transport rewrites streams as Chat Completions chunks;
             # only the raw transport keeps a native event stream intact.
             request_kwargs["force_raw_passthrough"] = True
-        if request_timeout is not None:
+        if request_timeout is not None or getattr(g, "generation_deadline", None) is not None:
             request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
         return execute_managed_attempt(lambda: proxy_service_cls.make_request(**request_kwargs), f"{provider}:{provider_model}", token)
 
@@ -377,7 +376,7 @@ def _dispatch_bridged_chat(
     target = ENDPOINT_PROTOCOLS[endpoint]
     record_request_conversion(payload, CHAT, target)
     try:
-        body = translate_request(_copy_request_payload(payload, provider_model), CHAT, target)
+        body = emit_managed_request(_copy_request_payload(payload, provider_model), CHAT, target)
     except TranslationError as error:
         raise translation_api_error(error) from error
     cache_decision = apply_prompt_cache_policy(
@@ -558,7 +557,7 @@ def _dispatch_unified_chat_candidate(
                 "api_provider": provider,
                 "use_cache": False,
             }
-            if request_timeout is not None:
+            if request_timeout is not None or getattr(g, "generation_deadline", None) is not None:
                 request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
             return execute_managed_attempt(lambda: send_configured_unified_provider_request(
                 proxy_service_cls,
@@ -647,7 +646,7 @@ def _dispatch_unified_chat_candidate(
         )
         raise
 
-
+@managed_pipeline
 @sample_chat_dispatch
 @affinity_auto_request
 def dispatch_unified_chat_completion(
@@ -762,7 +761,7 @@ def _dispatch_native_protocol(
     """Pass a Responses or Messages body to a provider that speaks it natively."""
     start_time = time.time()
     headers_source = request.headers
-    upstream_payload = _copy_request_payload(payload, provider_model)
+    upstream_payload = emit_managed_request(_copy_request_payload(payload, provider_model), ENDPOINT_PROTOCOLS[endpoint], ENDPOINT_PROTOCOLS[endpoint])
     if endpoint == RESPONSES_ENDPOINT:
         upstream_payload = apply_glm_5_reasoning_policy(
             upstream_payload,
@@ -824,7 +823,7 @@ def _dispatch_translated_protocol(
         dispatch_chat=dispatch_unified_chat_completion,
     )
 
-
+@managed_pipeline
 def dispatch_protocol_request(
     app,
     auth_service_cls,
@@ -951,6 +950,7 @@ def register_unified_routes(app, csrf, auth_service_cls, metrics_service_cls, pr
     @csrf.exempt
     @api_auth_required
     @with_chat_conversion_report
+    @with_managed_idempotency
     @cached_chat_completion
     def unified_chat_completions():
         payload = json_object_body()

@@ -6,6 +6,9 @@ import { recordNativeUsage } from "./usage-ledger-d1.mjs";
 import { admissionSettings, admissionModelGroup, principalHash, runWithAdmission, AdmissionError } from "./admission-do.mjs";
 import { resolveRetentionPolicy, retentionRequestId } from "./retention-policy.mjs";
 import { nativeRevisionConsumer, tickNativeRevisionSync } from "./native-config-sync.mjs";
+import { generationDeadlineHook, createGenerationDeadline, forwardedDeadlineHeaders, GenerationDeadlineExceeded, InvalidGenerationDeadline } from "./generation-deadline.mjs";
+import { nativeReservationLifecycle, reservationSettings, ReservationError } from "./reservations-d1.mjs";
+export { runScheduledMaintenance, scheduledMaintenanceEnabled } from "./scheduled-maintenance.mjs";
 import { UpstreamCancellation } from "./upstream-cancellation.mjs";
 
 let warned = false;
@@ -54,7 +57,7 @@ async function nativeContext(request, env, authority, metrics) {
   let retentionPolicy = resolveRetentionPolicy(env, retentionIdentity);
   if (retentionPolicy.enabled) retentionPolicy = resolveRetentionPolicy(env,
     { ...retentionIdentity, keyHash: await retentionRequestId(env.ADMIN_API_KEY) });
-  const model = await requestedModel(request);
+  const model = await requestedModel(request) ?? new URL(request.url).pathname.match(/\/models\/([^/]+):(?:generateContent|streamGenerateContent)$/)?.[1] ?? null;
   const revision = nativeRevisionConsumer(env);
   const cacheRevisions = () => revision ? Object.fromEntries(Object.entries(revision.status().domains)
     .map(([name, state]) => [name, state.revision])) : {};
@@ -64,67 +67,127 @@ async function nativeContext(request, env, authority, metrics) {
     requestId: crypto.randomUUID(), endpoint: authority.route, startedAt, retentionPolicy, cacheRevisions });
 }
 
+class NativeGenerationRejection extends Error {
+  constructor(response) { super("Native generation rejected"); this.rejection = response; }
+  response() { return this.rejection; }
+}
+
+export function generationErrorResponse(error) {
+  return error instanceof GenerationDeadlineExceeded || error instanceof InvalidGenerationDeadline
+    || error instanceof ReservationError || error instanceof AdmissionError || error instanceof NativeGenerationRejection ? error.response() : null;
+}
+
+export function forwardedGenerationHeaders(request, env, deadline = createGenerationDeadline(request, env)) {
+  return forwardedDeadlineHeaders(request.headers, deadline);
+}
+
+export function nativeGenerationSetup(request, env) {
+  const path = new URL(request.url).pathname;
+  if (!generationPath(request, path)) return { hook: null, run: action => action() };
+  const rejection = nativeRevisionConsumer(env)?.requireFreshSecurity();
+  if (rejection) throw new NativeGenerationRejection(rejection);
+  if (!request.headers.has("X-MultiLLM-Deadline-Ms")) return { hook: null, run: action => action() };
+  const hook = generationDeadlineHook(request, env, { protocol: path.endsWith("/messages") ? "anthropic" : path.endsWith("/responses") ? "responses" : "chat" });
+  return { hook, run(action) {
+    const pending = (async () => {
+      try { return hook.deadline ? await hook.deadline.run(action, hook.owner) : await action(); }
+      catch (error) { hook.deadline?.stop(); await hook.owner.close("interrupted"); throw error; }
+    })();
+    // Concurrent metadata setup can finish after the caller has already returned an error.
+    void pending.catch(() => {});
+    return pending;
+  } };
+}
+
+function generationPath(request, path) {
+  return request.method === "POST"
+    && /(?:\/(?:chat\/completions|responses|messages|embeddings|images\/(?:generations|edits))|:(?:generateContent|streamGenerateContent))$/.test(path);
+}
+
+async function dispatchWithNativeHooks(request, env, authority, fetcher, state) {
+  const { lifecycle, context, owner, hook, reservation, cacheEnabled, race } = state;
+  const cache = cacheEnabled ? await race(() => prepareNativeCache(request, env, authority, context)) : null;
+  const hit = await race(() => cache?.lookup());
+  owner.throwIfAborted();
+  await race(() => reservation?.admit({ ...context, cacheServed: Boolean(hit) }));
+  owner.throwIfAborted();
+  if (hit) {
+    owner.complete();
+    await lifecycle.finalize(cacheServedEvent(hit, context));
+    return hit;
+  }
+  await race(() => lifecycle.before_dispatch(context));
+  owner.throwIfAborted(); hook.deadline?.check();
+  await race(() => reservation?.before_dispatch(context));
+  owner.throwIfAborted(); hook.deadline?.check();
+  let response = hook.deadline ? await hook.fetch(upstream => fetcher(upstream, env, authority), request)
+    : await dispatchNative(request, env, authority, fetcher, owner);
+  // Observe before optional storage, so failed lifecycle checks cannot persist a success.
+  if (response.status < 400) await race(() => lifecycle.observe(context));
+  if (cache) response = await cache.store(response, { canStore: () => !owner.outcome?.ambiguous });
+  return response;
+}
+
+async function runNativeLifecycle(request, env, ctx, authority, fetcher, registrations, settings, hook) {
+  const owner = hook.owner;
+  const race = action => hook.deadline ? hook.deadline.run(action, owner) : action();
+  let context, lifecycle, resolveDone;
+  const reservation = settings.reservations ? nativeReservationLifecycle(request, env, authority) : null;
+  const finish = event => lifecycle.finalize({ ...event, cancellationOutcome: owner.outcome, handedOff: owner.handedOff });
+  try {
+    context = await race(() => nativeContext(request, env, authority, settings.metrics));
+    ctx?.waitUntil?.(new Promise(resolve => { resolveDone = resolve; }));
+    lifecycle = createGatewayLifecycle([...registrations, { finalize: event => reservation?.finalize(event) }, { async finalize(event) {
+      try { if (settings.metrics) await recordNativeUsage(env, event); }
+      finally { hook.deadline?.stop(); resolveDone?.(); }
+    } }]);
+    await race(() => lifecycle.authorize(context));
+    await race(() => lifecycle.admit(context));
+    const state = { lifecycle: { ...lifecycle, finalize: finish }, context, owner, hook, reservation,
+      cacheEnabled: settings.cache, race };
+    const dispatch = () => dispatchWithNativeHooks(request, env, authority, fetcher, state);
+    const identity = settings.admission ? { principal_hash: await principalHash((env.ADMIN_USERNAME || "admin").trim()),
+      model_group: context.modelGroup, request_id: context.requestId,
+      deadline_ms: Date.now() + (hook.deadline?.remainingMs() ?? 86_400_000) } : null;
+    const response = await race(() => identity ? runWithAdmission(identity, env, dispatch,
+      { signal: owner.controller.signal, onLost: error => owner.close(error) }) : dispatch());
+    if (response.headers.get("X-MultiLLM-Cache") === "hit") return response;
+    return await observeNativeResponse(response, context, { env, metrics: settings.metrics,
+      signal: hook.deadline ? request.signal : owner.controller.signal, finalize: finish });
+  } catch (error) {
+    hook.deadline?.stop();
+    await owner.close("interrupted");
+    const rejection = generationErrorResponse(error);
+    if (lifecycle) await finish({ ...context, status: rejection?.status ?? (request.signal.aborted ? 499 : 502),
+      outcome: request.signal.aborted ? "canceled" : "transport_error", input_tokens: null, output_tokens: null,
+      duration_ms: Math.max(0, Math.round(performance.now() - context.startedAt)), ttft_ms: null, cost_usd: null, cost_basis: null });
+    if (rejection && !request.signal.aborted) return rejection;
+    throw error;
+  }
+}
+
 export async function nativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators = []) {
   const path = authority.route ?? new URL(request.url).pathname;
-  if (request.method !== "POST"
-    || !/(?:\/(?:chat\/completions|responses|messages|embeddings|images\/(?:generations|edits))|:(?:generateContent|streamGenerateContent))$/.test(path)) {
-    return fetcher(request, env, authority);
-  }
+  if (!generationPath(request, path)) return fetcher(request, env, authority);
   // The route has already authenticated the bootstrap key. Only public route metadata is trusted.
   const revision = nativeRevisionConsumer(env);
   tickNativeRevisionSync(env, ctx);
   const rejection = revision?.requireFreshSecurity();
-  if (rejection) return rejection;
-  const metrics = nativeMetricsEnabled(env);
-  const admission = admissionSettings(env).enabled;
-  const cacheEnabled = generationCacheSettings(env).enabled;
+  if (rejection) { authority.deadlineHook?.deadline?.stop(); return rejection; }
+  const settings = { metrics: nativeMetricsEnabled(env), admission: admissionSettings(env).enabled,
+    cache: generationCacheSettings(env).enabled, reservations: reservationSettings(env).enabled };
   const registrations = collaborators.filter(hook => typeof hook.enabled === "function" ? hook.enabled(env)
-    : hook.flag ? ["true", "1", "yes", "on"].includes(String(env[hook.flag] ?? "").trim().toLowerCase()) : metrics);
-  const owner = new UpstreamCancellation({ signal: request.signal, onOutcome: authority.onCancellationOutcome });
-  if (!metrics && !admission && !revision && !resolveRetentionPolicy(env).enabled && !registrations.length && !cacheEnabled) {
-    return dispatchNative(request, env, authority, fetcher, owner);
+    : hook.flag ? ["true", "1", "yes", "on"].includes(String(env[hook.flag] ?? "").trim().toLowerCase()) : settings.metrics);
+  let hook;
+  try { hook = authority.deadlineHook ?? generationDeadlineHook(request, env, { onOutcome: authority.onCancellationOutcome,
+    protocol: path.endsWith("/messages") ? "anthropic" : path.endsWith("/responses") ? "responses" : "chat" }); }
+  catch (error) { const response = generationErrorResponse(error); if (response) return response; throw error; }
+  if (authority.onCancellationOutcome) hook.owner.onOutcome = authority.onCancellationOutcome;
+  if (!settings.metrics && !settings.admission && !revision && !resolveRetentionPolicy(env).enabled
+      && !registrations.length && !settings.cache && !settings.reservations && !hook.deadline) {
+    return dispatchNative(request, env, authority, fetcher, hook.owner);
   }
-  const context = await nativeContext(request, env, authority, metrics);
-  let resolveDone;
-  ctx?.waitUntil?.(new Promise(resolve => { resolveDone = resolve; }));
-  const lifecycle = createGatewayLifecycle([...registrations, { async finalize(event) {
-    try { if (metrics) await recordNativeUsage(env, event); }
-    finally { resolveDone?.(); }
-  } }]);
-  const observation = { env, metrics, signal: owner.controller.signal,
-    finalize: event => lifecycle.finalize({ ...event, cancellationOutcome: owner.outcome }) };
-  try {
-    await lifecycle.authorize(context);
-    await lifecycle.admit(context);
-    const cache = cacheEnabled ? await prepareNativeCache(request, env, authority, context) : null;
-    const hit = await cache?.lookup();
-    owner.throwIfAborted();
-    if (hit) {
-      owner.complete();
-      await lifecycle.finalize(cacheServedEvent(hit, context));
-      return hit;
-    }
-    const identity = admission ? { principal_hash: await principalHash((env.ADMIN_USERNAME || "admin").trim()),
-      model_group: context.modelGroup, request_id: context.requestId,
-      deadline_ms: Date.now() + 86_400_000 } : null;
-    const dispatch = async () => {
-      await lifecycle.before_dispatch(context);
-      let response = await dispatchNative(request, env, authority, fetcher, owner);
-      if (cache) response = await cache.store(response);
-      await lifecycle.observe(context);
-      return response;
-    };
-    const response = admission ? await runWithAdmission(identity, env, dispatch,
-      { signal: request.signal, onLost: error => owner.close(error) }) : await dispatch();
-    return await observeNativeResponse(response, context, observation);
-  } catch (error) {
-    await owner.close("interrupted");
-    const status = error instanceof AdmissionError ? error.status : request.signal.aborted ? 499 : 502;
-    await observeNativeResponse(new Response(null, { status }), context,
-      { ...observation, outcome: request.signal.aborted ? "canceled" : "transport_error" });
-    if (error instanceof AdmissionError && !request.signal.aborted) return error.response();
-    throw error;
-  }
+  return runNativeLifecycle(request, env, ctx, authority, fetcher, registrations, settings, hook);
 }
 
 export function withForwardedCorrelation(headers, env) {

@@ -41,11 +41,16 @@ transport reads can deliver a larger chunk containing that prefix.
 Exhausting the prefix bound or reaching EOF before useful output returns a real
 HTTP 502 `upstream_stream_invalid` error and does not authorize replay.
 
-The budget uses each host's monotonic clock. Forwarding sends only the rounded-down
-remaining milliseconds in `X-MultiLLM-Internal-Deadline-Ms`. The forwarding
-boundary strips any caller-supplied internal budget. The receiving Flask boundary
+The budget uses each host's monotonic clock. Forwarding keeps the caller's
+`X-MultiLLM-Deadline-Ms` and adds the rounded-down remaining milliseconds in
+`X-MultiLLM-Internal-Deadline-Ms`. The forwarding boundary strips any
+caller-supplied internal budget. The receiving Flask boundary
 accepts that header only after its fixed transport verifier authenticates the
 internal hop; public API authentication alone is not proof of an internal hop.
+The current Flask registrar has no internal-hop verifier and therefore ignores
+internal deadline headers. A forwarded request's budget therefore starts again
+from the caller's header on Flask's clock, so time already spent in the Worker is
+not deducted. Deducting it requires a verified transport boundary.
 No monotonic timestamp is transmitted or compared across machines.
 
 The deadline limits waiting and requests local cancellation. It cannot guarantee

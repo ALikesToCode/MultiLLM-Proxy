@@ -16,6 +16,7 @@ from services.credential_pool import CredentialPool
 from services.credential_context import observation_context, selection_context
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from services.request_cancellation import bind_cancellation
+from services.managed_turn import capture_submission_guard
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -275,6 +276,8 @@ def with_thought_signatures(body):
 class IntelligenceTransport:
     def __init__(self, config, auth, proxy):
         self.config, self.auth, self.proxy = config, auth, proxy
+        self.affinity_scope = None
+        self.generation_deadline, self.before_submission = capture_submission_guard()
 
     def credential(self, candidate):
         provider, model = candidate["model"].split(":", 1)
@@ -298,7 +301,9 @@ class IntelligenceTransport:
         scope = selection_context(provider, model, config=self.config)
         if CredentialPool.pooled(provider):
             decision = {"require_eligible": True, **scope} if scope else {}
-            return CredentialPool.available(provider, self.auth.get_api_keys(provider), **decision)
+            tokens = CredentialPool.available(provider, self.auth.get_api_keys(provider), **decision)
+            preferred = self.affinity_scope.preferred_key(candidate["model"], tokens) if self.affinity_scope else None
+            return [preferred, *(key for key in tokens if key != preferred)] if preferred else tokens
         token = self.credential(candidate)
         return [token] if token else []
 
@@ -377,9 +382,19 @@ class IntelligenceTransport:
         dispatch_data = protect_body(upstream.data if data is None else data, headers, provider=provider)
 
         scope = selection_context(provider, model, config=self.config)
+        from services.generation_deadline import bounded_timeout, current_deadline
+        remaining(deadline, cancelled)
+        timeout = bounded_timeout((min(5, remaining(deadline, cancelled)), remaining(deadline, cancelled)))
+        generation_deadline = current_deadline() or self.generation_deadline
+        if generation_deadline is not None:
+            generation_deadline.check()
+            timeout = tuple(min(value, generation_deadline.remaining() / len(timeout)) for value in timeout)
 
         def send():
             seconds = remaining(deadline, cancelled)
+            if generation_deadline is not None:
+                generation_deadline.check()
+            self.before_submission()
             return self.proxy.make_request(
                 method="POST",
                 url=url,
@@ -388,7 +403,8 @@ class IntelligenceTransport:
                 data=dispatch_data,
                 api_provider=provider,
                 use_cache=False,
-                timeout_override=(min(5, seconds), seconds),
+                timeout_override=(tuple(min(value, seconds) for value in timeout) if generation_deadline is not None
+                                  else (min(5, seconds), seconds)),
                 force_raw_passthrough=True,
                 **({"cooldown_context": scope} if scope else {}),
             )

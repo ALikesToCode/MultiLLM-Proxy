@@ -395,8 +395,16 @@ def configure_store(store):
 
 
 def get_store():
+    from services import control_state_d1
     if _store is not None:
+        if control_state_d1.using_d1() and not isinstance(_store, D1ReservationStore):
+            raise ReservationError()
         return _store
+    if control_state_d1.using_d1():
+        def call(document):
+            values = {key: value for key, value in document.items() if key not in {"version", "operation"}}
+            return control_state_d1.call("reservations", document["operation"], **values)
+        return D1ReservationStore(call)
     if os.environ.get("INTELLIGENCE_STORAGE_BACKEND", "").strip() != "":
         raise ReservationError()
     return SqlReservationStore()
