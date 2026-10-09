@@ -1,4 +1,5 @@
 /** Static registration boundary for native dispatch; later integrations supply named hooks. */
+import { organisationsEnabled, resolveAccountTenant, tenantNamespace, TenantError } from "./tenants-d1.mjs";
 import { generationCacheSettings, prepareNativeCache, cacheServedEvent } from "./exact-generation-cache.mjs";
 import { createGatewayLifecycle } from "./gateway-lifecycle.mjs";
 import { observeNativeResponse, appendNativeMetrics, PARSER_LIMIT } from "./request-telemetry.mjs";
@@ -72,6 +73,7 @@ async function nativeContext(request, env, authority, metrics) {
     .map(([name, state]) => [name, state.revision])) : {};
   return Object.freeze({ provider: authority.provider, principal,
     model: typeof model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,223}$/.test(model) ? model : null,
+    ...(organisationsEnabled(env) ? { tenantContext: authority.tenantContext, tenantNamespace: tenantNamespace(authority.tenantContext) } : {}),
     modelGroup: admissionModelGroup(authority.provider, model),
     requestId: crypto.randomUUID(), endpoint: authority.route, startedAt, retentionPolicy, cacheRevisions });
 }
@@ -322,6 +324,16 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
 }
 
 export async function nativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators = []) {
+  if (organisationsEnabled(env) && authority.authenticated === true) {
+    try {
+      const tenantContext = await resolveAccountTenant(env.INTELLIGENCE_DB, authority.principal?.id ?? authority.keyId, env);
+      authority = { ...authority, tenantContext, tenantNamespace: tenantNamespace(tenantContext) };
+    } catch (error) {
+      authority.deadlineHook?.deadline?.stop();
+      if (error instanceof TenantError) return error.response();
+      throw error;
+    }
+  }
   const path = authority.route ?? new URL(request.url).pathname;
   if (!generationPath(request, path)) return fetcher(request, env, authority);
   // The route has already authenticated the bootstrap key. Only public route metadata is trusted.
