@@ -120,7 +120,7 @@ class MetricsService:
             else "explicit"
         )
 
-        return {
+        metadata = {
             "request_id": getattr(g, "request_id", None),
             "user_id": user.get("username") or user.get("id"),
             "api_key_prefix": user.get("api_key_prefix"),
@@ -136,6 +136,11 @@ class MetricsService:
             ),
             "route_decision": route_decision,
         }
+        canary = getattr(g, "multillm_canary", None)
+        if (isinstance(canary, dict) and canary.get("cohort") in {"baseline", "candidate"}
+                and canary.get("mode") in {"shadow", "live"} and isinstance(canary.get("route_id"), str)):
+            metadata["canary"] = {key: canary[key] for key in ("cohort", "mode", "route_id")}
+        return metadata
 
     def track_request(
         self,
@@ -179,6 +184,7 @@ class MetricsService:
                 provider=provider,
             )
         self.requests.append({
+            **({'canary': context_metadata['canary']} if 'canary' in context_metadata else {}),
             'timestamp': now,
             'provider': provider,
             'status_code': status_code,

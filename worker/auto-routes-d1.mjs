@@ -5,6 +5,7 @@
  */
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { handleCanaryRouteOperation, canaryEnabled } from "./canary-assignment.mjs";
 
 const ROUTE_ID = /^auto:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
@@ -59,6 +60,9 @@ export async function handleAutoRoutesRequest(request, env) {
   if (String(body.operation).startsWith("snapshot_") && !snapshotEnabled(env)) return reply({ error: "not_found" }, 404);
   const db = env.INTELLIGENCE_DB;
   try {
+    if (["canary_list", "canary_put"].includes(body.operation) && canaryEnabled(env)) {
+      return await handleCanaryRouteOperation(db, body, env);
+    }
     if (String(body.operation).startsWith("snapshot_")) return await snapshotOperation(db, body);
     if (body.operation === "list" && fields(body, ["version", "operation"])) {
       const { results } = await db.prepare(`SELECT route_id, candidates, updated_at FROM auto_routes

@@ -52,6 +52,23 @@ class UpstreamFailure(Exception):
 
 
 @dataclass(frozen=True)
+class ProtocolExtras:
+    """Reviewed scalar fields bound to their source protocol and body kind."""
+
+    source_protocol: str
+    fields: tuple[tuple[str, Any], ...]
+    kind: str = "request"
+
+
+@dataclass(frozen=True)
+class ProtocolIR:
+    """Chat pivot body and separate extras; serialize only the emitted body."""
+
+    body: dict[str, Any]
+    extras: ProtocolExtras | None = None
+
+
+@dataclass(frozen=True)
 class StreamComment:
     """An SSE comment such as a provider keep-alive, forwarded as a comment."""
 

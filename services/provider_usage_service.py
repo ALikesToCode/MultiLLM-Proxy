@@ -241,6 +241,7 @@ class ProviderUsageService:
                 if 200 <= last_status < 300:
                     payload = self._response_json(response)
                     normalized = NORMALIZERS[probe.provider](payload)
+                    self._observe_reset_usage(probe, credential, normalized)
                     return {
                         "status": "available",
                         **normalized,
@@ -279,6 +280,17 @@ class ProviderUsageService:
             else "upstream_error"
         )
         return self._error_result(probe, error_code, last_status)
+
+    def _observe_reset_usage(
+        self, probe: ProviderUsageProbe, credential: str, normalized: Mapping[str, Any],
+    ) -> None:
+        # Subscription-account data is not an account-pool scheduling source.
+        if probe.provider == "nanogpt":
+            return
+        from services.pool_reset_schedule import record_pool_usage, settings
+        if settings().enabled:
+            observed = datetime.fromisoformat(self._utcnow().replace("Z", "+00:00")).timestamp()
+            record_pool_usage(probe.provider, credential, normalized.get("windows"), observed_at=observed)
 
     def _response_json(self, response: Any) -> Mapping[str, Any]:
         content = bytes(response.content or b"")

@@ -32,6 +32,10 @@ const API_ROUTE_PREFIXES = new Set([
   "xai",
 ]);
 
+export function isRealtimeRequestPath(pathname) {
+  return pathname === "/v1/realtime" || pathname.startsWith("/v1/realtime/");
+}
+
 export function isApiRequestPath(pathname) {
   const stripped = pathname.replace(/^\/+|\/+$/g, "");
   if (!stripped) {

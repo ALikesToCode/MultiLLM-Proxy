@@ -1,3 +1,4 @@
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 /**
  * Durable usage ledger in D1, reachable only through the Container's private outbound
  * handler. The Container batches billable requests and flushes them here; every flush
@@ -6,6 +7,8 @@
  */
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { submitNativeEvent } from "./observability-export.mjs";
+import { recordFlushedUsage } from "./usage-receipts.mjs";
 import { BUCKET_FIELDS, bucketInsertStatement, recordUsageWithBuckets, usageBucketsEnabled, validBaseUsageRow as validRow } from "./usage-buckets-d1.mjs";
 
 // Upper bounds in milliseconds of the usage_daily latency buckets; the last bucket is open.
@@ -99,6 +102,7 @@ async function record(db, env, body, insertEvents = INSERT_EVENTS) {
   ]);
   const duplicate = applied.meta.changes !== 1;
   if (!duplicate) mirror(env, body.rows);
+  await recordFlushedUsage(env, body.batch, body.rows);
   return { version: 1, recorded: duplicate ? 0 : rows.length, duplicate };
 }
 
@@ -192,16 +196,17 @@ export async function handleUsageLedgerRequest(request, env) {
 }
 
 /** Serialize native telemetry into the existing strict ledger; richer fields need a migration. */
-export async function recordNativeUsage(env, event) {
+export async function recordNativeUsage(env, event, ctx) {
   const model = event.model ? `${event.provider}:${event.model}` : null;
   const kind = event.endpoint.endsWith("/responses") ? "responses" : event.endpoint.endsWith("/embeddings") ? "embeddings"
     : event.endpoint.endsWith("/images/generations") ? "images" : "chat";
-  const row = { at: new Date().toISOString(), principal: event.principal, key_prefix: null,
+  const row = { at: new Date().toISOString(), principal: organisationsEnabled(env) ? tenantStorageKey(event.principal, event.tenantContext) : event.principal, key_prefix: null,
     kind, endpoint: event.endpoint, requested_model: model, selected_model: model,
     status: event.status, latency_ms: event.duration_ms, input_tokens: event.input_tokens,
     output_tokens: event.output_tokens, cost_usd: event.cost_usd, cost_basis: event.cost_basis,
     request_id: event.requestId };
   if (!validRow(row)) throw new Error("Invalid native usage metadata");
+  submitNativeEvent(env, event, ctx);
   if (!env.INTELLIGENCE_DB) { console.error(JSON.stringify({ event: "native_usage_storage_unavailable" })); return; }
   try {
     return await record(env.INTELLIGENCE_DB, env, { version: 1, operation: "record",

@@ -5,6 +5,12 @@
  * Container's private outbound handler at /v1/state/<domain>. Fixed statements, no
  * client SQL.
  */
+import { handleLearnedCooldown, learnedCooldownEnabled } from "./learned-cooldown-d1.mjs";
+import { handleAlertState, alertSettings } from "./alert-delivery.mjs";
+import { handleGenerationCache, MAX_RPC_BYTES } from "./generation-cache-d1.mjs";
+import { generationCacheSettings } from "./exact-generation-cache.mjs";
+import { semanticCacheSettings } from "./semantic-generation-cache.mjs";
+import { handleSemanticCache } from "./semantic-cache-d1.mjs";
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
 import { handlePromptTemplates, promptTemplatesEnabled } from "./prompt-templates-d1.mjs";
@@ -136,6 +142,15 @@ async function login(db, body) {
 }
 
 async function models(db, body, env) {
+  if (body.operation === "tool_grants") {
+    if (!fields(body, ["version", "operation", "principal"]) || !text(body.principal, 128) || body.principal === "*") return null;
+    const { deferredEnabled, readGrantSnapshot } = await import("./knowledge/deferred-tools.mjs");
+    if (!deferredEnabled(env.DEFERRED_TOOLS_ENABLED)) return reply({ error: "tool_grants_unavailable" }, 503);
+    try {
+      const { grants } = await readGrantSnapshot(env, body.principal);
+      return reply({ grants });
+    } catch { return reply({ error: "tool_grants_unavailable" }, 503); }
+  }
   if (body.operation === "revisions") {
     if (!revisionSyncSettings(env).enabled) return reply({ error: "not_found" }, 404);
     return handleRevisionMetadata(db, body);
@@ -258,6 +273,10 @@ async function catalog(db, body, env) {
 }
 
 const DOMAINS = Object.freeze({
+  "learned-cooldown": { handle: handleLearnedCooldown, maxBytes: 4096, operations: ["get", "put"] },
+  alerts: { handle: (db, body, env) => handleAlertState(env, body), maxBytes: 8192, operations: ["get", "configure", "observe"] },
+  "generation-cache": { handle: handleGenerationCache, maxBytes: MAX_RPC_BYTES, operations: ["get", "put", "prune"] },
+  "semantic-cache": { handle: handleSemanticCache, maxBytes: 2 * 1024 * 1024, operations: ["ready", "scan", "body", "put"] },
   "prompt-templates": { handle: handlePromptTemplates, maxBytes: 524288, operations: ["create", "get", "list"] },
   limits: { handle: limits, maxBytes: 16384, operations: ["sync"] },
   login: { handle: login, maxBytes: 4096, operations: ["check", "failure", "success"] },
@@ -273,13 +292,17 @@ export async function handleControlStateRequest(request, env) {
   const domain = Object.hasOwn(DOMAINS, name) ? DOMAINS[name] : null;
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || !domain
     || url.search || url.hash || url.username || url.password) return reply({ error: "not_found" }, 404);
+  if (name === "learned-cooldown" && !learnedCooldownEnabled(env)) return reply({ error: "not_found" }, 404);
+  if (name === "alerts" && !alertSettings(env).enabled) return reply({ error: "not_found" }, 404);
+  if (name === "generation-cache" && !generationCacheSettings(env).enabled) return reply({ error: "not_found" }, 404);
+  if (name === "semantic-cache" && !semanticCacheSettings(env).enabled) return reply({ error: "not_found" }, 404);
   if (name === "prompt-templates" && !promptTemplatesEnabled(env)) return reply({ error: "not_found" }, 404);
   if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
     return reply({ error: "invalid_request" }, 400);
   }
   const length = request.headers.get("content-length");
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > domain.maxBytes)) return reply({ error: "invalid_request" }, 400);
-  if (!env.INTELLIGENCE_DB) return reply({ error: "storage_unavailable" }, 503);
+  if (!env.INTELLIGENCE_DB) return name === "alerts" ? handleAlertState(env, { version: 1, operation: "get" }) : reply({ error: "storage_unavailable" }, 503);
   let body;
   try {
     body = JSON.parse(await boundedBody(request, domain.maxBytes));
@@ -288,7 +311,7 @@ export async function handleControlStateRequest(request, env) {
   try {
     return await domain.handle(env.INTELLIGENCE_DB, body, env) ?? reply({ error: "invalid_request" }, 400);
   } catch (error) {
-    logFailure("control_state_storage_failed", revisionSyncSettings(env).enabled ? new Error("Revision storage unavailable") : error, { domain: name,
+    logFailure("control_state_storage_failed", name === "generation-cache" || revisionSyncSettings(env).enabled ? new Error("Revision storage unavailable") : error, { domain: name,
       operation: domain.operations.includes(body.operation) ? body.operation : "unknown" });
     return reply({ error: "storage_unavailable" }, 503);
   }

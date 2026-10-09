@@ -20,9 +20,11 @@ from functools import wraps
 from flask import Response, g, request
 
 from route_helpers import request_api_key
-from services import cache_policy
+from services import cache_policy, semantic_generation_cache as semantic
 from services.retention_policy import request_policy
-from services.cache_service import ResponseCache
+from services.cache_service import ResponseCache, shared_response_cache
+from services import shared_generation_cache as shared_cache
+from services.managed_turn import cache_response_allowed
 
 CACHE_HEADER = "X-MultiLLM-Cache"
 _OPT_IN = frozenset({"on", "true", "1", "yes"})
@@ -120,6 +122,10 @@ def _principal() -> str | None:
 def cache_key(principal: str, path: str, payload: dict, *, policy: cache_policy.CachePolicy | None = None) -> str:
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     identity = (principal, path, canonical)
+    from services.tenant_hierarchy import tenant_namespace
+    namespace = tenant_namespace()
+    if namespace:
+        identity += (namespace,)
     if policy is not None:
         identity += (cache_policy.ISOLATED_REVISION, cache_policy.policy_digest(policy))
     return hashlib.sha256("\x00".join(identity).encode("utf-8")).hexdigest()
@@ -140,20 +146,25 @@ def _hit(entry) -> Response:
     return response
 
 
-def _store_if_complete(response: Response, key: str, settings: dict) -> None:
-    if (response.status_code != 200 or response.direct_passthrough
+def _store_if_complete(response: Response, key: str, settings: dict, *, shared=None, identity=None) -> None:
+    if (not cache_response_allowed(response) or response.status_code != 200 or response.direct_passthrough
             or response.mimetype != "application/json"):
         return
     body = response.get_data()
-    if len(body) > settings["max_bytes"] // 8 or not _complete_answer(body):
+    if len(body) > (shared_cache.MAX_BODY_BYTES if shared else settings["max_bytes"] // 8) or not _complete_answer(body):
         return
-    _store.configure(max_entries=settings["max_entries"], max_bytes=settings["max_bytes"])
-    _store.put(key, body, {
+    metadata = {
         "content_type": response.headers.get("Content-Type", "application/json"),
         "headers": {name: response.headers[name] for name in _STORED_HEADERS if name in response.headers},
         "provider": getattr(g, "multillm_provider", None),
         "model": getattr(g, "multillm_model", None),
-    }, ttl_seconds=settings["ttl"])
+    }
+    if shared is not None:
+        metadata["content_type"] = "application/json"
+        shared.put(key, body, metadata, **identity)
+    else:
+        _store.configure(max_entries=settings["max_entries"], max_bytes=settings["max_bytes"])
+        _store.put(key, body, metadata, ttl_seconds=settings["ttl"])
 
 
 def _mark(response, value: str):
@@ -162,43 +173,109 @@ def _mark(response, value: str):
     return response
 
 
+def _shared_headers(response, value):
+    response = _mark(response, value)
+    if isinstance(response, Response):
+        response.headers["X-MultiLLM-Cache-Backend"] = "d1-r2"
+        if value == "hit":
+            response.headers["X-MultiLLM-Usage-Basis"] = "cache-served"
+            response.headers["X-MultiLLM-Provider-Calls"] = "0"
+    return response
+
+
 def cached_chat_completion(view):
     """Wrap an authenticated Chat Completions view; apply it below the auth decorator."""
 
     @wraps(view)
-    def wrapper(*args, **kwargs):
+    def exact_wrapper(*args, **kwargs):
         retention = request_policy()
         mode, max_age = request_mode()
         settings = _settings()
         if mode is None or request.method != "POST":
-            return view(*args, **kwargs)
+            return semantic_wrapper(*args, **kwargs)
         if not retention.allows_content:
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         payload = request.get_json(silent=True)
+        if semantic.reuse_bypass(payload):
+            return _mark(view(*args, **kwargs), "bypass")
         principal = _principal()
         if not settings["enabled"] or principal is None or not request_is_cacheable(payload):
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         revision = cache_policy.policy_revision()
         policy = None
-        if revision == cache_policy.ISOLATED_REVISION:
+        use_shared = shared_cache.shared_enabled()
+        if use_shared and revision in {cache_policy.LEGACY_REVISION, cache_policy.ISOLATED_REVISION}:
+            policy = shared_cache.shared_policy(payload)
+            if policy is None:
+                return _mark(semantic_wrapper(*args, **kwargs), "bypass")
+        elif revision == cache_policy.ISOLATED_REVISION:
             policy = cache_policy.resolve_policy(payload)
             if policy is None:
-                return _mark(view(*args, **kwargs), "bypass")
+                return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         elif revision != cache_policy.LEGACY_REVISION:
-            return _mark(view(*args, **kwargs), "bypass")
+            return _mark(semantic_wrapper(*args, **kwargs), "bypass")
         key = cache_key(principal, request.path, payload, policy=policy)
         policy_digest = cache_policy.policy_digest(policy) if policy is not None else None
+        shared = shared_response_cache() if use_shared else None
+        identity = shared_cache.identity(principal, payload, policy) if use_shared else None
         if mode == "on":
-            entry = _store.get(key, max_age=max_age)
+            entry = shared.get(key, max_age=max_age, **identity) if shared else _store.get(key, max_age=max_age)
+            if use_shared and entry is not None:
+                current = shared_cache.shared_policy(payload)
+                if current is None or cache_policy.policy_digest(current) != policy_digest:
+                    entry = None
             if entry is not None:
-                return _hit(entry)
-        response = view(*args, **kwargs)
-        if (isinstance(response, Response) and (policy_digest is None
-                or cache_policy.policy_is_current(payload, policy_digest))):
-            _store_if_complete(response, key, settings)
-        return _mark(response, "miss")
+                response = _hit(entry)
+                return _shared_headers(response, "hit") if use_shared else response
+        response = semantic_wrapper(*args, **kwargs)
+        if isinstance(response, Response) and response.headers.get("X-MultiLLM-Cache-Backend") == "semantic-d1-r2":
+            return response
+        current = shared_cache.shared_policy(payload) if use_shared else None
+        unchanged = (current is not None and cache_policy.policy_digest(current) == policy_digest) if use_shared else (
+            policy_digest is None or cache_policy.policy_is_current(payload, policy_digest))
+        if isinstance(response, Response) and unchanged:
+            _store_if_complete(response, key, settings, shared=shared, identity=identity)
+        return _shared_headers(response, "miss") if use_shared else _mark(response, "miss")
 
-    return wrapper
+    @wraps(view)
+    def semantic_wrapper(*args, **kwargs):
+        if not semantic.settings().enabled:
+            return view(*args, **kwargs)
+        payload = request.get_json(silent=True)
+        try:
+            prepared = semantic.prepare_request(payload, _principal())
+        except semantic.SemanticCacheSchemaMissing:
+            return Response(json.dumps({"error": "semantic_cache_schema_missing",
+                "message": "The semantic generation cache schema is missing. Apply its migration before enabling it."}),
+                status=503, content_type="application/json")
+        except Exception:
+            return view(*args, **kwargs)
+        if prepared is None:
+            return view(*args, **kwargs)
+        mode, max_age = request_mode()
+        if max_age is None:
+            match = _MAX_AGE.search(request.headers.get("Cache-Control", "").lower())
+            max_age = int(match.group(1)) if match else None
+        if mode != "refresh" and "no-cache" not in request.headers.get("Cache-Control", "").lower():
+            try:
+                entry = prepared.lookup()
+            except semantic.SemanticCacheSchemaMissing:
+                return Response(json.dumps({"error": "semantic_cache_schema_missing",
+                    "message": "The semantic generation cache schema is missing. Apply its migration before enabling it."}),
+                    status=503, content_type="application/json")
+            if entry is not None and (max_age is None or entry[2] <= max_age):
+                return semantic.semantic_hit(entry)
+        response = view(*args, **kwargs)
+        if isinstance(response, Response):
+            prepared.save(response, {
+                "content_type": "application/json",
+                "headers": {name: response.headers[name] for name in _STORED_HEADERS if name in response.headers},
+                "provider": getattr(g, "multillm_provider", None),
+                "model": getattr(g, "multillm_model", None),
+            })
+        return response
+
+    return exact_wrapper
 
 
 def clear() -> None:

@@ -71,6 +71,73 @@ def _window(
     }
 
 
+def _reset_epoch(value: Any) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _available_quota(window: Mapping[str, Any]) -> float | None:
+    values = {name: _number(window.get(name)) for name in ("limit", "used", "remaining", "percent_used")}
+    if any(window.get(name) is not None and value is None for name, value in values.items()):
+        return None
+    try:
+        if any(value is not None and (value < 0 or not math.isfinite(value)) for value in values.values()):
+            return None
+    except OverflowError:
+        return None
+    limit, used, remaining, percent = (values[name] for name in values)
+    if percent is not None and percent > 100:
+        return None
+    if limit is not None and used is not None:
+        calculated = limit - used
+        if calculated < 0 or (remaining is not None and not math.isclose(calculated, remaining, abs_tol=1e-6)):
+            return None
+        remaining = calculated
+    if remaining is None or (limit is not None and remaining > limit):
+        return None
+    if percent is not None and limit is not None and limit > 0:
+        expected = 100 * (limit - remaining) / limit
+        if not math.isclose(expected, percent, abs_tol=0.01):
+            return None
+    return float(remaining)
+
+
+def reset_usage_windows(
+    windows: Any, observed_at: float,
+) -> tuple[tuple[float, float], ...] | None:
+    """Validate quota/reset pairs without changing the public usage snapshot."""
+    if not isinstance(windows, (list, tuple)) or not windows or len(windows) > 32:
+        return None
+    normalized = []
+    for window in windows:
+        if not isinstance(window, Mapping):
+            return None
+        remaining = _available_quota(window)
+        absolute = _reset_epoch(window.get("resets_at"))
+        relative = _number(window.get("resets_in_ms"))
+        if window.get("resets_at") is not None and absolute is None:
+            return None
+        if window.get("resets_in_ms") is not None and (relative is None or relative <= 0):
+            return None
+        try:
+            relative_at = observed_at + float(relative) / 1000 if relative is not None else None
+        except OverflowError:
+            return None
+        if absolute is not None and relative_at is not None and abs(absolute - relative_at) > 5:
+            return None
+        reset = absolute if absolute is not None else relative_at
+        # A bounded horizon includes annual quotas but rejects implausible clocks.
+        if remaining is None or reset is None or not 0 < reset - observed_at <= 31_622_400:
+            return None
+        normalized.append((remaining, reset))
+    return tuple(normalized)
+
+
 def _normalize_navyai(payload: Mapping[str, Any]) -> dict[str, Any]:
     limits = _mapping(payload.get("limits"))
     usage = _mapping(payload.get("usage"))

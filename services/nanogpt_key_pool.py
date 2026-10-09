@@ -10,7 +10,9 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import ClassVar
 
 from services.auth_primitives import is_placeholder_credential
-from services.model_cooldown import model_cooldown, settings
+from services.model_cooldown import ModelCooldownExhausted, model_cooldown, settings
+from services import pool_reset_schedule as reset_schedule
+from services import learned_cooldown as learned
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
 _DIRECT_KEY_NAMES = ("NANOGPT_API_KEY", "NANO_GPT_KEY")
@@ -118,6 +120,8 @@ class NanoGPTKeyPool:
         """Select an uncooled credential without claiming a successful probe."""
         configured = list(dict.fromkeys(key.strip() for key in keys if key.strip()))
         now = time.monotonic() if now is None else now
+        if reset_schedule.settings().enabled:
+            return cls._scheduled_key(configured, model=model, quota_bucket=quota_bucket, now=now)
         config = settings()
         scoped = config.enabled and bool(model or quota_bucket)
         with cls._lock:
@@ -137,6 +141,48 @@ class NanoGPTKeyPool:
             return next(
                 (key for key in ordered if cls._rejected_until.get(key, 0) <= now), None
             )
+
+    @classmethod
+    def _scheduled_key(
+        cls, configured: list[str], *, model: str | None = None,
+        quota_bucket: str | None = None, now: float,
+    ) -> str | None:
+        with cls._lock:
+            cls._prune(configured, now)
+            ordered = [cls._active_key] if cls._active_key in configured else []
+            ordered.extend(key for key in configured if key not in ordered)
+            return next(iter(cls._scheduled_candidates(
+                configured, ordered, model=model, quota_bucket=quota_bucket, now=now,
+            )), None)
+
+    @classmethod
+    def _scheduled_candidates(
+        cls, configured: list[str], ordered: list[str], *,
+        model: str | None = None, quota_bucket: str | None = None, now: float,
+    ) -> list[str]:
+        config = settings()
+        eligible = [key for key in ordered if cls._rejected_until.get(key, 0) <= now]
+        fallback = min((max(1, cls._rejected_until.get(key, now + 60) - now) for key in configured), default=60)
+        if config.enabled and (model or quota_bucket):
+            eligible = model_cooldown.available(
+                cls._model_cooldown_provider, ordered, model=model,
+                quota_bucket=quota_bucket, max_seconds=config.max_seconds,
+                now=now, legacy_rest_until=cls._rejected_until,
+            )
+            if not eligible:
+                try:
+                    model_cooldown.select(
+                        cls._model_cooldown_provider, ordered, model=model,
+                        quota_bucket=quota_bucket, max_seconds=config.max_seconds,
+                        now=now, legacy_rest_until=cls._rejected_until,
+                    )
+                except ModelCooldownExhausted as error:
+                    fallback = error.retry_after
+        return reset_schedule.pool_reset_schedule.admit(
+            cls._model_cooldown_provider, configured, eligible, model=model,
+            quota_bucket=quota_bucket, require_eligible=True, fallback=fallback,
+            max_seconds=config.max_seconds if config.enabled else 3600,
+        )
 
     @classmethod
     def select_key(
@@ -161,6 +207,11 @@ class NanoGPTKeyPool:
         single_configured_key = len(configured) == 1
         with cls._lock:
             cls._prune(configured, checked_at)
+            if reset_schedule.settings().enabled:
+                configured = cls._scheduled_candidates(
+                    configured, configured, model=model,
+                    quota_bucket=quota_bucket, now=checked_at,
+                )
             if scoped:
                 eligible = model_cooldown.available(
                     cls._model_cooldown_provider,
@@ -308,10 +359,16 @@ class NanoGPTKeyPool:
         outcome: UpstreamOutcome | None = None,
         credential_wide_auth: bool | None = None,
         retry_after_seconds: float | None = None,
+        usage_windows: list[Mapping] | None = None,
     ) -> None:
         """Record one upstream request and invalidate definite key failures."""
         if not key:
             return
+        reset_schedule.record_result_observation(
+            cls._model_cooldown_provider, key, status, model=model,
+            quota_bucket=quota_bucket, outcome=outcome,
+            retry_after_seconds=retry_after_seconds, usage_windows=usage_windows,
+        )
         if settings().enabled and (model or quota_bucket):
             cls._record_model_result(
                 key,
@@ -329,12 +386,18 @@ class NanoGPTKeyPool:
                 if cls._active_key == key:
                     cls._active_requests += 1
             return
+        delay = learned.adjust_cooldown(
+            cls._model_cooldown_provider, key, outcome or classify_upstream_outcome(status),
+            model=model, quota_bucket=quota_bucket, now=now,
+            current_seconds=rejected_cooldown_seconds,
+            retry_after_seconds=retry_after_seconds,
+        )
         if is_nanogpt_credential_rejection(status):
             cls.invalidate(
                 key,
                 status,
                 check_ttl_seconds=check_ttl_seconds,
-                rejected_cooldown_seconds=rejected_cooldown_seconds,
+                rejected_cooldown_seconds=delay,
                 now=now,
             )
             return

@@ -22,6 +22,12 @@ from config import load_numbered_env_values
 from error_handlers import APIError
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_api_key, image_relay_specs
+from providers.local_inference import (
+    LOCAL_INFERENCE_PROVIDERS,
+    local_credential_env_names,
+    local_inference_base_urls,
+    local_provider_allows_keyless,
+)
 from services.credential_pool import CredentialPool
 from services.auth_primitives import (
     DEFAULT_ADMIN_SCOPES,
@@ -41,7 +47,7 @@ from services.auth_primitives import (
     serialize_scopes,
     usable_credential,
 )
-from services import key_controls
+from services import key_controls, stream_cost_breaker
 from services.nanogpt_key_pool import configured_nanogpt_keys
 from services import user_store
 from services.sqlite_store import connect, storage_path
@@ -116,6 +122,7 @@ class AuthService:
         ).fetchone()
         if not table_exists:
             cls._create_users_table(connection)
+            stream_cost_breaker.ensure_sql_cap(connection)
             cls._ensure_users_indexes(connection)
             return
 
@@ -156,6 +163,7 @@ class AuthService:
                     f"ALTER TABLE users ADD COLUMN {column_name} {column_definition}"
                 )
 
+        stream_cost_breaker.ensure_sql_cap(connection)
         cls._backfill_user_metadata(connection)
         cls._ensure_users_indexes(connection)
 
@@ -284,6 +292,7 @@ class AuthService:
             "created_by": row["created_by"],
             "rotated_at": deserialize_datetime(row["rotated_at"]),
             "revoked_at": deserialize_datetime(row["revoked_at"]),
+            **stream_cost_breaker.storage_control(row),
             **key_controls.from_storage(
                 {name: key_controls.row_value(row, name) for name in key_controls.CONTROL_FIELDS}
             ),
@@ -292,12 +301,12 @@ class AuthService:
     @classmethod
     def _reload_user_cache(cls) -> None:
         if user_store.using_d1():
-            rows = user_store.list_users()
+            rows = stream_cost_breaker.list_users()
         else:
             with cls._storage_lock:
                 with closing(cls._connect()) as connection:
                     rows = connection.execute(
-                        """
+                        stream_cost_breaker.sql_select("""
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
@@ -305,7 +314,7 @@ class AuthService:
                             monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                         FROM users
                         ORDER BY username
-                        """
+                        """)
                     ).fetchall()
         cls._users = {
             row["username"]: cls._row_to_user(row)
@@ -316,13 +325,13 @@ class AuthService:
     @classmethod
     def _load_user_by_username(cls, username: str) -> Optional[Dict[str, Any]]:
         if user_store.using_d1():
-            row = user_store.get_user(username)
+            row = stream_cost_breaker.get_user(username)
         else:
             with cls._storage_lock:
                 with closing(cls._connect()) as connection:
                     cls._ensure_users_schema(connection)
                     row = connection.execute(
-                        """
+                        stream_cost_breaker.sql_select("""
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
@@ -330,7 +339,7 @@ class AuthService:
                             monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                         FROM users
                         WHERE username = ?
-                        """,
+                        """),
                         (username,),
                     ).fetchone()
         if not row:
@@ -346,13 +355,13 @@ class AuthService:
     @classmethod
     def _load_users_by_api_key_prefix(cls, api_key_prefix: str) -> List[tuple[str, Dict[str, Any]]]:
         if user_store.using_d1():
-            rows = user_store.users_by_prefix(api_key_prefix)
+            rows = stream_cost_breaker.users_by_prefix(api_key_prefix)
         else:
             with cls._storage_lock:
                 with closing(cls._connect()) as connection:
                     cls._ensure_users_schema(connection)
                     rows = connection.execute(
-                        """
+                        stream_cost_breaker.sql_select("""
                         SELECT
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
@@ -361,7 +370,7 @@ class AuthService:
                         FROM users
                         WHERE api_key_prefix = ? AND revoked_at IS NULL
                         ORDER BY username
-                        """,
+                        """),
                         (api_key_prefix,),
                     ).fetchall()
 
@@ -401,7 +410,7 @@ class AuthService:
         cls._forget_verified_keys()
         stored_controls = {**key_controls.empty(), **(controls or {})}
         if user_store.using_d1():
-            user_store.upsert_user({
+            stream_cost_breaker.upsert_user({
                 "username": username,
                 "api_key_hash": api_key_hash,
                 "api_key_prefix": api_key_prefix,
@@ -415,6 +424,8 @@ class AuthService:
                 "rotated_at": serialize_datetime(rotated_at),
                 "revoked_at": serialize_datetime(revoked_at),
                 **{name: stored_controls[name] for name in key_controls.CONTROL_FIELDS},
+                **({stream_cost_breaker.CAP_FIELD: stored_controls[stream_cost_breaker.CAP_FIELD]}
+                   if stream_cost_breaker.CAP_FIELD in stored_controls else {}),
             })
             cls._reload_user_cache()
             return
@@ -466,6 +477,7 @@ class AuthService:
                         *(stored_controls[name] for name in key_controls.CONTROL_FIELDS),
                     ),
                 )
+                stream_cost_breaker.persist_sql_cap(connection, username, stored_controls)
                 connection.commit()
         cls._reload_user_cache()
 
@@ -672,6 +684,11 @@ class AuthService:
     @classmethod
     def get_api_key(cls, provider: str, *, model: str | None = None, quota_bucket: str | None = None) -> Optional[str]:
         """Get API key for a provider."""
+        if provider in LOCAL_INFERENCE_PROVIDERS:
+            if provider not in local_inference_base_urls():
+                return None
+            return next((key for name in local_credential_env_names(provider)
+                         if (key := usable_credential(os.environ.get(name), name))), None)
         if CredentialPool.pooled(provider):
             pooled = CredentialPool.select(provider, model=model, quota_bucket=quota_bucket)
             if pooled:
@@ -688,7 +705,14 @@ class AuthService:
     @classmethod
     def provider_credential_env_names(cls, provider: str) -> tuple[str, ...]:
         """Return safe environment-variable names for dashboard setup guidance."""
+        if provider in LOCAL_INFERENCE_PROVIDERS:
+            return local_credential_env_names(provider)
         return provider_credential_env_names(provider)
+
+    @staticmethod
+    def provider_requires_api_key(provider: str, base_urls) -> bool:
+        """Local servers may be keyless only for an explicitly configured endpoint."""
+        return not local_provider_allows_keyless(provider, base_urls)
 
     @classmethod
     def get_api_keys(cls, provider: str) -> List[str]:
@@ -895,7 +919,8 @@ class AuthService:
 
     @staticmethod
     def _stored_controls(user: Dict[str, Any]) -> Dict[str, Any]:
-        return {name: user.get(name) for name in key_controls.CONTROL_FIELDS}
+        return {**{name: user.get(name) for name in key_controls.CONTROL_FIELDS},
+                **stream_cost_breaker.storage_control(user)}
 
     @classmethod
     def _update_login(cls, username: str, last_login: datetime) -> None:
@@ -918,6 +943,8 @@ class AuthService:
 
     @classmethod
     def _update_key_usage(cls, username: str, remote_addr: Optional[str] = None) -> None:
+        from services.tenant_hierarchy import verify_before_key_usage
+        verify_before_key_usage(username)
         user = cls._users.get(username)
         if not user:
             return
@@ -978,6 +1005,8 @@ class AuthService:
             and admin_api_key
             and hmac.compare_digest(api_key, admin_api_key)
         ):
+            from services.tenant_hierarchy import verify_before_key_usage
+            verify_before_key_usage(default_username)
             return cls._verify_bootstrap_admin(default_username, api_key, remote_addr)
 
         if api_key.startswith(KEY_NAMESPACE):
@@ -1062,6 +1091,17 @@ class AuthService:
         if not check_password_hash(user["api_key_hash"], api_key):
             return False
 
+        return cls.issue_dashboard_session(username, user=user)
+
+    @classmethod
+    def issue_dashboard_session(cls, username: str, *, user: Optional[Dict[str, Any]] = None) -> bool:
+        """Issue a fresh session from the account's current stored permissions."""
+        username = normalized_username(username)
+        if username is None:
+            return False
+        user = cls._load_user_by_username(username) if user is None else user
+        if not user or user.get("revoked_at") or key_controls.expired(user):
+            return False
         last_login = _utcnow()
         cls._update_login(username, last_login)
         user = cls._users[username]
@@ -1172,7 +1212,7 @@ class AuthService:
         user = cls._load_user_by_username(username)
         if not user:
             raise APIError("User not found", status_code=404)
-        controls = key_controls.validate(payload)
+        controls = {**stream_cost_breaker.storage_control(user), **key_controls.validate(payload)}
         if (
             username == normalized_username(os.environ.get("ADMIN_USERNAME", "admin"))
             and (controls["expires_at"] or controls["allowed_ips"])

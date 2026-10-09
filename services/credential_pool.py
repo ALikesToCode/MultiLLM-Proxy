@@ -18,7 +18,9 @@ from typing import ClassVar
 
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from services.auth_primitives import usable_credential
-from services.model_cooldown import model_cooldown, settings
+from services.model_cooldown import ModelCooldownExhausted, model_cooldown, settings
+from services import pool_reset_schedule as reset_schedule
+from services import learned_cooldown as learned
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
 REFUSED_REST_SECONDS = 300
@@ -77,6 +79,11 @@ class CredentialPool:
     ) -> list[str]:
         """Configured keys that are not resting, in preference order."""
         keys = cls.keys(provider) if keys is None else keys
+        if reset_schedule.settings().enabled:
+            return cls._scheduled_available(
+                provider, keys, now=now, model=model, quota_bucket=quota_bucket,
+                require_eligible=require_eligible,
+            )
         config = settings()
         if config.enabled and (model or quota_bucket):
             with cls._lock:
@@ -103,6 +110,37 @@ class CredentialPool:
             ]
 
     @classmethod
+    def _scheduled_available(
+        cls, provider: str, keys: list[str], *, now: float | None = None,
+        model: str | None = None, quota_bucket: str | None = None,
+        require_eligible: bool = False,
+    ) -> list[str]:
+        current = time.monotonic() if now is None else now
+        config = settings()
+        with cls._lock:
+            legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
+        eligible = [key for key in keys if legacy[key] <= current]
+        fallback = min((max(1, until - current) for until in legacy.values()), default=60)
+        if config.enabled and (model or quota_bucket):
+            eligible = model_cooldown.available(
+                provider, keys, model=model, quota_bucket=quota_bucket,
+                max_seconds=config.max_seconds, now=current, legacy_rest_until=legacy,
+            )
+            if not eligible and require_eligible:
+                try:
+                    model_cooldown.select(
+                        provider, keys, model=model, quota_bucket=quota_bucket,
+                        max_seconds=config.max_seconds, now=current, legacy_rest_until=legacy,
+                    )
+                except ModelCooldownExhausted as error:
+                    fallback = error.retry_after
+        return reset_schedule.pool_reset_schedule.admit(
+            provider, keys, eligible, model=model, quota_bucket=quota_bucket,
+            require_eligible=require_eligible, fallback=fallback,
+            max_seconds=config.max_seconds if config.enabled else 3600,
+        )
+
+    @classmethod
     def select(
         cls,
         provider: str,
@@ -113,11 +151,18 @@ class CredentialPool:
     ) -> str | None:
         """The key to use now; the first configured one when every key is resting."""
         keys = cls.keys(provider)
+        if reset_schedule.settings().enabled:
+            available = cls._scheduled_available(
+                provider, keys, now=now, model=model, quota_bucket=quota_bucket,
+                require_eligible=True,
+            )
+            from services.prompt_cache_affinity import prefer_credential
+            return prefer_credential(provider, model, available) or next(iter(available), None)
         config = settings()
         if config.enabled and (model or quota_bucket):
             with cls._lock:
                 legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
-            return model_cooldown.select(
+            selected = model_cooldown.select(
                 provider,
                 keys,
                 model=model,
@@ -126,7 +171,14 @@ class CredentialPool:
                 now=now,
                 legacy_rest_until=legacy,
             )
-        return next(iter(cls.available(provider, keys, now=now) or keys), None)
+            from services.prompt_cache_affinity import prefer_credential
+            preferred = prefer_credential(provider, model, cls.available(
+                provider, keys, model=model, quota_bucket=quota_bucket, now=now,
+            ))
+            return preferred or selected
+        available = cls.available(provider, keys, now=now)
+        from services.prompt_cache_affinity import prefer_credential
+        return prefer_credential(provider, model, available) or next(iter(available or keys), None)
 
     @classmethod
     def record(
@@ -141,9 +193,15 @@ class CredentialPool:
         outcome: UpstreamOutcome | None = None,
         credential_wide_auth: bool | None = None,
         retry_after_seconds: float | None = None,
+        usage_windows: list[Mapping] | None = None,
     ) -> None:
         if not key or provider not in POOLED_KEY_ENVS:
             return
+        reset_schedule.record_result_observation(
+            provider, key, status, model=model, quota_bucket=quota_bucket,
+            outcome=outcome, retry_after_seconds=retry_after_seconds,
+            usage_windows=usage_windows,
+        )
         config = settings()
         if config.enabled and (model or quota_bucket):
             classified = outcome or classify_upstream_outcome(status)
@@ -177,11 +235,17 @@ class CredentialPool:
                     )
             return
         current = time.monotonic() if now is None else now
+        delay = learned.adjust_cooldown(
+            provider, key, outcome or classify_upstream_outcome(status),
+            model=model, quota_bucket=quota_bucket, now=now,
+            current_seconds=RATE_LIMITED_REST_SECONDS,
+            retry_after_seconds=retry_after_seconds,
+        )
         with cls._lock:
             if status in REFUSED_STATUSES:
                 cls._resting[(provider, key)] = current + REFUSED_REST_SECONDS
             elif status in RATE_LIMITED_STATUSES:
-                cls._resting[(provider, key)] = current + RATE_LIMITED_REST_SECONDS
+                cls._resting[(provider, key)] = current + delay
             elif 200 <= status < 300:
                 cls._resting.pop((provider, key), None)
 
@@ -197,6 +261,7 @@ class CredentialPool:
         outcome: UpstreamOutcome | None = None,
         credential_wide_auth: bool | None = None,
         retry_after_seconds: float | None = None,
+        usage_windows: list[Mapping] | None = None,
         now: float | None = None,
     ) -> None:
         """Record the result for the bearer key a request carried."""
@@ -220,6 +285,7 @@ class CredentialPool:
                 outcome=outcome,
                 credential_wide_auth=credential_wide_auth,
                 retry_after_seconds=retry_after_seconds,
+                usage_windows=usage_windows,
                 now=now,
             )
 

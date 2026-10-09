@@ -13,7 +13,8 @@ from providers.protocols import CHAT_COMPLETIONS, MESSAGES, RESPONSES
 from route_helpers import stream_upstream_response
 from services import protocol_translation as translation
 from services.protocol_translation import TranslationError, UpstreamFailure
-from services.conversion_diagnostics import response_report
+from services.conversion_diagnostics import combine_reports, response_report
+from services import protocol_extras
 
 ENDPOINT_PROTOCOLS = {
     CHAT_COMPLETIONS: translation.CHAT,
@@ -169,7 +170,7 @@ def translate_downstream_response(
                 headers=[*headers, *STREAM_HEADERS.items()],
                 content_type="text/event-stream",
             )
-        payload = translation.translate_response(
+        payload = protocol_extras.translate_managed_response(
             decoded, source, target, model=model, request=request_payload
         )
     except UpstreamFailure as failure:
@@ -181,4 +182,8 @@ def _record_response_conversion(payload, source, target) -> None:
     from routes.unified_bridge import diagnostics_requested, record_conversion
 
     if diagnostics_requested():
-        record_conversion(response_report(payload, source, target))
+        report = response_report(payload, source, target)
+        if protocol_extras.enabled() and isinstance(payload, Mapping):
+            extras = protocol_extras.capture_response_extras(payload, source)
+            report = combine_reports(report, protocol_extras.extras_report(extras, target))
+        record_conversion(report)

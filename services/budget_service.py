@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Optional
 
-from services import usage_ledger
+from services import reservation_store, usage_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,21 @@ def limits(user: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
     return user.get("daily_budget_usd"), user.get("monthly_budget_usd")
 
 
+def principal_owner(user):
+    from flask import has_request_context
+    from services.tenant_hierarchy import current_tenant, principal_id, tenant_namespace
+    from services.credits_ledger import context_owner
+    principal = str(user.get("username") or user.get("id") or "")
+    if has_request_context():
+        context = current_tenant()
+        if context.principal_id == principal_id(principal) and tenant_namespace(context):
+            return context_owner(context)
+    return principal
+
+
 def budgeted(user: Mapping[str, Any]) -> bool:
-    return any(limit is not None for limit in limits(user))
+    from services.tenant_governance import workspace_context
+    return workspace_context(user) is not None or any(limit is not None for limit in limits(user))
 
 
 @dataclass
@@ -199,12 +212,18 @@ class BudgetService:
         return day, month, sum(amount for _, _, amount in state.inflight.values())
 
     @classmethod
-    def check_and_reserve(cls, user: Mapping[str, Any], estimate_usd: float,
+    def check_and_reserve(cls, user: Mapping[str, Any], estimate_usd: Optional[float],
                           now: Optional[datetime] = None) -> BudgetDecision:
+        from services.tenant_governance import reserve_budget
+        governance = reserve_budget(user, estimate_usd, now, cls)
+        if governance is not None:
+            return governance
         daily, monthly = limits(user)
         if daily is None and monthly is None:
             return BudgetDecision(True)
-        principal = str(user.get("username") or user.get("id") or "")
+        if reservation_store.enabled():
+            return cls._reserve_durable(user, estimate_usd, now)
+        principal = principal_owner(user)
         period = periods(now)
         state = cls._state(principal)
         try:
@@ -239,9 +258,94 @@ class BudgetService:
         )
 
     @classmethod
-    def settle(cls, reservation: Optional[str]) -> None:
+    def _durable_totals(cls, user, now=None):
+        principal = principal_owner(user)
+        summary = reservation_store.get_store().summary(principal, now, reservation_store.review_seconds())
+        if not summary["day_seeded"] or not summary["month_seeded"]:
+            state, period = cls._state(principal), periods(now)
+            cls._refresh(principal, state, period)
+            with cls._lock:
+                day, month, _ = cls._spent(state, period)
+            if not summary["day_seeded"]:
+                summary["spent_today_usd"] = day
+            if not summary["month_seeded"]:
+                summary["spent_this_month_usd"] = month
+        return summary
+
+    @classmethod
+    def _reserve_durable(cls, user, estimate, now=None):
+        if estimate is None:
+            return BudgetDecision(False, error="unpriced_reservation", status_code=503,
+                                  message="Configure pricing before dispatching a request with a monetary budget.")
+        try:
+            summary = cls._durable_totals(user, now)
+            identity = uuid.uuid4().hex
+            daily, monthly = limits(user)
+            reservation_store.get_store().reserve(identity, principal_owner(user),
+                estimate, daily, monthly, summary["spent_today_usd"], summary["spent_this_month_usd"], now)
+            return BudgetDecision(True, reservation=identity)
+        except reservation_store.ReservationError as error:
+            return BudgetDecision(False, error=error.code, status_code=error.status,
+                message=("This request exceeds the key's budget including durable holds."
+                         if error.code == "budget_exceeded" else "The durable usage reservation could not be made."))
+        except (BudgetUnavailable, OSError):
+            return BudgetDecision(False, error="usage_reservations_unavailable", status_code=503,
+                                  message="Durable usage reservations are unavailable.")
+
+    @classmethod
+    def mark_dispatched(cls, reservation, *, governance_store=None):
+        """Persist before provider submission; failure must prevent submission."""
+        from services.tenant_governance import dispatch
+        if dispatch(reservation, authority=governance_store):
+            return
+        if not reservation or not reservation_store.enabled():
+            return
+        store = reservation_store.get_store()
+        row = store.get(reservation)
+        if row["state"] == "reserved":
+            store.transition(reservation, row["revision"], "dispatched", transition_id=uuid.uuid4().hex)
+        elif row["state"] != "dispatched":
+            raise reservation_store.ReservationError("reservation_conflict", 409)
+
+    @classmethod
+    def complete(cls, reservation, row, *, cached=False, governance_store=None):
+        """Replace a hold only with measured cost; uncertain completion retains it."""
+        from services.tenant_governance import complete
+        if complete(reservation, row, cached=cached, authority=governance_store):
+            return
+        if not reservation or not reservation_store.enabled():
+            return
+        store = reservation_store.get_store()
+        current = store.get(reservation)
+        if current["state"] not in {"reserved", "dispatched"}:
+            return
+        if current["state"] == "reserved" and (cached or row.get("status", 200) >= 400):
+            cls.settle(reservation, before_dispatch=True)
+            return
+        if current["state"] == "reserved":
+            cls.mark_dispatched(reservation)
+            current = store.get(reservation)
+        measured = row.get("cost_usd") is not None and row.get("cost_basis") == "usage" and not cached
+        fields = {"input_tokens": row.get("input_tokens"), "output_tokens": row.get("output_tokens")}
+        if measured:
+            fields.update(cost_usd=row["cost_usd"], basis="provider", settlement_id=reservation)
+        store.transition(reservation, current["revision"], "settled" if measured else "unknown",
+                         transition_id=uuid.uuid4().hex, **fields)
+
+    @classmethod
+    def settle(cls, reservation: Optional[str], *, before_dispatch=False, governance_store=None) -> None:
         """Release an in-flight estimate; the settled cost arrives through `record_cost`."""
         if not reservation:
+            return
+        from services.tenant_governance import complete
+        if complete(reservation, {}, before_dispatch=before_dispatch, authority=governance_store):
+            return
+        if reservation_store.enabled():
+            if before_dispatch:
+                store = reservation_store.get_store()
+                row = store.get(reservation)
+                store.transition(reservation, row["revision"], "settled", cost_usd=0, basis="released",
+                                 settlement_id=reservation, transition_id=uuid.uuid4().hex)
             return
         with cls._lock:
             entry = cls._reservations.pop(reservation, None)
@@ -258,6 +362,8 @@ class BudgetService:
         Call before handing the row to the ledger, which then reports it as stored or
         dropped exactly once.
         """
+        from services.tenant_governance import capture_cost
+        capture_cost(row)
         with cls._lock:
             state = cls._principals.setdefault(str(row["principal"]), _Principal())
             _add(state.pending, row)
@@ -270,21 +376,27 @@ class BudgetService:
     def status(cls, user: Mapping[str, Any], now: Optional[datetime] = None) -> dict[str, Any]:
         """Spend and remaining budget for /v1/usage; reads durable totals when due."""
         daily, monthly = limits(user)
-        principal = str(user.get("username") or user.get("id") or "")
+        principal = principal_owner(user)
         period = periods(now)
         state = cls._state(principal)
         available = True
+        durable = None
         try:
-            cls._refresh(principal, state, period)
-        except BudgetUnavailable:
+            if reservation_store.enabled():
+                durable = cls._durable_totals(user, now)
+            else:
+                cls._refresh(principal, state, period)
+        except (BudgetUnavailable, reservation_store.ReservationError, OSError):
             available = False
         with cls._lock:
             day, month, inflight = cls._spent(state, period)
+        if durable is not None:
+            day, month, inflight = durable["spent_today_usd"], durable["spent_this_month_usd"], durable["held_usd"]
 
         def remaining(limit, spent):
             return None if limit is None else round(max(0.0, limit - spent - inflight), 10)
 
-        return {
+        result = {
             "totals_available": available,
             "day": period["day"],
             "month": period["month"],
@@ -298,6 +410,14 @@ class BudgetService:
             "daily_resets_at": period["day_resets_at"].isoformat(),
             "monthly_resets_at": period["month_resets_at"].isoformat(),
         }
+
+        if reservation_store.enabled():
+            result["reservations"] = ({key: durable[key] for key in
+                ("held_usd", "reserved", "dispatched", "unknown", "needs_review")} if durable is not None
+                else {"error": "usage_reservations_unavailable"})
+            if not available:
+                result["daily_remaining_usd"] = result["monthly_remaining_usd"] = None
+        return result
 
 
 usage_ledger.LEDGER.add_listener(BudgetService.on_flushed, BudgetService.on_dropped)

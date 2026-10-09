@@ -26,6 +26,8 @@ from route_helpers import api_authenticate_only, request_api_key
 from routes.knowledge_management import permits
 from routes.knowledge_mcp import PROTOCOL_VERSIONS
 from services.client_headers import client_context_headers
+from services import deferred_tools, context_pages
+from services.knowledge_client import KnowledgeError
 
 logger = logging.getLogger(__name__)
 
@@ -238,17 +240,31 @@ TOOLS: list[dict[str, Any]] = [
         "scope": "chat",
     },
 ]
-_TOOLS = {tool["name"]: tool for tool in TOOLS}
-_VALIDATORS = {tool["name"]: Draft202012Validator(tool["inputSchema"]) for tool in TOOLS}
+_CONTEXT_RETRIEVE = {
+    "name": "multillm_context_retrieve",
+    "title": "Retrieve context page",
+    "description": "Retrieve exact historical context under the current chat grant, session and policy revision.",
+    "inputSchema": _schema({"page_id": {"type": "string", "pattern": context_pages.PAGE_ID.pattern}}, ("page_id",)),
+    "annotations": {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
+    "scope": "chat",
+}
+
+
+def _enabled_tools():
+    return [*TOOLS, _CONTEXT_RETRIEVE] if context_pages.paging_enabled() else TOOLS
+
+
+_TOOLS = {tool["name"]: tool for tool in [*TOOLS, _CONTEXT_RETRIEVE]}
+_VALIDATORS = {name: Draft202012Validator(tool["inputSchema"]) for name, tool in _TOOLS.items()}
 
 
 def tool_definitions() -> list[dict[str, Any]]:
     """Tool definitions as MCP lists them, without the scope bookkeeping."""
-    return [{key: value for key, value in tool.items() if key != "scope"} for tool in TOOLS]
+    return [{key: value for key, value in tool.items() if key != "scope"} for tool in _enabled_tools()]
 
 
 def tool_catalogue() -> list[dict[str, str]]:
-    return [{"name": tool["name"], "scope": tool["scope"]} for tool in TOOLS]
+    return [{"name": tool["name"], "scope": tool["scope"]} for tool in _enabled_tools()]
 
 
 class ToolError(Exception):
@@ -547,12 +563,23 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
 
 def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Validate the arguments, then make the tool's single gateway request."""
+    if name not in _TOOLS or name == "multillm_context_retrieve" and not context_pages.paging_enabled():
+        return _tool_error("unknown_tool", "Unknown MultiLLM tool.")
     error = next(iter(sorted(_VALIDATORS[name].iter_errors(arguments), key=lambda item: list(item.path))), None)
     if error is not None:
         location = "/".join(str(part) for part in error.path) or "arguments"
         return _tool_error("invalid_arguments", f"{location}: {error.message}"[:1000])
     try:
+        if name == "multillm_context_retrieve":
+            authority = context_pages.managed_authority()
+            result = context_pages.managed_service().retrieve(
+                page_id=arguments["page_id"], scope=authority["scope"],
+                retention_policy=authority["retention_policy"], granted=authority["granted"] is True)
+            return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                    "structuredContent": result, "isError": False}
         return _HANDLERS[name](arguments)
+    except context_pages.ContextPageError as failure:
+        return _tool_error(failure.code, "Context page retrieval could not be completed.")
     except _Failed as failure:
         return _error_result(failure.reply)
     except ToolError as failure:
@@ -661,14 +688,24 @@ def _mcp():
                                         "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS})
     if method == "ping":
         return _rpc_result(identifier, {})
+    if deferred_tools.enabled() and method in {"tools/list", "multillm.tools.discover"}:
+        entries = [{"definition": definition, "scope": tool["scope"], "toolset": "gateway"}
+                   for definition, tool in zip(tool_definitions(), _enabled_tools())]
+        try:
+            service = deferred_tools.runtime_service()
+            result = ({"tools": service.list_tools(entries, g.authenticated_user)} if method == "tools/list"
+                      else service.discover(entries, g.authenticated_user, params))
+            return _rpc_result(identifier, result)
+        except KnowledgeError as failure:
+            return _rpc_error(identifier, failure.code, failure.message, failure.status)
     if method == "tools/list":
-        return _rpc_result(identifier, {"tools": [definition for definition, tool in zip(tool_definitions(), TOOLS)
+        return _rpc_result(identifier, {"tools": [definition for definition, tool in zip(tool_definitions(), _enabled_tools())
                                                   if _visible(tool)]})
     if method != "tools/call":
         return _rpc_error(identifier, -32601, "Method not found.")
     name = params.get("name")
     tool = _TOOLS.get(name) if isinstance(name, str) else None
-    if tool is None:
+    if tool is None or name == "multillm_context_retrieve" and not context_pages.paging_enabled():
         return _rpc_error(identifier, -32602, "Unknown MultiLLM tool.")
     arguments = params.get("arguments", {})
     if not isinstance(arguments, dict):
@@ -676,6 +713,12 @@ def _mcp():
     if not _visible(tool):
         return _rpc_result(identifier, _tool_error(
             "insufficient_scope", f"The key needs the {tool['scope']} scope for this tool."))
+    if deferred_tools.enabled():
+        try:
+            deferred_tools.runtime_service().authorize_call(
+                {"definition": tool, "scope": tool["scope"]}, g.authenticated_user, arguments)
+        except KnowledgeError as failure:
+            return _rpc_error(identifier, failure.code, failure.message, failure.status)
     result = call_tool(name, arguments)
     error = result.get("structuredContent", {}).get("error", {})
     if error.get("code") == "secret_detected":

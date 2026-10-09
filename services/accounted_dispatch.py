@@ -7,7 +7,7 @@ from flask import g, request
 
 from error_handlers import APIError
 from services import key_controls, request_accounting, telemetry_export
-from services.budget_service import BudgetService, budgeted
+from services.budget_service import BudgetService
 from services.rate_limit_service import RateLimitService
 
 _ROUTING_FIELDS = ("multillm_model", "multillm_provider", "multillm_route_decision")
@@ -17,7 +17,12 @@ def release_outer_accounting() -> None:
     """Subrequests replace the aggregate row and its reservation."""
     context = getattr(g, "usage_context", None)
     if isinstance(context, request_accounting.UsageContext):
-        BudgetService.settle(context.reservation)
+        if not context.finished:
+            if context.credit_hold is not None or context.governance_store is not None:
+                request_accounting.release_before_dispatch()
+            else:
+                BudgetService.settle(context.reservation)
+                context.finished = True
         g.usage_context = None
 
 
@@ -33,23 +38,24 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
     context = request_accounting.UsageContext(
         kind=kind, models=[model], provider=None, user=user, started=time.perf_counter(), start_ns=time.time_ns(),
         input_tokens=input_tokens, output_tokens=output_tokens, units=units,
-        trace=telemetry_export.trace_context(request.headers.get("traceparent")))
+        trace=telemetry_export.trace_context(request.headers.get("traceparent")), gateway_subrequest=True)
     request_id = getattr(g, "request_id", None)
     context.request_id = (request_id if isinstance(request_id, str)
                           and request_accounting.REQUEST_ID.fullmatch(request_id) else None)
     context.path = "/v1/chat/completions" if kind == "chat" else "/v1/images/generations"
-    if budgeted(user):
-        decision = BudgetService.check_and_reserve(
-            user, request_accounting.estimate_cost([model], input_tokens, output_tokens, units))
-        if not decision.allowed:
-            raise APIError(decision.message, decision.status_code, payload={"error": decision.error})
-        context.reservation = decision.reservation
+    denied = request_accounting.reserve_attempt(context)
+    if denied is not None:
+        raise APIError(denied.json["message"], denied.status_code, payload={"error": denied.json["error"]})
     routing = {name: getattr(g, name, None) for name in _ROUTING_FIELDS}
     for name in _ROUTING_FIELDS:
         setattr(g, name, None)
     response = None
     outer_subrequest = getattr(g, "gateway_subrequest", False)
     g.gateway_subrequest = True
+    outer_context = getattr(g, "usage_context", None)
+    owned = context.credit_hold is not None or context.governance_store is not None
+    if owned:
+        g.usage_context = context
     try:
         if not skip_rate:
             decision = RateLimitService.enforce_request(
@@ -83,6 +89,8 @@ def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = 
         request_accounting._record(context, getattr(error, "status_code", 502), None, None)
         raise
     finally:
+        if owned:
+            g.usage_context = outer_context
         g.gateway_subrequest = outer_subrequest
         for name, value in routing.items():
             setattr(g, name, value)

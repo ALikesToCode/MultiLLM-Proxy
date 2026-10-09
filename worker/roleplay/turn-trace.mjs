@@ -35,6 +35,11 @@ export class TurnTraceJournal {
     phase("queued");
     return {
       id: row.id, phase, metrics,
+      canary(event) {
+        if (event?.rule !== "context_canary_leak" || event.traceId !== row.id ||
+            !/^[0-9a-f]{64}$/.test(event.digest)) return;
+        row.canary = { digest: event.digest, rule: event.rule, traceId: row.id };
+      },
       selected(candidate, receipt) {
         if (!retainContent) return;
         row.provider = candidate.provider;

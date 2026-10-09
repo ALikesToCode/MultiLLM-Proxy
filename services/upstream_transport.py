@@ -6,15 +6,22 @@ import requests
 
 from streaming.sse import iter_sse_data
 from services.request_cancellation import CancellationIterator, bind_cancellation
+from services.stream_cost_breaker import bind_upstream
 
 def close_retry_response(response: requests.Response) -> None:
     """Release a retryable response without masking the original result."""
     bind_cancellation(response).close()
 
 
-def iter_stream_content(response: requests.Response) -> Iterator[bytes]:
+def iter_stream_content(response: requests.Response, *, pii_context=None) -> Iterator[bytes]:
     """Yield decoded upstream bytes as soon as the socket exposes them."""
-    return CancellationIterator(lambda: _stream_content(response), bind_cancellation(response))
+    context = bind_cancellation(response)
+    bind_upstream(context)
+    source = CancellationIterator(lambda: _stream_content(response), context)
+    if pii_context is None:
+        return source
+    from services.pii_stream import RehydratingIterator
+    return RehydratingIterator(source, pii_context, event_stream=True)
 
 
 def _stream_content(response: requests.Response) -> Iterator[bytes]:

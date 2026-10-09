@@ -396,6 +396,8 @@ export async function roleplayModuleUrl() {
   const transportDataUrl = dataModuleUrl(
     transportSource
       .replace('from "../upstream-cancellation.mjs";', `from "${new URL("../../worker/upstream-cancellation.mjs", import.meta.url)}";`)
+      .replace('from "../pii-rehydration.mjs";', `from "${new URL("../../worker/pii-rehydration.mjs", import.meta.url)}";`)
+      .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
       .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
       .replace('from "./compaction-budget.mjs";', `from "${compactionBudgetUrl}";`)
       .replace(
@@ -490,6 +492,10 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('import("../prompt-injection-detection.mjs")', `import("${new URL("../../worker/prompt-injection-detection.mjs", import.meta.url)}")`)
+    .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
+    .replace('from "../context-pages-d1.mjs";', `from "${new URL("../../worker/context-pages-d1.mjs", import.meta.url)}";`)
+    .replace('from "../context-canary.mjs";', `from "${new URL("../../worker/context-canary.mjs", import.meta.url)}";`)
     .replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`)
     .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
@@ -746,6 +752,7 @@ export async function loadWorkerModule({ transformSource = source => source } = 
     .replace('from "./worker/intelligence-outbound.mjs";', `from "${new URL("../../worker/intelligence-outbound.mjs", import.meta.url)}";`)
     .replace('from "./worker/admission-do.mjs";', `from "${new URL("../../worker/admission-do.mjs", import.meta.url)}";`)
     .replace('from "./worker/gateway-extensions.mjs";', `from "${new URL("../../worker/gateway-extensions.mjs", import.meta.url)}";`)
+    .replace('from "./worker/batch-jobs.mjs";', `from "${new URL("../../worker/batch-jobs.mjs", import.meta.url)}";`)
     .replace('from "./worker/client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode-session.mjs";', `from "${new URL("../../worker/opencode-session.mjs", import.meta.url)}";`)
     .replace('from "./worker/opencode/reasoning-request.mjs";', `from "${new URL("../../worker/opencode/reasoning-request.mjs", import.meta.url)}";`)
