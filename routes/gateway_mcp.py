@@ -26,6 +26,8 @@ from route_helpers import api_authenticate_only, request_api_key
 from routes.knowledge_management import permits
 from routes.knowledge_mcp import PROTOCOL_VERSIONS
 from services.client_headers import client_context_headers
+from services import deferred_tools
+from services.knowledge_client import KnowledgeError
 
 logger = logging.getLogger(__name__)
 
@@ -661,6 +663,16 @@ def _mcp():
                                         "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS})
     if method == "ping":
         return _rpc_result(identifier, {})
+    if deferred_tools.enabled() and method in {"tools/list", "multillm.tools.discover"}:
+        entries = [{"definition": definition, "scope": tool["scope"], "toolset": "gateway"}
+                   for definition, tool in zip(tool_definitions(), TOOLS)]
+        try:
+            service = deferred_tools.runtime_service()
+            result = ({"tools": service.list_tools(entries, g.authenticated_user)} if method == "tools/list"
+                      else service.discover(entries, g.authenticated_user, params))
+            return _rpc_result(identifier, result)
+        except KnowledgeError as failure:
+            return _rpc_error(identifier, failure.code, failure.message, failure.status)
     if method == "tools/list":
         return _rpc_result(identifier, {"tools": [definition for definition, tool in zip(tool_definitions(), TOOLS)
                                                   if _visible(tool)]})
@@ -676,6 +688,12 @@ def _mcp():
     if not _visible(tool):
         return _rpc_result(identifier, _tool_error(
             "insufficient_scope", f"The key needs the {tool['scope']} scope for this tool."))
+    if deferred_tools.enabled():
+        try:
+            deferred_tools.runtime_service().authorize_call(
+                {"definition": tool, "scope": tool["scope"]}, g.authenticated_user, arguments)
+        except KnowledgeError as failure:
+            return _rpc_error(identifier, failure.code, failure.message, failure.status)
     result = call_tool(name, arguments)
     error = result.get("structuredContent", {}).get("error", {})
     if error.get("code") == "secret_detected":

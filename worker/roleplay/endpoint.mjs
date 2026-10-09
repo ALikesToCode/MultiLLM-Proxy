@@ -7,7 +7,8 @@ import {
   recoveryTemplate, preserveRecovery, handleRecoverySnapshot, resolveRoleplayRetention,
   retentionResponse, retentionRequestId, retentionAllowsContent, createRetentionStateRepository,
 } from "./recovery.mjs";
-import { parseRoutingPolicy, filterRoutingCandidates, parameterReceipt } from "./routing-policy.mjs";
+import { parseRoutingPolicy, filterRoutingCandidates, parameterReceipt,
+  SessionTierError, SessionTierPolicy, sessionTierSettings, beginRoleplaySessionTier } from "./routing-policy.mjs";
 
 import {
   isRoleplayPath,
@@ -100,6 +101,7 @@ export class RoleplaySession extends DurableObject {
       ...buildIntelligenceCandidates(env, this.settings),
     ];
     this.stateRepository = createRoleplayStateRepository(ctx.storage);
+    this.sessionTiers = new SessionTierPolicy(ctx.storage, sessionTierSettings(env));
     this.refreshSessionAlarm = createSessionAlarmRefresher(
       ctx,
       this.settings.sessionTtlSeconds,
@@ -146,26 +148,32 @@ export class RoleplaySession extends DurableObject {
 
   async enqueueTurn(request, settings, retention = resolveRoleplayRetention(this.env, request)) {
     const trace = this.traces.begin(retention);
+    const tierScope = { turn: null };
     try {
       return await this.turnQueue.run(
         request, settings,
         async (turnRequest, queueMs) => {
           trace.phase("preparing");
           trace.metrics({ queueMs });
-          const result = await this.handleTurn(turnRequest, settings, queueMs, trace, retention);
+          const result = await this.handleTurn(turnRequest, settings, queueMs, trace, retention, tierScope);
           result.response.headers.set("X-Roleplay-Trace-ID", trace.id);
           result.completion = Promise.resolve(result.completion).then(async (completion) => {
             if (completion?.persistenceFailed) await trace.finish(false, "persistence_failed");
             return completion;
           });
-          if (!result.response.ok) await trace.finish(false, "request_failed");
+          if (!result.response.ok) {
+            await tierScope.turn?.finish(null, { success: false });
+            await trace.finish(false, "request_failed");
+          }
           return result;
         },
         (completion) => this.ctx.waitUntil(completion),
       );
     } catch (error) {
+      try { await tierScope.turn?.finish(null, { success: false }); }
+      catch (storageError) { error = storageError; }
       await trace.finish(false, error.code || "turn_failed");
-      if (error instanceof RoleplayTurnError) {
+      if (error instanceof RoleplayTurnError || error instanceof SessionTierError) {
         return errorResponse(error.message, error.status, error.code);
       }
       if (error instanceof RoleplayRequestError) {
@@ -184,7 +192,7 @@ export class RoleplaySession extends DurableObject {
     }
   }
 
-  async handleTurn(request, settings, queueMs = 0, trace = null, retention = resolveRoleplayRetention(this.env, request)) {
+  async handleTurn(request, settings, queueMs = 0, trace = null, retention = resolveRoleplayRetention(this.env, request), tierScope = { turn: null }) {
     const stateRepository = createRetentionStateRepository(this.ctx.storage, this.stateRepository, retention, this.configuredCandidates);
     const scanCounts = [0, 0];
     const applyScanHeader = headers => {
@@ -212,7 +220,7 @@ export class RoleplaySession extends DurableObject {
           request.headers.get(INTERNAL_OUTPUT_MODE_HEADER) === "unlimited",
       },
     );
-    parsedInitial.routing = parseRoutingPolicy(payload.routing);
+    parsedInitial.routing = parseRoutingPolicy(payload.routing, { sessionTierEnabled: this.sessionTiers.settings.enabled });
     if (parsedInitial.routing.fallback === "none") {
       settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
     }
@@ -305,6 +313,13 @@ export class RoleplaySession extends DurableObject {
     let candidates = rankFor(autoPreference);
     if (!candidates.length && autoPreference !== parsed.modelPreference) {
       candidates = rankFor(parsed.modelPreference);
+    }
+    const tierTurn = await beginRoleplaySessionTier(this.sessionTiers, parsed, payload,
+      candidates, state.stats, this.configuredCandidates);
+    tierScope.turn = tierTurn;
+    if (tierTurn) {
+      candidates = tierTurn.candidates;
+      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
     }
     if (parsed.routing.fallback === "none") candidates.splice(1);
     if (!candidates.length) {
@@ -521,7 +536,7 @@ export class RoleplaySession extends DurableObject {
       estimatedInputTokens,
       plan.estimatedTokens + checkpointSavedTokens,
     );
-    const generationCandidates = prepareRoleplayCandidates(
+    let generationCandidates = prepareRoleplayCandidates(
       candidates,
       estimatedInputTokens,
       parsed.maxTokens,
@@ -530,6 +545,7 @@ export class RoleplaySession extends DurableObject {
         ? { messages: roleplayMessages, estimateTokens }
         : null,
     );
+    if (tierTurn) generationCandidates = tierTurn.select(generationCandidates);
     if (!generationCandidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "context_too_large");
       await stateRepository.save(state);
@@ -569,6 +585,8 @@ export class RoleplaySession extends DurableObject {
     );
     state = attempted.state;
     if (attempted.terminalResponse) {
+      await tierTurn?.finish(null, { success: false,
+        credentialFailed: [401, 403].includes(attempted.terminalResponse.status) });
       await preserveRecovery(this.ctx.storage, recovery, { success: false, reason: "provider_failed" }, trace?.id, retention);
       state = markRoleplayRequest(state, idempotencyKey, "provider_failed");
       await stateRepository.save(state);
@@ -666,7 +684,7 @@ export class RoleplaySession extends DurableObject {
       responseHeaders.set("Cache-Control", "no-cache, no-transform");
       const observed = createObservedStream({
         onProgress: (progress) => trace?.progress(progress),
-        upstreamBody: response.body,
+        upstreamBody: tierTurn ? tierTurn.observe(response).body : response.body,
         requestSignal: request.signal,
         upstreamController: controller,
         heartbeatMs: settings.streamHeartbeatMs,
@@ -702,6 +720,8 @@ export class RoleplaySession extends DurableObject {
           } = completion;
           state = continuation.state;
           const finalCandidate = continuation.candidate;
+          await tierTurn?.finish(finalCandidate, { success: success && !request.signal.aborted &&
+            ["stop", "tool_calls"].includes(completion.finishReason), finishReason: completion.finishReason });
           trace?.selected(finalCandidate, parameterReceipt(parsed, finalCandidate, settings));
           logRoleplayStreamCompletion({
             candidate: finalCandidate,
@@ -827,6 +847,10 @@ export class RoleplaySession extends DurableObject {
       failureStatus: "completion_failed",
     });
     const finalCandidate = continuation.candidate;
+    await tierTurn?.finish(finalCandidate, { success: completionResult.success && !request.signal.aborted &&
+      contentType.toLowerCase().includes("application/json"),
+      finishReason: completionResult.finishReason,
+      toolCalls: completionResult.payload?.choices?.[0]?.message?.tool_calls ?? [] });
     state = applyRoleplayCompletionState({
       state,
       candidate: finalCandidate,

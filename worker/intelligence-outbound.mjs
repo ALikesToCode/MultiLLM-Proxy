@@ -11,6 +11,7 @@ import { handleRouteHealthRequest } from "./route-health-d1.mjs";
 import { handleUsageLedgerRequest } from "./usage-ledger-d1.mjs";
 import { handleShadowEvalRequest } from "./shadow-eval-d1.mjs";
 import { handleMediaJobsRequest } from "./media-jobs.mjs";
+import { handleManagedStateRequest } from "./managed-state-dispatch.mjs";
 
 /** Domain operations reachable only through the container's private outbound handler. */
 export function handleIntelligenceOutbound(request, env) {
@@ -33,5 +34,6 @@ export function handleIntelligenceOutbound(request, env) {
   if (url.pathname === "/v1/usage") return handleUsageLedgerRequest(request, env);
   if (url.pathname === "/v1/shadow-eval") return handleShadowEvalRequest(request, env);
   if (url.pathname === "/v1/media-jobs") return handleMediaJobsRequest(request, env);
+  if (url.pathname.startsWith("/v1/managed-state/")) return handleManagedStateRequest(request, env);
   return Response.json({ error: { code: "not_found", message: "Storage operation not found." } }, { status: 404 });
 }

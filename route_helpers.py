@@ -37,7 +37,7 @@ CORS_DEFAULT_HEADERS = (
     + ", ".join([*CLIENT_HEADER_NAMES.values(), *OPENCODE_CLIENT_HEADER_NAMES.values()])
 )
 CORS_EXPOSE_HEADERS = (
-    "Retry-After, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
+    "Retry-After, X-Request-ID, X-MultiLLM-RateLimit-Limit, X-MultiLLM-RateLimit-Remaining, X-MultiLLM-RateLimit-Reset, X-MultiLLM-Idempotency, X-MultiLLM-Optimization, X-MultiLLM-Tool-Repair, X-MultiLLM-Image-QA, X-MultiLLM-Cascade, X-MultiLLM-Conversion-Fidelity, X-MultiLLM-Conversion-Fields, "
     "X-MultiLLM-Optimization-Mode, X-MultiLLM-Estimated-Input-Before, "
     "X-MultiLLM-Estimated-Input-After, X-MultiLLM-Image-Prompts-Compacted, "
     "X-MultiLLM-Messages-Summarized, X-MultiLLM-Optimization-Target-Met, "
@@ -50,7 +50,7 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Auto-Route, X-MultiLLM-Auto-Selected-Model, "
     "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, "
-    "X-MultiLLM-Cache, X-MultiLLM-Retention, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
+    "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
     "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
