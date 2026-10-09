@@ -23,13 +23,16 @@ def execute_managed_attempt(send, model, credential):
     from services.managed_turn import before_provider_submission
     before_provider_submission()
     scope = current_scope()
-    if scope is None:
-        return send()
     try:
         response = send()
     except BaseException:
-        scope.observer(model, credential)(classify_upstream_outcome(transport_failure="interrupted"))
+        if scope is not None:
+            scope.observer(model, credential)(classify_upstream_outcome(transport_failure="interrupted"))
         raise
+    from services.pii_redaction import current_context
+    context = current_context()
+    if context is not None:
+        response.multillm_pii_context = context
     return capture_managed_attempt(response, model, credential)
 
 
@@ -167,6 +170,11 @@ class ManagedOutcomeIterator:
 
 def observe_managed_response(downstream, upstream, *, stream=False):
     """Deliver classified final outcomes through the managed-dispatch callback."""
+    from services.pii_redaction import current_context
+    from services.pii_stream import rehydrate_response
+    context = getattr(upstream, "multillm_pii_context", None) or current_context()
+    if context is not None:
+        downstream = rehydrate_response(downstream, context, stream=stream)
     from services.managed_turn import defer_affinity_response
     if defer_affinity_response(downstream, upstream, stream=stream):
         return downstream

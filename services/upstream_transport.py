@@ -12,9 +12,13 @@ def close_retry_response(response: requests.Response) -> None:
     bind_cancellation(response).close()
 
 
-def iter_stream_content(response: requests.Response) -> Iterator[bytes]:
+def iter_stream_content(response: requests.Response, *, pii_context=None) -> Iterator[bytes]:
     """Yield decoded upstream bytes as soon as the socket exposes them."""
-    return CancellationIterator(lambda: _stream_content(response), bind_cancellation(response))
+    source = CancellationIterator(lambda: _stream_content(response), bind_cancellation(response))
+    if pii_context is None:
+        return source
+    from services.pii_stream import RehydratingIterator
+    return RehydratingIterator(source, pii_context, event_stream=True)
 
 
 def _stream_content(response: requests.Response) -> Iterator[bytes]:
