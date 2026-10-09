@@ -24,6 +24,7 @@ from services import cache_policy
 from services.retention_policy import request_policy
 from services.cache_service import ResponseCache, shared_response_cache
 from services import shared_generation_cache as shared_cache
+from services.managed_turn import cache_response_allowed
 
 CACHE_HEADER = "X-MultiLLM-Cache"
 _OPT_IN = frozenset({"on", "true", "1", "yes"})
@@ -142,7 +143,7 @@ def _hit(entry) -> Response:
 
 
 def _store_if_complete(response: Response, key: str, settings: dict, *, shared=None, identity=None) -> None:
-    if (response.status_code != 200 or response.direct_passthrough
+    if (not cache_response_allowed(response) or response.status_code != 200 or response.direct_passthrough
             or response.mimetype != "application/json"):
         return
     body = response.get_data()

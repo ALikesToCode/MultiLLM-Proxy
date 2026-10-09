@@ -33,6 +33,8 @@ _ENDPOINTS = {
     "route_health": "http://intelligence.internal/v1/route-health",
     "usage": "http://intelligence.internal/v1/usage",
     "shadow_eval": "http://intelligence.internal/v1/shadow-eval",
+    "alerts": "http://intelligence.internal/v1/state/alerts",
+    "reservations": "http://intelligence.internal/v1/reservations",
 }
 _MAX_BYTES = 262144
 _TIMEOUT = (2, 3)

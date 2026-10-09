@@ -16,12 +16,14 @@ from services.intelligence_output import (
     visible_completion,
     with_thinking_tokens,
 )
-from services.intelligence_policy import input_reservation, select_candidates
+from services.intelligence_policy import input_reservation
+from services.managed_turn import prepare_intelligence_selection, defer_finalization, completed_envelope
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_stream import ChatStream
 from services.intelligence_transport import remaining
 from services.intelligence_tool_repair import IntelligenceToolRepair
 from services.route_health import RouteHealth
+from services.upstream_outcome import classify_upstream_outcome
 
 logger = logging.getLogger(__name__)
 # A rate needs this much visible output over this long to say anything about a provider.
@@ -86,16 +88,22 @@ class ChatGateway:
         self.created = int(time.time())
         self.deadline = time.monotonic() + request.deadline_ms / 1000
         self.cancelled = cancelled if cancelled is not None else threading.Event()
-        self.candidates = select_candidates(policy, request, transport.config)
+        self.candidates, self.session_tier, self.affinity = prepare_intelligence_selection(request, policy, transport, principal)
+        transport.affinity_scope = self.affinity
         if not self.candidates:
             raise GatewayError(
                 "no_eligible_model",
                 "No reviewed model satisfies this request's eligibility and capability requirements.",
                 503,
             )
-        self.reservation = IntelligenceStore.reserve(
-            principal, request.max_total_tokens, policy
-        )
+        try:
+            self.reservation = IntelligenceStore.reserve(
+                principal, request.max_total_tokens, policy
+            )
+        except Exception:
+            if self.session_tier is not None:
+                self.session_tier.finish(None, success=False)
+            raise
         self.usage = Usage()
         self.attempts = self.escalations = self.consumed = 0
         self.selected = None
@@ -104,7 +112,29 @@ class ChatGateway:
         self.unresolved = False
         self.emitted = False
         self.finished = False
+        self.classified_success = False
+        self.completion = None
         self.tool_repair = IntelligenceToolRepair(self)
+
+    def _finish_attempt(self, candidate, token):
+        """Bind the completed attempt only after outer schema validation."""
+        from services.prompt_cache_cost import CacheObservation
+        observer = self.affinity.observer(candidate["model"], token) if self.affinity else None
+        usage = CacheObservation.from_body({"usage": self.usage.values})
+        tools = []
+        if isinstance(self.completion, dict):
+            for choice in self.completion.get("choices", []):
+                tools.extend(choice.get("message", {}).get("tool_calls") or [])
+
+        def finish(complete):
+            if observer is not None:
+                observer(classify_upstream_outcome(200) if complete
+                         else classify_upstream_outcome(transport_failure="interrupted"), usage)
+            if self.session_tier is not None:
+                self.session_tier.finish(candidate if complete else None, success=complete,
+                                         tool_calls=tools if complete else ())
+        if not defer_finalization(finish):
+            finish(completed_envelope(self.completion))
 
     def metadata(self):
         model = self.selected["model"] if self.selected else None
@@ -139,6 +169,8 @@ class ChatGateway:
         if self.finished:
             return
         self.finished = True
+        if self.session_tier is not None and not self.classified_success:
+            self.session_tier.finish(None, success=False)
         if self.unresolved:
             self.usage.complete = False
         IntelligenceStore.settle(
@@ -156,6 +188,8 @@ class ChatGateway:
         try:
             for candidate, token, spare_keys in getattr(self, "_prepared_attempts", None) or self._attempts():
                 self._key_refused = False
+                from services.generation_deadline import check_deadline
+                check_deadline()
                 remaining(self.deadline, self.cancelled)
                 if self.attempts >= self.request.max_attempts:
                     break
@@ -220,6 +254,8 @@ class ChatGateway:
                         final_status = None
                         continue
                     final_status = 200
+                    self.classified_success = True
+                    self._finish_attempt(candidate, token)
                     self.settle()
                     if self.request.payload.get("stream"):
                         yield self.decorate(
@@ -236,6 +272,8 @@ class ChatGateway:
                     raise
                 finally:
                     self.exchange.close()
+                    if final_status != 200 and self.affinity is not None:
+                        self.affinity.record(candidate["model"], token, classify_upstream_outcome(transport_failure="interrupted"))
                     self._record(candidate, final_status, started, answered)
             raise last_error
         finally:
@@ -308,7 +346,7 @@ class ChatGateway:
                 completion, candidate, payload or self.request.payload, token
             )
             validate_completion(completion, self.request)
-            self.settle()
+            self.completion = completion
             self.emitted = True
             yield self.decorate(completion)
             return
@@ -343,7 +381,8 @@ class ChatGateway:
         if first_output is not None:
             record_speed(model, usage, started, first_output, time.monotonic())
         self.tool_repair.finish_stream(parsed, candidate)
-        validate_completion(parsed.completion(), self.request)
+        self.completion = parsed.completion()
+        validate_completion(self.completion, self.request)
         for event in buffered:
             self.emitted = True
             yield self.identify(event)

@@ -63,10 +63,11 @@ records or release unknown usage holds. No prompt or response content is logged.
 
 The Flask registration point is `middleware.idempotency.register_idempotency`.
 Register its named `idempotency_request_hook` after authentication, retention and
-secret policy, and before admission. Intelligence dispatch finalizes only after
+secret policy and generation deadlines, and before admission. Intelligence dispatch finalizes only after
 validated nonstream completion. Other managed chat dispatchers supply their resolved
 policy through `policy_revision` and call `dispatch_with_idempotency` with an explicit
 completion classifier. The optional `settlement` callback receives classified state,
 without response content or permission to generate. The private managed-state
-dispatcher uses fixed domain paths and explicitly supplied reservation/tool-grant
-handlers; unregistered domains return 404.
+dispatcher keeps idempotency at `/v1/managed-state/idempotency`. Reservations use
+the separate `/v1/reservations` endpoint, and tool grants use model-state operations;
+the managed-state reservation and tool-grant injection points remain unused.

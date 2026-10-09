@@ -5,6 +5,7 @@
  * Container's private outbound handler at /v1/state/<domain>. Fixed statements, no
  * client SQL.
  */
+import { handleAlertState, alertSettings } from "./alert-delivery.mjs";
 import { handleGenerationCache, MAX_RPC_BYTES } from "./generation-cache-d1.mjs";
 import { generationCacheSettings } from "./exact-generation-cache.mjs";
 import { boundedBody } from "./control-users-d1.mjs";
@@ -269,6 +270,7 @@ async function catalog(db, body, env) {
 }
 
 const DOMAINS = Object.freeze({
+  alerts: { handle: (db, body, env) => handleAlertState(env, body), maxBytes: 8192, operations: ["get", "configure", "observe"] },
   "generation-cache": { handle: handleGenerationCache, maxBytes: MAX_RPC_BYTES, operations: ["get", "put", "prune"] },
   "prompt-templates": { handle: handlePromptTemplates, maxBytes: 524288, operations: ["create", "get", "list"] },
   limits: { handle: limits, maxBytes: 16384, operations: ["sync"] },
@@ -285,6 +287,7 @@ export async function handleControlStateRequest(request, env) {
   const domain = Object.hasOwn(DOMAINS, name) ? DOMAINS[name] : null;
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || !domain
     || url.search || url.hash || url.username || url.password) return reply({ error: "not_found" }, 404);
+  if (name === "alerts" && !alertSettings(env).enabled) return reply({ error: "not_found" }, 404);
   if (name === "generation-cache" && !generationCacheSettings(env).enabled) return reply({ error: "not_found" }, 404);
   if (name === "prompt-templates" && !promptTemplatesEnabled(env)) return reply({ error: "not_found" }, 404);
   if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
@@ -292,7 +295,7 @@ export async function handleControlStateRequest(request, env) {
   }
   const length = request.headers.get("content-length");
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > domain.maxBytes)) return reply({ error: "invalid_request" }, 400);
-  if (!env.INTELLIGENCE_DB) return reply({ error: "storage_unavailable" }, 503);
+  if (!env.INTELLIGENCE_DB) return name === "alerts" ? handleAlertState(env, { version: 1, operation: "get" }) : reply({ error: "storage_unavailable" }, 503);
   let body;
   try {
     body = JSON.parse(await boundedBody(request, domain.maxBytes));
