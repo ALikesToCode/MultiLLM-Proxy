@@ -212,20 +212,27 @@ def model_allowed(user: Mapping[str, Any], model: Any) -> bool:
     """Whether a model ID matches the key's allowlist; ``*`` matches any characters."""
     patterns = model_patterns(user)
     if patterns is None:
-        return True
-    if not isinstance(model, str) or not model.strip():
-        return False
-    candidate = model.strip().lower()
-    return any(_glob(pattern.lower()).match(candidate) for pattern in patterns)
+        allowed = True
+    elif not isinstance(model, str) or not model.strip():
+        allowed = False
+    else:
+        candidate = model.strip().lower()
+        allowed = any(_glob(pattern.lower()).match(candidate) for pattern in patterns)
+    from services.tenant_governance import grant_allowed
+    return grant_allowed(allowed, model, user=user)
 
 
 def provider_allowed(user: Mapping[str, Any], provider: str) -> bool:
     """Whether a request that names no model may reach a provider namespace."""
     patterns = model_patterns(user)
     if patterns is None:
-        return True
-    provider = provider.strip().lower()
-    return any(pattern in {"*", f"{provider}:*"} for pattern in patterns)
+        allowed = True
+        candidate = provider.strip().lower() if isinstance(provider, str) else ""
+    else:
+        candidate = provider.strip().lower()
+        allowed = any(pattern in {"*", f"{candidate}:*"} for pattern in patterns)
+    from services.tenant_governance import grant_allowed
+    return grant_allowed(allowed, f"{candidate}:*", user=user)
 
 
 def expires_at(user: Mapping[str, Any]) -> Optional[datetime]:

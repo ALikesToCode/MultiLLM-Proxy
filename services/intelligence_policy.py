@@ -189,12 +189,14 @@ def validate_policy(raw):
 def eligible(candidate, allow_paid, config, *, model_status=None):
     provider = candidate["model"].split(":", 1)[0]
     model_status = model_status or ModelRegistry.get_model_status
-    return (
+    allowed = (
         all(candidate[key] for key in ("enabled", "entitled", "privacy_allowed"))
         and (candidate["billing"] != "payg" or allow_paid)
         and model_status(candidate["model"]) != "disabled"
         and get_adapter(provider, config["API_BASE_URLS"]) is not None
     )
+    from services.tenant_governance import eligibility_allowed
+    return eligibility_allowed(allowed, candidate["model"])
 
 
 def input_reservation(candidate, request):
