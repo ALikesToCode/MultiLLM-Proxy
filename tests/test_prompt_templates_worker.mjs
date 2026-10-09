@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { applyMigrations, migrationNames } from "./d1_migrations.mjs";
+
+const PYTHON = process.env.PYTHON || (existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3");
 
 const template = { slug: "greeting", version: 1, content: "Hello {{name}} / {{name}}", variables: ["name"] };
 const content_hash = createHash("sha256").update(template.content).digest("hex");
@@ -96,7 +99,7 @@ test("enabled missing migration fails closed with 503 and keeps old rows", async
 test("D1 and SQLite return the same versions, conflicts, page and literal rendering", async t => {
   const { call } = await database(t);
   assert.equal((await call(create())).status, 200);
-  const python = spawnSync("/home/mysterious/storage/github/MultiLLM-Proxy/.venv/bin/python", ["-I", "-c", `
+  const python = spawnSync(PYTHON, ["-I", "-c", `
 import json, os, sys, tempfile, types
 sys.path.insert(0, os.getcwd())
 sys.modules["env_loader"] = types.SimpleNamespace(load_runtime_env=lambda *args, **kwargs: None)

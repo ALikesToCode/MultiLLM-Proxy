@@ -4,6 +4,7 @@ import copy
 import importlib
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -278,7 +279,7 @@ def test_offline_replay_null_unknown_prices_tokens_and_deterministic_totals(tmp_
     path.write_text(encoded(observations))
     price_path = tmp_path / "prices.json"
     price_path.write_text(encoded(prices))
-    process = subprocess.run(["/home/mysterious/storage/github/MultiLLM-Proxy/.venv/bin/python", "-I",
+    process = subprocess.run([sys.executable, "-I",
         str(Path(__file__).resolve().parents[1] / "scripts/replay_routing_cost.py"),
         "--observations", str(path), "--prices", str(price_path)], capture_output=True, text=True, check=True)
     assert json.loads(process.stdout) == report
