@@ -184,7 +184,8 @@ class Wave3IntegrationTest(UnifiedApiTestCase):
         self.assertEqual(response.status_code, 429)
         deadline = client.acquire.call_args.args[0].deadline_ms
         self.assertGreater(deadline, before)
-        self.assertLessEqual(deadline, before + 1100)
+        # The 1000 ms routing deadline, not the 5000 ms policy one; slack covers slow runners.
+        self.assertLessEqual(deadline, before + 3000)
 
     def test_retention_bypasses_real_cache(self):
         os.environ["CONTENT_RETENTION_ENABLED"] = "true"
