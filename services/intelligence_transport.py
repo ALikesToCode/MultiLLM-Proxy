@@ -13,6 +13,10 @@ from providers.nanogpt import nanogpt_model_has_speed_suffix
 from providers.opencode_go import build_opencode_model_url
 from providers.registry import get_adapter
 from services.credential_pool import CredentialPool
+from services.credential_context import observation_context, selection_context
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
+from services.request_cancellation import bind_cancellation
+from services.managed_turn import capture_submission_guard
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -55,14 +59,17 @@ class Exchange:
     """
 
     def __init__(
-        self, send, deadline, cancelled, max_bytes, record=lambda status: None
+        self, send, deadline, cancelled, max_bytes, record=lambda status: None,
+        *, record_response=None,
     ):
         self.deadline, self.cancelled = deadline, cancelled
         self.events = queue.Queue(maxsize=4)
         self.stopped = threading.Event()
         self.response = None
+        self._response_lock = threading.Lock()
         self.max_bytes = max_bytes
         self.send, self.record = send, record
+        self.record_response = record_response
         if not _TRANSPORT_SLOTS.acquire(blocking=False):
             raise GatewayError(
                 "gateway_busy",
@@ -89,8 +96,17 @@ class Exchange:
             remaining(self.deadline, self.cancelled)
             if self.stopped.is_set():
                 return
-            response = self.response = self.send()
-            self.record(response.status_code)
+            response = self.send()
+            with self._response_lock:
+                bind_cancellation(response)
+                self.response = response
+            if self.stopped.is_set() or self.cancelled.is_set():
+                response.close()
+                return
+            if self.record_response is not None:
+                self.record_response(response)
+            else:
+                self.record(response.status_code)
             # Upstream headers cannot impersonate a locally opened circuit and
             # turn an ambiguous 503 into permission to repeat a generation.
             headers = {
@@ -116,7 +132,7 @@ class Exchange:
                         )
                     self._put(("data", chunk))
             self._put(("done", None))
-        except GatewayError as error:
+        except (GatewayError, ModelCooldownExhausted, ModelCooldownCapacity) as error:
             self._put(("error", error))
         except Exception:
             self._put(
@@ -177,6 +193,10 @@ class Exchange:
 
     def close(self):
         self.stopped.set()
+        with self._response_lock:
+            response = self.response
+        if response is not None:
+            response.close()
 
 
 def without_thought_signatures(body):
@@ -256,9 +276,12 @@ def with_thought_signatures(body):
 class IntelligenceTransport:
     def __init__(self, config, auth, proxy):
         self.config, self.auth, self.proxy = config, auth, proxy
+        self.affinity_scope = None
+        self.generation_deadline, self.before_submission = capture_submission_guard()
 
     def credential(self, candidate):
-        provider = candidate["model"].split(":", 1)[0]
+        provider, model = candidate["model"].split(":", 1)
+        scope = selection_context(provider, model, config=self.config)
         if provider == "nanogpt":
             # Reviewed subscription calls use only a configured isolated key, even
             # while it is rejected or rate limited. Shared-pool selection would
@@ -267,16 +290,20 @@ class IntelligenceTransport:
             if pinned is not None and candidate["billing"] == "subscription":
                 return pinned.strip() or None
             return NanoGPTUnifiedKeyPool.select_available_key(
-                self.auth.get_api_keys(provider)
+                self.auth.get_api_keys(provider), **scope
             )
-        return self.auth.get_api_key(provider)
+        return self.auth.get_api_key(provider, **scope)
 
     def credentials(self, candidate):
         """Keys to try for one candidate in order: every resting-free key of a pooled
         provider, otherwise the single selected credential."""
-        provider = candidate["model"].split(":", 1)[0]
+        provider, model = candidate["model"].split(":", 1)
+        scope = selection_context(provider, model, config=self.config)
         if CredentialPool.pooled(provider):
-            return CredentialPool.available(provider, self.auth.get_api_keys(provider))
+            decision = {"require_eligible": True, **scope} if scope else {}
+            tokens = CredentialPool.available(provider, self.auth.get_api_keys(provider), **decision)
+            preferred = self.affinity_scope.preferred_key(candidate["model"], tokens) if self.affinity_scope else None
+            return [preferred, *(key for key in tokens if key != preferred)] if preferred else tokens
         token = self.credential(candidate)
         return [token] if token else []
 
@@ -316,6 +343,8 @@ class IntelligenceTransport:
     ):
         provider, model = candidate["model"].split(":", 1)
         adapter = self.adapter(candidate, media=path is not None)
+        from services.context_pages import page_managed_candidate
+        payload = page_managed_candidate(payload, model=candidate["model"]) if path is None else payload
         body = dict(payload, model=model)
         if path is None:
             body = apply_glm_5_reasoning_policy(body, provider, model)
@@ -354,8 +383,20 @@ class IntelligenceTransport:
 
         dispatch_data = protect_body(upstream.data if data is None else data, headers, provider=provider)
 
+        scope = selection_context(provider, model, config=self.config)
+        from services.generation_deadline import bounded_timeout, current_deadline
+        remaining(deadline, cancelled)
+        timeout = bounded_timeout((min(5, remaining(deadline, cancelled)), remaining(deadline, cancelled)))
+        generation_deadline = current_deadline() or self.generation_deadline
+        if generation_deadline is not None:
+            generation_deadline.check()
+            timeout = tuple(min(value, generation_deadline.remaining() / len(timeout)) for value in timeout)
+
         def send():
             seconds = remaining(deadline, cancelled)
+            if generation_deadline is not None:
+                generation_deadline.check()
+            self.before_submission()
             return self.proxy.make_request(
                 method="POST",
                 url=url,
@@ -364,12 +405,17 @@ class IntelligenceTransport:
                 data=dispatch_data,
                 api_provider=provider,
                 use_cache=False,
-                timeout_override=(min(5, seconds), seconds),
+                timeout_override=(tuple(min(value, seconds) for value in timeout) if generation_deadline is not None
+                                  else (min(5, seconds), seconds)),
                 force_raw_passthrough=True,
+                **({"cooldown_context": scope} if scope else {}),
             )
 
-        def record(status):
+        def record_response(response):
             if provider == "nanogpt":
-                NanoGPTUnifiedKeyPool.record_result(token, status)
+                from services.pool_reset_schedule import response_usage_observation
+                NanoGPTUnifiedKeyPool.record_result(token, response.status_code, **scope,
+                    **observation_context(response, cancelled=cancelled.is_set()),
+                    **response_usage_observation(response))
 
-        return Exchange(send, deadline, cancelled, max_bytes, record)
+        return Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)

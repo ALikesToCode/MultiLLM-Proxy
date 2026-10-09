@@ -9,6 +9,7 @@ import { metered } from "./operations.mjs";
 import { callTool } from "./providers/mcp.mjs";
 import { jsonPost, ProviderError, requestJSON } from "./providers/transport.mjs";
 import { providerStatus } from "./providers/index.mjs";
+import { checkContractPin, digestsEnabled } from "./contract-drift.mjs";
 
 export const NATIVE_TOOLS = TOOLS;
 export const NATIVE_OPERATIONS = Object.keys(TOOLS).map(name => `native.${name}`);
@@ -199,6 +200,8 @@ export async function dispatchNative(env, authority, principal, operation, paylo
   if (!isRecord(payload) || JSON.stringify(payload).length > MAX_ARGUMENT_BYTES) invalid(tool, "");
   check(tool, spec.input, payload, "");
   authorizeArguments(tool, payload, principal);
+  await checkContractPin({ name: `knowledge_${tool}`, inputSchema: spec.input }, options.contractPin,
+    { enabled: digestsEnabled(env.MCP_CONTRACT_DIGESTS_ENABLED) });
   const snapshot = await authority.call("catalogue.state");
   const allocation = snapshot.policy.providers[spec.provider];
   if (!snapshot.policy.enabled || !allocation?.enabled) {

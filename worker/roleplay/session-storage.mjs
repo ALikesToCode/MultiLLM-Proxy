@@ -228,7 +228,12 @@ export async function saveRoleplayState(
   state,
   previousState = null,
   metadata = {},
+  retentionPolicy = null,
 ) {
+  if (retentionPolicy?.enabled && retentionPolicy.mode === "zero") {
+    await saveRetentionCounters(storage, state);
+    return;
+  }
   const { directives, messages, ...core } = state;
   const entries = { ...metadata, [STATE_KEY]: core };
   if (!previousState || previousState.messages !== messages) {
@@ -241,4 +246,64 @@ export async function saveRoleplayState(
     );
   }
   await storage.put(entries);
+}
+
+const RETENTION_COUNTERS_KEY = "roleplay-retention-counters";
+const RETENTION_COUNTER_FIELDS = ["turns", "compactions", "localCompactions", "inputTokensSaved",
+  "stateCacheHits", "stateCacheMisses", "compactionFailures", "compactionBackoffUntil", "updatedAt",
+  "nanogptCredentialChecks"];
+
+function retentionCounters(state) {
+  return Object.fromEntries(RETENTION_COUNTER_FIELDS.filter(key => Number.isFinite(state[key]) && state[key] >= 0)
+    .map(key => [key, state[key]]));
+}
+
+const RETENTION_MODEL_FIELDS = ["attempts", "successes", "failures", "consecutiveFailures", "cooldownUntil",
+  "ewmaTtfbMs", "ewmaTotalMs", "lastStatus", "lastUsedAt", "ewmaTokensPerSecond", "lastCompletionTokens",
+  "lastGenerationMs", "semanticRefusals", "lastSemanticRefusalAt"];
+const RETENTION_SAMPLE_FIELDS = ["ttfbSamplesMs", "totalSamplesMs", "tokensPerSecondSamples",
+  "firstReasoningSamplesMs", "firstContentSamplesMs"];
+
+async function retentionModelKey(key) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function retentionModelCounters(stats) {
+  const counters = Object.fromEntries(RETENTION_MODEL_FIELDS.filter(key => Number.isFinite(stats?.[key]) && stats[key] >= 0)
+    .map(key => [key, stats[key]]));
+  for (const key of RETENTION_SAMPLE_FIELDS) {
+    if (Array.isArray(stats?.[key])) counters[key] = stats[key].filter(value => Number.isFinite(value) && value >= 0).slice(-64);
+  }
+  return counters;
+}
+
+async function saveRetentionCounters(storage, state) {
+  const counters = retentionCounters(state);
+  counters.stats = Object.fromEntries(await Promise.all(Object.entries(state.stats ?? {}).map(async ([key, stats]) =>
+    [await retentionModelKey(key), retentionModelCounters(stats)])));
+  // Request identities are already hashed at the turn boundary. Ignore arbitrary metadata.
+  counters.recentRequests = (state.recentRequests ?? []).filter(row => /^[a-f0-9]{64}$/.test(row.key)
+    && Number.isFinite(row.at) && /^[a-z_]{1,64}$/.test(row.status))
+    .map(({ key, at, status }) => ({ key, at, status })).slice(-32);
+  await storage.put(RETENTION_COUNTERS_KEY, counters);
+}
+
+export function createRetentionStateRepository(storage, repository, policy, candidates = []) {
+  if (!policy?.enabled || policy.mode !== "zero") return repository;
+  return {
+    loaded: false,
+    async load() {
+      const saved = await storage.get(RETENTION_COUNTERS_KEY) ?? {};
+      const entries = await Promise.all(candidates.map(async candidate => {
+        const prior = saved.stats?.[await retentionModelKey(candidate.key)];
+        return prior ? [candidate.key, { provider: candidate.provider, model: candidate.model,
+          family: candidate.family, ...retentionModelCounters(prior) }] : null;
+      }));
+      const stats = Object.fromEntries(entries.filter(Boolean));
+      return { ...createInitialRoleplayState(), ...retentionCounters(saved),
+        stats, recentRequests: Array.isArray(saved.recentRequests) ? saved.recentRequests : [] };
+    },
+    async save(state) { await saveRetentionCounters(storage, state); return state; },
+  };
 }

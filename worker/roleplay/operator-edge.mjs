@@ -4,6 +4,19 @@ import { errorResponse, jsonResponse } from "./transport.mjs";
 import { readBoundedBytes } from "./transport.mjs";
 import { previewProfile } from "./profile-receipt.mjs";
 import { BUILD_ID } from "../build-id.mjs";
+import { RETENTION_HEADER, resolveRetentionPolicy, retentionRequestId } from "../retention-policy.mjs";
+
+// Call only after authentication. Session scope is not the operator's identity.
+export async function roleplayRetentionHeaders(env, request, token, headers = new Headers()) {
+  if (!resolveRetentionPolicy(env).enabled) return headers;
+  const admin = await isAuthorizedRoleplayToken(token, { ADMIN_API_KEY: env.ADMIN_API_KEY });
+  headers.set("X-MultiLLM-Retention-Key-ID", admin ? String(env.ADMIN_USERNAME || "admin").trim() : "roleplay");
+  headers.set("X-MultiLLM-Retention-Key-Hash", await retentionRequestId(token));
+  headers.set("X-MultiLLM-Retention-Route", new URL(request.url).pathname);
+  const header = request.headers.get(RETENTION_HEADER);
+  if (header !== null) headers.set(RETENTION_HEADER, header);
+  return headers;
+}
 
 async function operatorBody(request) {
   const { bytes } = await readBoundedBytes(request.body, 32_768, request.signal);
@@ -45,11 +58,13 @@ export async function handleRoleplayOperatorRequest(request, env) {
   catch { return errorResponse("Use a JSON object within the 32 KiB limit", 400, "invalid_request"); }
   try {
     const stub = env.ROLEPLAY_SESSION.getByName(id);
-    if (operation === "branch") return await createBranch(stub, body, { env, request, scopeKey, publicId });
-    if (operation === "recovery" && body.action !== "inspect") return await dispatchRecovery(stub, body, { env, request, scopeKey });
+    const internalHeaders = await roleplayRetentionHeaders(env, request, token);
+    if (operation === "branch") return await createBranch(stub, body, { env, request, scopeKey, publicId, internalHeaders });
+    if (operation === "recovery" && body.action !== "inspect") return await dispatchRecovery(stub, body, { env, request, scopeKey, internalHeaders });
+    if (body) internalHeaders.set("Content-Type", "application/json");
     const response = await stub.fetch(new Request(`https://roleplay.internal/operator/${operation}`, {
-      method: request.method, signal: request.signal,
-      ...(body ? { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } } : {}),
+      method: request.method, signal: request.signal, headers: internalHeaders,
+      ...(body ? { body: JSON.stringify(body) } : {}),
     }));
     const headers = new Headers(response.headers);
     headers.set("Cache-Control", "no-store");
@@ -59,17 +74,20 @@ export async function handleRoleplayOperatorRequest(request, env) {
   }
 }
 
-async function dispatchRecovery(source, body, { env, request, scopeKey }) {
+async function dispatchRecovery(source, body, { env, request, scopeKey, internalHeaders }) {
   const prepared = await source.fetch(new Request("https://roleplay.internal/operator/recovery", {
-    method: "POST", signal: request.signal, body: JSON.stringify(body),
+    method: "POST", signal: request.signal, body: JSON.stringify(body), headers: internalHeaders,
   }));
   if (!prepared.ok) return prepared;
   const { payload } = await prepared.json();
   const publicId = "recovery-" + crypto.randomUUID();
   const id = await scopePublicRoleplaySessionId(publicId, scopeKey);
+  const turnHeaders = new Headers(internalHeaders);
+  turnHeaders.set("Content-Type", "application/json");
+  turnHeaders.set("Idempotency-Key", body.token);
   const response = await env.ROLEPLAY_SESSION.getByName(id).fetch(new Request("https://roleplay.internal/turn", {
     method: "POST", signal: request.signal, body: JSON.stringify({ ...payload, session_id: publicId }),
-    headers: { "Content-Type": "application/json", "Idempotency-Key": body.token },
+    headers: turnHeaders,
   }));
   const headers = new Headers(response.headers);
   headers.set("X-Roleplay-Session-ID", publicId);
@@ -77,12 +95,12 @@ async function dispatchRecovery(source, body, { env, request, scopeKey }) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-async function createBranch(source, body, { env, request, scopeKey, publicId }) {
+async function createBranch(source, body, { env, request, scopeKey, publicId, internalHeaders }) {
   if (body.confirm !== true || typeof body.label !== "string" || !/^[\w .()-]{1,64}$/.test(body.label)) {
     return errorResponse("Confirm copying retained context to a new named branch", 400, "confirmation_required");
   }
   const snapshot = await source.fetch(new Request("https://roleplay.internal/operator/memory", {
-    method: "POST", signal: request.signal,
+    method: "POST", signal: request.signal, headers: internalHeaders,
     body: JSON.stringify({ action: "export-branch", revision: body.revision, confirm: true }),
   }));
   if (!snapshot.ok) return snapshot;
@@ -90,7 +108,7 @@ async function createBranch(source, body, { env, request, scopeKey, publicId }) 
   const branchId = "branch-" + crypto.randomUUID();
   const storageId = await scopePublicRoleplaySessionId(branchId, scopeKey);
   const imported = await env.ROLEPLAY_SESSION.getByName(storageId).fetch(new Request("https://roleplay.internal/operator/import-branch", {
-    method: "POST", signal: request.signal,
+    method: "POST", signal: request.signal, headers: internalHeaders,
     body: JSON.stringify({ state: { ...state, branch: { parent: publicId, label: body.label, createdAt: Date.now() } } }),
   }));
   if (!imported.ok) return imported;

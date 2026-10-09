@@ -1,6 +1,7 @@
 import json
 import logging
 import requests
+from functools import partial
 from typing import Optional, Dict, Any, Tuple, List, Generator
 from concurrent.futures import ThreadPoolExecutor
 from error_handlers import APIError
@@ -14,6 +15,11 @@ from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
+from services.generation_deadline import (
+    GenerationDeadlineExceeded, bounded_timeout, check_deadline, own_upstream,
+    retry_with_deadline as retry_managed_attempt,
+)
+from services.retry_advice import retry_advice_settings
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
@@ -30,6 +36,7 @@ from services.upstream_errors import (
     stream_error_event,
 )
 from services.upstream_transport import close_retry_response, iter_stream_lines
+from services.request_cancellation import attach_stream_owner, bind_cancellation, owned_stream_lines
 from providers.nanogpt import (
     NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
@@ -1214,6 +1221,9 @@ class ProxyService:
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
+            from services.admission_request import bounded_generation_timeout
+            timeout = bounded_timeout(bounded_generation_timeout(timeout))
+
             response = session.request(
                 method=method,
                 url=url,
@@ -1223,11 +1233,13 @@ class ProxyService:
                 timeout=timeout,
                 allow_redirects=False,
                 verify=True,
-                stream=is_streaming
+                stream=is_streaming or check_deadline() is not None
             )
+            own_upstream(response)
 
             if not is_streaming:
                 _ = response.content
+                check_deadline()
                 logger.info(
                     "Upstream response status=%s content_length=%s",
                     response.status_code,
@@ -1250,10 +1262,12 @@ class ProxyService:
         timeout_override: Optional[Tuple[int, int]] = None,
         force_raw_passthrough: bool = False,
         is_streaming: Optional[bool] = None,
+        deadline: Optional[float] = None,
     ) -> requests.Response:
         """
         Make a base request with retries and error handling
         """
+        check_deadline()
         data = protect_body(data, headers, provider=api_provider)
         for key in list(headers):
             if key.lower() == "content-length" and data is not None:
@@ -1262,6 +1276,16 @@ class ProxyService:
             force_raw_passthrough
             or api_provider in RAW_PASSTHROUGH_PROVIDERS
         )
+        next_request = partial(
+            cls._make_base_request, method=method, url=url, headers=headers,
+            params=params, data=data, api_provider=api_provider, use_cache=use_cache,
+            timeout_override=timeout_override, force_raw_passthrough=force_raw_passthrough,
+            deadline=deadline,
+        )
+
+        def next_attempt(count: int) -> requests.Response:
+            return next_request(retry_count=count, is_streaming=is_streaming)
+
         try:
             if not raw_passthrough and retry_count == 0:
                 circuit_response = cls._circuit_open_response(api_provider)
@@ -1285,6 +1309,9 @@ class ProxyService:
                 Config.API_TIMEOUTS.get("default", (5, 60)),
             )
 
+            from services.admission_request import bounded_generation_timeout
+            timeout = bounded_timeout(bounded_generation_timeout(timeout))
+
             response = session.request(
                 method=method,
                 url=url,
@@ -1295,6 +1322,7 @@ class ProxyService:
                 timeout=timeout,
                 allow_redirects=False,
             )
+            own_upstream(response)
 
             # Native/raw providers expose protocol-specific streams and binary
             # bodies. Reading, normalizing, retrying, or substituting a local
@@ -1325,26 +1353,20 @@ class ProxyService:
                     retry_count + 1,
                     MAX_RETRIES,
                 )
-                close_retry_response(response)
-                time.sleep(RETRY_DELAY * (retry_count + 1))
-                return cls._make_base_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=data,
-                    api_provider=api_provider,
-                    use_cache=use_cache,
-                    retry_count=retry_count + 1,
-                    timeout_override=timeout_override,
-                    force_raw_passthrough=force_raw_passthrough,
-                    is_streaming=is_streaming,
+                retried = retry_managed_attempt(
+                    next_attempt,
+                    lambda: classify_upstream_outcome(response.status_code, replay_permission=True),
+                    retry_count=retry_count, max_retries=MAX_RETRIES,
+                    retry_delay=RETRY_DELAY, response=response, deadline=deadline, sleep=time.sleep,
                 )
+                if retried is not None:
+                    return retried
 
             if not is_streaming:
                 try:
                     # Let requests handle decompression automatically
                     content = response.content
+                    check_deadline()
                     content_type = response.headers.get('content-type', '').lower()
                     if not content or "json" not in content_type:
                         cls._record_circuit_result(api_provider, response.status_code)
@@ -1384,27 +1406,31 @@ class ProxyService:
                             retry_count + 1,
                             MAX_RETRIES,
                         )
-                        close_retry_response(response)
-                        time.sleep(RETRY_DELAY * (retry_count + 1))
-                        return cls._make_base_request(
-                            method=method,
-                            url=url,
-                            headers=headers,
-                            params=params,
-                            data=data,
-                            api_provider=api_provider,
-                            use_cache=use_cache,
-                            retry_count=retry_count + 1,
-                            timeout_override=timeout_override,
-                            force_raw_passthrough=force_raw_passthrough,
-                            is_streaming=is_streaming,
+                        replay_allowed = (
+                            not retry_advice_settings().enabled
+                            or (not is_streaming and (
+                                method.upper() in cls.SAFE_RETRY_METHODS
+                                or cls._has_idempotency_key(headers)
+                            ))
                         )
+                        retried = retry_managed_attempt(
+                            next_attempt,
+                            lambda: classify_upstream_outcome(
+                                response.status_code, replay_permission=replay_allowed,
+                            ),
+                            retry_count=retry_count, max_retries=MAX_RETRIES,
+                            retry_delay=RETRY_DELAY, response=response, deadline=deadline, sleep=time.sleep,
+                        )
+                        if retried is not None:
+                            return retried
 
                     if api_provider == "cline-pass" and response.status_code < 400:
                         normalized_payload = cline_completion_payload(normalized_payload)
                     response._content = json.dumps(normalized_payload).encode('utf-8')
                     response.headers['Content-Type'] = 'application/json'
 
+                except GenerationDeadlineExceeded:
+                    raise
                 except Exception as error:
                     logger.error(
                         "Response normalization failed provider=%s type=%s",
@@ -1417,7 +1443,19 @@ class ProxyService:
             cls._record_circuit_result(api_provider, response.status_code)
             return response
 
+        except GenerationDeadlineExceeded:
+            if not raw_passthrough:
+                cls._record_circuit_result(api_provider, 504,
+                    outcome=classify_upstream_outcome(cancelled=True))
+            raise
         except requests.exceptions.RequestException as e:
+            try:
+                check_deadline()
+            except GenerationDeadlineExceeded:
+                if not raw_passthrough:
+                    cls._record_circuit_result(api_provider, 504,
+                        outcome=classify_upstream_outcome(cancelled=True))
+                raise
             if raw_passthrough:
                 provider_name = {
                     **{pool.provider: pool.display_name for pool in CODEX_EVERYWHERE_POOLS},
@@ -1461,20 +1499,16 @@ class ProxyService:
                 and retry_count < MAX_RETRIES
             ):
                 logger.info(f"Retrying request (attempt {retry_count + 1}/{MAX_RETRIES})")
-                time.sleep(RETRY_DELAY * (retry_count + 1))
-                return cls._make_base_request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    data=data,
-                    api_provider=api_provider,
-                    use_cache=use_cache,
-                    retry_count=retry_count + 1,
-                    timeout_override=timeout_override,
-                    force_raw_passthrough=force_raw_passthrough,
-                    is_streaming=is_streaming,
+                retried = retry_managed_attempt(
+                    next_attempt,
+                    lambda error=e: classify_upstream_outcome(
+                        transport_failure=cls._transport_failure_kind(error), replay_permission=True,
+                    ),
+                    retry_count=retry_count, max_retries=MAX_RETRIES,
+                    retry_delay=RETRY_DELAY, deadline=deadline, sleep=time.sleep,
                 )
+                if retried is not None:
+                    return retried
             if not raw_passthrough:
                 cls._record_circuit_result(
                     api_provider, 503,
@@ -1792,9 +1826,11 @@ class ProxyService:
                     if chat_request.get("stream", False):
                         logger.info("Handling Google AI streaming response")
                         
+                        bind_cancellation(response)
+
                         def generate():
                             try:
-                                for line in response.iter_lines():
+                                for line in owned_stream_lines(response):
                                     if line:
                                         try:
                                             line_str = line.decode('utf-8') if isinstance(line, bytes) else line
@@ -1890,7 +1926,7 @@ class ProxyService:
                                 'X-Accel-Buffering': 'no'
                             }
                         )
-                        return streaming_response
+                        return attach_stream_owner(streaming_response, response)
                     else:
                         # Non-streaming response
                         try:
@@ -2028,9 +2064,11 @@ class ProxyService:
 
             # Handle streaming response
             if completion_data.get("stream", False):
+                bind_cancellation(response)
+
                 def generate():
                     try:
-                        for line in response.iter_lines():
+                        for line in owned_stream_lines(response):
                             if line:
                                 try:
                                     completion_chunk = json.loads(line)
@@ -2072,7 +2110,7 @@ class ProxyService:
                     finally:
                         response.close()
 
-                return Response(
+                streaming_response = Response(
                     generate(),
                     mimetype='text/event-stream',
                     headers={
@@ -2081,6 +2119,8 @@ class ProxyService:
                         'X-Accel-Buffering': 'no'
                     }
                 )
+
+                return attach_stream_owner(streaming_response, response)
 
             # Handle non-streaming response
             if response.status_code == 200:
@@ -2794,10 +2834,12 @@ class ProxyService:
             if response.status_code == 200:
                 if is_streaming_request:
                     # Handle streaming response
+                    bind_cancellation(response)
+
                     def generate_stream():
                         done_sent = False
                         try:
-                            for line in response.iter_lines():
+                            for line in owned_stream_lines(response):
                                 if line:
                                     try:
                                         line_str = line.decode('utf-8') if isinstance(line, bytes) else line
@@ -2809,6 +2851,7 @@ class ProxyService:
                                         # Check for stream end marker
                                         if line_str.strip() == '[DONE]':
                                             done_sent = True
+                                            bind_cancellation(response).complete()
                                             yield "data: [DONE]\n\n"
                                             if hasattr(response, "close"):
                                                 response.close()
@@ -2900,7 +2943,7 @@ class ProxyService:
                             'X-Accel-Buffering': 'no'
                         }
                     )
-                    return streaming_response
+                    return attach_stream_owner(streaming_response, response)
                 elif should_convert_to_openai_response:
                     # Handle normal chat/completions response
                     try:
@@ -3073,10 +3116,12 @@ class ProxyService:
             
             # Check for streaming response
             if request_data.get('stream', False) and response.status_code == 200:
+                bind_cancellation(response)
+
                 def generate():
                     done_sent = False
                     try:
-                        for line in response.iter_lines():
+                        for line in owned_stream_lines(response):
                             if line:
                                 try:
                                     line_str = line.decode('utf-8') if isinstance(line, bytes) else line
@@ -3092,6 +3137,7 @@ class ProxyService:
                                     # Check for stream end marker
                                     if line_str.strip() == '[DONE]':
                                         done_sent = True
+                                        bind_cancellation(response).complete()
                                         yield "data: [DONE]\n\n"
                                         if hasattr(response, "close"):
                                             response.close()
@@ -3142,7 +3188,7 @@ class ProxyService:
                         'X-Accel-Buffering': 'no'
                     }
                 )
-                return streaming_response
+                return attach_stream_owner(streaming_response, response)
             
             return response
             
@@ -3355,6 +3401,7 @@ class ProxyService:
                 if standardized_chunk:
                     if "data: [DONE]" in standardized_chunk:
                         done_sent = True
+                        bind_cancellation(response).complete()
                         yield standardized_chunk
                         return
                     yield standardized_chunk
@@ -3388,6 +3435,7 @@ class ProxyService:
         use_cache: bool = True,
         timeout_override: Optional[Tuple[int, int]] = None,
         force_raw_passthrough: bool = False,
+        cooldown_context: Optional[Dict[str, Any]] = None,
     ) -> requests.Response:
         """
         Make a request with retries and error handling
@@ -3419,7 +3467,11 @@ class ProxyService:
                     timeout_override=timeout_override,
                     force_raw_passthrough=force_raw_passthrough,
                 )
-                CredentialPool.record_headers(api_provider, headers, response.status_code)
+                from services.credential_context import dispatch_context, observation_context
+                from services.pool_reset_schedule import response_usage_observation
+                CredentialPool.record_headers(api_provider, headers, response.status_code,
+                    **(cooldown_context or dispatch_context(api_provider, data, url)),
+                    **observation_context(response), **response_usage_observation(response))
                 return response
 
             # Check if this is a streaming request
@@ -3497,8 +3549,9 @@ class ProxyService:
                 and response.status_code < 400
                 and response.headers.get('content-type', '').startswith(('text/event-stream', 'application/json'))
             ):
-                # Create a Flask response that yields from our generator
-                return Response(
+                # Bind the hidden upstream before constructing the lazy body.
+                bind_cancellation(response)
+                streaming_response = Response(
                     cls._create_streaming_response(response, api_provider),
                     content_type='text/event-stream',
                     headers={
@@ -3507,6 +3560,8 @@ class ProxyService:
                     }
                 )
             
+                return attach_stream_owner(streaming_response, response)
+
             return response
         except Exception as error:
             if isinstance(error, APIError):

@@ -1894,7 +1894,7 @@ test("worker preserves Codex Everywhere multipart uploads and binary image respo
   assert.equal(stub.getCalls(), 0);
 });
 
-test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetches once in off mode", async () => {
+test("worker streams gated Codex Everywhere bodies, cancels the upstream on abort, and fetches once in off mode", async () => {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let releaseRequest;
@@ -1922,8 +1922,11 @@ test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetch
     start(controller) {
       controller.enqueue(encoder.encode("event: response.created\n\n"));
       responseGate.then(() => {
-        controller.enqueue(encoder.encode("event: response.completed\n\n"));
-        controller.close();
+        // The Worker cancels this body when the client aborts, so late chunks are refused.
+        try {
+          controller.enqueue(encoder.encode("event: response.completed\n\n"));
+          controller.close();
+        } catch {}
       });
     },
   });
@@ -2004,10 +2007,9 @@ test("worker streams gated Codex Everywhere bodies, propagates aborts, and fetch
         controller.abort();
         await Promise.resolve();
         assert.equal(upstreamSawAbort, true);
+        // A client abort ends the downstream body and cancels the upstream read once.
+        await assert.rejects(reader.read(), { name: "AbortError" });
         releaseResponse();
-        const second = await reader.read();
-        assert.equal(decoder.decode(second.value), "event: response.completed\n\n");
-        assert.equal((await reader.read()).done, true);
       },
     );
   } finally {

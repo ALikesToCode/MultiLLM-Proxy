@@ -448,7 +448,10 @@ def register_core_routes(app) -> None:
         if request.headers.get("Authorization") or request_api_key():
             return None
 
-        if request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS | STATUS_PUBLIC_ENDPOINTS or request.endpoint in [
+        from routes.saml_federation import SAML_PUBLIC_ENDPOINTS
+        if (request.endpoint in KNOWLEDGE_PUBLIC_ENDPOINTS | PRODUCT_PUBLIC_ENDPOINTS | STATUS_PUBLIC_ENDPOINTS | SAML_PUBLIC_ENDPOINTS
+                or (request.endpoint or "").startswith("scim.") or request.endpoint in [
+            "payment_webhook",
             "login",
             "login_access",
             "static_files",
@@ -457,7 +460,7 @@ def register_core_routes(app) -> None:
             "web_manifest",
             "service_worker",
             "apple_touch_icon",
-        ] or request.path.startswith("/static/"):
+        ] or request.path.startswith("/static/")):
             return None
 
         if not AuthService.is_authenticated():

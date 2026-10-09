@@ -1,4 +1,5 @@
 import { fail } from "./contracts.mjs";
+import { retentionAllowsContent } from "../retention-policy.mjs";
 import { HANDOFF_BYTES, handoffBytes, parseHandoff, renderHandoff } from "./handoff-contracts.mjs";
 
 export const HANDOFF_PROJECT_LIMIT = 50;
@@ -20,7 +21,8 @@ export class HandoffStore {
 
   rows(query, ...args) { return [...this.sql.exec(query, ...args)]; }
 
-  save(parsed, now) {
+  save(parsed, now, retentionPolicy = null) {
+    if (!retentionAllowsContent(retentionPolicy)) fail("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409);
     const { ttl_days, ...content } = parsed;
     const record = { id: crypto.randomUUID(), ...content, created_at: new Date(now).toISOString(),
       expires_at: new Date(now + ttl_days * 86400000).toISOString() };
@@ -58,9 +60,10 @@ export class HandoffStore {
     return { handoffs, trust: "operator" };
   }
 
-  call(operation, payload, now = Date.now()) {
+  call(operation, payload, now = Date.now(), retentionPolicy = null) {
+    if (operation === "save" && !retentionAllowsContent(retentionPolicy)) fail("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409);
     const parsed = parseHandoff(operation, payload);
-    if (operation === "save") return this.save(parsed, now);
+    if (operation === "save") return this.save(parsed, now, retentionPolicy);
     if (operation === "get") return this.get(parsed, new Date(now).toISOString());
     if (operation === "list") return this.list(parsed, new Date(now).toISOString());
     const deleted = this.rows("SELECT id FROM handoffs WHERE id = ? LIMIT 1", parsed.id).length > 0;

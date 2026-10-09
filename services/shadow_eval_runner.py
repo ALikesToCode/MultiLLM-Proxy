@@ -15,6 +15,7 @@ from services.request_accounting import price
 from services.shadow_eval_contract import TASKS, clean_usage, encoded, finite
 from services.shadow_eval_judge import judge_payload, outcome, parse_judgment, random_order, tool_validity
 from services.shadow_eval_store import ShadowEvalStore
+from services import evaluation_noise_floor as noise_floor
 
 PRINCIPAL = "internal:shadow-evaluation"
 logger = logging.getLogger(__name__)
@@ -111,9 +112,14 @@ def evaluate(sample, candidate, config, dispatch, *, deadline):
     return result
 
 
-def run(app, dispatch, *, store=ShadowEvalStore):
+def run(app, dispatch, *, store=ShadowEvalStore, options=None):
     from services.intelligence_policy import validate_policy
 
+    if options is not None:
+        if not noise_floor.enabled():
+            raise ValueError("Three-arm evaluation is disabled")
+        options = noise_floor.run_options(options)
+    units = noise_floor.CALL_UNITS if options is not None else 1
     run_id = uuid.uuid4().hex
     leased = False
     count = 0
@@ -137,17 +143,23 @@ def run(app, dispatch, *, store=ShadowEvalStore):
         for _ in range(config["max_replays_per_run"]):
             progressed = False
             for task, model in work:
-                if count >= config["max_replays_per_run"] or time.monotonic() >= deadline:
+                if (count + 1) * units > config["max_replays_per_run"] or time.monotonic() >= deadline:
                     return count
                 sample = store.pending(task, model)
                 if not sample:
                     continue
                 identifier = uuid.uuid4().hex
-                if not store.claim(sample, model, config, run_id, identifier):
+                reserve = noise_floor.claim if options is not None else lambda storage, *args: storage.claim(*args)
+                if not reserve(store, sample, model, config, run_id, identifier):
                     return count
                 count += 1
                 progressed = True
-                store.finish(identifier, evaluate(sample, model, config, dispatch, deadline=deadline))
+                if options is not None:
+                    result = noise_floor.evaluate_three_arm(sample, model, config, dispatch, deadline=deadline,
+                        options=options, run_id=run_id, call=call)
+                else:
+                    result = evaluate(sample, model, config, dispatch, deadline=deadline)
+                store.finish(identifier, result)
             if not progressed:
                 break
     except Exception as error:
@@ -161,7 +173,7 @@ def run(app, dispatch, *, store=ShadowEvalStore):
     return count
 
 
-def start_run(app, dispatch):
+def start_run(app, dispatch, *, options=None):
     if not _RUN_LOCK.acquire(blocking=False):
         return False
 
@@ -169,7 +181,10 @@ def start_run(app, dispatch):
         try:
             # A fresh request context prevents sampled/admin identity and headers leaking into calls.
             with app.test_request_context("/admin/shadow-eval/run", method="POST", json={}):
-                run(app, dispatch)
+                if options is None:
+                    run(app, dispatch)
+                else:
+                    run(app, dispatch, options=options)
         finally:
             _RUN_LOCK.release()
     try:

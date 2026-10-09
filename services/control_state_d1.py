@@ -37,7 +37,8 @@ def using_d1():
 
 
 def call(endpoint, operation, **values):
-    return intelligence_d1_store.request_private_intelligence({"operation": operation, **values}, endpoint=endpoint)
+    version = {"version": 1} if endpoint in {"tenant_governance", "saml", "scim", "credits", "payments"} else {}
+    return intelligence_d1_store.request_private_intelligence({**version, "operation": operation, **values}, endpoint=endpoint)
 
 
 def cause(error):

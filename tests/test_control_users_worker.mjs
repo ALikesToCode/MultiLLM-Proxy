@@ -167,7 +167,7 @@ test("per-key budgets, allowlists, expiry and address ranges persist and are val
 });
 
 test("accounts keep working when code is deployed before the key-control migration", async () => {
-  const { mf, call } = await database({ skip: ["0007_usage_ledger.sql"] });
+  const { mf, call } = await database({ skip: ["0007_usage_ledger.sql", "0016_usage_buckets.sql"] });
   try {
     assert.equal((await call({ operation: "upsert", user: user("alice") })).status, 200);
     assert.deepEqual((await call({ operation: "get", username: "alice" })).body.user, user("alice"));

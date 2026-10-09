@@ -8,12 +8,16 @@
 import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import catalogue from "./knowledge-mcp-catalogue.json" with { type: "json" };
+import { organisationsEnabled, resolveAccountTenant, TenantError } from "./tenants-d1.mjs";
 import { authStorageBackend } from "./container-env.mjs";
 import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { logFailure } from "./log.mjs";
+import { contractPinMismatch, digestsEnabled, discoveryContract } from "./knowledge/contract-drift.mjs";
 import { SYNC_REQUEST_BYTES } from "./knowledge/skills-validation.mjs";
+import { deferredEnabled, handleDeferredMcp, validateToolArguments } from "./knowledge/deferred-tools.mjs";
 import { protectPayload, secretScanMode, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
+import { RETENTION_HEADER, resolveRetentionPolicy, retentionAllowsContent } from "./retention-policy.mjs";
 
 const KNOWLEDGE_SCOPES = ["knowledge:read", "knowledge:manage"];
 const KEY_NAMESPACE = "mllm_intelligence_";
@@ -155,12 +159,25 @@ function accountScopes(user, env) {
   return user.scopes.split(",").map(scope => scope.trim()).filter(scope => KNOWLEDGE_SCOPES.includes(scope));
 }
 
+async function tenantPrincipal(env, principal) {
+  if (!organisationsEnabled(env)) return { principal };
+  try {
+    Object.defineProperty(principal, "tenant_context", {
+      value: await resolveAccountTenant(env.INTELLIGENCE_DB, principal.id, env), enumerable: false,
+    });
+    return { principal };
+  } catch (error) {
+    if (error instanceof TenantError) throw new KnowledgeEdgeError(error.code, error.message, error.status);
+    throw error;
+  }
+}
+
 // Dashboard accounts in D1 use the Container's key prefix and Werkzeug hashes.
 async function accountPrincipal(env, key, clientAddress) {
   if (key.length > MAX_KEY_LENGTH) return { denied: true };
   const prefix = `mllm_${key.slice(0, 8)}`;
   let users;
-  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, prefix); }
+  try { users = await activeUsersByPrefix(env.INTELLIGENCE_DB, prefix, env); }
   catch (error) {
     logFailure("knowledge_edge_account_lookup_failed", error);
     return null;
@@ -171,7 +188,7 @@ async function accountPrincipal(env, key, clientAddress) {
   // An expired key, or one used outside its address ranges, is never served here; the
   // Container refuses it with key_expired or ip_not_allowed.
   if (index >= 0 && !keyControlsPermit(verifiable[index], clientAddress)) return null;
-  if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env), secret_scan_mode: verifiable[index].secret_scan_mode } };
+  if (index >= 0) return tenantPrincipal(env, { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env), secret_scan_mode: verifiable[index].secret_scan_mode });
   // A hash format the edge cannot check is left to the Container.
   return verifiable.length < users.length ? null : { denied: true };
 }
@@ -185,7 +202,7 @@ async function resolvePrincipal(request, env) {
   if (!key) return null;
   if (env.ADMIN_API_KEY && sameSecret(key, env.ADMIN_API_KEY)) {
     const id = adminUsername(env);
-    return id ? { principal: { id, scopes: [...KNOWLEDGE_SCOPES] } } : null;
+    return id ? tenantPrincipal(env, { id, scopes: [...KNOWLEDGE_SCOPES] }) : null;
   }
   if (!env.INTELLIGENCE_DB) return null;
   if (!key.startsWith(KEY_NAMESPACE)) {
@@ -202,7 +219,7 @@ async function resolvePrincipal(request, env) {
   if (record === null) return { denied: true };
   if (!validRecord(record, prefix)) return null;
   if (record.revokedAt !== null || await matchingHash(key, [record.keyHash], prefix) < 0) return { denied: true };
-  return { principal: { id: record.id, scopes: record.scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope)) } };
+  return tenantPrincipal(env, { id: record.id, scopes: record.scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope)) });
 }
 
 const permits = (principal, scope) => principal.scopes.includes(scope);
@@ -247,6 +264,9 @@ function contractCheck(status) {
 }
 
 async function dispatch(env, operation, principal, payload, signal) {
+  if (operation === "handoffs.save" && !retentionAllowsContent(principal.retentionPolicy)) {
+    throw new KnowledgeEdgeError("retention_forbidden", "Handoff content cannot be saved under zero retention.", 409);
+  }
   // The private Skills handler scans individual files rather than rejecting the batch.
   const decision = operation === "skills.sync" ? { mode: secretScanMode(env, principal, true) }
     : await protectPayload(payload, env, { principal, knowledge: true, provider: "knowledge", route: `/v1/knowledge/${operation}` });
@@ -256,8 +276,10 @@ async function dispatch(env, operation, principal, payload, signal) {
     throw error;
   }
   if (decision.header) principal.secretScanHeader = decision.header;
-  const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes }, payload,
-    secret_scan_mode: decision.mode, secret_scan_checked: true });
+  const body = JSON.stringify({ version: 1, operation, principal: { id: principal.id, scopes: principal.scopes,
+    ...(organisationsEnabled(env) && principal.tenant_context ? { tenant_context: principal.tenant_context } : {}) }, payload,
+    secret_scan_mode: decision.mode, secret_scan_checked: true,
+    ...(principal.retentionPolicy?.enabled ? { retention_policy: principal.retentionPolicy } : {}) });
   if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
@@ -345,6 +367,8 @@ async function callTool(env, request, principal, id, params) {
   if (!permits(principal, entry.scope)) {
     return failure("insufficient_scope", "The key is not authorized for this Knowledge tool.");
   }
+  const mismatch = await contractPinMismatch(entry.definition, request.headers.get("X-MultiLLM-MCP-Contract"), env.MCP_CONTRACT_DIGESTS_ENABLED);
+  if (mismatch) return rpcError(id, mismatch.code, mismatch.message, mismatch.status);
   const args = params.arguments ?? {};
   if (!isRecord(args)) return rpcError(id, -32602, "Tool arguments must be an object.");
   try {
@@ -392,6 +416,15 @@ async function handleMcp(request, env, principal) {
     return method.startsWith("notifications/") ? new Response(null, { status: 202, headers: noStore })
       : rpcError(null, -32600, "An MCP request requires an id.", 400);
   }
+  if (deferredEnabled(env.DEFERRED_TOOLS_ENABLED)) {
+    const requested = new URL(request.url).searchParams.get("toolsets");
+    const toolsets = requested === null ? null : [...new Set(requested.split(",").map(name => name.trim()).filter(Boolean))];
+    if (toolsets && (!toolsets.length || toolsets.some(name => !catalogue.toolsets.includes(name)))) {
+      return rpcError(id, -32602, `Unknown toolset. Use any of: ${catalogue.toolsets.join(", ")}.`);
+    }
+    const response = await handleDeferredMcp(body, env, principal, catalogue.tools, { toolsets, validate: validateToolArguments });
+    if (response !== null) return response;
+  }
   if (method === "initialize") {
     if (typeof params.protocolVersion !== "string" || !isRecord(params.capabilities ?? {}) || !isRecord(params.clientInfo ?? {})) {
       return rpcError(id, -32602, "Initialize requires a protocolVersion string.");
@@ -408,8 +441,9 @@ async function handleMcp(request, env, principal) {
     if (toolsets && (!toolsets.size || [...toolsets].some(name => !catalogue.toolsets.includes(name)))) {
       return rpcError(id, -32602, `Unknown toolset. Use any of: ${catalogue.toolsets.join(", ")}.`);
     }
-    return rpcResult(id, { tools: catalogue.tools.filter(entry => permits(principal, entry.scope)
-      && (!toolsets || toolsets.has(entry.toolset))).map(entry => entry.definition) });
+    return rpcResult(id, await discoveryContract(catalogue.tools, principal.scopes, {
+      toolsets: toolsets === null ? null : [...toolsets], enabled: digestsEnabled(env.MCP_CONTRACT_DIGESTS_ENABLED),
+    }));
   }
   if (method !== "tools/call") return rpcError(id, -32601, "Method not found.");
   return callTool(env, request, principal, id, params);
@@ -549,6 +583,11 @@ export async function handleKnowledgeEdgeRequest(request, env) {
     // Either Knowledge scope opens MCP, so a key with neither needs the smaller one.
     const scope = route === "mcp" ? "knowledge:read" : route.scope;
     return json({ error: "insufficient_scope", message: `The authenticated key requires the ${scope} scope` }, 403);
+  }
+  if (resolveRetentionPolicy(env).enabled) {
+    principal.retentionPolicy = resolveRetentionPolicy(env, { keyId: principal.id,
+      keyHash: createHash("sha256").update(requestKey(request.headers)).digest("hex"),
+      route: pathname, header: request.headers.get(RETENTION_HEADER) ?? "" });
   }
   try {
     const response = route === "mcp" ? await handleMcp(request, env, principal) : await handleRest(request, env, principal, route);

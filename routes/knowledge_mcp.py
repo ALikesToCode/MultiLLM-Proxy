@@ -13,6 +13,11 @@ from routes import knowledge_management as management
 from routes import knowledge_handoffs as handoffs
 from routes import knowledge_skills as skills
 from services.knowledge_native import NATIVE_OPERATIONS, NATIVE_TOOLS
+from services import mcp_contract_drift as drift
+from services import deferred_tools
+from services.knowledge_client import KnowledgeError
+
+_UNSET = object()
 
 CATALOGUE_PATH = Path(__file__).resolve().parents[1] / "worker" / "knowledge-mcp-catalogue.json"
 # 2025-03-26 is not offered: it requires JSON-RPC batching, which this server does not accept.
@@ -130,3 +135,62 @@ def catalogue():
 
 def catalogue_json():
     return json.dumps(catalogue(), indent=2, ensure_ascii=False) + "\n"
+
+
+def discovery_contract(scopes, toolsets=None, *, enabled=None, entries=None):
+    """Runtime discovery hook: authorization filtering precedes digest metadata."""
+    active = drift.digests_enabled() if enabled is None else enabled
+    return drift.discovery_contract(catalogue()["tools"] if entries is None else entries, scopes, toolsets, enabled=active)
+
+
+def discovery_for_user(user, toolsets=None, *, entries=None):
+    scopes = ["admin"] if user.get("is_admin") else user.get("scopes") or []
+    if deferred_tools.enabled():
+        selected = catalogue()["tools"] if entries is None else entries
+        allowed = deferred_tools.runtime_service().list_tools(selected, user)
+        names = {tool["name"] for tool in allowed}
+        entries = [entry for entry in selected if entry["definition"]["name"] in names]
+    return discovery_contract(scopes, toolsets, entries=entries)
+
+
+def check_contract_pin(tool_name, pin, *, enabled=None, definition=None, user=None, arguments=_UNSET):
+    """Runtime preflight hook; invoke after tool authorization, before dispatch."""
+    if deferred_tools.enabled():
+        if user is None:
+            from flask import g
+            user = g.authenticated_user
+        if arguments is _UNSET:
+            entry = next(entry for entry in catalogue()["tools"] if entry["definition"]["name"] == tool_name)
+            deferred_tools.runtime_service().require_grant(entry, user)
+            raise KnowledgeError("tool_validation_unavailable", "The MCP dispatcher must supply the complete tool arguments.", 503)
+        authorize_deferred_call(user, tool_name, arguments)
+    active = drift.digests_enabled() if enabled is None else enabled
+    if not active or pin is None:
+        return
+    if definition is None:
+        definition = next((entry["definition"] for entry in catalogue()["tools"]
+                           if entry["definition"]["name"] == tool_name), None)
+    if definition is None:
+        raise ValueError("Unknown Knowledge tool.")
+    drift.check_contract_pin(definition, pin, enabled=True)
+
+
+def deferred_discovery(user, params, toolsets=None, *, entries=None):
+    """Explicit discovery hook for the MCP dispatcher, including disabled method semantics."""
+    if not deferred_tools.enabled():
+        raise KnowledgeError(-32601, "Method not found.", 200)
+    selected = catalogue()["tools"] if entries is None else entries
+    if toolsets is not None:
+        selected = [entry for entry in selected if entry["toolset"] in toolsets]
+    return deferred_tools.runtime_service().discover(selected, user, params, digests=drift.digests_enabled())
+
+
+def authorize_deferred_call(user, tool_name, arguments, *, entries=None):
+    """Dispatcher preflight before contract pin checks and the existing operation parser."""
+    if not deferred_tools.enabled():
+        return
+    selected = catalogue()["tools"] if entries is None else entries
+    entry = next((entry for entry in selected if entry["definition"]["name"] == tool_name), None)
+    if entry is None:
+        raise KnowledgeError("unknown_tool", "Unknown Knowledge tool.", 400)
+    deferred_tools.runtime_service().authorize_call(entry, user, arguments)

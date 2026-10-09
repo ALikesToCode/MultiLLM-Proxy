@@ -59,17 +59,14 @@ def _check_bounds(value):
         pending.extend((child, depth + 1) for child in children)
 
 
-def _check_references(schema):
+def iter_schema_nodes(schema):
+    """Visit schema objects, excluding literal values in enum, const and defaults."""
     pending = [schema]
     while pending:
         item = pending.pop()
         if not isinstance(item, dict):
             continue
-        for name in ("$ref", "$dynamicRef", "$recursiveRef"):
-            if name in item and (
-                not isinstance(item[name], str) or not item[name].startswith("#")
-            ):
-                raise ValueError("Only local schema references are supported")
+        yield item
         for key, value in item.items():
             if key in _SCHEMA_MAPS and isinstance(value, dict):
                 pending.extend(value.values())
@@ -79,6 +76,15 @@ def _check_references(schema):
                 pending.extend(value if isinstance(value, list) else [value])
             elif key == "dependencies" and isinstance(value, dict):
                 pending.extend(v for v in value.values() if isinstance(v, dict))
+
+
+def _check_references(schema):
+    for item in iter_schema_nodes(schema):
+        for name in ("$ref", "$dynamicRef", "$recursiveRef"):
+            if name in item and (
+                not isinstance(item[name], str) or not item[name].startswith("#")
+            ):
+                raise ValueError("Only local schema references are supported")
 
 
 def _schema_validator(response_format):
@@ -158,7 +164,8 @@ def _finite_float(value):
     return number
 
 
-def check_json_output(content, response_format):
+def parse_json_output(content):
+    """Parse strict JSON once, rejecting duplicate keys and non-finite numbers."""
     if not isinstance(content, str):
         raise JsonOutputError("invalid_json")
     try:
@@ -170,6 +177,11 @@ def check_json_output(content, response_format):
         )
     except (ValueError, RecursionError) as error:
         raise JsonOutputError("invalid_json") from error
+    return parsed
+
+
+def check_json_output(content, response_format):
+    parsed = parse_json_output(content)
     if response_format["type"] == "json_object" and not isinstance(parsed, dict):
         raise JsonOutputError("schema_mismatch")
     if response_format["type"] == "json_schema":

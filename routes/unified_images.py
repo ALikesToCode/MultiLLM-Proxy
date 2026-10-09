@@ -127,6 +127,7 @@ def dispatch_image_generation_raw(
             proxy_service_cls,
             provider,
             send_request,
+            model=provider_model,
         )
 
         metrics_service_cls.get_instance().track_request(

@@ -53,6 +53,8 @@ from route_helpers import (
     stream_upstream_response,
 )
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
+from services.credential_context import dispatch_context, observation_context, proxy_selection_context
+from services.model_cooldown import settings as cooldown_settings
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.provider_access_policy import provider_route_scope
 from services.reasoning_policy import apply_glm_5_reasoning_policy
@@ -277,10 +279,13 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             else:
                 logger.info("Proxying request for %s", api_provider)
 
+            body = request.get_json(silent=True) if request.is_json and cooldown_settings().enabled else {}
+            credential_scope = proxy_selection_context(api_provider, body, url, config=app.config,
+                path=path, method=request.method, headers=request.headers)
             if api_provider == "googleai":
                 auth_token = auth_service_cls.get_google_token()
             else:
-                auth_token = auth_service_cls.get_api_key(api_provider)
+                auth_token = auth_service_cls.get_api_key(api_provider, **credential_scope)
 
             configured_nanogpt_key = None
             if api_provider == "nanogpt":
@@ -300,6 +305,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                                 api_key,
                                 app.config["NANOGPT_KEY_CHECK_TIMEOUT_SECONDS"],
                             ),
+                            **credential_scope,
                             check_ttl_seconds=app.config[
                                 "NANOGPT_KEY_CHECK_TTL_SECONDS"
                             ],
@@ -477,9 +483,13 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 response = send_to_url(url)
 
             if configured_nanogpt_key:
+                from services.pool_reset_schedule import response_usage_observation
                 NanoGPTKeyPool.record_result(
                     configured_nanogpt_key,
                     response.status_code,
+                    **dispatch_context(api_provider, request_data, url, config=app.config),
+                    **observation_context(response),
+                    **response_usage_observation(response),
                     check_ttl_seconds=app.config[
                         "NANOGPT_KEY_CHECK_TTL_SECONDS"
                     ],
