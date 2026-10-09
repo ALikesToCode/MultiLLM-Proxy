@@ -14,6 +14,7 @@ import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-a
 import { logFailure } from "./log.mjs";
 import { contractPinMismatch, digestsEnabled, discoveryContract } from "./knowledge/contract-drift.mjs";
 import { SYNC_REQUEST_BYTES } from "./knowledge/skills-validation.mjs";
+import { deferredEnabled, handleDeferredMcp, validateToolArguments } from "./knowledge/deferred-tools.mjs";
 import { protectPayload, secretScanMode, SECRET_SCAN_HEADER } from "./secret-firewall.mjs";
 import { RETENTION_HEADER, resolveRetentionPolicy, retentionAllowsContent } from "./retention-policy.mjs";
 
@@ -399,6 +400,15 @@ async function handleMcp(request, env, principal) {
   if (!hasId) {
     return method.startsWith("notifications/") ? new Response(null, { status: 202, headers: noStore })
       : rpcError(null, -32600, "An MCP request requires an id.", 400);
+  }
+  if (deferredEnabled(env.DEFERRED_TOOLS_ENABLED)) {
+    const requested = new URL(request.url).searchParams.get("toolsets");
+    const toolsets = requested === null ? null : [...new Set(requested.split(",").map(name => name.trim()).filter(Boolean))];
+    if (toolsets && (!toolsets.length || toolsets.some(name => !catalogue.toolsets.includes(name)))) {
+      return rpcError(id, -32602, `Unknown toolset. Use any of: ${catalogue.toolsets.join(", ")}.`);
+    }
+    const response = await handleDeferredMcp(body, env, principal, catalogue.tools, { toolsets, validate: validateToolArguments });
+    if (response !== null) return response;
   }
   if (method === "initialize") {
     if (typeof params.protocolVersion !== "string" || !isRecord(params.capabilities ?? {}) || !isRecord(params.clientInfo ?? {})) {
