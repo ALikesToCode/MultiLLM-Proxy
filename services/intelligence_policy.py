@@ -254,8 +254,11 @@ def select_candidates(policy, request, config, *, session_tier=None):
 
     def apply_session_tier(choices):
         if session_tier is not None and not request.explicit:
-            return session_tier.select(choices)
-        return choices
+            choices = session_tier.select(choices)
+        from services.latency_slo import selection_candidates
+        return selection_candidates(choices, route="auto:intelligence",
+                                    output_tokens=request.output_tokens, auto=not request.explicit,
+                                    lane_selected=session_tier is not None)
 
     ranked = sorted(candidates, key=rank)
     if request.explicit or request.profile == "balanced":
