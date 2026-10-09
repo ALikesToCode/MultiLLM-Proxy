@@ -59,7 +59,33 @@ def _route():
     return str(request.url_rule) if request.url_rule else "unmatched"
 
 
-def protect_payload(value, *, provider=None, user=None, knowledge=False):
+def protect_managed_payload(value, *, user=None, route_policy=None):
+    """Scan only when a managed route explicitly opts into this boundary."""
+    from services.prompt_injection_detection import evaluate, record_security_event
+    if user is None and has_request_context():
+        user = getattr(g, "authenticated_user", {})
+    user = user if isinstance(user, dict) else {}
+    key_policy = {"mode": user.get("prompt_injection_mode"),
+                  "threshold": user.get("prompt_injection_threshold")}
+    decision = evaluate(value, policies=(key_policy, route_policy))
+    if decision.action:
+        if has_request_context():
+            g.prompt_injection_action = decision.action
+        record_security_event(decision)
+    if decision.action == "blocked":
+        raise APIError("Prompt injection heuristics exceeded the configured threshold", 422,
+                       {"error": "prompt_injection_suspected"})
+    return value
+
+
+def protect_payload(value, *, provider=None, user=None, knowledge=False, managed=False, injection_policy=None):
+    updated = _protect_credentials(value, provider=provider, user=user, knowledge=knowledge)
+    if managed:
+        protect_managed_payload(value, user=user, route_policy=injection_policy)
+    return updated
+
+
+def _protect_credentials(value, *, provider=None, user=None, knowledge=False):
     mode = scan_mode(user, knowledge=knowledge)
     if mode == "off":
         return value
@@ -170,4 +196,7 @@ def init_secret_firewall(app):
         counts = getattr(g, "secret_scan_counts", None)
         if counts and response.status_code < 400:
             response.headers[HEADER] = f"redacted={counts[0]}; observed={counts[1]}"
+        action = getattr(g, "prompt_injection_action", None)
+        if action:
+            response.headers["X-MultiLLM-Injection-Action"] = action
         return response

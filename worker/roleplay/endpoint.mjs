@@ -92,6 +92,25 @@ export { isRoleplayPath, scopePublicRoleplaySessionId };
 export { handleRoleplayEdgeRequest } from "./edge.mjs";
 const INTERNAL_OUTPUT_MODE_HEADER = "X-MultiLLM-Roleplay-Output-Mode";
 
+async function preparePromptInjection(payload, env) {
+  const mode = env.PROMPT_INJECTION_MODE;
+  if (mode === undefined || mode === null || typeof mode === "string" && ["", "off"].includes(mode.trim().toLowerCase())) return null;
+  // Load the fixed opt-in collaborator only when the operator enables inspection.
+  const { evaluatePromptInjection, recordPromptInjection } = await import("../prompt-injection-detection.mjs");
+  const decision = evaluatePromptInjection(payload, env);
+  await recordPromptInjection(decision);
+  return decision;
+}
+
+function applyPromptInjectionHeader(headers, decision) {
+  if (decision?.action) headers.set("X-MultiLLM-Injection-Action", decision.action);
+}
+
+function injectionResponse(response, decision) {
+  applyPromptInjectionHeader(response.headers, decision);
+  return response;
+}
+
 export class RoleplaySession extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -156,6 +175,7 @@ export class RoleplaySession extends DurableObject {
           trace.phase("preparing");
           trace.metrics({ queueMs });
           const result = await this.handleTurn(turnRequest, settings, queueMs, trace, retention, tierScope);
+          applyPromptInjectionHeader(result.response.headers, tierScope.injection);
           result.response.headers.set("X-Roleplay-Trace-ID", trace.id);
           result.completion = Promise.resolve(result.completion).then(async (completion) => {
             if (completion?.persistenceFailed) await trace.finish(false, "persistence_failed");
@@ -174,21 +194,21 @@ export class RoleplaySession extends DurableObject {
       catch (storageError) { error = storageError; }
       await trace.finish(false, error.code || "turn_failed");
       if (error instanceof RoleplayTurnError || error instanceof SessionTierError) {
-        return errorResponse(error.message, error.status, error.code);
+        return injectionResponse(errorResponse(error.message, error.status, error.code), tierScope.injection);
       }
       if (error instanceof RoleplayRequestError) {
-        return errorResponse(
+        return injectionResponse(errorResponse(
           error.message,
           error.status,
           error.status === 413 ? "request_too_large" : "invalid_request",
-        );
+        ), tierScope.injection);
       }
       logRoleplayError("roleplay_session_turn_failed", error);
-      return errorResponse(
+      return injectionResponse(errorResponse(
         "Roleplay turn could not be completed",
         502,
         "roleplay_unavailable",
-      );
+      ), tierScope.injection);
     }
   }
 
@@ -220,6 +240,13 @@ export class RoleplaySession extends DurableObject {
           request.headers.get(INTERNAL_OUTPUT_MODE_HEADER) === "unlimited",
       },
     );
+    const injection = await preparePromptInjection(payload, this.env);
+    tierScope.injection = injection;
+    if (injection?.action === "blocked") {
+      const response = errorResponse("Prompt injection heuristics exceeded the configured threshold", 422, "prompt_injection_suspected");
+      applyPromptInjectionHeader(response.headers, injection);
+      return { response, completion: Promise.resolve() };
+    }
     parsedInitial.routing = parseRoutingPolicy(payload.routing, { sessionTierEnabled: this.sessionTiers.settings.enabled });
     if (parsedInitial.routing.fallback === "none") {
       settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
@@ -675,6 +702,7 @@ export class RoleplaySession extends DurableObject {
     }
 
     applyScanHeader(responseHeaders);
+    applyPromptInjectionHeader(responseHeaders, injection);
 
     if (
       parsed.stream &&
