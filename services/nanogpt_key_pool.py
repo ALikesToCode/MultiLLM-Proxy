@@ -12,6 +12,7 @@ from typing import ClassVar
 from services.auth_primitives import is_placeholder_credential
 from services.model_cooldown import ModelCooldownExhausted, model_cooldown, settings
 from services import pool_reset_schedule as reset_schedule
+from services import learned_cooldown as learned
 from services.upstream_outcome import UpstreamOutcome, classify_upstream_outcome
 
 _DIRECT_KEY_NAMES = ("NANOGPT_API_KEY", "NANO_GPT_KEY")
@@ -385,12 +386,18 @@ class NanoGPTKeyPool:
                 if cls._active_key == key:
                     cls._active_requests += 1
             return
+        delay = learned.adjust_cooldown(
+            cls._model_cooldown_provider, key, outcome or classify_upstream_outcome(status),
+            model=model, quota_bucket=quota_bucket, now=now,
+            current_seconds=rejected_cooldown_seconds,
+            retry_after_seconds=retry_after_seconds,
+        )
         if is_nanogpt_credential_rejection(status):
             cls.invalidate(
                 key,
                 status,
                 check_ttl_seconds=check_ttl_seconds,
-                rejected_cooldown_seconds=rejected_cooldown_seconds,
+                rejected_cooldown_seconds=delay,
                 now=now,
             )
             return
