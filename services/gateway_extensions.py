@@ -7,7 +7,7 @@ from services.config_revision_sync import configure_sync, load_settings, support
 from services.provider_catalog_refresh import refresh_provider_catalog_revision
 
 AUTHENTICATED_HOOK_ORDER = (
-    "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
+    "tenant_context_hook", "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
     "responses_state_hook", "context_canary_request_hook", "generation_deadline_hook",
     "latency_slo_request_hook", "idempotency_request_hook", "admit",
 )
@@ -33,12 +33,27 @@ def after_authentication():
     if getattr(g, "gateway_authenticated_hooks_ran", False):
         return None
     g.gateway_authenticated_hooks_ran = True
+    from services.tenant_hierarchy import current_tenant, enabled, tenant_context_hook
+    # Preserve the default registrar list while resolving legacy identity on every request.
+    if not enabled():
+        g.tenant_context = current_tenant()
+    elif not any(hook.__name__ == "tenant_context_hook" for hook in current_app.extensions.get("gateway_after_authentication", ())):
+        refused = tenant_context_hook()
+        if refused is not None:
+            return refused
     for hook in current_app.extensions.get("gateway_after_authentication", ()):
         refused = hook()
         if refused is not None:
             g.pop("context_canary_scope", None)
             return refused
     return None
+
+
+def register_tenants(app):
+    from services.tenant_hierarchy import TenantError, enabled, error_response, tenant_context_hook
+    app.register_error_handler(TenantError, error_response)
+    if enabled():
+        register_authenticated_hook(app, tenant_context_hook)
 
 
 def register_retention(app):
@@ -95,7 +110,7 @@ def gateway_callbacks(*, csrf=None):
     from middleware.rate_limit_headers import register_rate_limit_headers
     from services.context_canary_hook import register_context_canary
     from services.pii_redaction import register_pii_redaction
-    return (register_retention, register_injection_decision, register_batch_spillover, register_pii_redaction,
+    return (register_tenants, register_retention, register_injection_decision, register_batch_spillover, register_pii_redaction,
             partial(register_hosted_responses, csrf=csrf), register_context_canary,
             register_deadline, register_latency_slo, register_managed_idempotency,
             register_admission, register_cooldown_errors, register_rate_limit_headers)

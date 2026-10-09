@@ -943,6 +943,8 @@ class AuthService:
 
     @classmethod
     def _update_key_usage(cls, username: str, remote_addr: Optional[str] = None) -> None:
+        from services.tenant_hierarchy import verify_before_key_usage
+        verify_before_key_usage(username)
         user = cls._users.get(username)
         if not user:
             return
@@ -1003,6 +1005,8 @@ class AuthService:
             and admin_api_key
             and hmac.compare_digest(api_key, admin_api_key)
         ):
+            from services.tenant_hierarchy import verify_before_key_usage
+            verify_before_key_usage(default_username)
             return cls._verify_bootstrap_admin(default_username, api_key, remote_addr)
 
         if api_key.startswith(KEY_NAMESPACE):

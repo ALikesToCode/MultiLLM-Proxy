@@ -8,6 +8,7 @@
 import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import catalogue from "./knowledge-mcp-catalogue.json" with { type: "json" };
+import { organisationsEnabled, resolveAccountTenant, TenantError } from "./tenants-d1.mjs";
 import { authStorageBackend } from "./container-env.mjs";
 import { activeUsersByPrefix, adminUsernames, grantsAdmin, keyControlsPermit, validUser } from "./control-users-d1.mjs";
 import { INTEGRATION_SCOPES, lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
@@ -158,6 +159,19 @@ function accountScopes(user, env) {
   return user.scopes.split(",").map(scope => scope.trim()).filter(scope => KNOWLEDGE_SCOPES.includes(scope));
 }
 
+async function tenantPrincipal(env, principal) {
+  if (!organisationsEnabled(env)) return { principal };
+  try {
+    Object.defineProperty(principal, "tenant_context", {
+      value: await resolveAccountTenant(env.INTELLIGENCE_DB, principal.id, env), enumerable: false,
+    });
+    return { principal };
+  } catch (error) {
+    if (error instanceof TenantError) throw new KnowledgeEdgeError(error.code, error.message, error.status);
+    throw error;
+  }
+}
+
 // Dashboard accounts in D1 use the Container's key prefix and Werkzeug hashes.
 async function accountPrincipal(env, key, clientAddress) {
   if (key.length > MAX_KEY_LENGTH) return { denied: true };
@@ -174,7 +188,7 @@ async function accountPrincipal(env, key, clientAddress) {
   // An expired key, or one used outside its address ranges, is never served here; the
   // Container refuses it with key_expired or ip_not_allowed.
   if (index >= 0 && !keyControlsPermit(verifiable[index], clientAddress)) return null;
-  if (index >= 0) return { principal: { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env), secret_scan_mode: verifiable[index].secret_scan_mode } };
+  if (index >= 0) return tenantPrincipal(env, { id: verifiable[index].username, scopes: accountScopes(verifiable[index], env), secret_scan_mode: verifiable[index].secret_scan_mode });
   // A hash format the edge cannot check is left to the Container.
   return verifiable.length < users.length ? null : { denied: true };
 }
@@ -188,7 +202,7 @@ async function resolvePrincipal(request, env) {
   if (!key) return null;
   if (env.ADMIN_API_KEY && sameSecret(key, env.ADMIN_API_KEY)) {
     const id = adminUsername(env);
-    return id ? { principal: { id, scopes: [...KNOWLEDGE_SCOPES] } } : null;
+    return id ? tenantPrincipal(env, { id, scopes: [...KNOWLEDGE_SCOPES] }) : null;
   }
   if (!env.INTELLIGENCE_DB) return null;
   if (!key.startsWith(KEY_NAMESPACE)) {
@@ -205,7 +219,7 @@ async function resolvePrincipal(request, env) {
   if (record === null) return { denied: true };
   if (!validRecord(record, prefix)) return null;
   if (record.revokedAt !== null || await matchingHash(key, [record.keyHash], prefix) < 0) return { denied: true };
-  return { principal: { id: record.id, scopes: record.scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope)) } };
+  return tenantPrincipal(env, { id: record.id, scopes: record.scopes.filter(scope => KNOWLEDGE_SCOPES.includes(scope)) });
 }
 
 const permits = (principal, scope) => principal.scopes.includes(scope);
