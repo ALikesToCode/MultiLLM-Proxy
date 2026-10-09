@@ -2,6 +2,7 @@
 import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import { activeUsersByPrefix, boundedBody, keyControlsPermit, validUser } from "./control-users-d1.mjs";
+import { organisationsEnabled, resolveAccountTenant, TenantError } from "./tenants-d1.mjs";
 import { lookupIntegrationPrincipal } from "./intelligence-auth-d1.mjs";
 import { authStorageBackend } from "./container-env.mjs";
 import { acquireAdmission, admissionSettings, principalHash } from "./admission-do.mjs";
@@ -92,10 +93,22 @@ function integration(row) {
   return { owner: row.id, scopes: row.scopes, revoked_at: row.revokedAt,
     credential_kind: "integration", credential_fingerprint: digest(row.keyHash) };
 }
+async function tenantPrincipal(env, principal) {
+  if (!organisationsEnabled(env)) return principal;
+  try {
+    Object.defineProperty(principal, "tenant_context", {
+      value: await resolveAccountTenant(env.INTELLIGENCE_DB, principal.owner, env), enumerable: false,
+    });
+    return principal;
+  } catch (error) {
+    if (error instanceof TenantError) throw new RealtimeError(error.code, error.status);
+    throw error;
+  }
+}
 async function authenticate(request, env, model, now) {
   const key = bearer(request);
   if (!key || key.length > 1024) throw new RealtimeError("invalid_api_key", 401);
-  if (key.startsWith("rt1.")) return consumeTicket(key, request, env, model, now);
+  if (key.startsWith("rt1.")) return tenantPrincipal(env, await consumeTicket(key, request, env, model, now));
   let principal;
   if (same(key, env.ADMIN_API_KEY)) principal = bootstrap(env);
   else if (/^mllm_intelligence_[A-Za-z0-9_-]{32,128}$/.test(key)) {
@@ -109,6 +122,7 @@ async function authenticate(request, env, model, now) {
       if (await checkHash(key, row.api_key_hash)) { principal = account(row); break; } }
   }
   if (!principal) throw new RealtimeError("invalid_api_key", 401);
+  await tenantPrincipal(env, principal);
   principal.principal_hash = await principalHash(`realtime-key:${digest(key)}`);
   return permit(principal, request, model, now);
 }
