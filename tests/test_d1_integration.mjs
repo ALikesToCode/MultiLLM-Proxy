@@ -24,7 +24,8 @@ const bundled = await build({ stdin: { resolveDir: process.cwd(), sourcefile: "p
 
 async function privateStore(t, skip = []) {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: bundled.outputFiles[0].text,
-    compatibilityDate: "2026-07-30", host: "127.0.0.1", port: 0, d1Databases: ["INTELLIGENCE_DB"] }));
+    compatibilityDate: "2026-07-30", compatibilityFlags: ["nodejs_compat"], host: "127.0.0.1", port: 0,
+    d1Databases: ["INTELLIGENCE_DB"] }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("INTELLIGENCE_DB");
   await applyMigrations(db, { skip });
@@ -70,10 +71,11 @@ test("key controls and the usage ledger persist through the Worker in D1", async
 });
 
 test("a D1 without the account migration fails closed for dashboard keys but not for the environment admin", async t => {
-  // 0007, 0011 and 0013 alter control_users, so they are skipped with the migration that creates the table;
+  // 0007, 0011, 0013 and 0030 alter control_users, so they are skipped with the migration that creates the table;
   // 0016 alters 0007's usage_events.
   const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql",
-    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0016_usage_buckets.sql"]);
+    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0016_usage_buckets.sql",
+    "0030_stream_cost_caps.sql"]);
   assert.deepEqual(await drive(url, "unmigrated"), { dashboard_key: 503, admin: "admin",
     route: ["gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5"], save_route: 503 });
 });

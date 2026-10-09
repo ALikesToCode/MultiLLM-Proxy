@@ -21,6 +21,8 @@ from urllib.parse import unquote
 
 import requests
 
+from services.observability_adapters import OBSERVABILITY_EXPORTER
+
 logger = logging.getLogger(__name__)
 
 MAX_QUEUE = 2048
@@ -91,6 +93,10 @@ class TelemetryExporter:
         self.stats = {"exported": 0, "dropped": 0, "failed_exports": 0}
 
     def submit(self, record: dict) -> bool:
+        try:
+            OBSERVABILITY_EXPORTER.submit(record, origin="flask")
+        except Exception:
+            logger.warning("Observability submission failed")
         if not configured():
             return False
         with self._lock:

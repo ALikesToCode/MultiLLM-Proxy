@@ -9,6 +9,7 @@ from error_handlers import APIError
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from providers.registry import get_registry
 from services import cloudflare_ai
+from services import canary_traffic
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.media_catalog import (
     TRANSPORT_FAILURE_HEADER,
@@ -129,6 +130,7 @@ def _decorate_response(
     route_decision: str | None = None,
     ordering: str = "priority",
     failures: list[tuple[str, str]] | None = None,
+    canary: canary_traffic.CanaryAssignment | None = None,
 ) -> Response:
     selected_provider, _ = ModelRegistry.parse_model_id(selected_model)
     if route_decision is None:
@@ -147,6 +149,8 @@ def _decorate_response(
         g.multillm_provider = selected_provider
         g.multillm_model = selected_model
         g.multillm_route_decision = route_decision
+    if canary is not None:
+        canary.decorate(response)
     return response
 
 
@@ -172,8 +176,21 @@ def dispatch_auto_route(
             status_code=404,
         )
 
-    order = RouteHealth.order(route.id, route.candidates, circuit_state=_circuit_state)
+    canary = canary_traffic.prepare_request(route, payload)
+    candidates = canary.dispatch_order if canary is not None else route.candidates
+    order = RouteHealth.order(route.id, candidates, circuit_state=_circuit_state)
+    if canary is not None:
+        canary.observe(order.candidates)
     priorities = {candidate: index for index, candidate in enumerate(route.candidates)}
+    if fail_over is chat_fail_over:
+        from services.hedged_requests import dispatch_hedged_auto
+        hedged = dispatch_hedged_auto(payload, route.id, order.candidates,
+            validate=validate_candidate, dispatch=dispatch_candidate,
+            decision=lambda position: _route_decision(priorities[order.candidates[position]], position))
+        if hedged is not None:
+            return _decorate_response(hedged.response, route, hedged.model, priorities[hedged.model],
+                hedged.attempts, route_decision=_route_decision(priorities[hedged.model], hedged.position),
+                ordering=order.mode, failures=hedged.failures, canary=canary)
     attempts = 0
     failures: list[tuple[str, str]] = []
     last_failure: Response | None = None
@@ -195,6 +212,9 @@ def dispatch_auto_route(
                 type(error).__name__,
             )
             failures.append((candidate, "skipped"))
+            if canary is not None:
+                g.multillm_canary["eligible_order"] = [model for model in g.multillm_canary["eligible_order"]
+                                                      if model != candidate]
             continue
 
         attempts += 1
@@ -260,6 +280,7 @@ def dispatch_auto_route(
                 route_decision=route_decision,
                 ordering=order.mode,
                 failures=failures,
+                canary=canary,
             )
 
         logger.info("Auto route %s moves past %s (%s)", route.id, candidate, reason)
@@ -281,6 +302,7 @@ def dispatch_auto_route(
             route_decision=last_decision,
             ordering=order.mode,
             failures=[failure for failure in failures if failure[0] != last_model],
+            canary=canary,
         )
     raise APIError(
         f"No configured provider is available for auto route: {route.id}",
@@ -428,6 +450,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
                 "candidates": candidates,
                 "updated_at": route.updated_at,
                 "ordering": settings.mode_for(route.id),
+                **({"canary": route.canary.as_dict()} if route.canary.enabled else {}),
             }
         )
     return {
@@ -454,6 +477,9 @@ def register_auto_route_admin_routes(
     auth_service_cls,
     proxy_service_cls,
 ) -> None:
+    # Preserve cohort visibility when existing policy guards raise an API error.
+    app.after_request(canary_traffic.decorate_current_response)
+
     @app.route("/admin/auto-routes", methods=["GET", "PUT"])
     @login_required
     def admin_auto_routes():
@@ -467,10 +493,16 @@ def register_auto_route_admin_routes(
                     status_code=400,
                 )
             try:
+                canary_options = {"canary": payload["canary"]} if "canary" in payload else {}
+                if "expected_updated_at" in payload:
+                    canary_options["expected_updated_at"] = payload["expected_updated_at"]
+                if "current_revision" in payload:
+                    canary_options["current_revision"] = payload["current_revision"]
                 AutoRouteService.save_route(
                     payload.get("route_id"),
                     payload.get("candidates"),
                     app.config["API_BASE_URLS"],
+                    **canary_options,
                 )
             except ValueError as error:
                 raise APIError(str(error), status_code=400) from error

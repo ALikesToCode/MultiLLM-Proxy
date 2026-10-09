@@ -1,18 +1,20 @@
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 from providers.registry import get_registry
-from services import auto_route_d1, config_revision_sync
+from error_handlers import APIError
+from services import auto_route_d1, canary_traffic, config_revision_sync
 from services.model_registry import ModelRegistry
 from services.sqlite_store import connect, storage_path
 
 
 AUTO_ROUTE_PREFIX = "auto:"
 MAX_AUTO_ROUTE_CANDIDATES = 16
+_CANARY_UNSET = object()
 # Media routes follow the Artificial Analysis image arena (Sep 2026): GPT Image 2.5
 # Sunburst and Flare lead, then GPT Image 2 and Grok Imagine Image 2.0. GGUU serves
 # them first at a flat ¥0.04 per image (1K to 4K); OpenAI charges about $0.21 at max.
@@ -232,6 +234,7 @@ class AutoRoute:
     id: str
     candidates: tuple[str, ...]
     updated_at: str
+    canary: canary_traffic.CanaryConfig = field(default_factory=canary_traffic.CanaryConfig)
 
 
 class AutoRouteService:
@@ -383,7 +386,7 @@ class AutoRouteService:
         return tuple(normalized)
 
     @classmethod
-    def _rows_to_routes(cls, rows: Iterable[sqlite3.Row]) -> list[AutoRoute]:
+    def _rows_to_routes(cls, rows: Iterable[sqlite3.Row], configurations=None) -> list[AutoRoute]:
         candidates_by_route: dict[str, list[str]] = {}
         updated_at_by_route: dict[str, str] = {}
         for row in rows:
@@ -397,6 +400,8 @@ class AutoRouteService:
                 id=route_id,
                 candidates=tuple(candidates),
                 updated_at=updated_at_by_route[route_id],
+                canary=canary_traffic.stored_config(configurations or {}, route_id,
+                    updated_at_by_route[route_id], candidates),
             )
             for route_id, candidates in candidates_by_route.items()
         ]
@@ -408,11 +413,13 @@ class AutoRouteService:
         if stored is None:
             stored = auto_route_d1.stored_routes()
         routes = {route_id: AutoRoute(route_id, candidates, "") for route_id, candidates in DEFAULT_AUTO_ROUTES.items()}
+        configurations = canary_traffic.durable_configurations()
         for route_id, (candidates, updated_at) in stored.items():
             # A route still holding a retired default follows the current default.
             if candidates in LEGACY_DEFAULT_AUTO_ROUTES.get(route_id, ()):
                 candidates = DEFAULT_AUTO_ROUTES[route_id]
-            routes[route_id] = AutoRoute(route_id, candidates, updated_at)
+            routes[route_id] = AutoRoute(route_id, candidates, updated_at,
+                canary_traffic.stored_config(configurations, route_id, updated_at, candidates))
         return [routes[route_id] for route_id in sorted(routes)]
 
     @classmethod
@@ -431,7 +438,8 @@ class AutoRouteService:
                 ORDER BY routes.route_id, candidates.priority
                 """
             ).fetchall()
-        return cls._rows_to_routes(rows)
+            configurations = canary_traffic.local_configurations(connection)
+        return cls._rows_to_routes(rows, configurations)
 
     @classmethod
     def get_route(cls, route_id: object) -> AutoRoute | None:
@@ -452,8 +460,29 @@ class AutoRouteService:
                 """,
                 (normalized,),
             ).fetchall()
-        routes = cls._rows_to_routes(rows)
+            configurations = canary_traffic.local_configurations(connection)
+        routes = cls._rows_to_routes(rows, configurations)
         return routes[0] if routes else None
+
+    @classmethod
+    def read_candidates(cls, route_id: object) -> tuple[str, ...]:
+        """Admission reads never seed routes or migrate an operator's stored order."""
+        normalized = cls.normalize_route_id(route_id)
+        if auto_route_d1.using_d1():
+            route = next((item for item in cls._durable_routes() if item.id == normalized), None)
+            return route.candidates if route is not None else ()
+        path = storage_path("MODEL_REGISTRY_DB_PATH", "model_registry.sqlite3")
+        if not path.is_file():
+            return DEFAULT_AUTO_ROUTES.get(normalized, ())
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                "SELECT model_id FROM auto_route_candidates WHERE route_id = ? ORDER BY priority",
+                (normalized,),
+            ).fetchall()
+        candidates = tuple(row[0] for row in rows)
+        if candidates in LEGACY_DEFAULT_AUTO_ROUTES.get(normalized, ()):
+            return DEFAULT_AUTO_ROUTES[normalized]
+        return candidates or DEFAULT_AUTO_ROUTES.get(normalized, ())
 
     @classmethod
     def save_route(
@@ -461,18 +490,44 @@ class AutoRouteService:
         route_id: object,
         candidates: object,
         base_urls: Mapping[str, str],
+        *,
+        canary: object = _CANARY_UNSET,
+        expected_updated_at: str | None = None,
+        current_revision: int | None = None,
     ) -> AutoRoute:
         normalized_route_id = cls.normalize_route_id(route_id)
         normalized_candidates = cls.normalize_candidates(candidates, base_urls)
+        policy = canary_traffic.normalize_config({} if canary is _CANARY_UNSET else canary, normalized_candidates)
+        if expected_updated_at is not None and not isinstance(expected_updated_at, str):
+            raise ValueError("Expected route timestamp must be a string")
+        if current_revision is not None and (type(current_revision) is not int or not 0 <= current_revision < 9007199254740991):
+            raise ValueError("Current route revision must be a non-negative safe integer")
         updated_at = _utcnow_iso()
         if auto_route_d1.using_d1():
+            if expected_updated_at is not None:
+                raise ValueError("Durable route saves require current_revision instead of a local timestamp")
+            if canary is not _CANARY_UNSET or current_revision is not None:
+                result = canary_traffic.durable_request("canary_put", route_id=normalized_route_id,
+                    candidates=list(normalized_candidates), updated_at=updated_at, canary=policy.as_dict(),
+                    current_revision=current_revision)
+                if result.get("stored") is not True:
+                    raise APIError("Canary route storage did not confirm the save", 503)
+                auto_route_d1.reset_cache()
+                return AutoRoute(normalized_route_id, normalized_candidates, updated_at, policy)
             auto_route_d1.save_route(normalized_route_id, normalized_candidates, updated_at)
             return AutoRoute(id=normalized_route_id, candidates=normalized_candidates, updated_at=updated_at)
 
+        if current_revision is not None:
+            raise ValueError("Local route saves require expected_updated_at instead of a durable revision")
         with closing(cls._connect()) as connection:
             cls._ensure_storage(connection)
             connection.commit()
             connection.execute("BEGIN IMMEDIATE")
+            if expected_updated_at is not None:
+                previous = connection.execute("SELECT updated_at FROM auto_routes WHERE route_id = ?",
+                                              (normalized_route_id,)).fetchone()
+                if previous is None or previous["updated_at"] != expected_updated_at:
+                    raise APIError("Auto route revision changed; reload before saving", 409)
             connection.execute(
                 """
                 INSERT INTO auto_routes (route_id, updated_at)
@@ -495,10 +550,13 @@ class AutoRouteService:
                     for priority, model_id in enumerate(normalized_candidates)
                 ],
             )
+            if canary is not _CANARY_UNSET:
+                canary_traffic.save_local_configuration(connection, normalized_route_id, updated_at, policy)
             connection.commit()
 
         return AutoRoute(
             id=normalized_route_id,
             candidates=normalized_candidates,
             updated_at=updated_at,
+            canary=policy,
         )

@@ -5,9 +5,12 @@
  * Container's private outbound handler at /v1/state/<domain>. Fixed statements, no
  * client SQL.
  */
+import { handleLearnedCooldown, learnedCooldownEnabled } from "./learned-cooldown-d1.mjs";
 import { handleAlertState, alertSettings } from "./alert-delivery.mjs";
 import { handleGenerationCache, MAX_RPC_BYTES } from "./generation-cache-d1.mjs";
 import { generationCacheSettings } from "./exact-generation-cache.mjs";
+import { semanticCacheSettings } from "./semantic-generation-cache.mjs";
+import { handleSemanticCache } from "./semantic-cache-d1.mjs";
 import { boundedBody } from "./control-users-d1.mjs";
 import { logFailure } from "./log.mjs";
 import { handlePromptTemplates, promptTemplatesEnabled } from "./prompt-templates-d1.mjs";
@@ -270,8 +273,10 @@ async function catalog(db, body, env) {
 }
 
 const DOMAINS = Object.freeze({
+  "learned-cooldown": { handle: handleLearnedCooldown, maxBytes: 4096, operations: ["get", "put"] },
   alerts: { handle: (db, body, env) => handleAlertState(env, body), maxBytes: 8192, operations: ["get", "configure", "observe"] },
   "generation-cache": { handle: handleGenerationCache, maxBytes: MAX_RPC_BYTES, operations: ["get", "put", "prune"] },
+  "semantic-cache": { handle: handleSemanticCache, maxBytes: 2 * 1024 * 1024, operations: ["ready", "scan", "body", "put"] },
   "prompt-templates": { handle: handlePromptTemplates, maxBytes: 524288, operations: ["create", "get", "list"] },
   limits: { handle: limits, maxBytes: 16384, operations: ["sync"] },
   login: { handle: login, maxBytes: 4096, operations: ["check", "failure", "success"] },
@@ -287,8 +292,10 @@ export async function handleControlStateRequest(request, env) {
   const domain = Object.hasOwn(DOMAINS, name) ? DOMAINS[name] : null;
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || !domain
     || url.search || url.hash || url.username || url.password) return reply({ error: "not_found" }, 404);
+  if (name === "learned-cooldown" && !learnedCooldownEnabled(env)) return reply({ error: "not_found" }, 404);
   if (name === "alerts" && !alertSettings(env).enabled) return reply({ error: "not_found" }, 404);
   if (name === "generation-cache" && !generationCacheSettings(env).enabled) return reply({ error: "not_found" }, 404);
+  if (name === "semantic-cache" && !semanticCacheSettings(env).enabled) return reply({ error: "not_found" }, 404);
   if (name === "prompt-templates" && !promptTemplatesEnabled(env)) return reply({ error: "not_found" }, 404);
   if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
     return reply({ error: "invalid_request" }, 400);

@@ -72,6 +72,15 @@ def verify_file_link(file_id: str, expires: object, signature: object, now: floa
 def issue_principal(kind: str, subject: str, owner: str, ttl: int) -> str:
     """A capability for one job, carrying the owner's identity instead of their key."""
     claims = {"k": kind, "s": subject, "o": owner, "e": int(time.time()) + ttl}
+    from flask import g, has_request_context
+    from services.tenant_hierarchy import enabled, principal_id
+    if enabled():
+        context = getattr(g, "tenant_context", None) if has_request_context() else None
+        if context is None or context.principal_id != principal_id(owner):
+            raise APIError("The verified job workspace is unavailable", 503,
+                           payload={"error": "tenant_storage_unavailable"})
+        claims["tenant"] = {name: getattr(context, name) for name in
+                           ("principal_id", "org_id", "team_id", "grants_revision")}
     payload = _b64url(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     return f"{payload}.{_b64url(_mac('principal', payload))}"
 
@@ -91,6 +100,24 @@ def read_principal(token: object, kind: str) -> dict:
             or not isinstance(claims.get("s"), str) or not isinstance(claims.get("e"), int) or claims["e"] < time.time()):
         raise refused
     return claims
+
+
+def bind_principal_tenant(claims: dict, user: dict):
+    """Bind a signed submission workspace without resolving today's binding."""
+    from flask import g
+    from services.enterprise_contract import TenantContext
+    from services.tenant_hierarchy import enabled, principal_id
+    if not enabled():
+        return None
+    try:
+        context = TenantContext(**claims["tenant"])
+        if context.principal_id != principal_id(user.get("username") or user.get("id") or ""):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise APIError("The verified job workspace is unavailable", 503,
+                       payload={"error": "tenant_storage_unavailable"}) from None
+    g.verified_tenant = g.tenant_context = context
+    return context
 
 
 def webhook_secret_bytes(owner: str) -> bytes:

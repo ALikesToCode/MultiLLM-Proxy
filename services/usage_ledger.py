@@ -20,7 +20,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
-from services import usage_store
+from services import usage_store, usage_receipts
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,7 @@ class UsageLedger:
                 self._stats["recorded"] += len(batch["rows"])
                 self._stats["last_flush_at"] = utc_timestamp()
             self._notify(0, batch["rows"])
+            usage_receipts.record_flushed_usage(batch["id"], batch["rows"])
             return len(batch["rows"])
 
     def flush(self, timeout: float = 5.0) -> bool:

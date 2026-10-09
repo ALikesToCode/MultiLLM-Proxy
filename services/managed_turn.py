@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
@@ -28,6 +29,11 @@ class ManagedTurn:
     tier_metadata: dict | None = None
     finalizers: list = field(default_factory=list)
     submitted: bool = False
+    canary: object = None
+    canary_finalized: bool = False
+    paging: object = None
+    pages: list = field(default_factory=list)
+    paged_candidates: dict = field(default_factory=dict)
 
 
 _turn: ContextVar[ManagedTurn | None] = ContextVar(
@@ -115,6 +121,9 @@ def contract_payload(payload):
     from services import output_schema_validation
 
     hidden = set()
+    from services.context_pages import paging_enabled
+    if paging_enabled():
+        hidden.add("capabilities")
     if output_schema_validation.enabled(current_app.config):
         hidden.add(output_schema_validation.OPTION)
     if protocol_extras.enabled():
@@ -127,16 +136,19 @@ def contract_payload(payload):
 def _prepare(payload, source):
     turn = current_turn()
     cleaned = payload
+    from services.context_pages import prepare_managed_paging, page_managed_candidate
+    if turn is not None and turn.paging is None:
+        cleaned, turn.paging = prepare_managed_paging(payload)
     tier_enabled = session_tiers.settings().enabled
     if protocol_extras.enabled() and (turn is None or turn.carrier is None):
         # Gateway metadata is not part of the protocol carrier. Validate extras
         # before preparing a session lane or copying a provider request.
         metadata = {
             key: value
-            for key, value in payload.items()
+            for key, value in cleaned.items()
             if key == "routing" or tier_enabled and key == "session_tier"
         }
-        body = {key: value for key, value in payload.items() if key not in metadata}
+        body = {key: value for key, value in cleaned.items() if key not in metadata}
         carrier = protocol_extras.request_to_ir(body, source)
         from routes.unified_bridge import record_conversion
 
@@ -147,6 +159,7 @@ def _prepare(payload, source):
         }
         if turn is not None:
             turn.carrier = carrier
+    cleaned = page_managed_candidate(cleaned, source)
     if tier_enabled and "session_tier" in cleaned:
         if turn is not None:
             turn.tier_metadata = cleaned["session_tier"]
@@ -227,6 +240,99 @@ def before_provider_submission():
         turn.submitted = True
 
 
+def prepare_dispatch_kwargs(kwargs, protocol=CHAT, *, turn=None, scope=None):
+    """Annotate only serialized provider bytes after the submission guard."""
+    turn = turn or current_turn()
+    if scope is None and has_request_context():
+        scope = getattr(g, "context_canary_scope", None)
+    if turn is None or scope is None:
+        return kwargs
+    from services.context_canary import ContextCanaryError, prepare_request
+    try:
+        payload = json.loads(kwargs["data"])
+        prepared = prepare_request(payload, os.environ, route=scope["route"],
+                                   key_scope=scope["key_scope"], protocol=protocol)
+        if prepared.context is None:
+            raise ContextCanaryError()
+    except (ValueError, TypeError, KeyError, UnicodeError) as error:
+        from error_handlers import APIError
+        raise APIError("Managed request inspection could not be prepared.", 502,
+                       {"error": "context_canary_scan_failed"}) from error
+    if turn.canary is not None:
+        turn.canary.close()
+    turn.canary = prepared.context
+    turn.canary_finalized = False
+    def abandoned(complete):
+        if not turn.canary_finalized:
+            prepared.context.close()
+    turn.finalizers.append(abandoned)
+    return {**kwargs, "data": json.dumps(prepared.payload, ensure_ascii=False).encode("utf-8")}
+
+
+class _CanaryProviderResponse:
+    """Expose scanned bytes to the intelligence exchange before its own settlement."""
+
+    def __init__(self, response, upstream):
+        from requests.structures import CaseInsensitiveDict
+        self.status_code = response.status_code
+        self.headers = CaseInsensitiveDict(response.headers)
+        self.response, self.upstream = response, upstream
+        self.raw = None
+
+    def iter_content(self, **kwargs):
+        yield from self.response.response
+
+    def close(self):
+        self.response.close()
+        self.upstream.close()
+
+
+def canary_intelligence_proxy(proxy):
+    """Capture opt-in state for the intelligence transport's detached send thread."""
+    scope = getattr(g, "context_canary_scope", None)
+    turn = current_turn()
+    if scope is None or turn is None:
+        return proxy
+    accounting = getattr(g, "usage_context", None)
+
+    class CanaryProxy:
+        def __getattr__(self, name):
+            return getattr(proxy, name)
+
+        def make_request(self, **kwargs):
+            from services.context_canary import finalize_response
+            from services.request_cancellation import bind_cancellation
+            from services.upstream_transport import iter_stream_content
+
+            kwargs = prepare_dispatch_kwargs(kwargs, turn=turn, scope=scope)
+            upstream = proxy.make_request(**kwargs)
+            owner = bind_cancellation(upstream)
+            response = Response(iter_stream_content(upstream), status=upstream.status_code,
+                                headers=dict(upstream.headers))
+            turn.canary_finalized = True
+            scanned = finalize_response(response, turn.canary, cancel=owner.cancel, accounting=accounting)
+            return _CanaryProviderResponse(scanned, upstream)
+
+    return CanaryProxy()
+
+
+def finalize_canary_response(turn, response):
+    """Capture request owners before response iterators leave the request thread."""
+    if turn is None or turn.canary is None or turn.canary_finalized:
+        return response
+    from services.context_canary import finalize_response
+    turn.canary_finalized = True
+    owner = getattr(g, "gateway_cancellation", None)
+    accounting = getattr(g, "usage_context", None)
+
+    def cancel():
+        if owner is not None and not owner.lost:
+            owner.cancel()
+
+    return finalize_response(response, turn.canary, cancel=cancel, accounting=accounting,
+                             protocol=turn.source)
+
+
 def capture_submission_guard():
     """Capture request ownership for transport threads and lazy generation."""
     deadline = current_deadline()
@@ -240,8 +346,12 @@ def capture_submission_guard():
             raise GatewayError("cancelled", "The caller cancelled the request.", 499)
         if context is not None:
             from services.budget_service import BudgetService
+            from services import credits_admission
 
-            BudgetService.mark_dispatched(context.reservation)
+            BudgetService.mark_dispatched(context.reservation,
+                **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
+            credits_admission.mark_dispatched(context.credit_hold)
+            context.dispatched = True
 
     return deadline, submit
 
@@ -322,6 +432,7 @@ def _eligible_intelligence_candidates(candidates, transport, user):
 
 
 def _finish_turn(turn, response):
+    response = finalize_canary_response(turn, response)
     complete = (
         completed_response(response)
         if response.mimetype != "text/event-stream"
@@ -331,7 +442,8 @@ def _finish_turn(turn, response):
     finalizers, turn.finalizers = turn.finalizers, []
     for finish in finalizers:
         finish(complete)
-    return response
+    from services.context_pages import expose_managed_pages
+    return expose_managed_pages(response, turn, complete=complete)
 
 
 def managed_pipeline(dispatch):
@@ -341,13 +453,20 @@ def managed_pipeline(dispatch):
     @wraps(dispatch)
     def prepared(app, auth, metrics, proxy, payload, *args, **kwargs):
         source = current_turn().source
+        from services.context_pages import ContextPageError
         try:
             payload = _prepare(payload, source)
+        except ContextPageError as error:
+            from error_handlers import APIError
+            raise APIError("Context paging could not be completed.", error.status, {"error": error.code}) from error
         except TranslationError as error:
             from routes.protocol_bridge import translation_api_error
 
             raise translation_api_error(error) from error
-        return dispatch(app, auth, metrics, proxy, payload, *args, **kwargs)
+        response = dispatch(app, auth, metrics, proxy, payload, *args, **kwargs)
+        if getattr(g, "context_canary_scope", None) is not None:
+            response = finalize_canary_response(current_turn(), app.make_response(response))
+        return response
 
     validated = with_managed_output_validation(prepared)
 
@@ -469,10 +588,19 @@ def bounded_managed_timeout(timeout):
 
 
 def cache_response_allowed(response):
+    if getattr(g, "context_canary_scope", None) is not None:
+        return False
     from services.shared_generation_cache import shared_enabled
 
+    from services.semantic_generation_cache import settings as semantic_settings
+    from services.context_pages import paging_enabled
+    from services.canary_traffic import enabled as canary_enabled
     if (
-        not shared_enabled()
+        not semantic_settings().enabled
+        and not paging_enabled()
+        and not canary_enabled()
+        and getattr(g, "prompt_injection_action", None) is None
+        and not shared_enabled()
         and current_deadline() is None
         and getattr(g, "managed_idempotency_claim", None) is None
     ):

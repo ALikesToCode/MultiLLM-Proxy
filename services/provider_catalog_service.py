@@ -15,6 +15,12 @@ from providers.cline_pass import (
 )
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
 from providers.image_relays import image_relay_specs
+from providers.local_inference import (
+    LOCAL_INFERENCE_PROVIDERS,
+    local_catalog_metadata,
+    local_inference_base_urls,
+    normalize_local_base_url,
+)
 from providers.opencode_go import is_opencode_zen_free_model
 from services import provider_catalog_d1
 from services.provider_capability_discovery import enrich_model_capabilities
@@ -48,6 +54,8 @@ class ProviderCatalogModel:
 
 
 PROVIDER_CATALOG_SPECS = {
+    **{provider: ProviderCatalogSpec("models", f"/{provider}/models")
+       for provider in sorted(LOCAL_INFERENCE_PROVIDERS)},
     "aihubmix": ProviderCatalogSpec("v1/models", "/aihubmix/v1/models"),
     "openai": ProviderCatalogSpec("v1/models", "/openai/v1/models"),
     "openrouter": ProviderCatalogSpec("models", "/openrouter/models"),
@@ -175,6 +183,13 @@ class ProviderCatalogService:
 
     @classmethod
     def list_models(cls) -> list[ProviderCatalogModel]:
+        models = cls._stored_models()
+        enabled = local_inference_base_urls()
+        return [model for model in models
+                if model.provider not in LOCAL_INFERENCE_PROVIDERS or model.provider in enabled]
+
+    @classmethod
+    def _stored_models(cls) -> list[ProviderCatalogModel]:
         if provider_catalog_d1.using_d1():
             return list(cls._durable_models())
         cache_key = cls._cache_key()
@@ -219,6 +234,8 @@ class ProviderCatalogService:
     @classmethod
     def has_model(cls, provider: str, model_id: str) -> bool:
         """Return whether a model appears in the last successful live catalog."""
+        if provider in LOCAL_INFERENCE_PROVIDERS and provider not in local_inference_base_urls():
+            return False
         if provider_catalog_d1.using_d1():
             return any(
                 model.provider == provider and model.model_id == model_id
@@ -408,6 +425,8 @@ class ProviderCatalogService:
             )
             existing = normalized.get(model_id)
             metadata = sanitize_provider_metadata(item)
+            if provider in LOCAL_INFERENCE_PROVIDERS:
+                metadata = local_catalog_metadata(provider, metadata)
             if existing:
                 context_window = cls._minimum_limit(
                     existing.context_window,
@@ -440,6 +459,8 @@ class ProviderCatalogService:
         auth_service_cls,
         provider: str,
     ) -> tuple[str | None, ...]:
+        if provider in LOCAL_INFERENCE_PROVIDERS:
+            return (auth_service_cls.get_api_key(provider),)
         if provider in PUBLIC_CATALOG_PROVIDERS:
             return (None,)
         if provider == "nanogpt":
@@ -599,6 +620,11 @@ class ProviderCatalogService:
             base_url = base_urls.get(provider)
             if not base_url:
                 continue
+            if provider in LOCAL_INFERENCE_PROVIDERS:
+                try:
+                    base_url = normalize_local_base_url(base_url)
+                except ValueError:
+                    continue
             credentials = cls._credential_candidates(auth_service_cls, provider)
             if not credentials:
                 results.append(

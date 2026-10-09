@@ -3,6 +3,10 @@
 import math
 import json
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+import uuid
+from dataclasses import replace
 from typing import Callable
 
 import requests
@@ -17,19 +21,48 @@ Attempt = Callable[[int], requests.Response]
 Outcome = Callable[[], UpstreamOutcome]
 
 
+_attempt_identity = ContextVar("managed_attempt_identity", default=None)
+
+
+def current_attempt_id():
+    return _attempt_identity.get()
+
+
+@contextmanager
+def isolated_managed_attempt(turn, scoped_id=None):
+    """Keep parallel attempt finalizers out of the parent managed turn."""
+    from services.managed_turn import _turn
+    local = replace(turn, finalizers=[], canary=None, canary_finalized=False, pages=list(turn.pages), paged_candidates=dict(turn.paged_candidates)) if turn else None
+    token = _turn.set(local)
+    attempt_token = _attempt_identity.set(scoped_id or uuid.uuid4().hex)
+    try:
+        yield local
+    finally:
+        _attempt_identity.reset(attempt_token)
+        _turn.reset(token)
+
+
 def execute_managed_attempt(send, model, credential):
     """Capture the actual dispatch credential; headers alone never bind affinity."""
     from services.prompt_cache_affinity import current_scope
     from services.managed_turn import before_provider_submission
+    hedged = getattr(g, "hedged_attempt", None) if has_request_context() else None
+    if hedged is not None:
+        hedged.before_submission()
     before_provider_submission()
     scope = current_scope()
-    if scope is None:
-        return send()
     try:
         response = send()
     except BaseException:
-        scope.observer(model, credential)(classify_upstream_outcome(transport_failure="interrupted"))
+        if scope is not None:
+            scope.observer(model, credential)(classify_upstream_outcome(transport_failure="interrupted"))
         raise
+    if hedged is not None:
+        hedged.capture(response)
+    from services.pii_redaction import current_context
+    context = current_context()
+    if context is not None:
+        response.multillm_pii_context = context
     return capture_managed_attempt(response, model, credential)
 
 
@@ -167,6 +200,11 @@ class ManagedOutcomeIterator:
 
 def observe_managed_response(downstream, upstream, *, stream=False):
     """Deliver classified final outcomes through the managed-dispatch callback."""
+    from services.pii_redaction import current_context
+    from services.pii_stream import rehydrate_response
+    context = getattr(upstream, "multillm_pii_context", None) or current_context()
+    if context is not None:
+        downstream = rehydrate_response(downstream, context, stream=stream)
     from services.managed_turn import defer_affinity_response
     if defer_affinity_response(downstream, upstream, stream=stream):
         return downstream
@@ -211,6 +249,8 @@ def retry_managed_attempt(
     available; absent one, per-attempt timeouts remain the transport's policy.
     None means that the original response/error must finish normally.
     """
+    if has_request_context() and getattr(g, "hedged_attempt", None) is not None:
+        return None
     classified = outcome()
     if not classified.replay_permission or retry_count >= max_retries:
         return None

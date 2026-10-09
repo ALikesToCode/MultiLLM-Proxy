@@ -196,6 +196,13 @@ class SharedGenerationCache:
         return response.get("stored") is True
 
 
+def namespace_principal(principal, context=None):
+    from services.tenant_hierarchy import tenant_namespace
+    namespace = tenant_namespace(context)
+    return namespace + "\0" + principal if namespace else principal
+
+
 def identity(principal, payload, policy):
+    principal = namespace_principal(principal)
     return {"principal_hash": hashlib.sha256(principal.encode()).hexdigest(),
             "policy_hash": cache_policy.policy_digest(policy), "model": payload["model"]}
