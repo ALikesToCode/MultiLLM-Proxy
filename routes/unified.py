@@ -89,6 +89,8 @@ from services.provider_prompt_cache import (
 from services.rate_limit_service import RateLimitService
 from services.reasoning_policy import apply_glm_5_reasoning_policy
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
+from services.prompt_cache_affinity import affinity_auto_request, affinity_candidate
+from services.managed_dispatch import execute_managed_attempt, observe_managed_response
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +344,7 @@ def _send_native_request(
             request_kwargs["force_raw_passthrough"] = True
         if request_timeout is not None:
             request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
-        return proxy_service_cls.make_request(**request_kwargs)
+        return execute_managed_attempt(lambda: proxy_service_cls.make_request(**request_kwargs), f"{provider}:{provider_model}", token)
 
     return _request_with_provider_token_rotation(
         app,
@@ -413,6 +415,7 @@ def _dispatch_bridged_chat(
         target=CHAT,
         stream=bool(payload.get("stream")),
     )
+    observe_managed_response(downstream, response, stream=bool(payload.get("stream")))
     return _add_credential_attempt_headers(
         _add_prompt_cache_headers(downstream, cache_decision),
         provider,
@@ -420,6 +423,7 @@ def _dispatch_bridged_chat(
     )
 
 
+@affinity_candidate
 @with_chat_tool_repair
 def _dispatch_unified_chat_candidate(
     app,
@@ -556,14 +560,14 @@ def _dispatch_unified_chat_candidate(
             }
             if request_timeout is not None:
                 request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
-            return send_configured_unified_provider_request(
+            return execute_managed_attempt(lambda: send_configured_unified_provider_request(
                 proxy_service_cls,
                 request_kwargs,
                 provider=provider,
                 runtime_config=app.config,
                 upstream_path=upstream_path,
                 request_headers=headers_source,
-            )
+            ), f"{provider}:{provider_model}", token)
 
         response, credential_attempts = _request_with_provider_token_rotation(
             app,
@@ -599,6 +603,7 @@ def _dispatch_unified_chat_candidate(
         )
 
         if isinstance(response, Response):
+            observe_managed_response(response, response, stream=bool(payload.get("stream")))
             return _add_credential_attempt_headers(
                 _add_prompt_cache_headers(
                     _add_adaptive_context_headers(response, adaptive_result),
@@ -617,6 +622,7 @@ def _dispatch_unified_chat_candidate(
                 headers=copy_raw_provider_response_headers(response.headers),
             )
         mark_transport_failure(downstream_response, response)
+        observe_managed_response(downstream_response, response, stream=bool(payload.get("stream")))
         return _add_credential_attempt_headers(
             _add_prompt_cache_headers(
                 _add_adaptive_context_headers(
@@ -643,6 +649,7 @@ def _dispatch_unified_chat_candidate(
 
 
 @sample_chat_dispatch
+@affinity_auto_request
 def dispatch_unified_chat_completion(
     app,
     auth_service_cls,

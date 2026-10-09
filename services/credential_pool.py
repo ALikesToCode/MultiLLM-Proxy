@@ -117,7 +117,7 @@ class CredentialPool:
         if config.enabled and (model or quota_bucket):
             with cls._lock:
                 legacy = {key: cls._resting.get((provider, key), 0) for key in keys}
-            return model_cooldown.select(
+            selected = model_cooldown.select(
                 provider,
                 keys,
                 model=model,
@@ -126,7 +126,14 @@ class CredentialPool:
                 now=now,
                 legacy_rest_until=legacy,
             )
-        return next(iter(cls.available(provider, keys, now=now) or keys), None)
+            from services.prompt_cache_affinity import prefer_credential
+            preferred = prefer_credential(provider, model, cls.available(
+                provider, keys, model=model, quota_bucket=quota_bucket, now=now,
+            ))
+            return preferred or selected
+        available = cls.available(provider, keys, now=now)
+        from services.prompt_cache_affinity import prefer_credential
+        return prefer_credential(provider, model, available) or next(iter(available or keys), None)
 
     @classmethod
     def record(
