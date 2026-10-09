@@ -20,7 +20,7 @@ from functools import wraps
 from flask import Response, g, request
 
 from route_helpers import request_api_key
-from services import cache_policy
+from services import cache_policy, semantic_generation_cache as semantic
 from services.retention_policy import request_policy
 from services.cache_service import ResponseCache, shared_response_cache
 from services import shared_generation_cache as shared_cache
@@ -183,7 +183,7 @@ def cached_chat_completion(view):
     """Wrap an authenticated Chat Completions view; apply it below the auth decorator."""
 
     @wraps(view)
-    def wrapper(*args, **kwargs):
+    def exact_wrapper(*args, **kwargs):
         retention = request_policy()
         mode, max_age = request_mode()
         settings = _settings()
@@ -228,6 +228,44 @@ def cached_chat_completion(view):
         if isinstance(response, Response) and unchanged:
             _store_if_complete(response, key, settings, shared=shared, identity=identity)
         return _shared_headers(response, "miss") if use_shared else _mark(response, "miss")
+
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not semantic.settings().enabled:
+            return exact_wrapper(*args, **kwargs)
+        payload = request.get_json(silent=True)
+        try:
+            prepared = semantic.prepare_request(payload, _principal())
+        except semantic.SemanticCacheSchemaMissing:
+            return Response(json.dumps({"error": "semantic_cache_schema_missing",
+                "message": "The semantic generation cache schema is missing. Apply its migration before enabling it."}),
+                status=503, content_type="application/json")
+        except Exception:
+            return exact_wrapper(*args, **kwargs)
+        if prepared is None:
+            return exact_wrapper(*args, **kwargs)
+        mode, max_age = request_mode()
+        if max_age is None:
+            match = _MAX_AGE.search(request.headers.get("Cache-Control", "").lower())
+            max_age = int(match.group(1)) if match else None
+        if mode != "refresh" and "no-cache" not in request.headers.get("Cache-Control", "").lower():
+            try:
+                entry = prepared.lookup()
+            except semantic.SemanticCacheSchemaMissing:
+                return Response(json.dumps({"error": "semantic_cache_schema_missing",
+                    "message": "The semantic generation cache schema is missing. Apply its migration before enabling it."}),
+                    status=503, content_type="application/json")
+            if entry is not None and (max_age is None or entry[2] <= max_age):
+                return semantic.semantic_hit(entry)
+        response = exact_wrapper(*args, **kwargs)
+        if isinstance(response, Response):
+            prepared.save(response, {
+                "content_type": "application/json",
+                "headers": {name: response.headers[name] for name in _STORED_HEADERS if name in response.headers},
+                "provider": getattr(g, "multillm_provider", None),
+                "model": getattr(g, "multillm_model", None),
+            })
+        return response
 
     return wrapper
 
