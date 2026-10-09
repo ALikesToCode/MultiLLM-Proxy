@@ -104,4 +104,35 @@ def run_free_checks(base_urls: Mapping[str, str], auth_service_cls, proxy_servic
         results.extend(checked)
     else:
         checked_at = time.time() if now is None else now
+    from services.gateway_alerts import observe_safely
+    observe_safely()
     return {"checked_at": iso_time(checked_at), "results": sorted(results, key=lambda item: item["provider"])}
+
+
+def passive_alert_health(providers, *, pools=None, now=None):
+    """Read existing circuits and pool eligibility without acquiring a key or probing."""
+    from services.credential_pool import CredentialPool
+    from services.resilience_service import ResilienceService
+    current = time.time() if now is None else now
+    result = {}
+    for provider in sorted(providers):
+        circuit = ResilienceService.snapshot(provider, now=current)
+        entry = RouteHealth.snapshot("provider:" + provider) or {}
+        failures = entry.get("consecutive_failures", 0)
+        if current - (entry.get("last_failure_at") or 0) > 3600:
+            failures = 0
+        counts = pools(provider) if pools is not None else None
+        if counts is None and CredentialPool.pooled(provider):
+            keys = CredentialPool.keys(provider)
+            counts = (len(keys), len(CredentialPool.available(provider, keys)))
+        if counts is None and provider == "nanogpt":
+            from services.auth_service import AuthService
+            from services.nanogpt_key_pool import NanoGPTKeyPool
+            keys = list(dict.fromkeys(AuthService.get_api_keys(provider)))
+            with NanoGPTKeyPool._lock:
+                eligible = sum(NanoGPTKeyPool._rejected_until.get(key, 0) <= time.monotonic() for key in keys)
+            counts = (len(keys), eligible)
+        result[provider] = {"circuit_open": circuit["state"] == "open",
+                            "pool_exhausted": counts is not None and counts[0] > 0 and counts[1] == 0,
+                            "consecutive_failures": failures}
+    return result
