@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
 import { handleCreditsRequest, appendCredit, appendPaymentCredit, readCredits, registerCreditAuthority, creditsEnabled, creditsEnforcement, contextOwner } from '../worker/credits-d1.mjs';
 import { AuthorityOperation, TenantContext, callAuthority, registerEnterpriseAdapters } from '../worker/enterprise-contract.mjs';
+
+const PYTHON = process.env.PYTHON || (existsSync('.venv/bin/python') ? '.venv/bin/python' : 'python3');
 
 const migration = readFileSync(new URL('../intelligence-migrations/0037_credits_ledger.sql', import.meta.url), 'utf8');
 const vectors = JSON.parse(readFileSync(new URL('../docs/credits-ledger.md', import.meta.url), 'utf8').split('```json\n')[1].split('```')[0]);
@@ -220,7 +222,7 @@ test('Python and D1 return identical ledger vectors', async t => {
     await (vector.operation === 'payment_append' ? appendPaymentCredit : appendCredit)(db, vector.request);
   }
   const code = `import os,sys,json,tempfile\nfrom pathlib import Path\nsys.path.insert(0,os.getcwd())\nfrom services.credits_ledger import SqlCreditsLedger\ntext=Path('docs/credits-ledger.md').read_text()\nvectors=json.loads(text.split('\x60\x60\x60json\\n',1)[1].split('\x60\x60\x60',1)[0])\nwith tempfile.TemporaryDirectory() as d:\n store=SqlCreditsLedger(Path(d)/'credits.sqlite3',initialize=True)\n for v in vectors:\n  if 'request' in v and not v.get('error'): (store.append_payment if v.get('operation') == 'payment_append' else store.append)(**v['request'])\n print(json.dumps(store.read('alice')))\n`;
-  const python = spawnSync('/home/mysterious/storage/github/MultiLLM-Proxy/.venv/bin/python', ['-I', '-c', code], {
+  const python = spawnSync(PYTHON, ['-I', '-c', code], {
     cwd: new URL('..', import.meta.url), encoding: 'utf8', timeout: 10000,
   });
   assert.equal(python.status, 0, python.stderr);
