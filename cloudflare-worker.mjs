@@ -1,4 +1,4 @@
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader } from "./worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled } from "./worker/gateway-extensions.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
@@ -1471,33 +1471,35 @@ async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
     );
   }
 
-  const reasoningMetadataPromise = resolveOpencodeChatMetadata(
-    request,
-    requestUrl.pathname,
-  );
   const callerAuth = opencodeCallerUpstreamAuth(request);
   const upstreamToken = env.OPENCODE_GO_API_KEY || env.OPENCODE_API_KEY;
   if (!upstreamToken && !callerAuth.authorization && !callerAuth.apiKey) {
     return applyCorsHeaders(request, buildMissingUpstreamKeyResponse(), env);
   }
 
-  request = await withOpencodeGlmReasoning(request, requestUrl.pathname);
+  const generationSetup = nativeGenerationSetup(request, env);
+  const reasoningMetadataPromise = generationSetup.run(() => resolveOpencodeChatMetadata(
+    request,
+    requestUrl.pathname,
+  ));
+
+  request = await generationSetup.run(() => withOpencodeGlmReasoning(request, requestUrl.pathname));
   const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
   const upstreamRequest = new Request(buildOpencodeUpstreamUrl(requestUrl, env, upstreamPath), {
     method: request.method,
-    headers: await withOpencodeRequestSession(request, buildOpencodeUpstreamHeaders(
+    headers: await generationSetup.run(() => withOpencodeRequestSession(request, buildOpencodeUpstreamHeaders(
       request,
       upstreamPath,
       upstreamToken,
       callerAuth,
-    )),
+    ))),
     body: bodyAllowed ? request.body : undefined,
     redirect: "manual",
     signal: request.signal,
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1597,12 +1599,13 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
 
   const upstreamUrl = buildLinkApiUpstreamUrl(requestUrl, env);
   const protocol = getLinkApiProtocol(upstreamUrl.pathname);
+  const generationSetup = nativeGenerationSetup(request, env);
   let normalizedRequest;
   try {
-    normalizedRequest = await withDefaultGptImageModeration(
+    normalizedRequest = await generationSetup.run(() => withDefaultGptImageModeration(
       request,
       upstreamUrl.pathname,
-    );
+    ));
   } catch (error) {
     if (!(error instanceof GPTImageModerationError)) {
       throw error;
@@ -1632,7 +1635,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1663,9 +1666,10 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     return applyCorsHeaders(request, buildMissingCodexEasyKeyResponse(), env);
   }
 
+  const generationSetup = nativeGenerationSetup(request, env);
   let normalizedRequest;
   try {
-    normalizedRequest = await withDefaultGptImageModeration(request, upstreamPath);
+    normalizedRequest = await generationSetup.run(() => withDefaultGptImageModeration(request, upstreamPath));
   } catch (error) {
     if (!(error instanceof GPTImageModerationError)) {
       throw error;
@@ -1690,7 +1694,7 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1831,6 +1835,7 @@ MultiLLMProxyContainer.outboundByHost = {
 export default {
   async scheduled(controller, env, ctx) {
     tickNativeRevisionSync(env, ctx);
+    if (scheduledMaintenanceEnabled(env)) ctx.waitUntil(runScheduledMaintenance(env));
     const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
     ctx.waitUntil(runScheduledShadowEval(env, container));
     ctx.waitUntil(runScheduledHealth(controller, env, container).catch((error) => {
@@ -1989,6 +1994,8 @@ export default {
       try {
         return await handleDirectCodexEasyRequest(request, env, requestUrl, ctx);
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("direct_codex_easy_fetch_failed", error);
         return applyCorsHeaders(
           request,
@@ -2008,6 +2015,8 @@ export default {
       try {
         return await handleDirectLinkApiRequest(request, env, requestUrl, ctx);
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("direct_linkapi_fetch_failed", error);
         return applyCorsHeaders(
           request,
@@ -2041,6 +2050,8 @@ export default {
           requestUrl.pathname,
         );
       } catch (error) {
+        const deadlineResponse = generationErrorResponse(error);
+        if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
         logStructuredError("opencode_edge_auth_failed", error);
         return applyCorsHeaders(
           request,
@@ -2059,7 +2070,7 @@ export default {
     try {
       const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
       const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
-      const headers = new Headers(request.headers);
+      const headers = forwardedGenerationHeaders(request, env);
       // Client copies of the Access identity headers never reach the Container.
       await withAccessIdentity(request, env, headers);
       headers.delete("content-length");
@@ -2113,6 +2124,8 @@ export default {
         env,
       );
     } catch (error) {
+      const deadlineResponse = generationErrorResponse(error);
+      if (deadlineResponse) return applyCorsHeaders(request, deadlineResponse, env);
       if (rootPath) {
         logStructuredError("container_fetch_failed", error);
         return buildRootFallbackResponse();

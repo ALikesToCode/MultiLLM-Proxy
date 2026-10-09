@@ -88,7 +88,12 @@ closed. Configuration and observation do not deliver webhooks synchronously.
 
 The Worker scheduler calls `runAlertDelivery` with a fixed aggregate collector and
 redirect-rejecting transport. The collector receives normalized rules and returns
-only `{rule_id, value, basis, window}` observations; a provider window is `current`.
+only `{rule_id, value, basis, window}` observations. It aggregates spend and price
+coverage from D1 `usage_daily` in UTC day and month windows, including recorded
+native traffic. Provider circuit, pool exhaustion and recent health failures come
+from Flask's existing passive `observe_safely` calls; the scheduler delivers those
+persisted events and does not duplicate their observations or start health probes.
+A provider window is `current`.
 The private dispatcher calls `handleAlertState` only after internal authentication.
 The Flask registrar mounts the admin route and exposes `gateway_alert_observer`;
 free checks observe existing results through the same service. Generation requests

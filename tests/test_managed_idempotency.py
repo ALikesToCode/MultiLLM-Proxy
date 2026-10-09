@@ -234,6 +234,15 @@ class ManagedIdempotencyTests(IntelligenceApiTestCase):
         assert "idempotency-key" not in {name.lower() for name in send.call_args.kwargs["headers"]}
         assert json.loads(send.call_args.kwargs["data"])["messages"] == [{"role": "user", "content": "test"}]
 
+    def test_enabled_output_validation_option_passes_the_claim_contract_check(self):
+        self.app.config["OUTPUT_SCHEMA_VALIDATION_ENABLED"] = True
+        option = {"mode": "strict", "schema": {"type": "string"}}
+        with self.requests(return_value=upstream(completion('"ok"'))) as send:
+            first = self.post(multillm_output_validation=option)
+            replay = self.post(multillm_output_validation=option)
+        assert first.status_code == replay.status_code == 200 and send.call_count == 1
+        assert replay.headers["X-MultiLLM-Idempotency"] == "replayed"
+
     def test_dedicated_route_replays_after_durable_handoff_before_provider(self):
         def generate(*args, **kwargs):
             assert [call["operation"] for call in self.authority.calls] == ["claim", "handoff"]

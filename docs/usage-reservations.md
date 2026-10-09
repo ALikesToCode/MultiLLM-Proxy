@@ -61,6 +61,18 @@ with classified, measured accounting. Native owners use `createReservationLifecy
 with verified identity, all eligible prices and initial legacy spend. They supply measured
 cost and nullable counters through the existing flat finalization event (or its `usage`
 field), plus the classified outcome and cancellation outcome.
+Native bootstrap owners read configured admin budget metadata from D1 when that
+binding is present. Requests without monetary limits create no hold. Estimates use
+all eligible configured prices, bounded request bytes for input exposure and the
+largest requested output limit (1024 tokens when absent), with existing native ledger totals
+as the initial UTC baselines. URL-selected Gemini models can be priced, but their
+`usageMetadata` remains unclassified by the existing native telemetry parser, so
+those holds remain unknown with nullable counters. The Worker refuses unpriced eligible candidates and
+unavailable budget storage before submission. Cache hits release a hold without
+provider handoff. A trusted native finalizer can release a persisted dispatch marker
+when it confirms that submission never started; it records `handoff_not_started`
+in the private transition audit. That evidence grants no retry permission.
+
 Flask owners use `request_accounting.mark_dispatched` before submission; the existing
 cancellation observer also records handoff when it binds an upstream response. Failed
 finalization retains money, including a crashed reservation still in `reserved` or

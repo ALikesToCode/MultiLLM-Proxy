@@ -11,12 +11,13 @@ from flask import Response, g, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from error_handlers import get_request_id
-from middleware.idempotency import begin_managed_request, finish_managed_response, mark_managed_handoff
+from middleware.idempotency import begin_managed_request, mark_managed_handoff
 from route_helpers import api_auth_required
 from services.idempotency_store import idempotency_enabled
 from services.intelligence_cancellation import CallerCancellation
 from services.intelligence_contract import ChatRequest, GatewayError
 from services.intelligence_gateway import ChatGateway
+from services.managed_turn import managed_pipeline, finish_intelligence_response
 from services.intelligence_output import sse
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_transport import IntelligenceTransport
@@ -156,6 +157,7 @@ def _cascade_stream(gateway, deadline):
     return response
 
 
+@managed_pipeline
 def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
     gateway = None
     try:
@@ -210,7 +212,8 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
                 gateway.prepare_credentials()
             return _cascade_stream(gateway, cascade_deadline) if cascade_deadline is not None else stream_response(gateway)
         try:
-            mark_managed_handoff()
+            if not getattr(g, "managed_idempotency_handed_off", False):
+                mark_managed_handoff()
         except GatewayError:
             # No provider was contacted when the durable dispatch acknowledgement failed.
             gateway.settle()
@@ -220,7 +223,7 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
         if parsed.payload.get("tools"):
             response.headers[HEADER] = summary_header(gateway.tool_repair.buffer.report)
         # Exhausting events proves validated nonstream completion, including settlement.
-        return finish_managed_response(response, complete=True)
+        return finish_intelligence_response(response)
     except (ModelCooldownExhausted, ModelCooldownCapacity):
         if gateway is not None:
             gateway.cancel()

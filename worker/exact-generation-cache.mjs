@@ -1,5 +1,6 @@
 /** Opt-in exact Chat Completions caching after native authentication and retention. */
 import { GenerationCacheD1, MAX_BODY_BYTES, digest, completeCacheBody } from "./generation-cache-d1.mjs";
+import { createUsageObserver } from "./request-telemetry.mjs";
 import { retentionAllowsContent } from "./retention-policy.mjs";
 const warned = new Set();
 function warn(event) { if (!warned.has(event)) { warned.add(event); console.warn(JSON.stringify({event: `generation_cache_${event}`})); } }
@@ -105,7 +106,7 @@ export async function prepareNativeCache(request, env, authority, context) {
       const response = new Response(entry.body, {headers: {"content-type": entry.metadata.content_type, ...entry.metadata.headers, Age: String(Math.floor(entry.age))}});
       return mark(response, "hit");
     } catch {warn("storage_unavailable"); return null;}
-  }, async store(response) {
+  }, async store(response, { canStore = () => true } = {}) {
     if (request.signal.aborted || response.status !== 200 || response.headers.get("content-type")?.split(";", 1)[0] !== "application/json"
       || response.headers.get("content-encoding") && response.headers.get("content-encoding") !== "identity") return mark(response, "miss");
     try {
@@ -113,7 +114,12 @@ export async function prepareNativeCache(request, env, authority, context) {
       if (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_BODY_BYTES)) return mark(response, "miss");
       const body = await boundedBytes(response.clone().body, MAX_BODY_BYTES);
       const current = await nativePolicyHash(request, env, authority, context);
-      if (body && completeCacheBody(body) && !request.signal.aborted && current === identity.policy_hash) {
+      const observer = createUsageObserver();
+      if (body) observer.feed(body);
+      const classified = observer.finish();
+      if (body && completeCacheBody(body) && classified.completed && !classified.failed
+          && classified.usage.input_tokens !== null && classified.usage.output_tokens !== null
+          && canStore() && !request.signal.aborted && current === identity.policy_hash) {
         await optionalStorage(store.put(identity, body,
           {content_type: "application/json", headers: {}, provider: authority.provider, model: identity.model}));
       }
