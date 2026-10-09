@@ -301,6 +301,7 @@ def _send_native_request(
     request_timeout=None,
 ):
     """Send one body to a provider's native Responses or Messages endpoint."""
+    from services.managed_turn import prepare_dispatch_kwargs
     raw_body = json.dumps(body).encode("utf-8")
 
     def send_request(token: str):
@@ -332,7 +333,7 @@ def _send_native_request(
             request_kwargs["force_raw_passthrough"] = True
         if request_timeout is not None or getattr(g, "generation_deadline", None) is not None:
             request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
-        return execute_managed_attempt(lambda: proxy_service_cls.make_request(**request_kwargs), f"{provider}:{provider_model}", token)
+        return execute_managed_attempt(lambda: proxy_service_cls.make_request(**prepare_dispatch_kwargs(request_kwargs, ENDPOINT_PROTOCOLS[endpoint])), f"{provider}:{provider_model}", token)
 
     return _request_with_provider_token_rotation(
         app,
@@ -512,6 +513,7 @@ def _dispatch_unified_chat_candidate(
 
         # Held in a cell so a NanoGPT pay-as-you-go refusal can resend an
         # un-suffixed body through the same rotation.
+        from services.managed_turn import prepare_dispatch_kwargs
         outbound = {"data": _encode(upstream_payload)}
 
         def send_request(token: str):
@@ -551,7 +553,7 @@ def _dispatch_unified_chat_candidate(
                 request_kwargs["timeout_override"] = bounded_timeout(request_timeout)
             return execute_managed_attempt(lambda: send_configured_unified_provider_request(
                 proxy_service_cls,
-                request_kwargs,
+                prepare_dispatch_kwargs(request_kwargs),
                 provider=provider,
                 runtime_config=app.config,
                 upstream_path=upstream_path,

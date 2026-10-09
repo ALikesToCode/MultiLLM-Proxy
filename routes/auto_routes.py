@@ -182,6 +182,15 @@ def dispatch_auto_route(
     if canary is not None:
         canary.observe(order.candidates)
     priorities = {candidate: index for index, candidate in enumerate(route.candidates)}
+    if fail_over is chat_fail_over:
+        from services.hedged_requests import dispatch_hedged_auto
+        hedged = dispatch_hedged_auto(payload, route.id, order.candidates,
+            validate=validate_candidate, dispatch=dispatch_candidate,
+            decision=lambda position: _route_decision(priorities[order.candidates[position]], position))
+        if hedged is not None:
+            return _decorate_response(hedged.response, route, hedged.model, priorities[hedged.model],
+                hedged.attempts, route_decision=_route_decision(priorities[hedged.model], hedged.position),
+                ordering=order.mode, failures=hedged.failures, canary=canary)
     attempts = 0
     failures: list[tuple[str, str]] = []
     last_failure: Response | None = None

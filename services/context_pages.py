@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, Callable, Mapping
 
@@ -290,6 +290,11 @@ def managed_authority():
         authority = authorize()
         if not isinstance(authority, dict) or not {"scope", "retention_policy", "granted"} <= authority.keys():
             raise ContextPageError("context_paging_authority_unavailable")
+        from services.shared_generation_cache import namespace_principal
+        scope = authority["scope"]
+        principal = namespace_principal(scope.principal)
+        if principal != scope.principal:
+            authority = {**authority, "scope": replace(scope, principal=hashlib.sha256(principal.encode()).hexdigest())}
         return authority
     user = getattr(g, "authenticated_user", None) or {}
     principal = authenticated_principal(user)
@@ -301,6 +306,8 @@ def managed_authority():
     revision = json.dumps({"grants": user.get("scopes"), "models": model_patterns(user),
                            "secret": scan_mode(user), "retention": retention.revision},
                           sort_keys=True, separators=(",", ":"))
+    from services.shared_generation_cache import namespace_principal
+    principal = namespace_principal(principal)
     scope = PageScope(hashlib.sha256((principal + "\0" + key).encode()).hexdigest(),
                       hashlib.sha256(session.encode()).hexdigest(), hashlib.sha256(revision.encode()).hexdigest())
     return {"scope": scope, "retention_policy": retention, "granted": permits(user, "chat")}

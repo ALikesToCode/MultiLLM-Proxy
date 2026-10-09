@@ -17,7 +17,7 @@ from services.idempotency_store import idempotency_enabled
 from services.intelligence_cancellation import CallerCancellation
 from services.intelligence_contract import ChatRequest, GatewayError
 from services.intelligence_gateway import ChatGateway
-from services.managed_turn import managed_pipeline, finish_intelligence_response
+from services.managed_turn import managed_pipeline, finish_intelligence_response, canary_intelligence_proxy
 from services.intelligence_output import sse
 from services.intelligence_store import IntelligenceStore
 from services.intelligence_transport import IntelligenceTransport
@@ -192,7 +192,7 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
         gateway = ChatGateway(
             parsed,
             policy,
-            IntelligenceTransport(app.config, auth, proxy),
+            IntelligenceTransport(app.config, auth, canary_intelligence_proxy(proxy)),
             g.authenticated_user["username"],
             get_request_id(),
             metrics,

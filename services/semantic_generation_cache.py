@@ -116,6 +116,8 @@ def cosine(one, two):
 
 
 def partition(principal, path, payload, revisions, policy):
+    from services.shared_generation_cache import namespace_principal
+    principal = namespace_principal(principal)
     messages = [*payload["messages"][:-1], {**payload["messages"][-1], "content": None}]
     invariant = {**payload, "messages": messages}
     return {"principal_hash": digest(principal),
@@ -323,6 +325,8 @@ def reuse_bypass(payload):
     """Dynamic cohorts, flagged content and retrieval handles never replay generations."""
     from services.context_pages import paging_cache_bypass
     if paging_cache_bypass(payload) or getattr(g, "prompt_injection_action", None) == "logged":
+        return True
+    if getattr(g, "context_canary_scope", None) is not None:
         return True
     if getattr(g, "multillm_canary", None) is not None:
         return True

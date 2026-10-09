@@ -73,7 +73,12 @@ def principal_owner():
     principal = user.get("id") or user.get("username")
     if not isinstance(principal, (str, int)) or not str(principal):
         raise unavailable()
-    return hashlib.sha256(canonical([user.get("tenant_id"), str(principal)])).hexdigest()
+    from services.tenant_hierarchy import tenant_namespace
+    namespace = tenant_namespace()
+    identity = [user.get("tenant_id"), str(principal)]
+    if namespace:
+        identity.append(namespace)
+    return hashlib.sha256(canonical(identity)).hexdigest()
 
 
 def _submit(document, stopped, deadline, results):

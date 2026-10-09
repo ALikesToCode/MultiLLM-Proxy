@@ -1,3 +1,4 @@
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 /** Opt-in exact Chat Completions caching after native authentication and retention. */
 import { GenerationCacheD1, MAX_BODY_BYTES, digest, completeCacheBody } from "./generation-cache-d1.mjs";
 import { createUsageObserver } from "./request-telemetry.mjs";
@@ -54,7 +55,8 @@ export async function exactCacheIdentity(request, env, authority, context) {
   let payload;
   try {payload = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes));} catch {return null;}
   if (!eligibleRequest(payload)) return null;
-  const principal = await digest(`${authority.principal.id}\0${await digest(env.ADMIN_API_KEY)}`);
+  const principalId = organisationsEnabled(env) ? tenantStorageKey(authority.principal.id, authority.tenantContext ?? context.tenantContext) : authority.principal.id;
+  const principal = await digest(`${principalId}\0${await digest(env.ADMIN_API_KEY)}`);
   const policyHash = await nativePolicyHash(request, env, authority, context);
   const key = await digest(JSON.stringify([principal, authority.route, policyHash, canonical(payload)]));
   return {principal_hash: principal, cache_key: key, policy_hash: policyHash, model: payload.model};

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from flask import jsonify
 
 from error_handlers import APIError
+from services import learned_cooldown as learned
 from services.upstream_outcome import UpstreamOutcome
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,11 @@ class ModelCooldown:
         scope = self._scope(model, quota_bucket)
         identity = self.credential_id(provider, credential)
         wide_auth = outcome.credential_health == "rejected" and credential_wide_auth
+        delay = learned.adjust_cooldown(
+            provider, credential, outcome, model=model, quota_bucket=quota_bucket,
+            current_seconds=_delay(retry_after_seconds, fallback_seconds, max_seconds),
+            retry_after_seconds=retry_after_seconds, now=now, max_seconds=max_seconds,
+        )
         with self._lock:
             self._prune(current)
             if outcome.credential_health == "accepted":
@@ -167,7 +173,7 @@ class ModelCooldown:
             ):
                 return None
             entry = (identity, None if wide_auth else scope)
-            until = current + _delay(retry_after_seconds, fallback_seconds, max_seconds)
+            until = current + delay
             if entry not in self._entries and len(self._entries) >= self._max_entries:
                 # Do not evict live state and silently dispatch a cooling key.
                 self._overflow_until = max(self._overflow_until, until)

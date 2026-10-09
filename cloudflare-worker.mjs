@@ -1,4 +1,4 @@
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest } from "./worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest, handleRealtimeRequest } from "./worker/gateway-extensions.mjs";
 import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
 import { firewallFetch } from "./worker/secret-firewall.mjs";
@@ -1500,7 +1500,7 @@ async function handleDirectOpencodeRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1636,7 +1636,7 @@ async function handleDirectLinkApiRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1695,7 +1695,7 @@ async function handleDirectCodexEasyRequest(request, env, requestUrl, ctx) {
     ...(bodyAllowed && normalizedRequest.body ? { duplex: "half" } : {}),
   });
   const upstreamResponse = await nativeGenerationFetch(upstreamRequest, env, ctx, {
-    deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
+    authenticated: true, keyId: env.ADMIN_USERNAME || "admin", deadlineHook: generationSetup.hook, route: requestUrl.pathname, cacheRequest: request, retentionHeader: request.headers.get("X-MultiLLM-Retention"), principal: { id: env.ADMIN_USERNAME || "admin" },
     provider: requestUrl.pathname.split("/")[1],
   }, async (upstreamRequest, env, authority) => await firewallFetch(upstreamRequest, env, authority));
 
@@ -1890,6 +1890,9 @@ export default {
     if (healthPath) {
       return applyCorsHeaders(request, buildFallbackHealthResponse(), env);
     }
+
+    const realtimeResponse = await handleRealtimeRequest(request, env, ctx);
+    if (realtimeResponse) return realtimeResponse.status === 101 ? realtimeResponse : applyCorsHeaders(request, realtimeResponse, env);
 
     if (requestUrl.pathname === "/status.prometheus" || requestUrl.pathname === "/v1/metrics/prometheus") {
       if (!prometheusEnabled(env.PROMETHEUS_ENABLED)) {

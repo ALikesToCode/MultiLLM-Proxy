@@ -1,3 +1,4 @@
+import { handleTenantGovernanceRequest } from "./tenant-governance-d1.mjs";
 import { handleAdmissionRequest } from "./admission-do.mjs";
 import { handleIntelligenceStoreRequest } from "./intelligence-d1.mjs";
 import { handleIntelligenceAuthRequest } from "./intelligence-auth-d1.mjs";
@@ -25,6 +26,7 @@ export function handleIntelligenceOutbound(request, env) {
     return Response.json({ error: { code: "method_not_allowed", message: "Use POST for storage operations." } },
       { status: 405, headers: { Allow: "POST" } });
   }
+  if (url.pathname === "/v1/tenant-governance") return handleTenantGovernanceRequest(request, env);
   if (url.pathname === "/v1/reservations") return handleReservationsRequest(request, env);
   if (url.pathname === "/v1/gateway-batches") return handleBatchRequest(request, env);
   if (url.pathname === "/v1/admission") return handleAdmissionRequest(request, env);

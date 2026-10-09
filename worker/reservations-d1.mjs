@@ -1,3 +1,8 @@
+import { createGovernanceLifecycle, governanceEnabled, handleTenantGovernanceRequest, GovernanceError, intersectGrants } from "./tenant-governance-d1.mjs";
+import { createCreditsLifecycle, CreditsAdmissionError, integerMicroUsd, nativeTariffRevision, reconcileCreditsReservation } from "./credits-admission.mjs";
+import { creditsEnforcement } from "./credits-d1.mjs";
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
+import { recordSettledUsage } from "./usage-receipts.mjs";
 import { retentionRequestId } from "./retention-policy.mjs";
 /** Private, atomic monetary holds and injected request lifecycle. */
 const SCALE = 10_000_000_000;
@@ -244,15 +249,23 @@ export async function handleReservationsRequest(request, env, { now = Date.now }
         .bind(body.id).all();
       result = { transitions: rows.results };
     } else result = { reservation: publicRow(await db.prepare("SELECT * FROM usage_reservations WHERE id=?").bind(body.id).first()) };
+    if (body.operation === "transition" && body.state === "reconciled") {
+      const row = result.reservation;
+      await reconcileCreditsReservation(env, row, body.transition_id);
+      if (result.applied)
+      await recordSettledUsage(env, row.principal, body.transition_id, { reservation_id: row.id,
+        settlement_id: row.settlement_id, state: row.state, cost_usd: row.cost_usd, cost_basis: row.basis,
+        input_tokens: row.input_tokens, output_tokens: row.output_tokens });
+    }
     return reply(result);
   } catch (error) {
-    const failure = error instanceof ReservationError ? error : new ReservationError();
+    const failure = error instanceof ReservationError || error instanceof CreditsAdmissionError ? error : new ReservationError();
     return reply({ error: { code: failure.code, message: "The usage reservation operation could not be completed." } }, failure.status);
   }
 }
 /** One instance per native request. Identity and pricing come from verified admission. */
-export function createReservationLifecycle(env, { call, identity }) {
-  let reservation, finalEvent;
+export function createReservationLifecycle(env, { call, identity, governance, credits, workspace = false, metadata = async event => event }) {
+  let reservation, finalEvent, linkedIdentity;
   let dispatching;
   const transition = async (state, fields = {}) => {
     const result = await call({ version: 1, operation: "transition", id: reservation.id, revision: reservation.revision,
@@ -266,7 +279,7 @@ export function createReservationLifecycle(env, { call, identity }) {
       if (!reservationSettings(env).enabled) return;
       const values = await identity(context);
       if (values.daily_budget_usd == null && values.monthly_budget_usd == null) return;
-      const result = await call({ version: 1, operation: "reserve", id: crypto.randomUUID().replaceAll("-", ""), ...values });
+      const result = await call({ version: 1, operation: "reserve", id: linkedIdentity ?? crypto.randomUUID().replaceAll("-", ""), ...values });
       if (result.error) throw new ReservationError(result.error.code, result.error.code === "budget_exceeded" ? 429 : 503);
       reservation = result.reservation;
       if (finalEvent) await hooks.finalize(finalEvent);
@@ -292,7 +305,44 @@ export function createReservationLifecycle(env, { call, identity }) {
           output_tokens: context.cancellationOutcome?.ambiguous ? null : row.output_tokens ?? null });
     },
   };
-  return hooks;
+  if (!governance && !credits) return hooks;
+  let admitted, pending, eventMetadata;
+  const describe = async event => eventMetadata ??= await metadata(event);
+  const finalize = async event => {
+    finalEvent = event;
+    if (pending) await pending.catch(() => {});
+    const results = await Promise.allSettled([governance?.finalize(event), hooks.finalize(event), credits?.finalize(event)]);
+    const failure = results.find(result => result.status === "rejected");
+    if (failure) throw failure.reason;
+  };
+  return {
+    async authorize(event) { await governance?.authorize(await describe(event)); },
+    async admit(event) {
+      if (admitted) return;
+      if (pending) return pending;
+      pending = (async () => {
+        const values = await identity(event, Boolean(workspace || await credits?.requiresPricing()));
+        linkedIdentity ??= crypto.randomUUID().replaceAll("-", "");
+        const priced = { ...await describe(event), scoped_id: workspace ? `tg_${linkedIdentity}` : linkedIdentity, amount: values.estimate_usd == null ? null : integerMicroUsd(values.estimate_usd),
+          key_daily: values.daily_budget_usd == null ? null : integerMicroUsd(values.daily_budget_usd),
+          key_monthly: values.monthly_budget_usd == null ? null : integerMicroUsd(values.monthly_budget_usd),
+          base_day: integerMicroUsd(values.day_spent_usd ?? 0), base_month: integerMicroUsd(values.month_spent_usd ?? 0),
+          tariff_revision: nativeTariffRevision(env) };
+        await governance?.admit(priced);
+        if (!workspace) await hooks.admit(event);
+        await credits?.admit(priced);
+        admitted = true;
+      })();
+      try { await pending; }
+      catch (error) { pending = null; await finalize({ ...event, handedOff: false }); throw error; }
+      pending = null;
+      if (finalEvent) await finalize(finalEvent);
+    },
+    async before_dispatch(event) {
+      await governance?.before_dispatch(event); await hooks.before_dispatch(event); await credits?.before_dispatch(event);
+    },
+    finalize,
+  };
 }
 
 function nativePrice(table, provider, model, input, output, units) {
@@ -328,7 +378,7 @@ async function boundedReservationBody(request) {
   } finally { void reader.cancel().catch(() => {}); }
 }
 
-async function nativeReservationIdentity(request, env, authority, context) {
+async function nativeReservationIdentity(request, env, authority, context, forcePrice = false) {
   let principal = authority.principal;
   if (!principal?.id) throw new ReservationError();
   // Native bootstrap authentication uses the environment; stored controls are optional metadata.
@@ -339,8 +389,9 @@ async function nativeReservationIdentity(request, env, authority, context) {
     principal = { ...principal, ...stored };
   }
   const limits = { daily_budget_usd: principal.daily_budget_usd ?? null, monthly_budget_usd: principal.monthly_budget_usd ?? null };
-  if (limits.daily_budget_usd === null && limits.monthly_budget_usd === null) return limits;
-  const identity = `edge:${await retentionRequestId(`native-admin:${principal.id}`)}`;
+  if (!forcePrice && limits.daily_budget_usd === null && limits.monthly_budget_usd === null) return limits;
+  const legacyIdentity = `edge:${await retentionRequestId(`native-admin:${principal.id}`)}`;
+  const identity = organisationsEnabled(env) ? tenantStorageKey(legacyIdentity, authority.tenantContext) : legacyIdentity;
   let estimate = 0;
   if (!context.cacheServed) {
     const { body, size } = await boundedReservationBody(request);
@@ -356,6 +407,8 @@ async function nativeReservationIdentity(request, env, authority, context) {
     if (!costs.length || costs.some(cost => cost === null)) throw new ReservationError("unpriced_reservation");
     estimate = Math.max(...costs);
   }
+  if (limits.daily_budget_usd === null && limits.monthly_budget_usd === null)
+    return { principal: identity, estimate_usd: estimate, ...limits, day_spent_usd: 0, month_spent_usd: 0 };
   const day = new Date().toISOString().slice(0, 10);
   const baseline = await env.INTELLIGENCE_DB.prepare(`SELECT COALESCE(SUM(CASE WHEN day = ? THEN cost_usd ELSE 0 END), 0) AS day_spent_usd,
     COALESCE(SUM(cost_usd), 0) AS month_spent_usd FROM usage_daily WHERE principal = ? AND day >= ? AND day <= ?`)
@@ -376,11 +429,46 @@ async function boundedReservationOperation(action) {
 }
 
 /** Only server-verified principal metadata can impose native monetary limits. */
-export function nativeReservationLifecycle(request, env, authority) {
+export function nativeReservationLifecycle(request, env, authority, { identity: suppliedIdentity } = {}) {
+  const workspace = governanceEnabled(env) && authority.tenantContext?.org_id != null;
+  const governance = governanceEnabled(env) ? createGovernanceLifecycle(env, {
+    tenant_resolver: () => authority.tenantContext,
+    call: async body => {
+      const response = await handleTenantGovernanceRequest(new Request("http://intelligence.internal/v1/tenant-governance", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, rpc: true }),
+      }), env);
+      return { ...await response.json(), status: response.status };
+    },
+  }) : null;
+  const credits = createCreditsLifecycle(env, { context: authority.tenantContext });
+  let values;
+  const identity = async (event, force = false) => {
+    if (values && (!force || values.estimate_usd != null)) return values;
+    try { values = suppliedIdentity ? await suppliedIdentity(event, force)
+      : await boundedReservationOperation(() => nativeReservationIdentity(request, env, authority, event, force)); }
+    catch (error) { if (await credits.requiresPricing() && error.code === "unpriced_reservation") throw new CreditsAdmissionError("credits_unpriced"); throw error; }
+    return values;
+  };
+  const metadata = async event => {
+    const model = event.model?.includes(":") ? event.model : `${authority.provider}:${event.model}`;
+    if (!workspace) return { ...event, model, key_allowed: true, tools: [], key_tools: [] };
+    let principal = authority.principal;
+    if (governanceEnabled(env) && env.INTELLIGENCE_DB) {
+      const stored = await env.INTELLIGENCE_DB.prepare(`SELECT allowed_models FROM control_users WHERE username=? AND revoked_at IS NULL`)
+        .bind(principal.id).first();
+      principal = { ...principal, ...stored };
+    }
+    const patterns = principal.allowed_models == null ? null : String(principal.allowed_models).split(",");
+    const key_allowed = patterns === null || intersectGrants(true, model, [{ models: patterns }]);
+    if (governanceEnabled(env) && !key_allowed) throw new GovernanceError("model_not_allowed", 403);
+    const { body } = await boundedReservationBody(request);
+    const tools = (Array.isArray(body.tools) ? body.tools : []).map(tool => tool?.function?.name ?? tool?.name).filter(name => typeof name === "string");
+    return { ...event, model, key_allowed, tools, key_tools: authority.key_tools ?? tools };
+  };
   return createReservationLifecycle(env, { call: body => boundedReservationOperation(async () => {
     const response = await handleReservationsRequest(new Request("http://intelligence.internal/v1/reservations", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
     }), env);
     return response.json();
-  }), identity: context => boundedReservationOperation(() => nativeReservationIdentity(request, env, authority, context)) });
+  }), identity, ...(governance || creditsEnforcement(env) !== "off" ? { governance, credits, workspace, metadata } : {}) });
 }

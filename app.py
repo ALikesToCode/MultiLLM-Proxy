@@ -19,6 +19,8 @@ from route_helpers import (
     login_required,
 )
 from routes.config_snapshots import register_config_snapshot_routes
+from routes.enterprise_preview import register_enterprise_preview_routes
+from routes.tenants import register_tenant_routes
 from routes.core import register_core_routes
 from routes.dashboard_security import register_dashboard_security_routes
 from routes.intelligence_media import register_intelligence_media_routes
@@ -34,13 +36,14 @@ from routes.status_page import register_status_routes
 from routes.unified import register_unified_routes
 from routes.media import register_media_routes
 from routes.usage import register_usage_routes
+from routes.usage_receipts import register_usage_receipt_routes
 from routes.workbench import register_workbench_routes
 from security_config import load_max_content_length, validate_runtime_secrets
 from services.auth_service import AuthService
 from services.cache_service import CacheService
 from services.image_relay_catalog import ImageRelayCatalogRefresh
 from services.provider_catalog_refresh import ProviderCatalogAutoRefresh
-from services.gateway_extensions import gateway_callbacks, register_gateway_extensions
+from services.gateway_extensions import gateway_callbacks, register_gateway_extensions, register_enterprise_features
 from services.metrics_service import MetricsService
 from services.proxy_service import ProxyService
 from services import usage_ledger
@@ -144,11 +147,15 @@ def create_app() -> Flask:
     register_dashboard_security_routes(app)
     register_workbench_routes(app)
     register_config_snapshot_routes(app)
+    register_enterprise_preview_routes(app)
+    register_tenant_routes(app, csrf=csrf)
+    register_enterprise_features(app, csrf)
     register_shadow_eval_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_knowledge_routes(app, csrf)
     register_gateway_mcp_routes(app, csrf)
     register_documentation_routes(app, AuthService, ProxyService)
     register_usage_routes(app, csrf)
+    register_usage_receipt_routes(app, csrf)
     register_gateway_extensions(app, callbacks=gateway_callbacks(csrf=csrf))
     register_gateway_batch_routes(app)
     from functools import partial

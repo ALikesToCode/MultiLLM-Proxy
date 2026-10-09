@@ -174,7 +174,8 @@ export async function observeNativeResponse(response, context, options = {}) {
   const finish = reason => finalization ??= Promise.resolve().then(async () => {
     options.signal?.removeEventListener("abort", abort);
     const parsed = observer.finish();
-    const event = finalEvent(response, context, options, parsed, reason, millis(clock() - started), ttft);
+    const observed = finalEvent(response, context, options, parsed, reason, millis(clock() - started), ttft);
+    const event = options.classifyEvent ? options.classifyEvent(observed) : observed;
     if (options.metrics !== false) countEvent(event);
     try { await options.finalize?.(event); } catch { console.error(JSON.stringify({ event: "native_metrics_finalize_failed" })); }
   });

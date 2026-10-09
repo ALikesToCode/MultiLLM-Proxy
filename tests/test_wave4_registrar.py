@@ -111,7 +111,8 @@ def test_named_hook_order_and_replay_bypass_all_work(harness):
     enable()
     assert [hook.__name__ for hook in app.extensions["gateway_after_authentication"]] == [
         "request_policy_hook", "prompt_injection_request_hook", "spillover_hook", "pii_request_hook",
-        "responses_state_hook", "generation_deadline_hook", "idempotency_request_hook", "admit"]
+        "responses_state_hook", "context_canary_request_hook", "generation_deadline_hook",
+        "latency_slo_request_hook", "idempotency_request_hook", "admit"]
     client = app.test_client()
     headers = {"Idempotency-Key": "one"}
     first = client.post("/v1/chat/completions", json=BODY, headers=headers)

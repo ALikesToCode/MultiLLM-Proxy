@@ -1,3 +1,4 @@
+import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 /** Atomic managed request claims and bounded complete response objects. */
 import { boundedBody } from "./control-users-d1.mjs";
 
@@ -101,7 +102,7 @@ async function complete(db, bucket, body, now) {
   return { changed: changed.meta.changes === 1 };
 }
 
-export async function handleIdempotencyRequest(request, env) {
+export async function handleIdempotencyRequest(request, env, { tenantContext } = {}) {
   const url = new URL(request.url);
   if (request.method !== "POST" || url.origin !== "http://intelligence.internal" || url.pathname !== "/v1/managed-state/idempotency"
       || url.search || url.hash || url.username || url.password) return reply("not_found", 404);
@@ -112,6 +113,7 @@ export async function handleIdempotencyRequest(request, env) {
     body = JSON.parse(await boundedBody(request, MAX_DOCUMENT_BYTES));
     if (!validBody(body)) throw new Error();
   } catch { return reply("invalid_idempotency_request", 400); }
+  if (organisationsEnabled(env) && tenantContext && body.scope) body.scope = tenantStorageKey(body.scope, tenantContext);
   const db = env.INTELLIGENCE_DB, bucket = env.multillm_media;
   if (!db || !bucket) return reply("idempotency_store_unavailable", 503);
   const now = Math.floor(Date.now() / 1000);
