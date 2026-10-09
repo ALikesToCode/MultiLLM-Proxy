@@ -495,6 +495,7 @@ export async function roleplayModuleUrl() {
     .replace('import("../prompt-injection-detection.mjs")', `import("${new URL("../../worker/prompt-injection-detection.mjs", import.meta.url)}")`)
     .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
     .replace('from "../context-pages-d1.mjs";', `from "${new URL("../../worker/context-pages-d1.mjs", import.meta.url)}";`)
+    .replace('from "../context-canary.mjs";', `from "${new URL("../../worker/context-canary.mjs", import.meta.url)}";`)
     .replace('from "./candidate-context.mjs";', `from "${candidateContextUrl}";`)
     .replace('from "../secret-firewall.mjs";', `from "${new URL("../../worker/secret-firewall.mjs", import.meta.url)}";`)
     .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
