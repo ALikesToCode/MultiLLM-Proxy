@@ -17,6 +17,10 @@ from services.credential_context import observation_context, selection_context
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from services.request_cancellation import bind_cancellation
 from services.managed_turn import capture_submission_guard
+from services.intelligence_anthropic import (
+    AnthropicExchange,
+    prepare_anthropic_request,
+)
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -356,6 +360,8 @@ class IntelligenceTransport:
             else:
                 body = without_thought_signatures(body)
             body = with_codex_instructions(body, provider, model)
+            if provider == "anthropic":
+                body = prepare_anthropic_request(body)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )
@@ -418,4 +424,7 @@ class IntelligenceTransport:
                     **observation_context(response, cancelled=cancelled.is_set()),
                     **response_usage_observation(response))
 
-        return Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)
+        exchange = Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)
+        if provider == "anthropic" and path is None:
+            return AnthropicExchange(exchange, candidate["model"], max_bytes)
+        return exchange
