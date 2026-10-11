@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
+from services.protocol_translation.anthropic_request_policy import (
+    EFFORTS,
+    apply_thinking as _apply_thinking,
+)
 from services.protocol_translation.common import (
     ChatItem,
     StreamComment,
@@ -33,16 +37,6 @@ from services.protocol_translation.common import (
 
 # Messages requires max_tokens; Chat Completions does not.
 DEFAULT_MAX_TOKENS = 8192
-MIN_THINKING_BUDGET = 1024
-THINKING_BUDGETS = {
-    "minimal": 1024,
-    "low": 2048,
-    "medium": 8192,
-    "high": 16384,
-    "xhigh": 24576,
-    "max": 32768,
-}
-EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
 STOP_TO_FINISH = {
     "end_turn": "stop",
     "stop_sequence": "stop",
@@ -702,46 +696,6 @@ def _chat_tool_choice_to_messages(choice: Any, allowed: set[Any] | None) -> dict
             mode = (choice.get("allowed_tools") or {}).get("mode")
             return {"type": "any"} if mode == "required" else {"type": "auto"}
     raise TranslationError("Unsupported tool_choice value", param="tool_choice")
-
-
-def _apply_thinking(body: dict, payload: Mapping[str, Any]) -> None:
-    thinking = payload.get("thinking")
-    if isinstance(thinking, Mapping) and thinking.get("type") in {
-        "enabled",
-        "disabled",
-        "adaptive",
-    }:
-        body["thinking"] = dict(thinking)
-    else:
-        effort = payload.get("reasoning_effort")
-        if effort is None and isinstance(payload.get("reasoning"), Mapping):
-            effort = payload["reasoning"].get("effort")
-        if effort not in EFFORTS:
-            return
-        if effort == "none":
-            body["thinking"] = {"type": "disabled"}
-            return
-        body["thinking"] = {"type": "enabled", "budget_tokens": THINKING_BUDGETS[effort]}
-    if body["thinking"].get("type") == "disabled":
-        return
-    budget = body["thinking"].get("budget_tokens")
-    max_tokens = body["max_tokens"]
-    if (
-        isinstance(budget, int)
-        and not isinstance(budget, bool)
-        and isinstance(max_tokens, int)
-        and budget >= max_tokens
-    ):
-        # budget_tokens must stay below max_tokens; shrink it or drop thinking.
-        if max_tokens - 1 < MIN_THINKING_BUDGET:
-            body.pop("thinking")
-            return
-        body["thinking"]["budget_tokens"] = max_tokens - 1
-    # Thinking accepts neither a modified temperature nor top_p below 0.95.
-    body.pop("temperature", None)
-    top_p = body.get("top_p")
-    if isinstance(top_p, (int, float)) and top_p < 0.95:
-        body.pop("top_p")
 
 
 # ---------------------------------------------------------------------------
