@@ -24,6 +24,7 @@ from providers.local_inference import (
 )
 from providers.opencode_go import is_opencode_zen_free_model
 from services import provider_catalog_d1
+from services.anthropic_catalog import fetch_anthropic_catalog
 from services.provider_capability_discovery import enrich_model_capabilities
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
@@ -491,20 +492,28 @@ class ProviderCatalogService:
                     credential,
                     upstream_path=spec.upstream_path,
                 )
-                response = proxy_service_cls.make_request(
-                    method="GET",
-                    url=f"{base_url.rstrip('/')}/{spec.upstream_path}",
-                    headers=headers,
-                    params=[],
-                    data=None,
-                    api_provider=provider,
-                    use_cache=False,
-                    timeout_override=(3, 10),
-                    force_raw_passthrough=True,
-                )
-                last_status = int(response.status_code)
+                url = f"{base_url.rstrip('/')}/{spec.upstream_path}"
+                if provider == "anthropic":
+                    last_status, payload = fetch_anthropic_catalog(
+                        proxy_service_cls, url=url, headers=headers,
+                        max_models=MAX_MODELS_PER_PROVIDER,
+                    )
+                else:
+                    response = proxy_service_cls.make_request(
+                        method="GET",
+                        url=url,
+                        headers=headers,
+                        params=[],
+                        data=None,
+                        api_provider=provider,
+                        use_cache=False,
+                        timeout_override=(3, 10),
+                        force_raw_passthrough=True,
+                    )
+                    last_status = int(response.status_code)
+                    payload = response.json() if 200 <= last_status < 300 else None
                 if 200 <= last_status < 300:
-                    models = cls.extract_models(provider, response.json())
+                    models = cls.extract_models(provider, payload)
                     if models:
                         truncated = len(models) > MAX_MODELS_PER_PROVIDER
                         return {
