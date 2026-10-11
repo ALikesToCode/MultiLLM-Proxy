@@ -178,6 +178,7 @@ def _accepts_native_api_key(path: str) -> bool:
         _provider_prefix(path)
         in {
             "aihubmix",
+            "anthropic",
             "linkapi",
             "nanogpt",
             "navyai",
@@ -485,7 +486,7 @@ def _authenticate_api_request():
                 " Native LinkAPI clients may also use X-Api-Key, "
                 "X-Goog-Api-Key, or the Gemini key query parameter."
             )
-        elif provider_prefix in {"nanogpt", "navyai", "opencode"}:
+        elif provider_prefix in {"anthropic", "nanogpt", "navyai", "opencode"}:
             native_hint = " Native Anthropic clients may also use X-Api-Key."
         else:
             native_hint = ""

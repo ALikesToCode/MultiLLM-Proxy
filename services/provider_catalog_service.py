@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.anthropic import anthropic_catalog_metadata
 from providers.cline_pass import (
     CLINE_RECOMMENDED_MODELS_PATH,
     cline_pass_catalog_entries,
@@ -23,6 +24,7 @@ from providers.local_inference import (
 )
 from providers.opencode_go import is_opencode_zen_free_model
 from services import provider_catalog_d1
+from services.anthropic_catalog import fetch_anthropic_catalog
 from services.provider_capability_discovery import enrich_model_capabilities
 from services.provider_catalog_metadata import (
     decode_provider_metadata,
@@ -56,6 +58,7 @@ class ProviderCatalogModel:
 PROVIDER_CATALOG_SPECS = {
     **{provider: ProviderCatalogSpec("models", f"/{provider}/models")
        for provider in sorted(LOCAL_INFERENCE_PROVIDERS)},
+    "anthropic": ProviderCatalogSpec("v1/models", "/anthropic/v1/models"),
     "aihubmix": ProviderCatalogSpec("v1/models", "/aihubmix/v1/models"),
     "openai": ProviderCatalogSpec("v1/models", "/openai/v1/models"),
     "openrouter": ProviderCatalogSpec("models", "/openrouter/models"),
@@ -421,10 +424,12 @@ class ProviderCatalogService:
                     "max_output_tokens",
                     "max_completion_tokens",
                     "output_token_limit",
-                ),
+                ) + (("max_tokens",) if provider == "anthropic" else ()),
             )
             existing = normalized.get(model_id)
-            metadata = sanitize_provider_metadata(item)
+            metadata = sanitize_provider_metadata(
+                anthropic_catalog_metadata(item) if provider == "anthropic" else item
+            )
             if provider in LOCAL_INFERENCE_PROVIDERS:
                 metadata = local_catalog_metadata(provider, metadata)
             if existing:
@@ -487,20 +492,28 @@ class ProviderCatalogService:
                     credential,
                     upstream_path=spec.upstream_path,
                 )
-                response = proxy_service_cls.make_request(
-                    method="GET",
-                    url=f"{base_url.rstrip('/')}/{spec.upstream_path}",
-                    headers=headers,
-                    params=[],
-                    data=None,
-                    api_provider=provider,
-                    use_cache=False,
-                    timeout_override=(3, 10),
-                    force_raw_passthrough=True,
-                )
-                last_status = int(response.status_code)
+                url = f"{base_url.rstrip('/')}/{spec.upstream_path}"
+                if provider == "anthropic":
+                    last_status, payload = fetch_anthropic_catalog(
+                        proxy_service_cls, url=url, headers=headers,
+                        max_models=MAX_MODELS_PER_PROVIDER,
+                    )
+                else:
+                    response = proxy_service_cls.make_request(
+                        method="GET",
+                        url=url,
+                        headers=headers,
+                        params=[],
+                        data=None,
+                        api_provider=provider,
+                        use_cache=False,
+                        timeout_override=(3, 10),
+                        force_raw_passthrough=True,
+                    )
+                    last_status = int(response.status_code)
+                    payload = response.json() if 200 <= last_status < 300 else None
                 if 200 <= last_status < 300:
-                    models = cls.extract_models(provider, response.json())
+                    models = cls.extract_models(provider, payload)
                     if models:
                         truncated = len(models) > MAX_MODELS_PER_PROVIDER
                         return {

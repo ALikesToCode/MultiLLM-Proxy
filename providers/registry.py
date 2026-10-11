@@ -12,6 +12,16 @@ from providers.openai_compatible import OpenAICompatibleAdapter
 
 PROVIDER_SPECS = (
     (
+        "anthropic",
+        "v1/messages",
+        ProviderCapabilities(
+            supports_tools=True,
+            supports_vision=True,
+            supports_json_schema=True,
+            supports_token_count=True,
+        ),
+    ),
+    (
         "openai",
         "v1/chat/completions",
         ProviderCapabilities(

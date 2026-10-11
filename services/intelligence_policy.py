@@ -4,6 +4,7 @@ import copy
 
 from providers.codex_everywhere import CODEX_EVERYWHERE_OPENAI_PROVIDERS
 from providers.registry import get_adapter
+from services.intelligence_anthropic import HAIKU_INTELLIGENCE_MODEL
 from services.intelligence_contract import (
     CAPABILITIES,
     TASKS,
@@ -37,12 +38,13 @@ DEFAULT_POLICY = {
     "candidates": [],
     "media": {},
 }
-# These adapters expose Chat Completions directly. Native conversion handlers
-# with internal retries cannot yet provide the single-attempt accounting contract.
-# Gemini qualifies through its OpenAI-compatible endpoint (see intelligence_transport).
+# These adapters expose Chat Completions directly, or use single-attempt translation.
+# Gemini uses its compatible endpoint and Anthropic uses the bounded Messages bridge.
+# Conversion handlers with internal retries do not share this accounting contract.
 CHAT_PROVIDERS = frozenset(
     {
         "openai",
+        "anthropic",
         "openrouter",
         "linkapi",
         "aihubmix",
@@ -258,6 +260,11 @@ def select_candidates(policy, request, config, *, session_tier=None, model_statu
         return (priority, -score, *speed)
 
     def apply_session_tier(choices):
+        # Prefer Haiku for a new selection; an approved session keeps its actual
+        # model first so tool continuations stay on the established provider.
+        choices = sorted(
+            choices, key=lambda candidate: candidate["model"] != HAIKU_INTELLIGENCE_MODEL
+        )
         if session_tier is not None and not request.explicit:
             choices = session_tier.select(choices)
         if not apply_latency:

@@ -163,7 +163,7 @@ def prepare_validation(payload, config):
 
 def _bounded_validator(contract):
     steps, depth = 0, 0
-    expires = time.monotonic() + MAX_VALIDATION_SECONDS
+    expires = 0.0
 
     def bounded(callback, keyword):
         def validate(validator, value, instance, schema):
@@ -184,7 +184,12 @@ def _bounded_validator(contract):
     cls = extend(contract.validator_class, {
         name: bounded(callback, name) for name, callback in contract.validator_class.VALIDATORS.items()
     })
-    return cls(contract.schema, registry=Registry())
+    validator = cls(contract.schema, registry=Registry())
+    # Class construction does not execute the caller's schema. Start the work
+    # budget when the validator is ready so construction latency cannot reject
+    # an otherwise small, valid response.
+    expires = time.monotonic() + MAX_VALIDATION_SECONDS
+    return validator
 
 
 def _redacted_path(path):

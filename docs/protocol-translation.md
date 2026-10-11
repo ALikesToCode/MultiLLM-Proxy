@@ -117,9 +117,13 @@ for limits and protocol caveats.
 
 Reasoning is round-tripped only where the target can use it: thinking chat
 models such as Kimi and DeepSeek need `reasoning_content` back on assistant
-tool-call turns, so it is sent there and dropped elsewhere. Translated thinking
-blocks carry an empty `signature`; they are removed before a request is passed
-natively to a Messages model.
+tool-call turns, so it is sent there and dropped elsewhere. Thinking blocks
+reconstructed from plain reasoning text carry an empty `signature`; they are
+removed before a request is passed natively to a Messages model. Native signed
+Anthropic tool turns retain their complete assistant blocks in `extra_content`
+on the first Chat tool call or Responses function call. Replay that metadata
+unchanged with the complete assistant output when submitting tool results;
+see [Anthropic continuation handling](anthropic.md).
 
 ### Dropped safely
 

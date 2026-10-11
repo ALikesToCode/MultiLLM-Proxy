@@ -229,7 +229,7 @@ test("enabled security listing never silently substitutes missing account contro
     script: "export default {fetch(){return new Response('ok')}}", d1Databases: ["INTELLIGENCE_DB"] }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("INTELLIGENCE_DB");
-  await applyMigrations(db, { skip: ["0013_shadow_eval.sql"] });
+  await applyMigrations(db, { skip: ["0013_shadow_eval.sql", "0039_haiku_primary.sql"] });
   const env = { INTELLIGENCE_DB: db, CONFIG_REVISION_SYNC_ENABLED: "true" };
   assert.equal((await usersCall(env, { operation: "list", after: null, limit: 200 })).status, 503);
   assert.deepEqual((await usersCall({ ...env, CONFIG_REVISION_SYNC_ENABLED: "false" },

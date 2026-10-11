@@ -405,6 +405,7 @@ def _string(value: Any) -> str | None:
 
 
 def _tool_fragment(fragment: Any, position: int) -> dict | None:
+    from services.protocol_translation.anthropic_continuation import anthropic_extra
     if not isinstance(fragment, Mapping):
         return None
     index = fragment.get("index")
@@ -422,6 +423,9 @@ def _tool_fragment(fragment: Any, position: int) -> dict | None:
             for key in ("name", "arguments")
             if _string(function.get(key)) is not None
         }
+    extra = anthropic_extra(fragment.get("extra_content"))
+    if extra:
+        clean["extra_content"] = extra
     return clean
 
 
@@ -604,6 +608,8 @@ def aggregate_chat_items(items: Iterable[ChatItem]) -> dict:
                 )
                 if fragment.get("id"):
                     call["id"] = call["id"] or fragment["id"]
+                if isinstance(fragment.get("extra_content"), Mapping):
+                    call["extra_content"] = dict(fragment["extra_content"])
                 function = fragment.get("function") or {}
                 for key in ("name", "arguments"):
                     if isinstance(function.get(key), str):
@@ -663,6 +669,7 @@ def chat_completion_items(completion: Mapping[str, Any]) -> Iterator[ChatItem]:
                             "name": function.get("name") or "",
                             "arguments": function.get("arguments") or "",
                         },
+                        **({"extra_content": call["extra_content"]} if "extra_content" in call else {}),
                     }
                 ]
             },

@@ -74,7 +74,7 @@ test("a D1 without the account migration fails closed for dashboard keys but not
   // 0007, 0011, 0013 and 0030 alter control_users, so they are skipped with the migration that creates the table;
   // 0016 alters 0007's usage_events.
   const { url } = await privateStore(t, ["0003_control_users.sql", "0004_control_user_audit.sql", "0005_auto_routes.sql",
-    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0016_usage_buckets.sql",
+    "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0016_usage_buckets.sql", "0039_haiku_primary.sql",
     "0030_stream_cost_caps.sql"]);
   assert.deepEqual(await drive(url, "unmigrated"), { dashboard_key: 503, admin: "admin",
     route: ["gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5"], save_route: 503 });

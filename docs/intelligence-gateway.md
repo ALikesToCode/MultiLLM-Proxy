@@ -12,7 +12,9 @@ allowance settings. Source and synthetic HTTP tests do not establish deployed
 provider availability. `/v1/models` advertises the alias, its reviewed capabilities
 (tags in `capability_tags`, flags in `capabilities`), and `availability: "unverified"`;
 it never reports credential presence as a live probe. Gemini candidates use Gemini's
-OpenAI-compatible Chat Completions endpoint. Native Gemma/Vertex conversion paths are not
+OpenAI-compatible Chat Completions endpoint. Direct Anthropic candidates use a
+single-submission Messages bridge with the same deadlines, response bounds and
+usage accounting. Native Gemma/Vertex conversion paths are not
 eligible in version one because their internal attempts do not yet share this accounting
 contract.
 
@@ -140,7 +142,12 @@ first visible output for `latency_ms` and the visible output rate for
 `tokens_per_second`. Omit unknown measurements. No capability or quality is
 inferred from model names or provider-wide flags.
 
-The balanced profile preserves operator candidate order. Quality prioritizes
+An eligible `anthropic:claude-haiku-5-5` candidate comes first in every profile.
+It defaults to adaptive thinking with `output_config.effort: "max"`; explicit
+`reasoning_effort` still wins. This primary-model preference does not supply task
+scores or measured performance. Approved session lanes and latency admission still
+apply. Remaining candidates keep their profile's order.
+The balanced profile preserves operator fallback order. Quality prioritizes
 reviewed task score and tier. Fast prioritizes the shortest expected reply: time
 to first output plus 512 tokens (or the smaller output limit) at the output rate.
 Each streamed success records both figures for its candidate in route health, as
@@ -163,6 +170,16 @@ subscription endpoint, irrespective of global speed routing; caller payment and
 account headers are not forwarded. No implicit speed suffix is added. Reuse the
 existing provider credential environment variables, base URLs and key cooldowns.
 Intelligence dispatch does not trigger a credential probe.
+
+Migration `0039_haiku_primary.sql` adds Haiku first in an existing enabled D1
+policy, keeps the old document in `shadow_eval_policy_backups`, and authorizes
+server-side PAYG eligibility. It preserves existing Haiku eligibility settings,
+fallbacks, media settings and token limits. Disabled or unseeded policies stay
+disabled or unseeded. Requests must still opt in with
+`routing.allow_paid_overage: true`; without that opt-in, a PAYG Haiku candidate
+is skipped and the existing fallback chain runs. Configure `ANTHROPIC_API_KEY`
+and deploy the bridge before expecting Haiku responses. Local installations can
+use the same candidate shape in their reviewed policy.
 
 Token admission conservatively estimates text/tool/schema input from UTF-8 bytes
 plus framing overhead. Encoded image and audio parts are left out of that byte count.

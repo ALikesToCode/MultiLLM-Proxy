@@ -2,6 +2,7 @@
 
 import json
 import importlib
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
@@ -162,6 +163,33 @@ def test_work_steps_and_elapsed_limit(monkeypatch):
             response = client.post("/v1/chat/completions", json=payload())
             assert response.status_code == 502 and response.json["error"]["reason"] == "work_limit"
             assert dispatch.call_count == 1
+
+
+@pytest.mark.parametrize("expire_during_validation", [False, True])
+def test_elapsed_budget_starts_after_validator_construction(monkeypatch, expire_during_validation):
+    now = [0.0]
+    original_extend = validation.extend
+
+    def costly_extend(base, validators):
+        now[0] += 10.0
+        if expire_during_validation:
+            callback = validators["type"]
+
+            def delayed_type(*args):
+                now[0] += validation.MAX_VALIDATION_SECONDS
+                yield from callback(*args)
+
+            validators = {**validators, "type": delayed_type}
+        return original_extend(base, validators)
+
+    monkeypatch.setattr(validation, "extend", costly_extend)
+    monkeypatch.setattr(validation, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    client, dispatch = client_for(Response(json.dumps(completion('{"count":2}')), content_type="application/json"))
+    response = client.post("/v1/chat/completions", json=payload())
+    assert response.status_code == (502 if expire_during_validation else 200)
+    if expire_during_validation:
+        assert response.json["error"]["reason"] == "work_limit"
+    assert dispatch.call_count == 1
 
 
 def test_error_paths_are_bounded_and_dynamic_keys_are_redacted():

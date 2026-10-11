@@ -178,6 +178,7 @@ class Config:
 
     API_BASE_URLS = {
         'openai': 'https://api.openai.com',
+        'anthropic': 'https://api.anthropic.com',
         'cerebras': 'https://api.cerebras.ai',
         'googleai': f'https://{ENDPOINT}/v1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi',
         'xai': 'https://api.x.ai',
@@ -219,6 +220,7 @@ class Config:
     # Provider-specific timeouts (connect_timeout, read_timeout)
     API_TIMEOUTS = {
         'openai': (5, 60),
+        'anthropic': (5, 600),
         'cerebras': (5, 60),
         'googleai': (10, 120),  # Google AI can be slow to respond
         'xai': (5, 60),

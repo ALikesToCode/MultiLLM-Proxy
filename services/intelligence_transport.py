@@ -17,6 +17,10 @@ from services.credential_context import observation_context, selection_context
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from services.request_cancellation import bind_cancellation
 from services.managed_turn import capture_submission_guard
+from services.intelligence_anthropic import (
+    AnthropicExchange,
+    prepare_anthropic_request,
+)
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -199,8 +203,8 @@ class Exchange:
             response.close()
 
 
-def without_thought_signatures(body):
-    """Drop Gemini thought signatures from replayed tool calls before another provider sees them."""
+def without_thought_signatures(body, *, provider=None):
+    """Drop foreign signatures while retaining an Anthropic tool continuation."""
     messages = body.get("messages")
     if not isinstance(messages, list) or not any(
         isinstance(message, dict)
@@ -209,15 +213,23 @@ def without_thought_signatures(body):
         for message in messages
     ):
         return body
+
+    def clean_call(call):
+        if not isinstance(call, dict):
+            return call
+        cleaned = {key: value for key, value in call.items() if key != "extra_content"}
+        extra = call.get("extra_content")
+        if provider == "anthropic" and isinstance(extra, dict) and "anthropic" in extra:
+            cleaned["extra_content"] = {"anthropic": extra["anthropic"]}
+        return cleaned
+
     cleaned = []
     for message in messages:
         if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
             message = {
                 **message,
                 "tool_calls": [
-                    {key: value for key, value in call.items() if key != "extra_content"}
-                    if isinstance(call, dict)
-                    else call
+                    clean_call(call)
                     for call in message["tool_calls"]
                 ],
             }
@@ -354,8 +366,10 @@ class IntelligenceTransport:
             if provider == "gemini":
                 body = with_thought_signatures(body)
             else:
-                body = without_thought_signatures(body)
+                body = without_thought_signatures(body, provider=provider)
             body = with_codex_instructions(body, provider, model)
+            if provider == "anthropic":
+                body = prepare_anthropic_request(body)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )
@@ -418,4 +432,7 @@ class IntelligenceTransport:
                     **observation_context(response, cancelled=cancelled.is_set()),
                     **response_usage_observation(response))
 
-        return Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)
+        exchange = Exchange(send, deadline, cancelled, max_bytes, record_response=record_response)
+        if provider == "anthropic" and path is None:
+            return AnthropicExchange(exchange, candidate["model"], max_bytes)
+        return exchange

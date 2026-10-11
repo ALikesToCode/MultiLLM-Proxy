@@ -10,7 +10,7 @@ from request_validation import decode_json_object_bytes, validated_gemini_model_
 import threading
 from datetime import datetime, timedelta
 from services.auth_service import AuthService
-from services.client_headers import CLIENT_HEADER_NAMES, OPENCODE_CLIENT_HEADER_NAMES, with_client_defaults
+from services.client_headers import CLIENT_HEADER_NAMES, with_client_defaults
 from services.opencode_session import with_opencode_request_session
 from services.credential_pool import CredentialPool
 from services.resilience_service import ResilienceService
@@ -23,6 +23,8 @@ from services.retry_advice import retry_advice_settings
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
+from providers.anthropic import with_anthropic_headers
+from services.provider_request_headers import filter_upstream_headers
 from providers.codex_everywhere import (
     CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS,
     CODEX_EVERYWHERE_POOLS,
@@ -38,19 +40,16 @@ from services.upstream_errors import (
 from services.upstream_transport import close_retry_response, iter_stream_lines
 from services.request_cancellation import attach_stream_owner, bind_cancellation, owned_stream_lines
 from providers.nanogpt import (
-    NANOGPT_REQUEST_HEADER_WHITELIST,
     is_nanogpt_accountless_request,
     nanogpt_caller_api_key,
     nanogpt_caller_authorization,
     nanogpt_l402_authorization,
 )
 from providers.navyai import (
-    NAVYAI_REQUEST_HEADER_WHITELIST,
     navyai_caller_api_key,
     navyai_caller_authorization,
 )
 from providers.opencode_go import (
-    OPENCODE_GO_REQUEST_HEADER_WHITELIST,
     is_opencode_go_anthropic_request,
     is_opencode_go_native_path,
     opencode_go_caller_api_key,
@@ -411,76 +410,9 @@ class ProxyService:
         """
         Prepare headers for API requests, filtering out unnecessary ones.
         """
-        headers = {}
-        header_whitelist = dict(cls.UPSTREAM_HEADER_WHITELIST)
-        if api_provider in ["googleai", "gemini", "gemma"]:
-            header_whitelist["x-goog-user-project"] = "X-Goog-User-Project"
-        elif api_provider == "nanogpt":
-            header_whitelist.update(NANOGPT_REQUEST_HEADER_WHITELIST)
-        elif api_provider == "navyai":
-            header_whitelist.update(NAVYAI_REQUEST_HEADER_WHITELIST)
-        elif api_provider == "opencode":
-            header_whitelist.update(OPENCODE_GO_REQUEST_HEADER_WHITELIST)
-            header_whitelist.update(OPENCODE_CLIENT_HEADER_NAMES)
-        elif api_provider == "linkapi":
-            header_whitelist.update(
-                {
-                    "anthropic-beta": "Anthropic-Beta",
-                    "idempotency-key": "Idempotency-Key",
-                    "openai-beta": "OpenAI-Beta",
-                    "openai-project": "OpenAI-Project",
-                    "x-client-request-id": "X-Client-Request-ID",
-                    "x-goog-api-client": "X-Goog-Api-Client",
-                    "x-goog-user-project": "X-Goog-User-Project",
-                }
-            )
-            if upstream_path.strip("/").lower() == "v1/chat/completions":
-                header_whitelist["x-grok-conv-id"] = "X-Grok-Conv-Id"
-        elif (
-            api_provider in {"aihubmix", "together"}
-            or image_relay_spec(api_provider)
-        ):
-            header_whitelist.update(
-                {
-                    "idempotency-key": "Idempotency-Key",
-                    "openai-beta": "OpenAI-Beta",
-                    "openai-project": "OpenAI-Project",
-                    "x-client-request-id": "X-Client-Request-ID",
-                }
-            )
-        elif api_provider == "codex-easy" or api_provider in CODEX_EVERYWHERE_PROVIDERS:
-            header_whitelist.update(
-                {
-                    "anthropic-beta": "Anthropic-Beta",
-                    "idempotency-key": "Idempotency-Key",
-                    "openai-beta": "OpenAI-Beta",
-                    "openai-project": "OpenAI-Project",
-                    "x-client-request-id": "X-Client-Request-ID",
-                    "x-grok-conv-id": "X-Grok-Conv-Id",
-                }
-            )
-        elif api_provider == "kimi-code":
-            header_whitelist.update(
-                {
-                    "idempotency-key": "Idempotency-Key",
-                    "openai-beta": "OpenAI-Beta",
-                    "openai-project": "OpenAI-Project",
-                    "x-client-request-id": "X-Client-Request-ID",
-                }
-            )
-
-        for header, value in request_headers.items():
-            canonical_header = header_whitelist.get(header.lower())
-            if canonical_header:
-                headers[canonical_header] = value
-            elif (
-                (
-                    api_provider in {"codex-easy", "kimi-code", "nanogpt", "navyai", "opencode"}
-                    or api_provider in CODEX_EVERYWHERE_PROVIDERS
-                )
-                and header.lower().startswith("x-stainless-")
-            ):
-                headers[header] = value
+        headers = filter_upstream_headers(
+            request_headers, api_provider, upstream_path, cls.UPSTREAM_HEADER_WHITELIST
+        )
 
         opencode_native = (
             api_provider == "opencode"
@@ -594,9 +526,9 @@ class ProxyService:
             if not cls._has_header(headers, "X-Title"):
                 headers['X-Title'] = os.environ.get('APP_NAME', 'MultiLLM Proxy')
         elif api_provider == 'anthropic':
-            # Anthropic specific headers
-            if not cls._has_header(headers, "Anthropic-Version"):
-                headers['Anthropic-Version'] = '2023-06-01'
+            headers = with_anthropic_headers(
+                headers, auth_token, workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID")
+            )
         elif is_linkapi_claude and not cls._has_header(headers, "Anthropic-Version"):
             headers["Anthropic-Version"] = "2023-06-01"
         elif (
@@ -629,7 +561,7 @@ class ProxyService:
         if api_provider not in RAW_PASSTHROUGH_PROVIDERS:
             return params
 
-        if api_provider in {"codex-easy", "kimi-code", "linkapi"} or api_provider in CODEX_EVERYWHERE_PROVIDERS:
+        if api_provider in {"anthropic", "codex-easy", "kimi-code", "linkapi"} or api_provider in CODEX_EVERYWHERE_PROVIDERS:
             params = [(key, value) for key, value in params if key.lower() != "key"]
         return params
 

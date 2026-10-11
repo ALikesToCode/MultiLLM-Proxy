@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from providers.cline_pass import cline_completion_payload
 from services.free_json_contract import check_json_output, json_output_requested
 from services.intelligence_contract import GatewayError
+from services.protocol_translation.anthropic_continuation import anthropic_extra
 
 USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
@@ -65,18 +66,18 @@ def with_thinking_tokens(usage):
     }
 
 
-# Gemini 3 signs each function call and refuses the next request unless the caller
-# returns the signature with it. Nothing else in a call's extra_content is kept.
+# Keep only the provider continuation metadata needed to resume a tool turn.
 MAX_THOUGHT_SIGNATURE_CHARS = 32768
 
 
 def thought_extra(value):
-    """A tool call's Gemini thought signature in its wire shape, or None."""
+    """Validated provider continuation metadata in its wire shape, or None."""
+    native = anthropic_extra(value)
     google = value.get("google") if isinstance(value, dict) else None
     signature = google.get("thought_signature") if isinstance(google, dict) else None
     if not isinstance(signature, str) or not 0 < len(signature) <= MAX_THOUGHT_SIGNATURE_CHARS:
-        return None
-    return {"google": {"thought_signature": signature}}
+        return native
+    return {**(native or {}), "google": {"thought_signature": signature}}
 
 
 def safe_message(message):
