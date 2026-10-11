@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
+from services.protocol_translation.anthropic_continuation import anthropic_extra
 from services.protocol_translation.responses_requests import (
     chat_request_to_responses as chat_request_to_responses,
     responses_request_to_chat as responses_request_to_chat,
@@ -77,16 +78,18 @@ def responses_response_to_chat(
                 )
             )
         elif kind == "function_call":
-            calls.append(
-                {
-                    "id": str(item.get("call_id") or item.get("id") or new_id("call")),
-                    "type": "function",
-                    "function": {
-                        "name": str(item.get("name") or ""),
-                        "arguments": item.get("arguments") or "",
-                    },
-                }
-            )
+            call = {
+                "id": str(item.get("call_id") or item.get("id") or new_id("call")),
+                "type": "function",
+                "function": {
+                    "name": str(item.get("name") or ""),
+                    "arguments": item.get("arguments") or "",
+                },
+            }
+            extra = _response_extra(item.get("extra_content"))
+            if extra:
+                call["extra_content"] = extra
+            calls.append(call)
     text = "".join(texts)
     message: dict[str, Any] = {"role": "assistant", "content": text if text or not calls else None}
     if calls:
@@ -151,6 +154,7 @@ def chat_response_to_responses(
                 function.get("name") or "",
                 function.get("arguments") or "",
                 "completed",
+                extra_content=call.get("extra_content"),
             )
         )
     status, incomplete = _status_for_finish(finish)
@@ -205,8 +209,23 @@ def _reasoning_item(item_id: str, text: str, status: str) -> dict:
     return {"id": item_id, "type": "reasoning", "summary": [], "content": content, "status": status}
 
 
-def _function_call_item(item_id: str, call_id: str, name: str, arguments: str, status: str) -> dict:
-    return {
+def _response_extra(value: Any) -> dict | None:
+    try:
+        return anthropic_extra(value)
+    except ValueError as error:
+        raise UpstreamFailure("Invalid Anthropic continuation metadata") from error
+
+
+def _function_call_item(
+    item_id: str,
+    call_id: str,
+    name: str,
+    arguments: str,
+    status: str,
+    *,
+    extra_content: Any = None,
+) -> dict:
+    item: dict[str, Any] = {
         "id": item_id,
         "type": "function_call",
         "status": status,
@@ -214,6 +233,10 @@ def _function_call_item(item_id: str, call_id: str, name: str, arguments: str, s
         "name": name,
         "arguments": arguments,
     }
+    extra = _response_extra(extra_content)
+    if extra:
+        item["extra_content"] = extra
+    return item
 
 
 def responses_usage_to_chat(usage: Mapping[str, Any]) -> dict:
@@ -323,24 +346,28 @@ def responses_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             )
         return emitted
 
-    def register(item: Mapping[str, Any]) -> list[dict]:
-        key = str(item.get("id") or item.get("call_id") or len(tools))
+    def register(item: Mapping[str, Any], *, key: str | None = None) -> list[dict]:
+        key = key or str(item.get("id") or item.get("call_id") or len(tools))
+        extra = anthropic_extra(item.get("extra_content"))
         if key in tools:
+            if extra and tools[key].get("extra_content") != extra:
+                tools[key]["extra_content"] = extra
+                return chunk(
+                    {"tool_calls": [{"index": tools[key]["index"], "extra_content": extra}]}
+                )
             return []
         arguments = item.get("arguments") if isinstance(item.get("arguments"), str) else ""
         tools[key] = {"index": len(tools), "streamed": bool(arguments)}
-        return chunk(
-            {
-                "tool_calls": [
-                    {
-                        "index": tools[key]["index"],
-                        "id": str(item.get("call_id") or item.get("id") or new_id("call")),
-                        "type": "function",
-                        "function": {"name": str(item.get("name") or ""), "arguments": arguments},
-                    }
-                ]
-            }
-        )
+        call = {
+            "index": tools[key]["index"],
+            "id": str(item.get("call_id") or item.get("id") or new_id("call")),
+            "type": "function",
+            "function": {"name": str(item.get("name") or ""), "arguments": arguments},
+        }
+        if extra:
+            tools[key]["extra_content"] = extra
+            call["extra_content"] = extra
+        return chunk({"tool_calls": [call]})
 
     for event in iter_events(chunks):
         if isinstance(event, StreamFailure):
@@ -389,26 +416,34 @@ def responses_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
                         ]
                     }
                 )
-        elif kind in {"response.function_call_arguments.done", "response.output_item.done"}:
+        elif kind in {
+            "response.function_call_arguments.done",
+            "response.output_item.done",
+        }:
             item = data.get("item") if isinstance(data.get("item"), Mapping) else data
             if kind == "response.output_item.done" and item.get("type") != "function_call":
                 continue
             key = str(item.get("id") or data.get("item_id") or "")
             if key not in tools:
-                yield from register(item)
-            elif not tools[key]["streamed"] and item.get("arguments"):
-                tools[key]["streamed"] = True
-                yield from chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": tools[key]["index"],
-                                "function": {"arguments": item["arguments"]},
-                            }
-                        ]
-                    }
-                )
+                yield from register(item, key=key)
+            else:
+                yield from register(item, key=key)
+                if not tools[key]["streamed"] and item.get("arguments"):
+                    tools[key]["streamed"] = True
+                    yield from chunk(
+                        {
+                            "tool_calls": [
+                                {
+                                    "index": tools[key]["index"],
+                                    "function": {"arguments": item["arguments"]},
+                                }
+                            ]
+                        }
+                    )
         elif kind in {"response.completed", "response.incomplete"}:
+            for item in response.get("output") or []:
+                if isinstance(item, Mapping) and item.get("type") == "function_call":
+                    yield from register(item)
             usage = response.get("usage")
             if kind == "response.incomplete":
                 reason = (response.get("incomplete_details") or {}).get("reason")
@@ -605,8 +640,11 @@ class _ResponsesWriter:
         index = fragment.get("index", 0)
         function = as_mapping(fragment.get("function"))
         arguments = function.get("arguments") if isinstance(function.get("arguments"), str) else ""
+        extra = anthropic_extra(fragment.get("extra_content"))
         if index in self.tool_items:
             record = self.tool_items[index]
+            if extra:
+                record["item"]["extra_content"] = extra
             if not arguments:
                 return []
             record["item"]["arguments"] += arguments
@@ -619,6 +657,8 @@ class _ResponsesWriter:
                 )
             ]
         pending = self.pending_tools.setdefault(index, {"id": None, "name": "", "arguments": ""})
+        if extra:
+            pending["extra_content"] = extra
         if fragment.get("id") and not pending["id"]:
             pending["id"] = fragment["id"]
         if isinstance(function.get("name"), str):
@@ -629,7 +669,12 @@ class _ResponsesWriter:
     def _open_tool(self, index: int) -> list[str]:
         pending = self.pending_tools.pop(index)
         item = _function_call_item(
-            new_id("fc"), str(pending["id"] or new_id("call")), pending["name"], "", "in_progress"
+            new_id("fc"),
+            str(pending["id"] or new_id("call")),
+            pending["name"],
+            "",
+            "in_progress",
+            extra_content=pending.get("extra_content"),
         )
         events = self._open_item(item, "function_call")
         output_index = len(self.output) - 1

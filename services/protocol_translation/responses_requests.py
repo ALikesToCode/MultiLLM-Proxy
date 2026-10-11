@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from services.protocol_translation.anthropic_continuation import anthropic_extra
 from services.protocol_translation.common import (
     TranslationError,
     as_mapping,
@@ -19,6 +20,14 @@ _STATEFUL_FIELDS = {
     "background": "background responses",
     "prompt": "stored prompt templates",
 }
+
+
+def _request_extra(value: Any, *, param: str) -> dict | None:
+    try:
+        return anthropic_extra(value)
+    except ValueError as error:
+        raise TranslationError("Invalid Anthropic continuation metadata", param=param) from error
+
 
 # ---------------------------------------------------------------------------
 # Requests: Responses -> Chat Completions.
@@ -120,6 +129,9 @@ def _input_to_messages(value: Any) -> list[dict]:
                     "arguments": item.get("arguments") or "{}",
                 },
             }
+            extra = _request_extra(item.get("extra_content"), param="input")
+            if extra:
+                call["extra_content"] = extra
             _merge_assistant(messages, call=call, reasoning=pending_reasoning)
             pending_reasoning = ""
         elif kind == "function_call_output":
@@ -328,14 +340,16 @@ def chat_request_to_responses(payload: Mapping[str, Any]) -> dict:
                 function = call.get("function") if isinstance(call, Mapping) else None
                 if not isinstance(function, Mapping):
                     continue
-                items.append(
-                    {
-                        "type": "function_call",
-                        "call_id": str(call.get("id") or new_id("call")),
-                        "name": function.get("name") or "",
-                        "arguments": function.get("arguments") or "{}",
-                    }
-                )
+                item = {
+                    "type": "function_call",
+                    "call_id": str(call.get("id") or new_id("call")),
+                    "name": function.get("name") or "",
+                    "arguments": function.get("arguments") or "{}",
+                }
+                extra = _request_extra(call.get("extra_content"), param="messages")
+                if extra:
+                    item["extra_content"] = extra
+                items.append(item)
         elif role == "tool":
             items.append(
                 {

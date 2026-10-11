@@ -7,12 +7,17 @@ from services.intelligence_stream import ChatStream
 from services.protocol_translation import (
     CHAT,
     MESSAGES,
+    RESPONSES,
     TranslationError,
+    aggregate_stream,
     translate_request,
     translate_response,
+    translate_stream,
 )
+from streaming.sse import iter_sse_events
 from services.protocol_translation.anthropic import messages_sse_items
 from services.protocol_translation.common import (
+    UpstreamFailure,
     aggregate_chat_items,
     chat_items_to_sse,
     chat_completion_items,
@@ -71,7 +76,7 @@ def test_nonstream_tool_turn_preserves_complete_unmodified_native_content():
     assert rebuilt["messages"][2]["content"][0]["tool_use_id"] == "toolu_1"
 
 
-def native_frames():
+def native_frames(content=CONTENT):
     events = [
         {
             "type": "message_start",
@@ -82,7 +87,7 @@ def native_frames():
             },
         }
     ]
-    for index, block in enumerate(CONTENT):
+    for index, block in enumerate(content):
         if block["type"] == "thinking":
             events.extend(
                 [
@@ -108,6 +113,8 @@ def native_frames():
                 ]
             )
         elif block["type"] == "tool_use":
+            arguments = json.dumps(block["input"], separators=(",", ":"))
+            split = len(arguments) // 2
             events.extend(
                 [
                     {
@@ -120,7 +127,7 @@ def native_frames():
                         "index": index,
                         "delta": {
                             "type": "input_json_delta",
-                            "partial_json": '{"city":',
+                            "partial_json": arguments[:split],
                         },
                     },
                     {
@@ -128,7 +135,7 @@ def native_frames():
                         "index": index,
                         "delta": {
                             "type": "input_json_delta",
-                            "partial_json": '"Paris"}',
+                            "partial_json": arguments[split:],
                         },
                     },
                 ]
@@ -253,3 +260,123 @@ def test_native_continuation_size_is_bounded(monkeypatch):
 def test_plain_tool_calls_do_not_add_native_metadata():
     chat = translate_response(native_response(CONTENT[2:]), MESSAGES, CHAT)
     assert "extra_content" not in chat["choices"][0]["message"]["tool_calls"][0]
+
+
+def responses_continuation(response):
+    return {
+        "model": "claude-haiku-5-5",
+        "input": [
+            {"role": "user", "content": "Weather?"},
+            *response["output"],
+            *[
+                {
+                    "type": "function_call_output",
+                    "call_id": item["call_id"],
+                    "output": "Sunny",
+                }
+                for item in response["output"]
+                if item["type"] == "function_call"
+            ],
+        ],
+    }
+
+
+def test_responses_json_preserves_complete_signed_tool_continuation():
+    response = translate_response(native_response(), MESSAGES, RESPONSES)
+    call = next(item for item in response["output"] if item["type"] == "function_call")
+    assert call["extra_content"]["anthropic"]["content"] == CONTENT
+    rebuilt = translate_request(responses_continuation(response), RESPONSES, MESSAGES)
+    assert rebuilt["messages"][1]["content"] == CONTENT
+    chat = translate_response(response, RESPONSES, CHAT)
+    assistant = chat["choices"][0]["message"]
+    rebuilt = translate_request(continuation_request(assistant), CHAT, MESSAGES)
+    assert rebuilt["messages"][1]["content"] == CONTENT
+
+
+def test_chat_request_to_responses_preserves_signed_function_call_metadata():
+    assistant = translate_response(native_response(), MESSAGES, CHAT)["choices"][0][
+        "message"
+    ]
+    request = translate_request(continuation_request(assistant), CHAT, RESPONSES)
+    rebuilt = translate_request(request, RESPONSES, MESSAGES)
+    assert rebuilt["messages"][1]["content"] == CONTENT
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_responses_stream_completed_output_preserves_signed_tool_continuation(parallel):
+    content = copy.deepcopy(CONTENT)
+    if parallel:
+        content.append(
+            {
+                "type": "tool_use",
+                "id": "toolu_2",
+                "name": "weather",
+                "input": {"city": "Rome"},
+            }
+        )
+    frames = list(translate_stream(native_frames(content), MESSAGES, RESPONSES))
+    events = [json.loads(event.data) for event in iter_sse_events(frames) if event.data]
+    response = next(event["response"] for event in events if event["type"] == "response.completed")
+    call = next(item for item in response["output"] if item["type"] == "function_call")
+    assert call["extra_content"]["anthropic"]["content"] == content
+    if not parallel:
+        done = next(
+            event["item"]
+            for event in events
+            if event["type"] == "response.output_item.done"
+            and event["item"]["type"] == "function_call"
+        )
+        assert done["extra_content"] == call["extra_content"]
+    rebuilt = translate_request(responses_continuation(response), RESPONSES, MESSAGES)
+    assert rebuilt["messages"][1]["content"] == content
+    chat = aggregate_stream(frames, RESPONSES, CHAT)
+    assistant = chat["choices"][0]["message"]
+    request = continuation_request(assistant)
+    if parallel:
+        request["messages"].append({"role": "tool", "tool_call_id": "toolu_2", "content": "Sunny"})
+    assert translate_request(request, CHAT, MESSAGES)["messages"][1]["content"] == content
+
+
+@pytest.mark.parametrize("mutation", ["signature", "arguments", "text"])
+def test_changed_responses_continuation_fails_closed(mutation):
+    response = translate_response(native_response(), MESSAGES, RESPONSES)
+    call = next(item for item in response["output"] if item["type"] == "function_call")
+    if mutation == "signature":
+        call["extra_content"]["anthropic"]["content"][0]["signature"] = 123
+    elif mutation == "arguments":
+        call["arguments"] = '{"city":"London"}'
+    else:
+        next(item for item in response["output"] if item["type"] == "message")["content"][0][
+            "text"
+        ] = "Changed"
+    with pytest.raises(TranslationError):
+        translate_request(responses_continuation(response), RESPONSES, MESSAGES)
+
+
+@pytest.mark.parametrize("source", [CHAT, RESPONSES])
+def test_responses_translation_rejects_invalid_upstream_continuation(source):
+    response = translate_response(native_response(), MESSAGES, source)
+    if source == CHAT:
+        call = response["choices"][0]["message"]["tool_calls"][0]
+        target = RESPONSES
+    else:
+        call = next(item for item in response["output"] if item["type"] == "function_call")
+        target = CHAT
+    call["extra_content"]["anthropic"]["content"][0]["signature"] = 123
+    with pytest.raises(UpstreamFailure, match="continuation"):
+        translate_response(response, source, target)
+
+
+def test_responses_stream_rejects_invalid_terminal_continuation():
+    frames = list(translate_stream(native_frames(), MESSAGES, RESPONSES))
+    corrupted = []
+    for event in iter_sse_events(frames):
+        data = json.loads(event.data)
+        if data["type"] == "response.completed":
+            call = next(
+                item for item in data["response"]["output"] if item["type"] == "function_call"
+            )
+            call["extra_content"]["anthropic"]["content"][0]["signature"] = 123
+        corrupted.append(f"data: {json.dumps(data)}\n\n")
+    with pytest.raises(UpstreamFailure):
+        aggregate_stream(corrupted, RESPONSES, CHAT)

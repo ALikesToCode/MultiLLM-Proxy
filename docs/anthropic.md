@@ -8,6 +8,12 @@ signatures and redacted blocks required by Anthropic's tool continuation API.
 Changed tool IDs, names, arguments or assistant text fail validation rather than
 replaying stale native content.
 
+Responses function calls retain the same metadata in
+`extra_content.anthropic.content`. Return the complete `output` array unchanged
+in the next request's `input`, followed by each `function_call_output`. For
+streams, use `response.completed.response.output`; signed blocks can arrive
+after an earlier tool item's done event when tools run in parallel.
+
 Set `ANTHROPIC_API_KEY` in the server environment or Cloudflare Worker secrets.
 The Worker forwards it to the Container. Restart the server, or deploy the
 updated Worker and Container, after changing configuration.
