@@ -529,7 +529,7 @@ class NonStreamingResponseTest(unittest.TestCase):
             {
                 "role": "assistant",
                 "content": "Paris.",
-                "tool_calls": [{"id": "toolu_2", "type": "function", "function": {"name": "save", "arguments": "{\"city\":\"Paris\"}"}}],
+                "tool_calls": [{"id": "toolu_2", "type": "function", "function": {"name": "save", "arguments": "{\"city\":\"Paris\"}"}, "extra_content": {"anthropic": {"content": self.MESSAGE["content"]}}}],
                 "reasoning_content": "Hmm.",
             },
         )
@@ -626,6 +626,11 @@ class StreamTranslationTest(unittest.TestCase):
                 {"tool_calls": [{"index": 0, "id": "toolu_7", "type": "function", "function": {"name": "get_weather", "arguments": ""}}]},
                 {"tool_calls": [{"index": 0, "function": {"arguments": "{\"city\":"}}]},
                 {"tool_calls": [{"index": 0, "function": {"arguments": " \"Paris\"}"}}]},
+                {"tool_calls": [{"index": 0, "extra_content": {"anthropic": {"content": [
+                    {"type": "thinking", "thinking": "Plan.", "signature": "sig"},
+                    {"type": "text", "text": "Checking"},
+                    {"type": "tool_use", "id": "toolu_7", "name": "get_weather", "input": {"city": "Paris"}},
+                ]}}}]},
                 {},
             ],
         )

@@ -3,6 +3,8 @@
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
+from services.protocol_translation.anthropic_continuation import NativeContent
+
 from services.protocol_translation.anthropic_usage import (
     STOP_TO_FINISH,
     anthropic_usage_to_chat,
@@ -39,6 +41,7 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
     }
     blocks: dict[Any, dict] = {}
     tool_count = 0
+    native_content = NativeContent()
 
     def chunk(
         delta: dict | None = None, finish: str | None = None, usage: dict | None = None
@@ -79,6 +82,7 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             )
             return
         kind = data.get("type") or event.event
+        native_content.observe({**data, "type": kind})
         if kind == "message_start":
             message = as_mapping(data.get("message"))
             if message.get("id"):
@@ -176,6 +180,9 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             finish = STOP_TO_FINISH.get(
                 state["stop_reason"], "tool_calls" if tool_count else "stop"
             )
+            extra = native_content.extra() if tool_count else None
+            if extra:
+                yield from chunk({"tool_calls": [{"index": 0, "extra_content": extra}]})
             yield from chunk(
                 finish=finish, usage=anthropic_usage_to_chat(state["usage"])
             )

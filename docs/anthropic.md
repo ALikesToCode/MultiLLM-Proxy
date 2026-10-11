@@ -1,5 +1,13 @@
 # Anthropic Claude API
 
+Chat tool calls carry signed native assistant blocks in
+`tool_calls[0].extra_content.anthropic.content`. Return that metadata unchanged
+with the assistant message when submitting tool results. Streams deliver it on
+the first tool call's index before the terminal chunk. This preserves thinking
+signatures and redacted blocks required by Anthropic's tool continuation API.
+Changed tool IDs, names, arguments or assistant text fail validation rather than
+replaying stale native content.
+
 Set `ANTHROPIC_API_KEY` in the server environment or Cloudflare Worker secrets.
 The Worker forwards it to the Container. Restart the server, or deploy the
 updated Worker and Container, after changing configuration.

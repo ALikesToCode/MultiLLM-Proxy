@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
+from services.protocol_translation.anthropic_continuation import continuation_extra, restore_assistant_content
+
 from services.protocol_translation.anthropic_request_policy import (
     output_format as _output_format,
     reasoning_effort as _reasoning_effort,
@@ -554,6 +556,12 @@ def _chat_user_blocks(content: Any, index: int) -> list[dict]:
 
 
 def _chat_assistant_blocks(message: Mapping[str, Any]) -> list[dict]:
+    try:
+        native = restore_assistant_content(message)
+    except ValueError as error:
+        raise TranslationError(str(error), param="messages") from error
+    if native is not None:
+        return native
     blocks: list[dict] = []
     content = message.get("content")
     text = (
@@ -684,6 +692,9 @@ def messages_response_to_chat(
     message: dict[str, Any] = {"role": "assistant", "content": text if text or not calls else None}
     if calls:
         message["tool_calls"] = calls
+        extra = continuation_extra(payload.get("content") or [])
+        if extra:
+            calls[0]["extra_content"] = extra
     if any(reasoning):
         message["reasoning_content"] = "".join(reasoning)
     stop_reason = payload.get("stop_reason")

@@ -169,6 +169,30 @@ class HaikuIntelligenceTests(IntelligenceApiTestCase):
         assert response.json["model"] == "openai:fallback"
         assert send.call_count == 1
 
+    def test_signed_tool_result_round_trip_preserves_native_assistant_blocks(self):
+        self.seed_haiku()
+        native_content = [
+            {"type": "thinking", "thinking": "", "signature": "opaque-signature"},
+            {"type": "redacted_thinking", "data": "opaque-redacted-data"},
+            {"type": "tool_use", "id": "toolu_signed", "name": "weather", "input": {}},
+        ]
+        tools = [{"type": "function", "function": {"name": "weather", "parameters": {"type": "object"}}}]
+        with self.requests(return_value=upstream(message(content=native_content, stop_reason="tool_use"))):
+            first = self.haiku_post(tools=tools)
+        assert first.status_code == 200
+        assistant = first.json["choices"][0]["message"]
+        messages = [
+            {"role": "user", "content": "Weather?"}, assistant,
+            {"role": "tool", "tool_call_id": "toolu_signed", "content": "Sunny"},
+        ]
+        with self.requests(return_value=upstream(message())) as send:
+            second = self.haiku_post(messages=messages, tools=tools)
+        assert second.status_code == 200 and send.call_count == 1
+        body = json.loads(send.call_args.kwargs["data"])
+        assert body["messages"][1]["content"] == native_content
+        assert body["thinking"] == {"type": "adaptive"}
+        assert body["output_config"]["effort"] == "max"
+
     def test_unconfigured_primary_uses_the_existing_fallback(self):
         self.seed_haiku()
         with (

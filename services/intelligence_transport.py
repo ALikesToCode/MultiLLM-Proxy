@@ -203,8 +203,8 @@ class Exchange:
             response.close()
 
 
-def without_thought_signatures(body):
-    """Drop Gemini thought signatures from replayed tool calls before another provider sees them."""
+def without_thought_signatures(body, *, provider=None):
+    """Drop foreign signatures while retaining an Anthropic tool continuation."""
     messages = body.get("messages")
     if not isinstance(messages, list) or not any(
         isinstance(message, dict)
@@ -213,15 +213,23 @@ def without_thought_signatures(body):
         for message in messages
     ):
         return body
+
+    def clean_call(call):
+        if not isinstance(call, dict):
+            return call
+        cleaned = {key: value for key, value in call.items() if key != "extra_content"}
+        extra = call.get("extra_content")
+        if provider == "anthropic" and isinstance(extra, dict) and "anthropic" in extra:
+            cleaned["extra_content"] = {"anthropic": extra["anthropic"]}
+        return cleaned
+
     cleaned = []
     for message in messages:
         if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
             message = {
                 **message,
                 "tool_calls": [
-                    {key: value for key, value in call.items() if key != "extra_content"}
-                    if isinstance(call, dict)
-                    else call
+                    clean_call(call)
                     for call in message["tool_calls"]
                 ],
             }
@@ -358,7 +366,7 @@ class IntelligenceTransport:
             if provider == "gemini":
                 body = with_thought_signatures(body)
             else:
-                body = without_thought_signatures(body)
+                body = without_thought_signatures(body, provider=provider)
             body = with_codex_instructions(body, provider, model)
             if provider == "anthropic":
                 body = prepare_anthropic_request(body)
