@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from config import Config
 from providers.aihubmix import AIHUBMIX_BUILTIN_MODEL_IDS
+from providers.anthropic import ANTHROPIC_MODEL_IDS
 from providers.base import ModelInfo
 from providers.cline_pass import CLINE_PASS_MODEL_IDS
 from providers.codex_everywhere import CODEX_EVERYWHERE_PROVIDERS
@@ -41,6 +42,7 @@ DYNAMIC_PROVIDER_MODELS = {
 }
 
 DEFAULT_MODEL_IDS = {
+    "anthropic": list(ANTHROPIC_MODEL_IDS),
     "aihubmix": list(AIHUBMIX_BUILTIN_MODEL_IDS),
     "openai": ["gpt-4.1", "gpt-4.1-mini"],
     "openrouter": ["openai/gpt-4.1", "anthropic/claude-sonnet-4.5"],

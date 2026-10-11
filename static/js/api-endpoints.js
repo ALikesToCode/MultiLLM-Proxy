@@ -2,6 +2,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Provider endpoints configuration
     const endpoints = [
         ['OpenAI', '/openai/v1/chat/completions'],
+        ['Anthropic (Haiku 5.5)', [
+            '/anthropic/v1/messages',
+            '/anthropic/v1/messages/count_tokens',
+            '/anthropic/v1/models'
+        ]],
         ['Groq', '/groq/openai/v1/chat/completions'],
         ['Together AI', '/together/v1/chat/completions'],
         ['Google AI (Gemini)', '/googleai/predict'],

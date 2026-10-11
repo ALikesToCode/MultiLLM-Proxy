@@ -9,6 +9,7 @@ A powerful proxy server that provides a unified interface for multiple LLM provi
 - 🔄 Automatic token-based rate limiting and request distribution
 - 🌐 Support for multiple LLM providers:
   - OpenAI (GPT models)
+  - Anthropic (Claude Haiku 5.5)
   - Groq (ultra-fast inference)
   - Together AI
   - Google AI on Vertex AI
@@ -159,6 +160,9 @@ JWT_SECRET=your-jwt-secret-key
 ```env
 # OpenAI
 OPENAI_API_KEY=your-openai-api-key
+
+# Anthropic
+ANTHROPIC_API_KEY=your-anthropic-api-key
 
 # Cerebras
 CEREBRAS_API_KEY=your-cerebras-api-key
@@ -327,6 +331,12 @@ For automatic free-only fallback, use `/v1/free` with model `free:text` or
 available. See [free model pools](docs/free-model-pools.md) for setup, quota
 cooldowns, image input, and a local test request. These routes never select a
 paid model; Groq/Gemini require an explicit free-tier account assertion.
+
+Use `anthropic:claude-haiku-5-5` to select Claude Haiku 5.5 with the server's
+`ANTHROPIC_API_KEY`. The unified API translates Chat Completions and Responses
+to Claude Messages, including streaming, tools, and adaptive thinking. Native
+Claude clients can use `/anthropic` as their base URL with an admin proxy key.
+See [Anthropic integration](docs/anthropic.md) for configuration and examples.
 
 The unified API speaks OpenAI Chat Completions (`/v1/chat/completions`), OpenAI
 Responses (`/v1/responses`) and Anthropic Messages (`/v1/messages`, with
