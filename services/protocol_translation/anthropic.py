@@ -6,8 +6,15 @@ from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 from services.protocol_translation.anthropic_request_policy import (
-    EFFORTS,
+    output_format as _output_format,
+    reasoning_effort as _reasoning_effort,
     apply_thinking as _apply_thinking,
+)
+from services.protocol_translation.anthropic_stream import messages_sse_items as messages_sse_items
+from services.protocol_translation.anthropic_usage import (
+    FINISH_TO_STOP, STOP_TO_FINISH,
+    anthropic_usage_to_chat as _anthropic_usage_to_chat,
+    chat_usage_to_anthropic as _chat_usage_to_anthropic,
 )
 from services.protocol_translation.common import (
     ChatItem,
@@ -16,13 +23,8 @@ from services.protocol_translation.common import (
     TranslationError,
     anthropic_error_type,
     as_mapping,
-    chat_chunk,
-    chat_usage,
-    comment_item,
     dumps,
-    event_json,
     first_chat_choice,
-    iter_events,
     load_arguments,
     message_reasoning,
     new_id,
@@ -32,27 +34,10 @@ from services.protocol_translation.common import (
     sse_event,
     text_of,
     unix_time,
-    usage_numbers,
 )
 
 # Messages requires max_tokens; Chat Completions does not.
 DEFAULT_MAX_TOKENS = 8192
-STOP_TO_FINISH = {
-    "end_turn": "stop",
-    "stop_sequence": "stop",
-    "pause_turn": "stop",
-    "max_tokens": "length",
-    "model_context_window_exceeded": "length",
-    "tool_use": "tool_calls",
-    "refusal": "content_filter",
-}
-FINISH_TO_STOP = {
-    "stop": "end_turn",
-    "length": "max_tokens",
-    "tool_calls": "tool_use",
-    "function_call": "tool_use",
-    "content_filter": "refusal",
-}
 JSON_OBJECT_INSTRUCTION = "Respond with a single valid JSON object and no other text."
 # Server-tool history blocks carry results only Anthropic's runtime can replay.
 _SERVER_HISTORY_BLOCKS = frozenset(
@@ -394,41 +379,6 @@ def _tool_choice_to_chat(choice: Any) -> tuple[Any, bool | None]:
     if kind == "tool":
         return {"type": "function", "function": {"name": choice.get("name")}}, parallel
     raise TranslationError(f"tool_choice type '{kind}' is not supported", param="tool_choice")
-
-
-def _reasoning_effort(payload: Mapping[str, Any]) -> str | None:
-    config = payload.get("output_config")
-    effort = config.get("effort") if isinstance(config, Mapping) else None
-    if effort in EFFORTS and effort != "none":
-        # Chat Completions has no "max"; the gateway maps xhigh to each provider's top tier.
-        return "xhigh" if effort == "max" else str(effort)
-    thinking = payload.get("thinking")
-    if isinstance(thinking, Mapping) and thinking.get("type") == "enabled":
-        budget = thinking.get("budget_tokens")
-        if isinstance(budget, int) and not isinstance(budget, bool):
-            if budget < 4096:
-                return "low"
-            return "medium" if budget < 16384 else "high"
-    return None
-
-
-def _output_format(payload: Mapping[str, Any]) -> dict | None:
-    config = payload.get("output_config")
-    candidates = [
-        config.get("format") if isinstance(config, Mapping) else None,
-        payload.get("output_format"),
-    ]
-    for fmt in candidates:
-        if (
-            isinstance(fmt, Mapping)
-            and fmt.get("type") == "json_schema"
-            and isinstance(fmt.get("schema"), Mapping)
-        ):
-            return {
-                "type": "json_schema",
-                "json_schema": {"name": "output", "schema": dict(fmt["schema"]), "strict": True},
-            }
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -813,186 +763,6 @@ def _message_id(value: Any) -> str:
     return (
         f"msg_{safe_tool_id(value, 'msg')}" if isinstance(value, str) and value else new_id("msg")
     )
-
-
-def _anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
-    from services import prompt_cache_cost
-
-    if prompt_cache_cost.enabled():
-        return prompt_cache_cost.anthropic_to_chat(dict(usage))
-    def count(key: str) -> int:
-        value = usage.get(key)
-        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
-
-    cached = count("cache_read_input_tokens")
-    cache_write = count("cache_creation_input_tokens")
-    # Anthropic's input_tokens excludes cache reads and writes.
-    prompt = count("input_tokens") + cached + cache_write
-    return chat_usage(prompt, count("output_tokens"), cached=cached, cache_write=cache_write)
-
-
-def _chat_usage_to_anthropic(usage: Any) -> dict:
-    from services import prompt_cache_cost
-
-    if prompt_cache_cost.enabled():
-        return prompt_cache_cost.chat_to_anthropic(usage)
-    numbers = usage_numbers(usage)
-    return {
-        "input_tokens": max(0, numbers["prompt"] - numbers["cached"] - numbers["cache_write"]),
-        "output_tokens": numbers["completion"],
-        "cache_creation_input_tokens": numbers["cache_write"],
-        "cache_read_input_tokens": numbers["cached"],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Streams: Messages SSE -> pivot items.
-
-
-def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
-    state: dict[str, Any] = {
-        "id": new_id("chatcmpl"),
-        "model": "",
-        "created": unix_time(),
-        "started": False,
-        "usage": {},
-        "stop_reason": None,
-    }
-    blocks: dict[Any, dict] = {}
-    tool_count = 0
-
-    def chunk(
-        delta: dict | None = None, finish: str | None = None, usage: dict | None = None
-    ) -> list[dict]:
-        emitted = []
-        if not state["started"]:
-            state["started"] = True
-            emitted.append(
-                chat_chunk(
-                    state["id"],
-                    state["model"],
-                    state["created"],
-                    {"role": "assistant", "content": ""},
-                )
-            )
-        if delta is not None or finish is not None:
-            emitted.append(
-                chat_chunk(state["id"], state["model"], state["created"], delta, finish, usage)
-            )
-        return emitted
-
-    for event in iter_events(chunks):
-        if isinstance(event, StreamFailure):
-            yield event
-            return
-        comment = comment_item(event)
-        if comment is not None:
-            yield comment
-            continue
-        if not event.data:
-            continue
-        data = event_json(event)
-        if data is None:
-            yield StreamFailure("The upstream stream sent an unreadable event.", interrupted=True)
-            return
-        kind = data.get("type") or event.event
-        if kind == "message_start":
-            message = as_mapping(data.get("message"))
-            if message.get("id"):
-                state["id"] = _chat_id(message["id"])
-            state["model"] = message.get("model") or state["model"]
-            if isinstance(message.get("usage"), Mapping):
-                state["usage"].update(message["usage"])
-            yield from chunk()
-        elif kind == "content_block_start":
-            block = as_mapping(data.get("content_block"))
-            index = data.get("index")
-            block_type = block.get("type")
-            if block_type == "tool_use":
-                blocks[index] = {
-                    "kind": "tool",
-                    "tool": tool_count,
-                    "streamed": False,
-                    "input": block.get("input"),
-                }
-                tool_count += 1
-                yield from chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": blocks[index]["tool"],
-                                "id": str(block.get("id") or new_id("toolu")),
-                                "type": "function",
-                                "function": {"name": str(block.get("name") or ""), "arguments": ""},
-                            }
-                        ]
-                    }
-                )
-            elif block_type == "text":
-                blocks[index] = {"kind": "text"}
-                if block.get("text"):
-                    yield from chunk({"content": block["text"]})
-            elif block_type == "thinking":
-                blocks[index] = {"kind": "thinking"}
-                if block.get("thinking"):
-                    yield from chunk({"reasoning_content": block["thinking"]})
-            else:
-                blocks[index] = {"kind": "other"}
-        elif kind == "content_block_delta":
-            block = blocks.get(data.get("index"), {})
-            delta = as_mapping(data.get("delta"))
-            delta_type = delta.get("type")
-            if delta_type == "text_delta" and delta.get("text"):
-                yield from chunk({"content": delta["text"]})
-            elif delta_type == "thinking_delta" and delta.get("thinking"):
-                yield from chunk({"reasoning_content": delta["thinking"]})
-            elif delta_type == "input_json_delta" and block.get("kind") == "tool":
-                partial = delta.get("partial_json") or ""
-                if partial:
-                    block["streamed"] = True
-                    yield from chunk(
-                        {
-                            "tool_calls": [
-                                {"index": block["tool"], "function": {"arguments": partial}}
-                            ]
-                        }
-                    )
-        elif kind == "content_block_stop":
-            block = blocks.get(data.get("index"), {})
-            if block.get("kind") == "tool" and not block["streamed"] and block.get("input"):
-                # Some compatible servers send the whole input at block start.
-                yield from chunk(
-                    {
-                        "tool_calls": [
-                            {
-                                "index": block["tool"],
-                                "function": {"arguments": dumps(block["input"])},
-                            }
-                        ]
-                    }
-                )
-        elif kind == "message_delta":
-            delta = as_mapping(data.get("delta"))
-            if delta.get("stop_reason"):
-                state["stop_reason"] = delta["stop_reason"]
-            if isinstance(data.get("usage"), Mapping):
-                state["usage"].update({k: v for k, v in data["usage"].items() if v is not None})
-        elif kind == "message_stop":
-            finish = STOP_TO_FINISH.get(
-                state["stop_reason"], "tool_calls" if tool_count else "stop"
-            )
-            yield from chunk(finish=finish, usage=_anthropic_usage_to_chat(state["usage"]))
-            return
-        elif kind == "ping":
-            yield StreamComment("ping")
-        elif kind == "error":
-            error = as_mapping(data.get("error"))
-            yield StreamFailure(
-                str(error.get("message") or "The upstream provider reported an error."),
-                str(error.get("type") or "api_error"),
-            )
-            return
-    yield StreamFailure(interrupted=True)
 
 
 # ---------------------------------------------------------------------------

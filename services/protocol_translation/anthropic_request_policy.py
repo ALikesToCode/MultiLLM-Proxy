@@ -93,3 +93,38 @@ def _apply_adaptive_thinking(body: dict, payload: Mapping[str, Any]) -> None:
     body.setdefault("output_config", {})["effort"] = (
         "low" if effort == "minimal" else effort
     )
+
+
+def reasoning_effort(payload: Mapping[str, Any]) -> str | None:
+    config = payload.get("output_config")
+    effort = config.get("effort") if isinstance(config, Mapping) else None
+    if effort in EFFORTS and effort != "none":
+        # Chat Completions has no "max"; the gateway maps xhigh to each provider's top tier.
+        return "xhigh" if effort == "max" else str(effort)
+    thinking = payload.get("thinking")
+    if isinstance(thinking, Mapping) and thinking.get("type") == "enabled":
+        budget = thinking.get("budget_tokens")
+        if isinstance(budget, int) and not isinstance(budget, bool):
+            if budget < 4096:
+                return "low"
+            return "medium" if budget < 16384 else "high"
+    return None
+
+
+def output_format(payload: Mapping[str, Any]) -> dict | None:
+    config = payload.get("output_config")
+    candidates = [
+        config.get("format") if isinstance(config, Mapping) else None,
+        payload.get("output_format"),
+    ]
+    for fmt in candidates:
+        if (
+            isinstance(fmt, Mapping)
+            and fmt.get("type") == "json_schema"
+            and isinstance(fmt.get("schema"), Mapping)
+        ):
+            return {
+                "type": "json_schema",
+                "json_schema": {"name": "output", "schema": dict(fmt["schema"]), "strict": True},
+            }
+    return None
