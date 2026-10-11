@@ -3,15 +3,29 @@
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from services.protocol_translation.anthropic_usage import STOP_TO_FINISH, anthropic_usage_to_chat
+from services.protocol_translation.anthropic_usage import (
+    STOP_TO_FINISH,
+    anthropic_usage_to_chat,
+)
 from services.protocol_translation.common import (
-    ChatItem, StreamComment, StreamFailure, as_mapping, chat_chunk, comment_item,
-    dumps, event_json, iter_events, new_id, unix_time,
+    ChatItem,
+    StreamComment,
+    StreamFailure,
+    as_mapping,
+    chat_chunk,
+    comment_item,
+    dumps,
+    event_json,
+    iter_events,
+    new_id,
+    unix_time,
 )
 
 
 def _chat_id(value: Any) -> str:
-    return f"chatcmpl-{value}" if isinstance(value, str) and value else new_id("chatcmpl")
+    return (
+        f"chatcmpl-{value}" if isinstance(value, str) and value else new_id("chatcmpl")
+    )
 
 
 def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
@@ -42,7 +56,9 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             )
         if delta is not None or finish is not None:
             emitted.append(
-                chat_chunk(state["id"], state["model"], state["created"], delta, finish, usage)
+                chat_chunk(
+                    state["id"], state["model"], state["created"], delta, finish, usage
+                )
             )
         return emitted
 
@@ -58,7 +74,9 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             continue
         data = event_json(event)
         if data is None:
-            yield StreamFailure("The upstream stream sent an unreadable event.", interrupted=True)
+            yield StreamFailure(
+                "The upstream stream sent an unreadable event.", interrupted=True
+            )
             return
         kind = data.get("type") or event.event
         if kind == "message_start":
@@ -88,7 +106,10 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
                                 "index": blocks[index]["tool"],
                                 "id": str(block.get("id") or new_id("toolu")),
                                 "type": "function",
-                                "function": {"name": str(block.get("name") or ""), "arguments": ""},
+                                "function": {
+                                    "name": str(block.get("name") or ""),
+                                    "arguments": "",
+                                },
                             }
                         ]
                     }
@@ -118,13 +139,20 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
                     yield from chunk(
                         {
                             "tool_calls": [
-                                {"index": block["tool"], "function": {"arguments": partial}}
+                                {
+                                    "index": block["tool"],
+                                    "function": {"arguments": partial},
+                                }
                             ]
                         }
                     )
         elif kind == "content_block_stop":
             block = blocks.get(data.get("index"), {})
-            if block.get("kind") == "tool" and not block["streamed"] and block.get("input"):
+            if (
+                block.get("kind") == "tool"
+                and not block["streamed"]
+                and block.get("input")
+            ):
                 # Some compatible servers send the whole input at block start.
                 yield from chunk(
                     {
@@ -141,12 +169,16 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             if delta.get("stop_reason"):
                 state["stop_reason"] = delta["stop_reason"]
             if isinstance(data.get("usage"), Mapping):
-                state["usage"].update({k: v for k, v in data["usage"].items() if v is not None})
+                state["usage"].update(
+                    {k: v for k, v in data["usage"].items() if v is not None}
+                )
         elif kind == "message_stop":
             finish = STOP_TO_FINISH.get(
                 state["stop_reason"], "tool_calls" if tool_count else "stop"
             )
-            yield from chunk(finish=finish, usage=anthropic_usage_to_chat(state["usage"]))
+            yield from chunk(
+                finish=finish, usage=anthropic_usage_to_chat(state["usage"])
+            )
             return
         elif kind == "ping":
             yield StreamComment("ping")
@@ -158,5 +190,3 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             )
             return
     yield StreamFailure(interrupted=True)
-
-
