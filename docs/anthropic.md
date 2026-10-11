@@ -12,6 +12,12 @@ Set `ANTHROPIC_API_KEY` in the server environment or Cloudflare Worker secrets.
 The Worker forwards it to the Container. Restart the server, or deploy the
 updated Worker and Container, after changing configuration.
 
+For a key that can act on multiple Anthropic workspaces, also set
+`ANTHROPIC_WORKSPACE_ID` to the intended workspace. The server sends it as
+`anthropic-workspace-id` for generation and model discovery. Caller headers
+cannot change the configured workspace. A workspace-scoped key can omit this
+setting. See the [Claude API authentication documentation](https://platform.claude.com/docs/en/api/overview.md).
+
 Claude Haiku 5.5 is available in the built-in model catalog as
 `anthropic:claude-haiku-5-5`. Refreshing the provider catalog discovers other
 models available to the configured key. The upstream is fixed to

@@ -526,7 +526,9 @@ class ProxyService:
             if not cls._has_header(headers, "X-Title"):
                 headers['X-Title'] = os.environ.get('APP_NAME', 'MultiLLM Proxy')
         elif api_provider == 'anthropic':
-            headers = with_anthropic_headers(headers, auth_token)
+            headers = with_anthropic_headers(
+                headers, auth_token, workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID")
+            )
         elif is_linkapi_claude and not cls._has_header(headers, "Anthropic-Version"):
             headers["Anthropic-Version"] = "2023-06-01"
         elif (

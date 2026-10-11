@@ -129,6 +129,19 @@ def test_direct_anthropic_protocol_and_header_policy():
     assert "X-Api-Key" not in with_anthropic_headers(headers, None)
 
 
+def test_workspace_header_uses_only_server_configuration():
+    headers = {"anthropic-workspace-id": "caller-workspace"}
+    prepared = with_anthropic_headers(headers, "provider-key", workspace_id=" server-workspace ")
+    assert prepared["Anthropic-Workspace-Id"] == "server-workspace"
+    assert "anthropic-workspace-id" not in prepared
+    assert headers == {"anthropic-workspace-id": "caller-workspace"}
+    for workspace in (None, "", "  "):
+        assert not any(
+            name.lower() == "anthropic-workspace-id"
+            for name in with_anthropic_headers(headers, "provider-key", workspace_id=workspace)
+        )
+
+
 class AnthropicProviderTest(UnifiedApiTestCase):
     def setUp(self):
         super().setUp()
@@ -449,6 +462,21 @@ class AnthropicProviderTest(UnifiedApiTestCase):
         self.assertEqual(
             send.call_args.kwargs["headers"]["X-Api-Key"], "anthropic-provider-key"
         )
+
+    def test_generation_and_discovery_use_configured_workspace(self):
+        with patch.dict(os.environ, {"ANTHROPIC_WORKSPACE_ID": "server-workspace"}):
+            result, send = self.post(
+                "/v1/chat/completions",
+                {"model": SELECTOR, "messages": [{"role": "user", "content": "Hello"}]},
+                headers={**ADMIN, "Anthropic-Workspace-Id": "caller-workspace"},
+            )
+            assert result.status_code == 200
+            assert send.call_args.kwargs["headers"]["Anthropic-Workspace-Id"] == "server-workspace"
+            with patch("app.ProxyService.make_request", return_value=upstream({"data": [{"id": MODEL}]})) as send:
+                result = self.client.get("/anthropic/v1/models", headers={**ADMIN, "Anthropic-Workspace-Id": "caller-workspace"})
+                result.get_data()
+            assert result.status_code == 200
+            assert send.call_args.kwargs["headers"]["Anthropic-Workspace-Id"] == "server-workspace"
 
     def test_catalog_refresh_persists_anthropic_models(self):
         from services.provider_catalog_service import ProviderCatalogService

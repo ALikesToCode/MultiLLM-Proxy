@@ -12,16 +12,18 @@ ANTHROPIC_REQUEST_HEADER_WHITELIST = {
 
 
 def with_anthropic_headers(
-    headers: Mapping[str, str], auth_token: str | None
+    headers: Mapping[str, str], auth_token: str | None, *, workspace_id: str | None = None
 ) -> dict[str, str]:
     """Use the server's Claude key without forwarding proxy bearer credentials."""
     prepared = {
         name: value
         for name, value in headers.items()
-        if name.lower() not in {"authorization", "x-api-key"}
+        if name.lower() not in {"authorization", "x-api-key", "anthropic-workspace-id"}
     }
     if auth_token:
         prepared["X-Api-Key"] = auth_token
+    if workspace_id and workspace_id.strip():
+        prepared["Anthropic-Workspace-Id"] = workspace_id.strip()
     if not any(name.lower() == "anthropic-version" for name in prepared):
         prepared["Anthropic-Version"] = "2023-06-01"
     return prepared

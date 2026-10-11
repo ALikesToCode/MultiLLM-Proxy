@@ -9,6 +9,7 @@ test("container receives the Anthropic secret and provider limits", async () => 
   const { MultiLLMProxyContainer } = await loadWorkerModule();
   const source = {
     ANTHROPIC_API_KEY: "anthropic-test-key",
+    ANTHROPIC_WORKSPACE_ID: "workspace-test",
     ANTHROPIC_RATE_LIMIT_RPM: "50",
     ANTHROPIC_MAX_PROMPT_TOKENS: "1000000",
     ANTHROPIC_MAX_OUTPUT_TOKENS: "128000",
