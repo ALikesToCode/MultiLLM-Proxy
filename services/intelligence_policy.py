@@ -4,6 +4,7 @@ import copy
 
 from providers.codex_everywhere import CODEX_EVERYWHERE_OPENAI_PROVIDERS
 from providers.registry import get_adapter
+from services.intelligence_anthropic import HAIKU_INTELLIGENCE_MODEL
 from services.intelligence_contract import (
     CAPABILITIES,
     TASKS,
@@ -31,12 +32,13 @@ DEFAULT_POLICY = {
     "candidates": [],
     "media": {},
 }
-# These adapters expose Chat Completions directly. Native conversion handlers
-# with internal retries cannot yet provide the single-attempt accounting contract.
-# Gemini qualifies through its OpenAI-compatible endpoint (see intelligence_transport).
+# These adapters expose Chat Completions directly, or use single-attempt translation.
+# Gemini uses its compatible endpoint and Anthropic uses the bounded Messages bridge.
+# Conversion handlers with internal retries do not share this accounting contract.
 CHAT_PROVIDERS = frozenset(
     {
         "openai",
+        "anthropic",
         "openrouter",
         "linkapi",
         "aihubmix",
@@ -240,7 +242,12 @@ def select_candidates(policy, request, config):
             return (-score, -candidate.get("quality_tier", 0), *speed, priority)
         return (priority, -score, *speed)
 
-    return [candidate for _, candidate in sorted(candidates, key=rank)]
+    ranked = [candidate for _, candidate in sorted(candidates, key=rank)]
+    # The approved Haiku candidate is the primary model for every profile. Fallbacks
+    # keep their profile's order, and the primary still passes every eligibility gate.
+    return sorted(
+        ranked, key=lambda candidate: candidate["model"] != HAIKU_INTELLIGENCE_MODEL
+    )
 
 
 def model_advertisement(policy, config=None):

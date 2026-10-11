@@ -13,6 +13,10 @@ from providers.nanogpt import nanogpt_model_has_speed_suffix
 from providers.opencode_go import build_opencode_model_url
 from providers.registry import get_adapter
 from services.credential_pool import CredentialPool
+from services.intelligence_anthropic import (
+    AnthropicExchange,
+    prepare_anthropic_request,
+)
 from services.intelligence_contract import GatewayError
 from services.nanogpt_key_pool import NanoGPTUnifiedKeyPool
 from services.reasoning_policy import (
@@ -327,6 +331,8 @@ class IntelligenceTransport:
             else:
                 body = without_thought_signatures(body)
             body = with_codex_instructions(body, provider, model)
+            if provider == "anthropic":
+                body = prepare_anthropic_request(body)
         upstream = adapter.prepare_request(
             CanonicalRequest(provider=provider, model=model, raw=body)
         )
@@ -372,4 +378,7 @@ class IntelligenceTransport:
             if provider == "nanogpt":
                 NanoGPTUnifiedKeyPool.record_result(token, status)
 
-        return Exchange(send, deadline, cancelled, max_bytes, record)
+        exchange = Exchange(send, deadline, cancelled, max_bytes, record)
+        if provider == "anthropic" and path is None:
+            return AnthropicExchange(exchange, candidate["model"], max_bytes)
+        return exchange
