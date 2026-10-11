@@ -1,3 +1,5 @@
+import { withRuntimeFeatureFlags } from "./runtime-feature-flags.mjs";
+
 const DIRECT_ENV_KEYS = [
   "PROMETHEUS_ENABLED",
   "SECRET_SCAN_DEFAULT",
@@ -300,6 +302,7 @@ export function authStorageBackend(source = {}) {
 }
 
 export function collectContainerEnv(source = {}) {
+  source = withRuntimeFeatureFlags(source);
   const envVars = {
     AUTH_DB_PATH: source.AUTH_DB_PATH ?? "/tmp/auth.sqlite3",
     RATE_LIMIT_DB_PATH: source.RATE_LIMIT_DB_PATH ?? "/tmp/rate_limits.sqlite3",

@@ -1,4 +1,5 @@
 /** Opt-in strict bucket serialization; the ledger owner injects transaction writers. */
+import { runtimeFeatureValue } from "./runtime-feature-flags.mjs";
 
 export const BUCKET_FIELDS = Object.freeze(["ordinary_input_tokens", "cache_read_input_tokens", "cache_write_input_tokens",
   "ordinary_input_cost_microusd", "cache_read_input_cost_microusd", "cache_write_input_cost_microusd", "output_cost_microusd",
@@ -33,7 +34,7 @@ export function validBaseUsageRow(row) {
 const warned = new Set();
 const warn = name => { if (!warned.has(name)) { warned.add(name); console.warn(`Invalid ${name}; prompt cache buckets disabled`); } };
 export function usageBucketsEnabled(env) {
-  const flag = String(env.PROMPT_CACHE_USAGE_BUCKETS_ENABLED ?? "").trim().toLowerCase();
+  const flag = String(runtimeFeatureValue(env, "PROMPT_CACHE_USAGE_BUCKETS_ENABLED") ?? "").trim().toLowerCase();
   if (["", "0", "false", "no", "off"].includes(flag)) return false;
   if (!["1", "true", "yes", "on"].includes(flag)) { warn("PROMPT_CACHE_USAGE_BUCKETS_ENABLED"); return false; }
   const raw = String(env.PROMPT_CACHE_PRICE_METADATA_JSON ?? "").trim();

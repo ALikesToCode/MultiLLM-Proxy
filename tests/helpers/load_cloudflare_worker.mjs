@@ -492,6 +492,7 @@ export async function roleplayModuleUrl() {
       ),
   );
   const patchedEndpoint = endpointSource
+    .replace('from "../runtime-feature-flags.mjs";', `from "${new URL("../../worker/runtime-feature-flags.mjs", import.meta.url)}";`)
     .replace('import("../prompt-injection-detection.mjs")', `import("${new URL("../../worker/prompt-injection-detection.mjs", import.meta.url)}")`)
     .replace('from "../pii-redaction.mjs";', `from "${new URL("../../worker/pii-redaction.mjs", import.meta.url)}";`)
     .replace('from "../context-pages-d1.mjs";', `from "${new URL("../../worker/context-pages-d1.mjs", import.meta.url)}";`)
