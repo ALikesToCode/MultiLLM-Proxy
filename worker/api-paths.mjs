@@ -2,6 +2,7 @@
 
 const API_ROUTE_PREFIXES = new Set([
   "aihubmix",
+  "anthropic",
   "azure",
   "cerebras",
   "chutes",

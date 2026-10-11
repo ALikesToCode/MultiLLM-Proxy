@@ -40,6 +40,8 @@ MODEL_ENDPOINT_RESOLVERS: Mapping[str, Callable[[str], str | None]] = {
 
 def native_endpoints(provider: str, model: str) -> frozenset[str]:
     """Endpoints the provider model accepts without translation."""
+    if provider == "anthropic":
+        return frozenset({MESSAGES})
     resolver = MODEL_ENDPOINT_RESOLVERS.get(provider)
     endpoint = resolver(model) if resolver is not None else None
     if endpoint:

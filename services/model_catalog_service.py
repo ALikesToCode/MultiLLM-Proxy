@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Any
 
 from providers.aihubmix import is_aihubmix_image_model
+from providers.anthropic import anthropic_model_metadata
 from providers.image_relays import is_image_relay_model
 from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
@@ -33,6 +34,8 @@ def _model_provider_metadata(
     model_id: str,
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    if provider == "anthropic":
+        return anthropic_model_metadata(model_id, metadata)
     normalized = dict(metadata or {})
     endpoint = opencode_model_endpoint(model_id) if provider == "opencode" else None
     if endpoint:
@@ -155,6 +158,8 @@ def _add_source(
         ("context_window", context_window),
         ("max_output_tokens", max_output_tokens),
     ):
+        if value is None:
+            value = (provider_metadata or {}).get(field)
         if value is None:
             continue
         current = entry[field]

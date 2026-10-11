@@ -1,10 +1,37 @@
 from config import Config
 
+from providers.anthropic import HAIKU_5_5_MODEL_ID
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS, OPENAI_PROTOCOL
 from providers.image_relays import image_relay_specs
 
 
 PROVIDER_DETAILS = {
+    'anthropic': {
+        'description': 'Anthropic Claude API with Haiku 5.5, native Messages, streaming, tools, and token counting',
+        'default_model': HAIKU_5_5_MODEL_ID,
+        'endpoints': [
+            {
+                'url': '/v1/messages',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/anthropic/v1/messages" -H "x-api-key: $ADMIN_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" -d \'{"model":"claude-haiku-5-5","max_tokens":4096,"messages":[{"role":"user","content":"Hello!"}]}\''
+            },
+            {
+                'url': '/v1/messages/count_tokens',
+                'curl': 'curl -X POST "$PROXY_BASE_URL/anthropic/v1/messages/count_tokens" -H "x-api-key: $ADMIN_API_KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" -d \'{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"Hello!"}]}\''
+            },
+            {
+                'url': '/v1/models',
+                'curl': 'curl "$PROXY_BASE_URL/anthropic/v1/models" -H "x-api-key: $ADMIN_API_KEY"'
+            },
+        ],
+        'supported_features': {
+            'streaming': True,
+            'function_calling': True,
+            'json_mode': True,
+            'json_schema': True,
+            'model_discovery': True,
+            'raw_passthrough': True,
+        },
+    },
     'openai': {
         'description': 'OpenAI API for GPT models and embeddings',
         'endpoints': [

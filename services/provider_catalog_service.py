@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from providers.anthropic import anthropic_catalog_metadata
 from providers.cline_pass import (
     CLINE_RECOMMENDED_MODELS_PATH,
     cline_pass_catalog_entries,
@@ -48,6 +49,7 @@ class ProviderCatalogModel:
 
 
 PROVIDER_CATALOG_SPECS = {
+    "anthropic": ProviderCatalogSpec("v1/models", "/anthropic/v1/models"),
     "aihubmix": ProviderCatalogSpec("v1/models", "/aihubmix/v1/models"),
     "openai": ProviderCatalogSpec("v1/models", "/openai/v1/models"),
     "openrouter": ProviderCatalogSpec("models", "/openrouter/models"),
@@ -404,10 +406,12 @@ class ProviderCatalogService:
                     "max_output_tokens",
                     "max_completion_tokens",
                     "output_token_limit",
-                ),
+                ) + (("max_tokens",) if provider == "anthropic" else ()),
             )
             existing = normalized.get(model_id)
-            metadata = sanitize_provider_metadata(item)
+            metadata = sanitize_provider_metadata(
+                anthropic_catalog_metadata(item) if provider == "anthropic" else item
+            )
             if existing:
                 context_window = cls._minimum_limit(
                     existing.context_window,

@@ -12,6 +12,7 @@ from providers.registry import get_adapter
 from proxy import PROVIDER_DETAILS
 from request_validation import json_object_body
 from route_helpers import copy_upstream_response_headers, login_required
+from routes.unified import dispatch_unified_chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,23 @@ def register_dashboard_chat_routes(
                 raise APIError("No provider specified", status_code=400)
             if provider not in PROVIDER_DETAILS:
                 raise APIError(f"Unsupported provider: {provider}", status_code=400)
+
+            if provider == "anthropic":
+                payload = {
+                    key: value for key, value in data.items() if key != "provider"
+                }
+                model = payload.get("model")
+                if not isinstance(model, str) or not model:
+                    raise APIError("Model field is required", status_code=400)
+                if not model.startswith("anthropic:"):
+                    payload["model"] = f"anthropic:{model}"
+                return dispatch_unified_chat_completion(
+                    app,
+                    auth_service_cls,
+                    metrics_service_cls,
+                    proxy_service_cls,
+                    payload,
+                )
 
             if provider == "googleai":
                 auth_token = auth_service_cls.get_google_token()
