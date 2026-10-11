@@ -260,13 +260,13 @@ def select_candidates(policy, request, config, *, session_tier=None, model_statu
         return (priority, -score, *speed)
 
     def apply_session_tier(choices):
-        if session_tier is not None and not request.explicit:
-            choices = session_tier.select(choices)
-        # Prefer Haiku within the eligible lane before latency admission evaluates
-        # the primary. Fallback order and any latency reroute remain intact.
+        # Prefer Haiku for a new selection; an approved session keeps its actual
+        # model first so tool continuations stay on the established provider.
         choices = sorted(
             choices, key=lambda candidate: candidate["model"] != HAIKU_INTELLIGENCE_MODEL
         )
+        if session_tier is not None and not request.explicit:
+            choices = session_tier.select(choices)
         if not apply_latency:
             return choices
         from services.latency_slo import selection_candidates

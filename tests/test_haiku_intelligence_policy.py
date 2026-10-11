@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from dataclasses import replace
 
 import pytest
 
@@ -6,6 +7,7 @@ from services import intelligence_policy as policy_service
 from services import latency_slo
 from services.intelligence_anthropic import HAIKU_INTELLIGENCE_MODEL
 from services.intelligence_contract import ChatRequest
+from services.session_tiers import SessionTierTurn
 from tests.test_intelligence_policy import candidate, policy
 
 
@@ -66,3 +68,22 @@ def test_lane_acquisition_still_sees_haiku_first_without_latency_admission(selec
     assert policy_service.select_candidates(
         configured, request, config, model_status=lambda _: "enabled", apply_latency=False
     ) == [haiku, fallback]
+
+
+@pytest.mark.parametrize("profile", ["balanced", "fast", "quality"])
+@pytest.mark.parametrize("apply_latency", [False, True])
+def test_sticky_session_keeps_its_actual_model_first(monkeypatch, selection, profile, apply_latency):
+    configured, request, config, fallback, haiku = selection
+    lane = SessionTierTurn(None, "synthetic", {"actual_model": fallback["model"]}, [fallback, haiku])
+    observed = []
+
+    def latency_filter(choices, **kwargs):
+        observed.append(choices)
+        return choices
+
+    monkeypatch.setattr(latency_slo, "selection_candidates", latency_filter)
+    assert policy_service.select_candidates(
+        configured, replace(request, profile=profile), config, session_tier=lane,
+        model_status=lambda _: "enabled", apply_latency=apply_latency
+    ) == [fallback, haiku]
+    assert observed == ([[fallback, haiku]] if apply_latency else [])
