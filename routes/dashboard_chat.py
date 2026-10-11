@@ -61,6 +61,7 @@ def register_dashboard_chat_routes(
         """
         start_time = time.time()
         provider = None
+        delegated_dispatch = False
         try:
             data = json_object_body()
 
@@ -79,6 +80,7 @@ def register_dashboard_chat_routes(
                     raise APIError("Model field is required", status_code=400)
                 if not model.startswith("anthropic:"):
                     payload["model"] = f"anthropic:{model}"
+                delegated_dispatch = True
                 return dispatch_unified_chat_completion(
                     app,
                     auth_service_cls,
@@ -143,7 +145,7 @@ def register_dashboard_chat_routes(
                 "Chat completions API error status=%s",
                 error.status_code,
             )
-            if provider:
+            if provider and not delegated_dispatch:
                 metrics_service_cls.get_instance().track_request(
                     provider=provider,
                     status_code=error.status_code,
@@ -156,7 +158,7 @@ def register_dashboard_chat_routes(
                 "Unexpected chat completions error type=%s",
                 type(error).__name__,
             )
-            if provider:
+            if provider and not delegated_dispatch:
                 metrics_service_cls.get_instance().track_request(
                     provider=provider,
                     status_code=502,

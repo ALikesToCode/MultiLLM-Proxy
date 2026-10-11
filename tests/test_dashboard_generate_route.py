@@ -101,6 +101,40 @@ class DashboardGenerateRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.get_json()["message"], "Authentication required")
 
+    def test_anthropic_dispatch_records_each_failure_once(self):
+        self._set_admin_session()
+        for missing_key in (True, False):
+            with self.subTest(missing_key=missing_key), patch.dict(os.environ):
+                if missing_key:
+                    os.environ.pop("ANTHROPIC_API_KEY", None)
+                else:
+                    os.environ["ANTHROPIC_API_KEY"] = "anthropic-test-key"
+                self.app_module.MetricsService.get_instance().requests.clear()
+                with patch("app.ProxyService.make_request", side_effect=requests.ConnectionError("synthetic failure")) as send:
+                    response = self.client.post(
+                        "/api/backends/chat-completions/generate",
+                        json={"provider": "anthropic", "model": "claude-haiku-5-5", "messages": [{"role": "user", "content": "Hello"}]},
+                    )
+                status = 503 if missing_key else 502
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(send.call_count, 0 if missing_key else 1)
+                metrics = [item for item in self.app_module.MetricsService.get_instance().requests if item["provider"] == "anthropic"]
+                self.assertEqual(len(metrics), 1)
+                self.assertEqual(metrics[0]["status_code"], status)
+
+    def test_anthropic_predispatch_validation_records_failure_once(self):
+        self._set_admin_session()
+        with patch("app.ProxyService.make_request") as send:
+            response = self.client.post(
+                "/api/backends/chat-completions/generate",
+                json={"provider": "anthropic", "messages": []},
+            )
+        self.assertEqual(response.status_code, 400)
+        send.assert_not_called()
+        metrics = [item for item in self.app_module.MetricsService.get_instance().requests if item["provider"] == "anthropic"]
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(metrics[0]["status_code"], 400)
+
     def test_dashboard_chat_generate_returns_clean_400_for_bad_provider(self):
         self._set_admin_session()
         response = self.client.post(
