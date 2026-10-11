@@ -42,6 +42,13 @@ Wrangler `vars` in `wrangler.jsonc` already set:
 - `SERVER_PORT=8080`
 - `APP_NAME=MultiLLM Proxy`
 
+`RUNTIME_FEATURE_FLAGS` groups seven nonsecret feature settings into one JSON
+binding to leave room for provider secrets. The Container, usage ledger and
+roleplay session read these grouped settings. An individual binding with the
+same setting name takes precedence, including an explicit disabled value.
+Keep credentials in separate Worker secrets; the grouped binding accepts only
+the seven names committed in `wrangler.jsonc`.
+
 Public HTTP requests receive a `308` redirect to the same HTTPS URL before any
 route or container work. For Container requests, the Worker overwrites
 `X-Forwarded-Proto`, `X-Forwarded-Host`, and the internal

@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { runtimeFeatureValue } from "../runtime-feature-flags.mjs";
 import { SECRET_SCAN_HEADER } from "../secret-firewall.mjs";
 import { clientContextHeaders } from "../client-headers.mjs";
 import { roleplayPIIRetention, resolvePIIPolicy, PIIRedactionError } from "../pii-redaction.mjs";
@@ -320,7 +321,7 @@ export class RoleplaySession extends DurableObject {
 
     const memoryEnabled = parsedWithProfile.memory.mode !== "off";
     const candidateContextMode = parseCandidateContextMode(
-      this.env.ROLEPLAY_CANDIDATE_CONTEXT_REFIT,
+      runtimeFeatureValue(this.env, "ROLEPLAY_CANDIDATE_CONTEXT_REFIT"),
     );
     const protectedContext = prepareProtectedContext(
       state,

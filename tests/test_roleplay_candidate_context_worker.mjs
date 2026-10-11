@@ -270,6 +270,19 @@ test("smaller fallback uses its fitted payload, cache estimate and headers witho
   assert.equal(calls[1].max_tokens, 512);
 });
 
+test("grouped context refit preserves fitted fallback and an individual opt-out", async () => {
+  const overrides = { RUNTIME_FEATURE_FLAGS: { ROLEPLAY_CANDIDATE_CONTEXT_REFIT: "window" } };
+  const grouped = await runTurn(undefined, { overrides });
+  assert.equal(grouped.response.status, 200);
+  assert.equal(grouped.calls.length, 2);
+  assert.equal(grouped.response.headers.get("X-MultiLLM-Context-Refit"), "window");
+  assert.ok(!grouped.calls[1].messages.some(message => message.content === requestHistory[1].content));
+  const disabled = await runTurn("off", { overrides });
+  assert.equal(disabled.response.status, 429);
+  assert.equal(disabled.calls.length, 1);
+  assert.equal(disabled.response.headers.get("X-MultiLLM-Context-Refit"), null);
+});
+
 test("windowing keeps the durable original conversation complete", async () => {
   const { response, storage } = await runTurn("window");
   assert.equal(response.status, 200);
