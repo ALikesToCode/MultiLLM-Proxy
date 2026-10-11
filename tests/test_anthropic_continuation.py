@@ -164,6 +164,48 @@ def test_stream_signature_fragments_survive_tool_continuation(intelligence):
     assert rebuilt["messages"][1]["content"] == CONTENT
 
 
+def test_implicit_text_block_survives_signed_tool_continuation():
+    frames = []
+    for frame in native_frames():
+        event = json.loads(frame.decode()[6:])
+        if event.get("type") == "content_block_start" and event.get("index") == 2:
+            event = {
+                "type": "content_block_delta",
+                "index": 2,
+                "delta": {"type": "text_delta", "text": CONTENT[2]["text"]},
+            }
+        frames.append(f"data: {json.dumps(event)}\n\n".encode())
+    assistant = aggregate_chat_items(messages_sse_items(frames))["choices"][0][
+        "message"
+    ]
+    rebuilt = translate_request(continuation_request(assistant), CHAT, MESSAGES)
+    assert rebuilt["messages"][1]["content"] == CONTENT
+
+
+@pytest.mark.parametrize(
+    "kind", ["thinking_delta", "signature_delta", "input_json_delta"]
+)
+def test_signed_or_tool_delta_requires_its_native_block_start(kind):
+    content = anthropic_continuation.NativeContent()
+    with pytest.raises(ValueError, match="block delta"):
+        content.observe(
+            {"type": "content_block_delta", "index": 0, "delta": {"type": kind}}
+        )
+
+
+def test_implicit_text_delta_retains_continuation_byte_limit(monkeypatch):
+    monkeypatch.setattr(anthropic_continuation, "MAX_CONTINUATION_BYTES", 8)
+    content = anthropic_continuation.NativeContent()
+    with pytest.raises(ValueError, match="limit"):
+        content.observe(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "ok"},
+            }
+        )
+
+
 def test_chat_stream_normalization_and_replay_keep_native_continuation():
     chat = translate_response(native_response(), MESSAGES, CHAT)
     items = [normalize_chat_chunk(item) for item in chat_completion_items(chat)]

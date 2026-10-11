@@ -119,8 +119,14 @@ class NativeContent:
         elif kind == "content_block_delta":
             delta = event.get("delta")
             block = self.blocks.get(index)
-            if not isinstance(delta, dict) or block is None:
+            if not isinstance(delta, dict):
                 raise ValueError("Invalid Anthropic block delta")
+            if block is None:
+                # Compatible text streams can omit an empty block start. Signed
+                # reasoning and tool inputs still require their native starts.
+                if delta.get("type") != "text_delta":
+                    raise ValueError("Invalid Anthropic block delta")
+                block = self.blocks[index] = {"type": "text", "text": ""}
             field = {
                 "text_delta": "text",
                 "thinking_delta": "thinking",
