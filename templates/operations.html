@@ -164,6 +164,7 @@
 
     {% if user and user.is_admin %}
     <div class="operator-grid">
+        {% include 'safety-settings.html' %}
         <article class="panel span-12" id="cascade-panel" data-endpoint="{{ url_for('admin_cascades') }}">
             <header class="panel__header"><div><h2>Verification-gated cascades</h2>
                 <p>Try cheaper chat models first and advance when an answer fails a check. The final tier always answers.</p></div></header>
@@ -185,7 +186,7 @@
                     <h2>Automatic model priorities</h2>
                     <p>Each <code>auto:&lt;name&gt;</code> model tries this order after a definite authentication, model-availability or rate-limit rejection.</p>
                 </div>
-                <span class="panel-tag">Chat and images</span>
+                <span class="panel-tag">Chat and media</span>
             </header>
             <div class="panel__body auto-route-editor">
                 <div class="auto-route-editor__sidebar">
@@ -450,5 +451,6 @@ NAVYAI_API_KEY=your-key</code></pre>
 <script src="{{ url_for('static', filename='js/auto-route-catalog.js', v='9') }}"></script>
 <script src="{{ url_for('static', filename='js/auto-routes.js', v='7') }}"></script>
 <script src="{{ url_for('static', filename='js/cascades.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/safety-settings.js', v='1') }}"></script>
 {% endif %}
 {% endblock %}

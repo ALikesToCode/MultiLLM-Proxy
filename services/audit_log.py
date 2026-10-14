@@ -18,7 +18,7 @@ from services.intelligence_d1_store import PrivateIntelligenceError, request_pri
 
 logger = logging.getLogger(__name__)
 
-EVENT_ACTIONS = ("sign_in", "sign_out", "setting_change", "secret_scan")
+EVENT_ACTIONS = ("sign_in", "sign_out", "setting_change", "secret_scan", "safety_check")
 ACCOUNT_ACTIONS = ("upsert", "delete")
 ACTIONS = ACCOUNT_ACTIONS + EVENT_ACTIONS
 OUTCOMES = frozenset({"succeeded", "refused"})

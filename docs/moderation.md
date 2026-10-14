@@ -57,6 +57,56 @@ Flask secret. Rotating that secret changes the identifier. Native JSON image
 requests receive the same default; native multipart clients should supply
 `user` themselves.
 
+## Optional generation text screen
+
+Operations has an administrator-only **Child-safety text screening** panel.
+Screening starts **off**. When enabled, it blocks generation with HTTP 403 and
+`child_safety_blocked` only if moderation explicitly flags `sexual/minors`.
+The overall `flagged` field and other categories do not trigger this policy.
+
+The screen sends text to the configured `auto:moderation` route before dispatch:
+
+- The latest user message in Chat Completions and Messages, or submitted text
+  in Responses. System messages, earlier turns, assistant output and tool results
+  are excluded.
+- Image generation/edit and video prompts, including multipart edit prompts.
+- Every submitted image batch prompt after applying item defaults.
+
+These checks cover unified and provider-prefixed generation routes handled by
+Flask, including free-model routes, legacy Groq URLs, `/intelligence/v1/chat/completions`
+and `/optimize/v1/chat/completions`. They add a moderation round trip
+before streaming starts. They do not inspect images or generated output, and
+they do not cover calls served entirely by the Worker, native Gemini payloads,
+hosted Responses continuations, realtime sessions or asynchronous chat batches.
+Dashboard workbench calls that dispatch directly are also outside this screen.
+Use native inline moderation separately where output signals are needed.
+
+The default failure policy is **Allow generation and log the failure**.
+Administrators may choose **Block generation until moderation is available**,
+which returns HTTP 503 with `child_safety_unavailable`. A missing category,
+invalid response, unavailable credential or timeout counts as unavailable
+moderation. Definite upstream refusals may fail over; uncertain submissions are
+not replayed. `X-MultiLLM-Child-Safety` reports `passed`, `blocked`, `no-text`,
+`unavailable-allowed`, or `unavailable-blocked` when screening runs.
+
+Settings live in their own SQLite database (`SAFETY_DB_PATH`, default
+`instance/safety.sqlite3`), or in D1 when durable control storage is enabled.
+Apply additive migration `0040_child_safety_settings.sql` before deploying with
+D1. Dashboard saves require the loaded revision and reject conflicting saves
+with HTTP 409. Processes refresh settings within five seconds. During a storage
+outage a process retains its last known policy; a cold process without a known
+policy refuses generation with `safety_settings_unavailable` rather than
+silently disabling a saved screen. Administrator reads and failed saves return
+visible errors and never claim that a setting was stored.
+
+Decisions are logged as bounded metadata: opaque principal identifier,
+operation, decision, reason, input count, policy revision and category score.
+When D1 account storage is available they also appear as **Child-safety screen**
+in the existing audit log. Prompt text, image URLs, generated content and raw
+provider errors are excluded from these entries. Audit persistence is best
+effort; it does not change the moderation decision. Other gateway/provider
+retention settings still apply to generation requests.
+
 ## Coverage
 
 `sexual/minors` is a text-only moderation category. General moderation is not

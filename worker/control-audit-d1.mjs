@@ -8,7 +8,7 @@
 import { logFailure } from "./log.mjs";
 
 export const AUDIT_OPERATIONS = new Set(["audit_list", "audit_record"]);
-export const EVENT_ACTIONS = new Set(["sign_in", "sign_out", "setting_change", "secret_scan"]);
+export const EVENT_ACTIONS = new Set(["sign_in", "sign_out", "setting_change", "secret_scan", "safety_check"]);
 export const ACCOUNT_ACTIONS = new Set(["upsert", "delete"]);
 const OUTCOMES = new Set(["succeeded", "refused"]);
 const MAX_AUDIT_PAGE = 100;
@@ -30,8 +30,23 @@ async function recordEvent(db, body) {
   if (!fields(body, ["version", "operation", "action", "outcome", "actor", "target", "detail"])
     || !EVENT_ACTIONS.has(body.action) || !OUTCOMES.has(body.outcome) || !optionalText(body.actor, 256)
     || !optionalText(body.target, 256) || !optionalText(body.detail, body.action === "secret_scan" ? 1024 : 512)) return null;
-  const action = body.action === "secret_scan" ? "setting_change" : body.action;
+  const action = ["secret_scan", "safety_check"].includes(body.action) ? "setting_change" : body.action;
   let detail = body.detail;
+  if (body.action === "safety_check") {
+    let metadata;
+    try { metadata = JSON.parse(detail); } catch { return null; }
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)
+        || !fields(metadata, ["kind", "decision", "reason", "input_count", "revision", "score"])
+        || metadata.kind !== "child_safety" || !["allowed", "blocked"].includes(metadata.decision)
+        || !["clear", "sexual_minors", "moderation_unavailable"].includes(metadata.reason)
+        || !Number.isSafeInteger(metadata.input_count) || metadata.input_count < 1 || metadata.input_count > 2048
+        || !Number.isSafeInteger(metadata.revision) || metadata.revision < 0
+        || !(metadata.score === null || (typeof metadata.score === "number" && Number.isFinite(metadata.score)
+          && metadata.score >= 0 && metadata.score <= 1))
+        || !(body.actor === null || /^[0-9a-f]{64}$/.test(body.actor))
+        || !["completions", "responses", "messages", "images", "videos", "batch"].includes(body.target)) return null;
+    detail = JSON.stringify(metadata);
+  }
   if (body.action === "secret_scan") {
     let metadata;
     try { metadata = JSON.parse(detail); } catch { return null; }
@@ -57,7 +72,7 @@ function accountStatement(db, { before, target, action }, limit) {
     revoked_at FROM control_user_audit ${where} ORDER BY id DESC LIMIT ?`).bind(...values, limit);
 }
 
-const EVENT_ACTION = "CASE WHEN action = 'setting_change' AND json_valid(detail) THEN CASE WHEN json_extract(detail, '$.kind') = 'secret_scan' THEN 'secret_scan' ELSE action END ELSE action END";
+const EVENT_ACTION = "CASE WHEN action = 'setting_change' AND json_valid(detail) THEN CASE WHEN json_extract(detail, '$.kind') = 'secret_scan' THEN 'secret_scan' WHEN json_extract(detail, '$.kind') = 'child_safety' THEN 'safety_check' ELSE action END ELSE action END";
 
 function eventStatement(db, { before, actor, target, action }, limit) {
   const clauses = [], values = [];

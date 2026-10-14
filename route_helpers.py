@@ -6,7 +6,7 @@ import time
 from functools import wraps
 from typing import Any, Callable, Dict, Mapping, Optional
 
-from flask import Response, g, has_request_context, jsonify, redirect, request, url_for
+from flask import Response, current_app, g, has_request_context, jsonify, redirect, request, url_for
 
 from config import Config
 from services import key_controls, request_accounting
@@ -51,7 +51,7 @@ CORS_EXPOSE_HEADERS = (
     "X-MultiLLM-Auto-Attempts, X-MultiLLM-Auto-Selected-Priority, "
     "X-MultiLLM-Auto-Ordering, X-MultiLLM-Auto-Failover-Reasons, "
     "X-MultiLLM-Cache, X-MultiLLM-Cache-Backend, X-MultiLLM-Usage-Basis, X-MultiLLM-Provider-Calls, Age, X-MultiLLM-Retention, X-MultiLLM-Canary-Cohort, X-MultiLLM-Injection-Action, X-MultiLLM-Roleplay-Recovery, X-MultiLLM-Transport-Failure, X-MultiLLM-Token-Count, "
-    "X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
+    "X-MultiLLM-Child-Safety, X-MultiLLM-Latency-Ms, X-MultiLLM-Estimated-Cost-USD, "
     "X-MultiLLM-Cost-Basis, WWW-Authenticate, X-PAYMENT-RESPONSE, X-Poll-After, "
     "X-NanoGPT-Advisor-ID, X-NanoGPT-Data-Endpoint, "
     "X-NanoGPT-Direct-Endpoint, X-NanoGPT-Inline-Moderation-Cost-USD, "
@@ -548,6 +548,9 @@ def _call_accounted(target: Callable, args, kwargs):
     if refused is not None:
         return refused
     try:
+        screen = current_app.extensions.get("child_safety")
+        if screen is not None and (refused := screen.before_dispatch()) is not None:
+            return request_accounting.finish(refused)
         result = target(*args, **kwargs)
     except Exception as error:
         request_accounting.fail(error)

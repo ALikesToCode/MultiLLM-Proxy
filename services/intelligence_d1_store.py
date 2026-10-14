@@ -34,6 +34,7 @@ _ENDPOINTS = {
     "usage": "http://intelligence.internal/v1/usage",
     "shadow_eval": "http://intelligence.internal/v1/shadow-eval",
     "alerts": "http://intelligence.internal/v1/state/alerts",
+    "safety": "http://intelligence.internal/v1/state/safety",
     "reservations": "http://intelligence.internal/v1/reservations",
     "context-pages": "http://intelligence.internal/v1/managed-state/context-pages",
     "learned-cooldown": "http://intelligence.internal/v1/state/learned-cooldown",
@@ -45,10 +46,11 @@ _ENDPOINTS = {
     "payments": "http://intelligence.internal/v1/managed-state/payments",
 }
 _MAX_BYTES = 262144
-_ENDPOINT_MAX_BYTES = {"context-pages": 2 * 1024 * 1024, "learned-cooldown": 4096, "usage-receipts": 128 * 1024}
+_ENDPOINT_MAX_BYTES = {"context-pages": 2 * 1024 * 1024, "learned-cooldown": 4096, "safety": 4096, "usage-receipts": 128 * 1024}
 _ENDPOINT_MAX_BYTES.update({"tenant_governance": 32768, "saml": 8192, "scim": 131072,
                             "credits": 16384, "payments": 65536})
 _RESPONSE_MAX_BYTES = {_ENDPOINTS["context-pages"]: _ENDPOINT_MAX_BYTES["context-pages"],
+                       _ENDPOINTS["safety"]: _ENDPOINT_MAX_BYTES["safety"],
                        _ENDPOINTS["learned-cooldown"]: _ENDPOINT_MAX_BYTES["learned-cooldown"],
                        _ENDPOINTS["usage-receipts"]: _ENDPOINT_MAX_BYTES["usage-receipts"],
                        _ENDPOINTS["cascades"]: 524288}
@@ -79,6 +81,7 @@ _ENDPOINT_SLOTS.update({
     "provider_catalog": _ADMIN_STATE_SLOTS,
     "route_health": threading.BoundedSemaphore(2),
     "cascades": threading.BoundedSemaphore(4),
+    "safety": threading.BoundedSemaphore(2),
     "usage": threading.BoundedSemaphore(4),
     "shadow_eval": threading.BoundedSemaphore(2),
 })

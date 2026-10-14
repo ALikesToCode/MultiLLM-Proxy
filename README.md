@@ -403,6 +403,12 @@ and Cloudflare fast-path requests. See
 [GPT Image moderation defaults](docs/gpt-image-moderation.md) for supported
 model families and route boundaries.
 
+`POST /v1/moderations` supports standalone moderation through OpenAI, NavyAI,
+and NanoGPT. Operations also offers an optional child-safety text screen,
+off by default, with configurable behavior when moderation is unavailable.
+See [Moderation and OpenAI safety identifiers](docs/moderation.md) for input
+contracts, settings, and coverage.
+
 Quick reference for all provider endpoint URLs:
 
 ```plaintext
