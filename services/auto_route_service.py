@@ -96,6 +96,10 @@ DEFAULT_AUTO_ROUTES = {
         "openai:text-embedding-3-small",
         "nanogpt:text-embedding-3-small",
     ),
+    "auto:moderation": (
+        "openai:omni-moderation-latest",
+        "navyai:omni-moderation-latest",
+    ),
     # Speech and transcription run on Gemini first (Google AI credits): 3.8 Flash-Lite TTS
     # is the fast default, 3.8 Flash TTS the high-fidelity narrator, and 3.5 Transcribe
     # detects 85+ languages. Aura speaks English only and is skipped for other scripts.

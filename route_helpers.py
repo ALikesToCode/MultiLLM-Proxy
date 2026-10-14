@@ -322,6 +322,9 @@ DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 48 * 1024 * 1024
 
 def media_upload_limit(path: str) -> Optional[int]:
     """The body limit for an image or audio upload route, or None for other routes."""
+    if re.fullmatch(r"(?:/[a-z0-9_-]+)?/v1/moderations", path):
+        from services.moderation_input import MAX_MODERATION_BODY_BYTES
+        return MAX_MODERATION_BODY_BYTES
     if not MEDIA_UPLOAD_PATH.fullmatch(path):
         return None
     try:

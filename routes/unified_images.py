@@ -7,6 +7,7 @@ from flask import Response, request
 from error_handlers import APIError
 from providers.aihubmix import build_aihubmix_image_request
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
+from services.openai_safety import prepare_generation_payload
 from route_helpers import stream_upstream_response
 from routes.media_images import dispatch_auto_image_generation
 from routes.provider_credentials import _add_credential_attempt_headers, _request_with_provider_token_rotation
@@ -97,6 +98,7 @@ def dispatch_image_generation_raw(
         else:
             upstream_path = "v1/images/generations"
             upstream_payload = {**payload, "model": provider_model}
+        upstream_payload = prepare_generation_payload(upstream_payload, provider, upstream_path)
         raw_body = serialize_payload(upstream_payload)
         operation_base_url = (
             app.config["NANOGPT_STANDARD_BASE_URL"]

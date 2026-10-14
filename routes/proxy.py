@@ -16,6 +16,7 @@ from providers.aihubmix import (
 )
 from providers.codex_everywhere import codex_everywhere_pool, is_valid_codex_everywhere_path
 from providers.gpt_image_moderation import apply_gpt_image_moderation_default
+from services.openai_safety import prepare_generation_payload
 from providers.image_relays import (
     image_relay_backup_base_url,
     image_relay_spec,
@@ -399,6 +400,11 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                         image_payload,
                         separators=(",", ":"),
                     ).encode("utf-8")
+            if api_provider == "openai" and request.method == "POST" and isinstance(body, dict):
+                prepared_body = json.loads(raw_request_data)
+                attributed_body = prepare_generation_payload(prepared_body, api_provider, path, native=True)
+                if attributed_body != prepared_body:
+                    raw_request_data = json.dumps(attributed_body, separators=(",", ":")).encode("utf-8")
             request_data = (
                 raw_request_data
                 if raw_passthrough

@@ -35,6 +35,7 @@ from routes.proxy import register_proxy_routes
 from routes.status_page import register_status_routes
 from routes.unified import register_unified_routes
 from routes.media import register_media_routes
+from routes.moderations import register_moderation_routes
 from routes.usage import register_usage_routes
 from routes.usage_receipts import register_usage_receipt_routes
 from routes.workbench import register_workbench_routes
@@ -139,6 +140,7 @@ def create_app() -> Flask:
     register_proxy_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_unified_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_media_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_moderation_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_intelligence_media_routes(app, csrf, AuthService, ProxyService)
     register_free_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)
