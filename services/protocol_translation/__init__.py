@@ -116,9 +116,15 @@ def translate_request(payload: Mapping[str, Any], source: str, target: str) -> d
     _check(source, target)
     if source == target:
         return dict(payload)
+    if "moderation" in payload:
+        raise TranslationError("Inline moderation requires the provider's native protocol; use /v1/moderations "
+                               "for a separate check", param="moderation")
     try:
         chat = dict(payload) if source == CHAT else _REQUEST_TO_CHAT[source](payload)
-        return chat if target == CHAT else _REQUEST_FROM_CHAT[target](chat)
+        result = chat if target == CHAT else _REQUEST_FROM_CHAT[target](chat)
+        if source in OPENAI_FAMILY and target in OPENAI_FAMILY and "safety_identifier" in payload:
+            result["safety_identifier"] = payload["safety_identifier"]
+        return result
     except _SHAPE_ERRORS as error:
         raise TranslationError("The request body has an invalid shape for this protocol") from error
 

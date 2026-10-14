@@ -1,0 +1,28 @@
+<article class="panel span-12" id="safety-panel" data-endpoint="{{ url_for('admin_safety') }}">
+    <header class="panel__header">
+        <div><h2>Child-safety text screening</h2>
+            <p>Optionally check submitted text before generation. Off by default.</p></div>
+        <span class="panel-tag">Text only</span>
+    </header>
+    <div class="panel__body">
+        <form id="safety-form" aria-describedby="safety-help">
+            <fieldset id="safety-controls" disabled>
+                <legend class="sr-only">Child-safety screening settings</legend>
+                <label class="field-label" for="safety-enabled">
+                    <input type="checkbox" id="safety-enabled"> Enable text screening
+                </label>
+                <p class="field-help">Block generation only when moderation flags <code>sexual/minors</code>. Other categories do not block this screen.</p>
+                <label class="field-label" for="safety-failure-mode">When moderation is unavailable</label>
+                <select id="safety-failure-mode" class="field-select">
+                    <option value="allow">Allow generation and log the failure (default)</option>
+                    <option value="block">Block generation until moderation is available</option>
+                </select>
+                <p id="safety-help" class="field-help">Checks image and video prompts, image batch prompts, and the latest user text in Chat Completions, Responses and Messages served by the container. Adds a moderation round trip using <code>auto:moderation</code>. Audit entries contain decision metadata only.</p>
+                <p class="field-help">This screen does not inspect images, generated output, earlier conversation turns or routes served entirely by the Worker. It does not detect known CSAM images. Do not submit known or suspected CSAM to the general moderation API.</p>
+                <button type="submit" class="button button--primary">Save screening settings</button>
+            </fieldset>
+        </form>
+        <p id="safety-status" role="status" aria-live="polite">Loading screening settings…</p>
+        <button id="safety-reload" type="button" class="button button--secondary" hidden>Reload saved settings</button>
+    </div>
+</article>

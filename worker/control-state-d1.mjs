@@ -6,6 +6,7 @@
  * client SQL.
  */
 import { handleLearnedCooldown, learnedCooldownEnabled } from "./learned-cooldown-d1.mjs";
+import { handleChildSafetySettings } from "./child-safety-settings-d1.mjs";
 import { handleAlertState, alertSettings } from "./alert-delivery.mjs";
 import { handleGenerationCache, MAX_RPC_BYTES } from "./generation-cache-d1.mjs";
 import { generationCacheSettings } from "./exact-generation-cache.mjs";
@@ -273,6 +274,7 @@ async function catalog(db, body, env) {
 }
 
 const DOMAINS = Object.freeze({
+  safety: { handle: handleChildSafetySettings, maxBytes: 4096, operations: ["get", "configure"] },
   "learned-cooldown": { handle: handleLearnedCooldown, maxBytes: 4096, operations: ["get", "put"] },
   alerts: { handle: (db, body, env) => handleAlertState(env, body), maxBytes: 8192, operations: ["get", "configure", "observe"] },
   "generation-cache": { handle: handleGenerationCache, maxBytes: MAX_RPC_BYTES, operations: ["get", "put", "prune"] },

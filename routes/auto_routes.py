@@ -14,6 +14,7 @@ from services.auto_route_service import AutoRoute, AutoRouteService
 from services.media_catalog import (
     TRANSPORT_FAILURE_HEADER,
     image_profile,
+    is_moderation_model,
     is_speech_or_embedding_model,
     is_video_model,
 )
@@ -332,7 +333,7 @@ def _candidate_capabilities(candidate: str, catalog_capabilities: dict) -> dict:
         return {"supports_chat": False, "supports_images": True, "supports_video": False}
     if is_video_model(provider_model):
         return {"supports_chat": False, "supports_images": False, "supports_video": True}
-    if is_speech_or_embedding_model(provider_model):
+    if is_moderation_model(provider_model) or is_speech_or_embedding_model(provider_model):
         return {"supports_chat": False, "supports_images": False, "supports_video": False}
     return catalog_capabilities
 

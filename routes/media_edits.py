@@ -256,6 +256,8 @@ def dispatch_edit_candidate(app, auth_service_cls, metrics_service_cls, proxy_se
             response = cloudflare_ai.edit_image(payload, [image.data_url() for image in inputs.images])
             status = response.status_code
             return response
+        from services.openai_safety import prepare_generation_payload
+        payload = prepare_generation_payload(payload, provider, "v1/images/edits")
         raw_body, content_type = _edit_body(provider_model, payload, inputs, support.transport)
         headers = {"Content-Type": content_type}
         source_headers = request.headers if request_headers is None else request_headers

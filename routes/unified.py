@@ -4,6 +4,7 @@ import time
 from collections.abc import Mapping
 
 from services.shadow_eval_sampling import sample_chat_dispatch
+from services.openai_safety import prepare_generation_payload
 
 from flask import Response, g, jsonify, request
 
@@ -439,6 +440,7 @@ def _dispatch_unified_chat_candidate(
             payload.get("model"),
         )
         payload = page_managed_candidate(payload, model=f"{provider}:{provider_model}")
+        payload = prepare_generation_payload(payload, provider, "v1/chat/completions")
         bridge_endpoint = chat_bridge_endpoint(provider, provider_model)
         if bridge_endpoint is not None:
             return _dispatch_bridged_chat(
@@ -754,6 +756,7 @@ def _dispatch_native_protocol(
     start_time = time.time()
     headers_source = request.headers
     upstream_payload = emit_managed_request(_copy_request_payload(payload, provider_model), ENDPOINT_PROTOCOLS[endpoint], ENDPOINT_PROTOCOLS[endpoint])
+    upstream_payload = prepare_generation_payload(upstream_payload, provider, endpoint)
     if endpoint == RESPONSES_ENDPOINT:
         upstream_payload = apply_glm_5_reasoning_policy(
             upstream_payload,

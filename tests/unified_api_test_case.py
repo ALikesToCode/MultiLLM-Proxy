@@ -26,6 +26,7 @@ class UnifiedApiTestCase(unittest.TestCase):
                 "AIHUBMIX_API_KEY": "aihubmix-provider-key",
                 "CODEX_EASY_API_KEY": "codex-easy-provider-key",
                 "AUTH_DB_PATH": os.path.join(self.temp_dir.name, "auth.sqlite3"),
+                "SAFETY_DB_PATH": os.path.join(self.temp_dir.name, "safety.sqlite3"),
                 "RATE_LIMIT_DB_PATH": os.path.join(
                     self.temp_dir.name, "limits.sqlite3"
                 ),

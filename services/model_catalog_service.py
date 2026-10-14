@@ -10,7 +10,7 @@ from providers.image_relays import is_image_relay_model
 from providers.opencode_go import opencode_model_endpoint
 from providers.registry import get_registry
 from services.auto_route_service import AutoRoute
-from services.media_catalog import image_profile, is_speech_or_embedding_model, is_video_model
+from services.media_catalog import image_profile, is_moderation_model, is_speech_or_embedding_model, is_video_model
 from services.model_registry import ModelRegistry
 from services.model_precision import catalog_precision_metadata
 from services.provider_catalog_metadata import (
@@ -110,7 +110,7 @@ def _model_capabilities(
         if (metadata or {}).get("output_modalities")
         else None
     )
-    media_only = text_output is False or (
+    media_only = is_moderation_model(model_id) or text_output is False or (
         text_output is None
         and (
             image_model

@@ -125,6 +125,10 @@ _SPEECH_OR_EMBEDDING_MODEL = re.compile(
     re.IGNORECASE)
 
 
+def is_moderation_model(provider_model: str) -> bool:
+    return "moderation" in provider_model.lower()
+
+
 def is_speech_or_embedding_model(provider_model: str) -> bool:
     """Embedding, text-to-speech and transcription models serve no chat, images or video."""
     return bool(_SPEECH_OR_EMBEDDING_MODEL.search(provider_model))

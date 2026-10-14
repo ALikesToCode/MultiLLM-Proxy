@@ -23,6 +23,7 @@ MESSAGES = "v1/messages"
 
 # Providers whose every model accepts these endpoints besides Chat Completions.
 PROVIDER_NATIVE_ENDPOINTS: Mapping[str, frozenset[str]] = {
+    "openai": frozenset({RESPONSES}),
     "codex-easy": frozenset({RESPONSES}),
     **{provider: frozenset({RESPONSES}) for provider in CODEX_EVERYWHERE_OPENAI_PROVIDERS},
     "linkapi": frozenset({RESPONSES}),
