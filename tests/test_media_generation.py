@@ -45,6 +45,7 @@ def test_each_candidate_receives_the_closest_settings_its_model_supports():
         "model": "x", "prompt": "p", "size": "3840x2160", "quality": "max", "n": 1}
     assert prepare_image_payload("together", "black-forest-labs/flux", request) == request
     assert prepare_image_payload("gguu", "gpt-image-2.5", {**request, "quality": "auto", "size": "4000x1000"})["size"] == "3840x960"
+    assert prepare_image_payload("gguu", "gpt-image-2.5", {**request, "size": "3840x3840"})["size"] == "2880x2880"
 
 
 class MediaRouteTest(UnifiedApiTestCase):
@@ -172,8 +173,8 @@ class MediaRouteTest(UnifiedApiTestCase):
         image = next(route for route in status["routes"] if route["id"] == "auto:image")
         by_model = {entry["model"]: entry for entry in image["candidates"]}
         self.assertTrue(by_model["gguu:gpt-image-2.5-sunburst"]["available"])
-        self.assertFalse(by_model["cloudflare:openai/gpt-image-2.5-sunburst"]["available"])
-        self.assertFalse(by_model["together:openai/gpt-image-2"]["available"])
+        self.assertFalse(by_model["cloudflare:@cf/leonardo/lucid-origin"]["available"])
+        self.assertFalse(by_model["aihubmix:gpt-image-2-free"]["available"])
         video = next(route for route in status["routes"] if route["id"] == "auto:video")
         self.assertTrue(next(entry for entry in video["candidates"] if entry["model"].startswith("gemini:"))["available"])
         self.save("auto:image-probe", ["gguu:gpt-image-2.5-sunburst", "xai:grok-imagine-image-2.0", "together:openai/gpt-image-2"])

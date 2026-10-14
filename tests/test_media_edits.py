@@ -112,6 +112,7 @@ class MediaEditTest(UnifiedApiTestCase):
             [upstream(502, {"error": {"message": "timeout"}}, multillm_transport_failure="timeout")])
         self.assertEqual(response.status_code, 502)
         self.assertEqual(make_request.call_count, 1)
+        self.assertNotIn(b'name="size"', make_request.call_args.kwargs["data"], "an edit keeps the source image's shape")
 
     def test_json_edit_reaches_xai_as_image_urls_and_skips_unbound_cloudflare(self):
         self.save("auto:edit-test", ["cloudflare:openai/gpt-image-2", "xai:grok-imagine-image-2.0"])

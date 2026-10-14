@@ -549,8 +549,8 @@ and a Worker cron runs free provider checks; see
 the checks, keep-warm and its cost.
 
 Image and video generation use the same routes: `auto:image` serves the leading
-image model (GPT Image 2.5 Sunburst at `max` quality, GGUU first) with fallback
-across GGUU, Cloudflare AI, OpenAI, xAI, Together and AIHubMix; `/v1/images/batch`
+image model (GPT Image 2.5 Sunburst at `max` quality and 4K, GGUU first) with fallback
+across GGUU, Codex Everywhere, AIHubMix's free model and Workers AI; `/v1/images/batch`
 runs many prompts and sizes in one call; and `/v1/videos` creates asynchronous Veo,
 Grok Imagine Video and Sora jobs. See [Image and video generation](docs/media-generation.md);
 agents can install `/agent-onboarding/media/SKILL.md`.

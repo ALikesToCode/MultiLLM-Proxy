@@ -78,7 +78,7 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
 The unified endpoint removes the `gguu:` prefix and preserves the remaining
 OpenAI Images request and response fields. `auto:image` and `auto:gpt-image-2.5`
 start with GPT Image 2.5 Sunburst on GGUU at `max` quality and fall back to other
-GGUU models, Cloudflare AI and OpenAI ([media generation](media-generation.md)). GPT
+GGUU models and Codex Everywhere ([media generation](media-generation.md)). GPT
 Image models, including the 2.5 family, receive the automatic `moderation: "low"`
 default. `auto:image` and `auto:image-fast` also try
 `gguu-grok:grok-imagine-image-2.0` after the GPT Image models, which receives

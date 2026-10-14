@@ -14,7 +14,7 @@ from routes.provider_credentials import _add_credential_attempt_headers, _reques
 from routes.unified_transport import normalized_aihubmix_image_response, send_unified_image_request
 from services import cloudflare_ai
 from services.auto_route_service import AutoRouteService
-from services.media_catalog import TRANSPORT_FAILURE_HEADER
+from services.media_catalog import DEFAULT_IMAGE_SIZE, TRANSPORT_FAILURE_HEADER
 
 
 def generation_headers(headers, image_index=None, attempt_number=0):
@@ -46,7 +46,7 @@ def dispatch_image_generation_raw(
     """Dispatch an OpenAI Images request, translating provider-native models."""
     if AutoRouteService.is_auto_route(payload.get("model")):
         return dispatch_auto_image_generation(
-            payload,
+            {"size": DEFAULT_IMAGE_SIZE, **payload},
             validate_candidate=validate_candidate,
             dispatch_candidate=lambda candidate_payload: dispatch_image_generation_raw(
                 app,

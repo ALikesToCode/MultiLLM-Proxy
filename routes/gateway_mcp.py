@@ -74,7 +74,9 @@ _MIME_SIGNATURES = (
 _MODEL = {"type": "string", "minLength": 1, "maxLength": 300, "pattern": r"^\S+$"}
 _PROMPT = {"type": "string", "minLength": 1, "maxLength": 32000}
 _SIZE = {"type": "string", "pattern": r"^(auto|[0-9]{2,5}x[0-9]{2,5})$",
-         "description": "auto or WIDTHxHEIGHT: edges up to 3840 in multiples of 16, ratio at most 3:1."}
+         "description": ("auto or WIDTHxHEIGHT: edges up to 3840 in multiples of 16, ratio at most 3:1, at most "
+                         "3840x2160's pixels. Automatic routes default to 2880x2880 (4K square); 3840x2160 and "
+                         "2160x3840 are 4K landscape and portrait. Grok Imagine stops at 2k.")}
 _IMAGE_OPTIONS = {
     "size": _SIZE,
     "quality": {"type": "string", "enum": ["auto", "low", "medium", "high", "xhigh", "max"],
@@ -150,8 +152,9 @@ TOOLS: list[dict[str, Any]] = [
         "name": "generate_image",
         "title": "Generate images",
         "description": (
-            "PAID: generate 1 to 4 images from a prompt, about ¥0.04 (GGUU) to $0.21 (OpenAI at max) "
-            "each. auto:image (default) tries the best model first and falls back across providers. "
+            "PAID: generate 1 to 4 images from a prompt, about ¥0.04 (GGUU) or $0.015 (Codex "
+            "Everywhere) each on auto routes; a named OpenAI model costs up to $0.21. auto:image "
+            "(default) tries the best model first and falls back across providers. "
             "Returns URLs (download them promptly; they expire) or inline images up to 5 MiB each and "
             "10 MiB per call; larger inline images are omitted, so prefer response_format url, a smaller "
             "size or jpeg/webp. Nothing is stored on the server. Runs once; never retried. Needs chat."

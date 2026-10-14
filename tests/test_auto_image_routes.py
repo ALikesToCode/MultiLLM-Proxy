@@ -57,6 +57,16 @@ class AutoImageRouteTest(UnifiedApiTestCase):
         self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gguu:gpt-image-2.5-sunburst")
         self.assertEqual(response.headers["X-MultiLLM-Auto-Attempts"], "1")
 
+    def test_generations_without_a_size_default_to_4k_and_keep_an_explicit_size(self):
+        sizes = []
+        for extra in ({}, {"size": "auto"}):
+            with patch.object(self.app_module.ProxyService, "make_request", side_effect=[upstream(200, IMAGE)]) as make_request:
+                response = self.client.post("/v1/images/generations", headers={"Authorization": "Bearer admin-test-key"},
+                                            json={"model": "auto:gpt-image-2.5", "prompt": "A blue square", **extra})
+            self.assertEqual(response.status_code, 200)
+            sizes.append(json.loads(make_request.call_args.kwargs["data"])["size"])
+        self.assertEqual(sizes, ["2880x2880", "auto"])
+
     def test_image_route_skips_unconfigured_and_chat_only_candidates_then_fails_over_after_refusal(self):
         self.save("auto:image-test", ["a6api:gpt-image-2", "opencode:glm-5.2", "gguu:gpt-image-2.5", "latix:gpt-image-2"])
         response, make_request = self.generate(

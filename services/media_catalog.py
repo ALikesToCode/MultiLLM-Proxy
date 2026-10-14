@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from providers.image_relays import image_relay_spec
 
 DEFAULT_IMAGE_QUALITY = "max"
+# Generations without a size get 4K: 2880x2880 is 3840x2160's pixel count, GPT Image's
+# limit. GGUU charges the same at 1K and 4K; edits keep the source image's shape.
+DEFAULT_IMAGE_SIZE = "2880x2880"
+MAX_IMAGE_PIXELS = 3840 * 2160
 # Set on proxy-generated transport failures: "connect" means the request never reached
 # the provider; "timeout" or "interrupted" means it may have been accepted and billed.
 TRANSPORT_FAILURE_HEADER = "X-MultiLLM-Transport-Failure"
@@ -154,7 +158,8 @@ def _fit_size(width: int, height: int, max_edge: int) -> str:
         ratio = width / height
         best = min(_STANDARD_SIZES, key=lambda size: abs(math.log((size[0] / size[1]) / ratio)))
         return f"{best[0]}x{best[1]}"
-    scale = min(1.0, max_edge / max(width, height))
+    # GPT Image also caps the pixel count at 3840x2160's, so 3840x3840 becomes 2880x2880.
+    scale = min(1.0, max_edge / max(width, height), math.sqrt(MAX_IMAGE_PIXELS / (width * height)))
     # GPT Image sizes use multiples of 16.
     return f"{max(16, int(width * scale) // 16 * 16)}x{max(16, int(height * scale) // 16 * 16)}"
 
