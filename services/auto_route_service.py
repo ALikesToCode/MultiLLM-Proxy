@@ -21,9 +21,10 @@ _CANARY_UNSET = object()
 # GGUU keys belong to one group, so Grok Imagine uses the separate gguu-grok relay.
 # Codex Everywhere's image pool (ce-image, $0.015 per image) follows GGUU; the user keeps
 # GGUU first because it is the cheapest.
-# Cloudflare AI (AI Gateway billing, zero data retention), xAI, Together and AIHubMix
-# follow, and a Workers AI model is the last resort. Operations edits persist in D1
-# when the Worker provides it; on Container-local SQLite until the Container restarts.
+# Image routes keep only these cheap relays, AIHubMix's free model and a Workers AI model
+# as the last resort; the user dropped pay-as-you-go providers (Cloudflare GPT Image,
+# OpenAI, xAI, Together) on 2026-10-15. Operations edits persist in D1 when the Worker
+# provides it; on Container-local SQLite until the Container restarts.
 DEFAULT_AUTO_ROUTES = {
     "auto:glm-5.2": (
         "nanogpt:zai-org/glm-5.2:thinking",
@@ -50,10 +51,6 @@ DEFAULT_AUTO_ROUTES = {
         "ce-image:gpt-image-2.5-sunburst",
         "ce-image:gpt-image-2.5-flare",
         "ce-image:gpt-image-2",
-        "cloudflare:openai/gpt-image-2.5-sunburst",
-        "openai:gpt-image-2.5-sunburst",
-        "xai:grok-imagine-image-2.0",
-        "together:openai/gpt-image-2",
         "aihubmix:gpt-image-2-free",
         "cloudflare:@cf/leonardo/lucid-origin",
     ),
@@ -63,9 +60,6 @@ DEFAULT_AUTO_ROUTES = {
         "gguu-grok:grok-imagine-image-2.0",
         "ce-image:gpt-image-2.5-flare",
         "ce-image:gpt-image-2",
-        "cloudflare:openai/gpt-image-2.5-flare",
-        "openai:gpt-image-2.5-flare",
-        "xai:grok-imagine-image-2.0",
         "cloudflare:@cf/black-forest-labs/flux-1-schnell",
     ),
     "auto:gpt-image-2.5": (
@@ -74,20 +68,14 @@ DEFAULT_AUTO_ROUTES = {
         "gguu:gpt-image-2.5-flare",
         "ce-image:gpt-image-2.5-sunburst",
         "ce-image:gpt-image-2.5-flare",
-        "cloudflare:openai/gpt-image-2.5-sunburst",
-        "openai:gpt-image-2.5-sunburst",
-        "openai:gpt-image-2.5-flare",
     ),
-    # Edits and reference images: only candidates that accept source images. Cloudflare
-    # and xAI take no mask and are skipped when one is sent; see routes/media_edits.py.
+    # Edits and reference images: only candidates that accept source images; see
+    # routes/media_edits.py.
     "auto:image-edit": (
         "gguu:gpt-image-2.5-sunburst",
         "gguu:gpt-image-2",
         "ce-image:gpt-image-2.5-sunburst",
         "ce-image:gpt-image-2",
-        "cloudflare:openai/gpt-image-2.5-sunburst",
-        "openai:gpt-image-2.5-sunburst",
-        "xai:grok-imagine-image-2.0",
         "aihubmix:gpt-image-2-free",
     ),
     # Embeddings, speech and transcription (routes/media_audio.py). Vectors from different
@@ -151,6 +139,16 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "openai:gpt-image-2.5-sunburst",
             "openai:gpt-image-2.5-flare",
         ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5",
+            "gguu:gpt-image-2.5-flare",
+            "ce-image:gpt-image-2.5-sunburst",
+            "ce-image:gpt-image-2.5-flare",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-flare",
+        ),
     ),
     "auto:image": (
         (
@@ -177,6 +175,21 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "aihubmix:gpt-image-2-free",
             "cloudflare:@cf/leonardo/lucid-origin",
         ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
+            "ce-image:gpt-image-2.5-sunburst",
+            "ce-image:gpt-image-2.5-flare",
+            "ce-image:gpt-image-2",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "xai:grok-imagine-image-2.0",
+            "together:openai/gpt-image-2",
+            "aihubmix:gpt-image-2-free",
+            "cloudflare:@cf/leonardo/lucid-origin",
+        ),
     ),
     "auto:image-fast": (
         (
@@ -191,6 +204,17 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "gguu:gpt-image-2.5-flare",
             "gguu:gpt-image-2",
             "gguu-grok:grok-imagine-image-2.0",
+            "cloudflare:openai/gpt-image-2.5-flare",
+            "openai:gpt-image-2.5-flare",
+            "xai:grok-imagine-image-2.0",
+            "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+        ),
+        (
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
+            "ce-image:gpt-image-2.5-flare",
+            "ce-image:gpt-image-2",
             "cloudflare:openai/gpt-image-2.5-flare",
             "openai:gpt-image-2.5-flare",
             "xai:grok-imagine-image-2.0",
@@ -215,6 +239,16 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
         (
             "gguu:gpt-image-2.5-sunburst",
             "gguu:gpt-image-2",
+            "cloudflare:openai/gpt-image-2.5-sunburst",
+            "openai:gpt-image-2.5-sunburst",
+            "xai:grok-imagine-image-2.0",
+            "aihubmix:gpt-image-2-free",
+        ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2",
+            "ce-image:gpt-image-2.5-sunburst",
+            "ce-image:gpt-image-2",
             "cloudflare:openai/gpt-image-2.5-sunburst",
             "openai:gpt-image-2.5-sunburst",
             "xai:grok-imagine-image-2.0",

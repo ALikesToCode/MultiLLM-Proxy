@@ -13,15 +13,17 @@ The seeded routes follow the Artificial Analysis text-to-image arena (September 
 GPT Image 2.5 Sunburst (Elo 1196) and Flare (1190) lead, then GPT Image 2 (1171) and Grok
 Imagine Image 2.0 (1155). GGUU serves all four first because its public price is a flat
 ¥0.04 per image at 1K, 2K and 4K, against about $0.21 for Sunburst at `max` from OpenAI.
-Codex Everywhere's image pool (`ce-image`, $0.015 per image) comes next, before Cloudflare
-and OpenAI. OpenRouter is not used.
+Codex Everywhere's image pool (`ce-image`, $0.015 per image) comes next, then AIHubMix's
+free GPT Image 2 and a Workers AI model. Image routes use no pay-as-you-go provider:
+Cloudflare GPT Image, OpenAI, xAI, Together and OpenRouter are left out. Request them
+by name (for example `openai:gpt-image-2.5-sunburst`) when you want them.
 
 | Route | Candidates in order |
 | --- | --- |
-| `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `together:openai/gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
-| `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `cloudflare:openai/gpt-image-2.5-flare`, `openai:gpt-image-2.5-flare`, `xai:grok-imagine-image-2.0`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
-| `auto:gpt-image-2.5` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-flare`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-flare` |
-| `auto:image-edit` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2`, `cloudflare:openai/gpt-image-2.5-sunburst`, `openai:gpt-image-2.5-sunburst`, `xai:grok-imagine-image-2.0`, `aihubmix:gpt-image-2-free` |
+| `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
+| `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
+| `auto:gpt-image-2.5` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-flare`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare` |
+| `auto:image-edit` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2`, `aihubmix:gpt-image-2-free` |
 | `auto:video` | `gemini:veo-3.1-generate-preview`, `xai:grok-imagine-video-1.5`, `cloudflare:google/veo-3.1`, `openai:sora-2-pro`, `openai:sora-2` |
 
 A candidate without a credential (or Cloudflare AI without its binding) is skipped before
@@ -40,13 +42,24 @@ group with batch generation enabled.
 
 `POST /v1/images/generations` takes the OpenAI Images body. On automatic routes:
 
-- `quality` defaults to `max`. Every candidate receives the closest settings its model
-  supports: GPT Image 2.5 accepts `low` to `max`; GPT Image 2 and 1.5 top out at `high`;
-  Grok Imagine Image 2.0 takes `low` or `medium` with `aspect_ratio` and a `2k`
-  `resolution` instead of `size`; Cloudflare's GPT Image adapter accepts the three
-  standard sizes; Workers AI models turn quality into diffusion steps.
-- `size` is `auto` or `WIDTHxHEIGHT` with edges up to 3840 that are multiples of 16 and a
-  ratio of at most 3:1. Larger requests are scaled down for models with lower limits.
+- `quality` defaults to `max` and `size` to `2880x2880`, a square with 3840x2160's pixel
+  count. GGUU charges the same for 1K and 4K. Edits get no default size, so they keep the
+  source image's shape. Send `auto` to let the model choose the shape.
+- `size` is `auto` or `WIDTHxHEIGHT`. Every candidate receives the closest settings its
+  model supports:
+
+  | Model | `size` | `quality` |
+  | --- | --- | --- |
+  | GPT Image 2.5 Sunburst and Flare (GGUU, Codex Everywhere, OpenAI) | Edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels. 4K: `3840x2160`, `2160x3840`, `2880x2880`. | `low` to `max` |
+  | GPT Image 2 (GGUU, Codex Everywhere, Together, OpenAI) | Same as GPT Image 2.5 | `low` to `high` |
+  | GPT Image 2.5 and 2 on Cloudflare | `1024x1024`, `1536x1024`, `1024x1536` | as above |
+  | GPT Image 1 and 1.5 | `1024x1024`, `1536x1024`, `1024x1536` | `low` to `high` |
+  | Grok Imagine Image 2.0 | `aspect_ratio` and `resolution` (`1k`, or `2k` above 1024 px) instead of `size`; no 4K | `low`, `medium` |
+  | Grok Imagine Image Quality | Same as Grok Imagine Image 2.0 | not accepted |
+  | Workers AI `@cf/` models | Lucid Origin up to 2500 px per edge (the default becomes 2496x2496), Phoenix 1.0 up to 2048, FLUX.1 schnell fixed; JPEG output | diffusion steps |
+
+  Larger requests are scaled down to the model's edge and pixel limits; shapes a model
+  lacks snap to its closest one. OpenAI calls outputs above 2560x1440 experimental.
 - `n` from 1 to 10 sends one request per image, up to four at a time, and merges the
   results; `X-MultiLLM-Images-Returned` reports how many succeeded.
 - Image requests allow ten minutes per provider, because `max` quality at 4K can take

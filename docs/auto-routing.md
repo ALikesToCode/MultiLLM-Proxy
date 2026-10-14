@@ -53,8 +53,9 @@ automatic routing, key controls, accounting, protocol translation and failover.
 transcription. Candidates are tried in order; a candidate is skipped before any
 request when its provider cannot generate images, has no configured credential, or
 the model is disabled in Operations. `quality`
-defaults to `max`, and each candidate receives the closest settings its model
-supports (quality, size or aspect ratio, and only the fields it accepts).
+defaults to `max` and a generation's `size` to `2880x2880` (4K), and each candidate
+receives the closest settings its model supports (quality, size or aspect ratio, and
+only the fields it accepts).
 
 ```bash
 curl "$PROXY_BASE_URL/v1/images/generations" \

@@ -17,10 +17,10 @@ the provider probe.
 
 | Model | Use it for | Order tried |
 | --- | --- | --- |
-| `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI, OpenAI, Grok Imagine via xAI, GPT Image 2 via Together, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
-| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU |
-| `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Cloudflare AI, then OpenAI |
-| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, GPT Image 2.5 Sunburst via Cloudflare AI and OpenAI, Grok Imagine Image 2.0 via xAI, AIHubMix's free GPT Image 2 |
+| `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, the same GPT Image models via Codex Everywhere, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
+| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU, Codex Everywhere, FLUX.1 schnell on Workers AI |
+| `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Codex Everywhere |
+| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, then via Codex Everywhere, AIHubMix's free GPT Image 2 |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
 | `auto:embed` | Embeddings | `text-embedding-3-small` from OpenAI, then NanoGPT (one model, so vectors stay comparable) |
 | `auto:tts` | Speech | Gemini 3.8 Flash-Lite TTS and 3.8 Flash TTS, OpenAI `gpt-4o-mini-tts`, then Workers AI Aura (English only) |
@@ -40,12 +40,27 @@ curl -sS "$MULTILLM_BASE_URL/v1/images/generations" \
        "size": "3840x2160", "response_format": "url"}'
 ```
 
-- `quality` defaults to `max` on automatic routes. Each fallback model receives the
-  highest quality it supports (GPT Image 2 uses `high`), a size within its limits and
-  only the fields it accepts, so send one request, not one per provider.
-- `size` is `auto` or `WIDTHxHEIGHT`: edges at most 3840 and multiples of 16, ratio at
-  most 3:1. Common sizes: `1024x1024`, `1536x1024`, `1024x1536`, `2048x2048`,
-  `3840x2160`, `2160x3840`. Outputs above 2560x1440 are experimental.
+- On automatic routes `quality` defaults to `max` and `size` to `2880x2880` (a 4K
+  square). Send `3840x2160` or `2160x3840` for 4K landscape or portrait, or `auto` to
+  let the model pick the shape. Each fallback model receives the highest quality it
+  supports, a size within its limits and only the fields it accepts, so send one
+  request, not one per provider.
+- `size` is `auto` or `WIDTHxHEIGHT`. What each model accepts:
+
+  | Model | `size` | `quality` |
+  | --- | --- | --- |
+  | GPT Image 2.5 Sunburst and Flare (GGUU, Codex Everywhere, OpenAI) | Any `WIDTHxHEIGHT`: edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels (3840x2160). 4K: `3840x2160`, `2160x3840`, `2880x2880`. Also `2560x1440`, `2048x2048`, `1536x1024`, `1024x1536`, `1024x1024`. | `low`, `medium`, `high`, `xhigh`, `max` |
+  | GPT Image 2 (GGUU, Codex Everywhere, Together, OpenAI) | Same as GPT Image 2.5 | `low` to `high` |
+  | GPT Image 2.5 and 2 on Cloudflare | `1024x1024`, `1536x1024`, `1024x1536` | as above |
+  | GPT Image 1 and 1.5 | `1024x1024`, `1536x1024`, `1024x1536` | `low` to `high` |
+  | Grok Imagine Image 2.0 (GGUU, xAI) | No 4K. The proxy turns `size` into `aspect_ratio` (`1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `3:2`, `2:3`) and `resolution` (`1k`, or `2k` above 1024 px). | `low`, `medium` |
+  | Grok Imagine Image Quality | Same as Grok Imagine Image 2.0 | not accepted |
+  | Workers AI `@cf/` models | Lucid Origin up to 2500 px per edge (the default becomes 2496x2496), Phoenix 1.0 up to 2048, FLUX.1 schnell fixed; JPEG output | turned into diffusion steps |
+
+  A larger size is scaled down to fit and a shape a model lacks snaps to its closest
+  one. OpenAI calls outputs above 2560x1440 experimental.
+- A 4K PNG is often 10 MB or more. Prefer `response_format` `url`, or `output_format`
+  `jpeg` or `webp`, when you need the image inline.
 - `n` from 1 to 10 generates that many images; each is a separate request that may use
   a different provider. Optional: `background` (`transparent` with PNG or WebP),
   `output_format` (`png`, `jpeg`, `webp`), `moderation` (defaults to `low`).
@@ -292,8 +307,9 @@ Edits, background batches, embeddings, audio and narration are HTTP-only: call t
 
 ## Costs and retries
 
-- Images via GGUU cost a flat ¥0.04 each from 1K to 4K; OpenAI's `max` quality costs
-  about $0.21 per image. Videos cost dollars per clip. Confirm with the user before
+- Images via GGUU cost a flat ¥0.04 each from 1K to 4K and via Codex Everywhere $0.015;
+  automatic image routes use no pay-as-you-go provider. OpenAI's `max` quality, only
+  when named explicitly, costs about $0.21 per image. Videos cost dollars per clip. Confirm with the user before
   generating videos or more than a few images unless they already asked for them.
 - A provider error falls back automatically. A `504` or a response with
   `X-MultiLLM-Transport-Failure: timeout` means the request may already have been

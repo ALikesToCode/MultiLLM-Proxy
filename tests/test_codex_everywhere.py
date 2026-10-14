@@ -290,21 +290,22 @@ class CodexEverywhereInstructionTests(IntelligenceApiTestCase):
         assert sent["messages"] == [{"role": "user", "content": "test"}]
 
 
-def test_image_routes_keep_gguu_first_and_try_codex_everywhere_before_cloudflare_and_openai():
+def test_image_routes_keep_gguu_first_then_codex_everywhere_and_no_pay_as_you_go_providers():
     from services.auto_route_service import (
         DEFAULT_AUTO_ROUTES,
         LEGACY_DEFAULT_AUTO_ROUTES,
     )
 
+    paid = ("cloudflare:openai/", "openai:", "xai:", "together:", "openrouter:")
     for route in ("auto:image", "auto:image-fast", "auto:gpt-image-2.5", "auto:image-edit"):
         candidates = DEFAULT_AUTO_ROUTES[route]
         providers = [candidate.split(":", 1)[0] for candidate in candidates]
         first_ce = providers.index("ce-image")
         assert providers[0] == "gguu", route
         assert set(providers[:first_ce]) <= {"gguu", "gguu-grok"}, route
-        assert all(p not in {"cloudflare", "openai"} for p in providers[:first_ce + 1]), route
+        assert not [candidate for candidate in candidates if candidate.startswith(paid)], route
         previous = LEGACY_DEFAULT_AUTO_ROUTES[route][-1]
-        assert [c for c in candidates if not c.startswith("ce-image:")] == list(previous), (
+        assert [c for c in previous if not c.startswith(paid)] == list(candidates), (
             "a stored copy of the previous default follows the new one"
         )
 

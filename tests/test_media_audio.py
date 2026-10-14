@@ -284,7 +284,7 @@ class MediaAudioRouteTest(UnifiedApiTestCase):
         self.assertTrue(speech["gemini:gemini-3.8-flash-lite-tts"]["available"])
         edit = {entry["model"]: entry for entry in next(route for route in status["routes"]
                                                         if route["id"] == "auto:image-edit")["candidates"]}
-        self.assertFalse(edit["cloudflare:openai/gpt-image-2.5-sunburst"]["available"])
+        self.assertFalse(edit["aihubmix:gpt-image-2-free"]["available"])
 
     def test_model_listing_never_offers_audio_or_embedding_routes_for_chat(self):
         from services.media_catalog import is_speech_or_embedding_model

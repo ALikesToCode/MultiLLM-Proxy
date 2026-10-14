@@ -28,7 +28,7 @@ Discovery index: {base_url}/llms.txt
    uses the complete endpoint. Do not append /v1 twice.
 5. Select other contracts only when my task needs them: /v1/responses for
    Responses-compatible clients; /v1/images/generations with model auto:image
-   (the best image model, quality max, falling back across providers) or an
+   (the best image model, quality max at 4K, falling back across providers) or an
    explicit image model; /v1/images/batch for several prompts or sizes; and
    /v1/videos for asynchronous video jobs (poll /v1/videos/{{id}}, then download
    /content). Check model capabilities and the setup guide at {base_url}/docs.
