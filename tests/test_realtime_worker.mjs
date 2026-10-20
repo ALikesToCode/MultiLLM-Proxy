@@ -68,7 +68,7 @@ const done = (id = "r1") => JSON.stringify({ type: "response.done", response: { 
 
 test("disabled, empty and malformed flags preserve registered Container bytes and headers", async () => {
   for (const flag of [undefined, "", "false", "garbage"]) {
-    let calls = 0; const env = { INTELLIGENCE_DB: policyStore(), REALTIME_ENABLED: flag, MULTILLM_PROXY_CONTAINER: { getByName() { return {
+    let calls = 0; const env = { REALTIME_ENABLED: flag, INTELLIGENCE_DB: policyStore(), MULTILLM_PROXY_CONTAINER: { getByName() { return {
       async fetch(req) { calls++; assert.equal(req.headers.get("upgrade"), "websocket");
         return new Response("unchanged 雪", { status: 418, headers: { "x-original": "yes" } }); } }; } } };
     const response = await worker.fetch(request(), env, {});
@@ -191,7 +191,7 @@ test("dashboard key model grants, scopes, expiry and tickets use current D1 auth
   assert.equal((await handleRealtimeRequest(request({ authorization: `Bearer ${key}` }), f.env, f.ctx, f.options)).status, 403);
   f.sql.prepare("UPDATE control_users SET scopes='chat,audio',expires_at='2000-01-01T00:00:00Z' WHERE username='fixture-user'").run();
   assert.equal((await handleRealtimeRequest(request({ authorization: `Bearer ${key}` }), f.env, f.ctx, f.options)).status, 401);
-  f.sql.prepare("UPDATE control_users SET expires_at=NULL WHERE username='fixture-user'").run();
+  f.sql.prepare("UPDATE control_users SET expires_at=NULL,official_only=1 WHERE username='fixture-user'").run();
   assert.equal((await handleRealtimeRequest(request({ authorization: `Bearer ${key}` }), f.env, f.ctx, f.options)).status, 101);
   f.server.emit("close", { code: 1000 }); await f.flush(); assert.equal(f.calls(), 1);
 });
@@ -287,8 +287,8 @@ test("registered Realtime sockets and ticket issuance enforce provider classes",
   try {
     for (const request of [f.socket(), f.ticket()]) {
       const response = await worker.fetch(request, f.env, f.ctx);
-      assert.equal(response.status, 503);
-      assert.equal((await response.json()).error.code, "key_data_controls_unavailable");
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, "provider_class_not_allowed");
     }
     assert.equal(dials, 0);
     assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM realtime_tickets").get().n, 0);
@@ -302,8 +302,8 @@ for (const selected of ["openrouter:realtime-test", "openai:realtime-test"]) {
       .run('{"data_collection":"deny"}');
     for (const request of [f.socket(), f.ticket()]) {
       const response = await worker.fetch(request, f.env, f.ctx);
-      assert.equal(response.status, 503);
-      assert.equal((await response.json()).error.code, "key_data_controls_unavailable");
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, "forced_provider_preferences_not_supported");
     }
     assert.equal(f.calls(), 0);
   });
@@ -320,8 +320,8 @@ test("ticket consumption rechecks changed data controls before consumption or di
     f.sql.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='controlled'")
       .run(official, preferences);
     const response = await worker.fetch(f.socket(value), f.env, f.ctx);
-    assert.equal(response.status, 503);
-    assert.ok(["key_data_controls_unavailable", "realtime_auth_unavailable"].includes((await response.json()).error.code));
+    assert.equal(response.status, preferences === "invalid" ? 503 : 403);
+    assert.equal((await response.json()).error.code, code);
     assert.equal(f.sql.prepare("SELECT consumed_at FROM realtime_tickets").get().consumed_at, null);
     assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM realtime_sessions").get().n, 0);
     assert.equal(f.calls(), 0);

@@ -20,7 +20,10 @@ If a later revision enables an account restriction, rolling back to this revisio
 refuses provider dispatch with 503 before sending content. This dormant fence includes
 native routes, private bindings, Knowledge, Realtime and deferred work. A malformed or
 unreadable current policy cannot grant dispatch. Legacy background jobs without an
-identity run only while a fresh durable read proves every policy is NULL.
+identity run only while a fresh durable read proves every policy is NULL. Headerless
+private calls from a verified expansion Container remain compatible beside controlled
+accounts: that Container applies its current-account refusal fence before the hop.
+An unreadable or malformed store cannot use this compatibility proof.
 
 ## Contract
 
@@ -33,3 +36,17 @@ peers during independent deployments. Keep deployment preflight enabled.
 Rollback from enforcement to expansion leaves policy columns intact and refuses
 controlled accounts. Restore enforcement-capable components to resume those accounts;
 never clear restrictions as an automatic rollback step.
+
+Enforcement advertises `key_controls: {protocol: 2, enforcement: true}`. A controlled
+request probes the actual Container `/healthz` or private Knowledge `/ready` before
+sending its body. Missing, stale, malformed or unreadable capability refuses with 503.
+The Container independently checks the main Worker's account-RPC capability when
+loading controlled rows. The private Worker checks both current durable controls and
+the sender's enforcement protocol. NULL-policy calls need no enforcement negotiation.
+
+Deployment preflight verifies configuration, migration ledger, policy columns, required
+secret names and a fully active private deployment whose tagged source supports
+expansion. The tagged commit must be available in the checkout; a shallow build must
+fetch that history before release. It reads no secret values. Runtime peer readiness,
+rather than the tag, governs controlled dispatch. Bundle dry runs use isolated configs
+and never stand in for release admission.

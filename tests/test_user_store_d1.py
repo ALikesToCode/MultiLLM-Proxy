@@ -22,6 +22,8 @@ class FakeUsersDomain:
     def __call__(self, payload, *, endpoint):
         assert endpoint == "users"
         operation = payload["operation"]
+        if operation == "capabilities":
+            return {"version": 1, "key_controls": {"protocol": 2, "enforcement": True}}
         self.calls.append(operation)
         if self.down:
             raise PrivateIntelligenceError(503, "storage_unavailable")
@@ -36,7 +38,7 @@ class FakeUsersDomain:
                                             if row["api_key_prefix"] == payload["prefix"] and row["revoked_at"] is None]}
         if operation == "upsert":
             assert set(payload["user"]) == set(user_store.USER_FIELDS)
-            self.rows[payload["user"]["username"]] = {**payload["user"], "data_policy": envelope({"official_only": None, "forced_provider_preferences": None, **payload["user"]})}
+            self.rows[payload["user"]["username"]] = {**payload["user"], "data_policy": envelope(payload["user"])}
             return {"version": 1, "stored": True}
         if operation == "delete":
             return {"version": 1, "deleted": self.rows.pop(payload["username"], None) is not None}

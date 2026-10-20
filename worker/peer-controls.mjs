@@ -1,4 +1,5 @@
 /** Admission before content crosses an independently deployed runtime boundary. */
+import { requireControlledPeer } from "./peer-capability.mjs";
 import { resolvePrincipal } from "./knowledge-edge.mjs";
 import { currentDataControls, legacyDataControls } from "./key-data-guards.mjs";
 import { DispatchError } from "./provider-dispatch.mjs";
@@ -17,11 +18,14 @@ export async function delegationPolicy(request, env) {
     ? currentDataControls(env, { keyId: resolved.principal.id }) : legacyDataControls(env);
 }
 
-export async function admitContainerDelegation(request, env, _container) {
+export async function admitContainerDelegation(request, env, container) {
   const headers = request.headers;
   if (!["authorization", "x-multillm-api-key", "x-api-key", "x-goog-api-key"].some(name => headers.has(name))
     && !(new URL(request.url).pathname.startsWith("/linkapi/") && new URL(request.url).searchParams.has("key"))) return;
 
-  try { await delegationPolicy(request, env); }
+  try {
+    const policy = await delegationPolicy(request, env);
+    await requireControlledPeer(policy, container, "https://container.internal/healthz");
+  }
   catch { throw new DispatchError("key_data_controls_unavailable"); }
 }

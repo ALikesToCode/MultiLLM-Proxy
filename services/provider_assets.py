@@ -9,9 +9,6 @@ MAX_REDIRECTS = 5
 
 
 def asset_http(provider, url, *, headers=None, reference=None, **options):
-    from services.key_controls_capability import CAPABILITY
-    if not CAPABILITY["enforcement"]:
-        return provider_http(provider, "GET", url, headers=dict(headers or {}), reference=reference, **options)
     # Only documented authenticated content APIs may start with credentials.
     # Status-returned xAI and private-binding assets are always public downloads.
     authenticated = provider in {"openai", "gemini"} and api_origin(provider, url)

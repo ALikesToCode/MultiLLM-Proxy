@@ -88,12 +88,13 @@ from app import app  # noqa: E402
 
 client = app.test_client()
 headers = {"Authorization": "Bearer mllm_synthetic_incident_key_long_enough"}
-for path, method in [("/v1/models", "get"), ("/v1/chat/completions", "post")]:
+requests_to_run = json.loads(sys.argv[4]) if len(sys.argv) > 4 else [("/v1/models", "get"), ("/v1/chat/completions", "post")]
+for path, method in requests_to_run:
     arguments = {"json": {"model": "openrouter:openai/gpt-6-luna", "messages": [
         {"role": "user", "content": "synthetic"},
     ]}} if method == "post" else {}
     response = getattr(client, method)(path, headers=headers, **arguments)
     print(json.dumps({"path": path, "status": response.status_code,
-        "error": response.json.get("error") if isinstance(response.json, dict) else None,
+        "body": response.json, "error": response.json.get("error") if isinstance(response.json, dict) else None,
         "dispatches": len(seen), "preferences": seen[-1].get("provider") if seen else None}))
 scratch.cleanup()

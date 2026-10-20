@@ -9,13 +9,15 @@ export async function runtimeBundle(contents, revision = "", platform = "node") 
   const output = await build({ stdin: { resolveDir: root, contents }, bundle: true,
     format: "esm", platform, external: ["node:*"], write: false,
     plugins: [{ name: "runtime-version", setup(b) {
+      b.onResolve({ filter: /^@cloudflare\/containers$/ }, () => ({ path: "containers", namespace: "containers" }));
+      b.onLoad({ filter: /.*/, namespace: "containers" }, () => ({ contents: "export class Container {}; export class ContainerProxy {}; export const getContainer=(binding,name)=>binding.getByName(name);" }));
       b.onResolve({ filter: /^cloudflare:workers$/ }, () => ({ path: "runtime", namespace: "stub" }));
       b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents:
         "export class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}; export class WorkflowEntrypoint {}" }));
       if (platform === "node") b.onResolve({ filter: /dispatch-network\.mjs$/ }, () => ({
         path: new URL("../../worker/dispatch-network.mjs", import.meta.url).href, external: true,
       }));
-      if (revision) b.onLoad({ filter: /\/worker\/.*\.(mjs|json)$/ }, args => ({
+      if (revision) b.onLoad({ filter: /(?:\/worker\/.*\.(mjs|json)|\/cloudflare-worker\.mjs)$/ }, args => ({
         contents: execFileSync("git", ["show", `${revision}:${args.path.slice(root.length + 1)}`], { encoding: "utf8" }),
         loader: args.path.endsWith(".json") ? "json" : "js",
       }));

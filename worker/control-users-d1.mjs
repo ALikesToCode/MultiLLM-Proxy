@@ -1,3 +1,4 @@
+import { accountPolicyVersion, accountReply, accountWrite } from "./account-contract.mjs";
 /**
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
@@ -219,14 +220,10 @@ export async function handleControlUsersRequest(request, env) {
     if (!body || Array.isArray(body) || typeof body !== "object" || body.version !== 1) return reply({ error: "invalid_request" }, 400);
   } catch { return reply({ error: "invalid_request" }, 400); }
   const db = env.INTELLIGENCE_DB;
-  const policyVersion = body.data_policy_version === 1 ? 1 : null;
-  delete body.data_policy_version;
+  let policyVersion;
+  try { policyVersion = accountPolicyVersion(body); }
+  catch { return reply({ error: "invalid_request" }, 400); }
   if (body.operation === "capabilities") return reply({ version: 1, key_controls: KEY_CONTROLS });
-  const accountReply = user => {
-    if (!user || policyVersion === 1) return user;
-    if (user.official_only !== null || user.forced_provider_preferences !== null) return user;
-    return Object.fromEntries(Object.entries(user).filter(([name]) => !["official_only", "forced_provider_preferences", "data_policy"].includes(name)));
-  };
   try {
     if (AUDIT_OPERATIONS.has(body.operation)) {
       const result = await handleAuditOperation(db, body);
@@ -255,7 +252,7 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"])) break;
-        body.user = { official_only: null, forced_provider_preferences: null, ...body.user };
+        body.user = accountWrite(body.user, policyVersion);
         if (!validUser(body.user)) break;
         if (!streamCostEnabled(env) && body.user[STREAM_CAP_FIELD] != null) return reply({ error: "invalid_request" }, 400);
         const user = { official_only: null, forced_provider_preferences: null, shadow_eval_rate: null, secret_scan_mode: null, ...body.user };

@@ -75,8 +75,6 @@ def has_data_controls(user):
 
 
 def model_permitted(user, model, config=None):
-    from services.key_controls_capability import expansion_fence
-    expansion_fence(user.get("data_policy") or user)
     if not user.get("official_only"):
         return True
     provider = str(model or "").split(":", 1)[0].lower()

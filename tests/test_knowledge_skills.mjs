@@ -401,7 +401,7 @@ test("8 MiB sync ingress and outbound boundary accept exact size and reject one 
   for (const [bytes, expected] of [[SYNC_REQUEST_BYTES, 200], [SYNC_REQUEST_BYTES + 1, 413]]) {
     const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills", raw.padEnd(bytes)), env);
     assert.equal(response.status, expected);
-    const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync", principal: { id: "synthetic" } }).padEnd(bytes)), env);
+    const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync", principal: { id: "synthetic-principal" } }).padEnd(bytes)), env);
     assert.equal(outbound.status, expected);
   }
   const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills/find", JSON.stringify({ query: "x" }).padEnd(65537)), env);

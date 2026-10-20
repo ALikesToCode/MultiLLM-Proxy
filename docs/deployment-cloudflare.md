@@ -308,11 +308,12 @@ python -m pytest -q
 npm run test:worker
 npm run test:integration
 npm run cf:migrations:check
-npx wrangler deploy --dry-run
+node scripts/key_data_preflight.mjs --check
+node scripts/check_worker_bundle.mjs --config wrangler.jsonc --outdir /tmp/main-worker
 ```
 
 Pushing to `main` deploys; see [How deploys work](#how-deploys-work). Never deploy
-with a bare `wrangler deploy`, which skips the migrations.
+with a bare `wrangler deploy`: its preflight verifies prerequisites but does not apply migrations.
 
 ## How deploys work
 
@@ -332,7 +333,10 @@ A push to `main` runs the `ci` workflow. When it passes, the `deploy` workflow
    first because the main Worker binds it (`KNOWLEDGE_SERVICE`) and may call what the
    new version adds. The main Worker and its Container go last, and only when the
    repository variable `DEPLOY_MAIN_WORKER` is `true` (see [Workers Builds](#workers-builds)).
-   Each version is tagged with the full commit SHA, and its message links to the run.
+   Before upload, the main build verifies the migrated account schema, required bindings
+   and secret names, and the private Worker's tagged expansion capability. Main activation uses
+   `--containers-rollout=none` first, followed by the Container rollout. Each version
+   is tagged with the full commit SHA, and its message links to the run.
 4. **Verify.** `scripts/deploy_status.mjs --verify` retries for up to ten minutes
    until no migration is pending, `GET /ready` answers 200 (every D1 table exists and
    the Container is healthy), the Knowledge Worker's live version carries the commit,
@@ -349,8 +353,9 @@ SHA.
 
 ## Migrations
 
-Migrations are applied before the code that uses them, and with Workers Builds the new
-code can briefly run before them, so the schema must work for the old and the new code:
+Migrations are applied before the code that uses them. The main build refuses upload
+until they are recorded and the required account columns exist. The schema must
+still support old and new code during rollout:
 
 - Make only additive changes: new tables, new nullable or defaulted columns, new
   indexes, using `IF NOT EXISTS`. Add each new table to `REQUIRED_D1_TABLES` in
@@ -383,14 +388,20 @@ the code, and nothing ships unless ci passed.
 3. Add *Containers Edit* to the API token, and run the `deploy` workflow once from the
    **Actions** tab to deploy the current head of `main`.
 
-**(b) Workers Builds keeps deploying the main Worker.** Leave `DEPLOY_MAIN_WORKER` unset
-(the default) or `false`, and keep the Workers Builds deploy command as
-`npx wrangler deploy`; do not change it to `npm run deploy`, which would apply the
-migrations and deploy the Knowledge Worker a second time. Actions applies migrations and
-deploys the Knowledge Worker after ci passes. Workers Builds starts at push time, so after
-a push that adds a migration the new main Worker usually runs for a few minutes before
-its tables exist, and `/ready` answers 503 `d1_schema_missing` until they do. Code must
-tolerate a missing new table, and a push whose ci fails still ships the main Worker.
+**(b) Workers Builds remains connected.** It deploys the main Worker and its
+Container independently of the GitHub workflow, which also deploys the private
+Knowledge Worker. Keep the default Wrangler build command: its preflight refuses
+main upload until migrations and an expansion-capable private Worker are
+ready. A push before CI completes should fail that build. It does not become a
+successful deployment automatically after the workflow finishes: rerun the release
+only after prerequisites pass, and avoid competing deploy owners. Do not remove the build
+preflight for a release. Prefer option (a) to preserve the full
+migrations → private Worker → main Worker → Container order in one workflow.
+
+The account/control RPC is handled by the main Worker against its own D1 binding;
+it does not pass through the private Knowledge service. See
+[key data controls](key-data-guards.md#account-contract-and-release-preflight) for
+the negotiated account contract and local integration evidence.
 
 ## One-time setup
 
@@ -442,7 +453,8 @@ which can show no commit until the next deploy.
 
 `npm run deploy` (`scripts/deploy.sh`) runs the same order from your machine: the
 migration checks, `wrangler d1 migrations apply`, the remote check, the Knowledge
-Worker and the main Worker. From a clean checkout it tags both versions with the commit.
+Worker, the main Worker with Container rollout disabled, then the Container.
+Preflight runs before each main upload. From a clean checkout it tags both versions with the commit.
 Extra arguments go to the final deploy, for example
 `npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a changed
 Container image. Use it only when the workflow cannot run, and never while a deploy run

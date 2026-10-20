@@ -292,3 +292,21 @@ test("the generated MCP contract matches the Worker's import flags, roots and sc
   const schema = tool("knowledge_skills_import").definition.inputSchema.properties;
   for (const [field, value] of [["commit", SHA1], ["version", "1.0.0-beta+2"], ["clawhub", "awspace/pdf"]]) assert.match(value, new RegExp(schema[field].pattern), field);
 });
+
+
+test("approved reimport binds legacy watches and preserves the importing account", async t => {
+  const { env, store } = library(t);
+  const repo = github({ head: SHA1, commits: { [SHA1]: { tree: "t1", files: { "SKILL.md": SKILL } } } });
+  const payload = { repository: "acme/skills", path: "skills/pg", commit: SHA1 };
+  const options = { skills: store, fetch: repo.fetch };
+  await submit(env, "skills.import", payload, options);
+  assert.deepEqual(store.read("pg-tools").origin.dispatch_principal, { authenticated: true, keyId: "synthetic-principal" });
+  const legacy = store.read("pg-tools");
+  delete legacy.origin.dispatch_principal;
+  store.sql.exec("UPDATE skills SET record = ? WHERE skill_id = ?", JSON.stringify(legacy), "pg-tools");
+  assert.equal((await submit(env, "skills.import", payload, options)).status, "unchanged");
+  assert.deepEqual(store.read("pg-tools").origin.dispatch_principal, { authenticated: true, keyId: "synthetic-principal" });
+  await dispatchKnowledge(env, { version: 1, operation: "skills.import", payload,
+    principal: { id: "other-principal", scopes: MANAGE } }, options);
+  assert.deepEqual(store.read("pg-tools").origin.dispatch_principal, { authenticated: true, keyId: "synthetic-principal" });
+});

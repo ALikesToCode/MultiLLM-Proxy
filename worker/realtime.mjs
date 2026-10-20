@@ -253,7 +253,7 @@ async function openSession(request, env, ctx, settings, options) {
     const url = new URL(settings.providers.get(model)); url.protocol = "https:";
     handedOff = true;
     const response = await providerFetch(provider, url.href, { method: "GET", headers: upstreamHeaders(request, key),
-      redirect: "manual", signal: controller.signal }, { env, authority: { authenticated: true, keyId: principal.owner }, realtime: true,
+      signal: controller.signal }, { env, authority: { authenticated: true, keyId: principal.owner }, realtime: true,
         send: checked => (options.dial ?? fetch)(checked.url, { method: checked.method, headers: checked.headers,
           redirect: checked.redirect, signal: checked.signal }) });
     socket = response.webSocket;

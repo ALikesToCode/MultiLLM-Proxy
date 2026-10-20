@@ -1,5 +1,5 @@
 """The code version advertises rollout support; configuration cannot turn it on."""
-CAPABILITY = {"protocol": 1, "enforcement": False}
+CAPABILITY = {"protocol": 2, "enforcement": True}
 
 
 def expansion_fence(policy):

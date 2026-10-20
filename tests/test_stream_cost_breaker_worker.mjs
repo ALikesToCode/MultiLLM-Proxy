@@ -67,7 +67,7 @@ function fakeDb({missing=false,stored={}}={}) {
 }
 async function call(db,body,flags=env) {
   return handleControlUsersRequest(new Request("http://intelligence.internal/v1/users",{method:"POST",
-    headers:{"content-type":"application/json"},body:JSON.stringify({version:1,...body})}),{...flags,INTELLIGENCE_DB:db});
+    headers:{"content-type":"application/json"},body:JSON.stringify({version:1,data_policy_version:1,...body})}),{...flags,INTELLIGENCE_DB:db});
 }
 test("strict caps and omitted updates preserve existing column",async()=>{
   for(const value of [-1,0.5,true,NaN,1e16]) assert.equal(validUser(account({max_stream_cost_microusd:value})),false);

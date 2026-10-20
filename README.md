@@ -278,6 +278,8 @@ SQLite or PostgreSQL elsewhere). Each key can have daily and monthly dollar budg
 a model allowlist, an expiry time and client address ranges; the dashboard's Usage
 page and `GET /v1/usage` show spend and remaining budget, and request telemetry can be
 exported over OTLP. See [usage, budgets and key controls](docs/usage-and-budgets.md).
+Keys can also restrict provider data classes and enforce request preferences; see
+[key data controls and usage details](docs/key-data-guards.md).
 
 Administrators can query `GET /admin/providers/usage` from an authenticated
 dashboard session to combine provider-account allowances with local request,

@@ -305,7 +305,8 @@ test("Container outbound forwarding accepts only its fixed private target and st
   const result = await handleKnowledgeOutbound(new Request("http://knowledge.internal/v1/dispatch", options), env);
   assert.equal(result.status, 200);
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0].options.headers, { "content-type": "application/json" });
+  assert.deepEqual(requests[0].options.headers, { "content-type": "application/json", "X-MultiLLM-Key-Controls": "2",
+    "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: manager.id }) });
   for (const target of ["http://knowledge.internal/other", "https://knowledge.internal/v1/dispatch", "http://other.internal/v1/dispatch", "http://knowledge.internal/v1/dispatch?url=anything"]) {
     assert.equal((await handleKnowledgeOutbound(new Request(target, options), env)).status, 400);
   }

@@ -9,7 +9,7 @@ function skillsStore(env, options) {
     async call(operation, payload, principal) {
       const stub = env.KNOWLEDGE_SKILLS.get(env.KNOWLEDGE_SKILLS.idFromName("personal"));
       const response = await stub.fetch("http://skills.internal/dispatch", { method: "POST",
-        headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: dispatchContext()?.authority?.keyId }) }, body: JSON.stringify({ operation, payload, principal }), signal: AbortSignal.timeout(50000) });
+        headers: { "content-type": "application/json", "X-MultiLLM-Key-Controls": "2", "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: dispatchContext()?.authority?.keyId }) }, body: JSON.stringify({ operation, payload, principal }), signal: AbortSignal.timeout(50000) });
       const body = await response.json();
       if (!response.ok || body.version !== 1) fail(body.error?.code ?? "skills_unavailable", body.error?.message ?? "Skills storage is unavailable.", response.ok ? 503 : response.status);
       return body.result;
