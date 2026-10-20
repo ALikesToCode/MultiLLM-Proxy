@@ -69,14 +69,36 @@ def provider_data_class(provider, config=None):
     return DATA_CLASSES.get(provider, "subscription" if provider.startswith("ce-") else "reseller")
 
 
+def account_controls(user):
+    """Resolve the canonical envelope, or validate an explicit stored row."""
+    from services.dispatch_policy import verify, unavailable
+    if not isinstance(user, dict):
+        raise unavailable()
+    if "data_policy" in user:
+        return verify(user["data_policy"])
+    if "version" in user:
+        return verify(user)
+    return stored_controls(user)
+
+
 def has_data_controls(user):
     """Any stored non-NULL value represents an administrator-owned data policy."""
     from services.key_controls_capability import policy_present
-    return policy_present(user)
+    policy = account_controls(user) if "data_policy" in user or "version" in user else user
+    return policy_present(policy)
+
+
+def allows_shadow_sampling(user):
+    """Unverifiable authority cannot authorize retaining request content."""
+    try:
+        return not has_data_controls(account_controls(user))
+    except APIError:
+        return False
 
 
 def model_permitted(user, model, config=None):
-    if not user.get("official_only"):
+    policy = account_controls(user) if "data_policy" in user else user
+    if policy.get("official_only") not in (1, True):
         return True
     provider = str(model or "").split(":", 1)[0].lower()
     if provider in {"auto", "cascade", "intelligence"}:
@@ -114,8 +136,9 @@ def guard_request(provider, data):
     """Final transport boundary covers raw, unified, routed and internal requests."""
     require_provider(provider)
     user = getattr(g, "authenticated_user", None) or {} if has_request_context() else {}
-    forced = preferences(user.get("forced_provider_preferences"))
-    if provider != "openrouter" or not forced or data is None:
+    policy = account_controls(user) if "data_policy" in user else user
+    forced = preferences(policy.get("forced_provider_preferences"))
+    if provider != "openrouter" or forced is None or data is None:
         return data
     try:
         payload = json.loads(data)

@@ -492,7 +492,7 @@
   "services/auth_service.py": {
     "kind": "non-provider",
     "reason": "OAuth credential refresh authenticates the operator; provider generation is separately admitted.",
-    "sha256": "4b05ae698b86c28a9f1c07f1e4c447b00ae75c7c8ad7e6273984a1929d110150"
+    "sha256": "ddd35642bf94e75227fbf414add8807e5db9a72a66802d86244f040a32f7eda8"
   },
   "services/auto_route_d1.py": {
     "kind": "non-provider",
@@ -762,7 +762,7 @@
   "services/gemini_credentials.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "f8458ed0a5d9c02741d8b02fe16ab3c43d7d17bcc126f0e3abfced046f84f038"
+    "sha256": "de43c25cb99302e18cf5ba72d3781985cdb371e09fe8ca02d3991115bdcc5410"
   },
   "services/generation_deadline.py": {
     "kind": "non-provider",
@@ -872,7 +872,7 @@
   "services/key_data_guards.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "b3f15798579c3ce577eab8be43529a9b5735249fadf84c507b72336f03069fdf"
+    "sha256": "71318c7015922b1fc3dbb0e6ab1e18c957a0046a7de7ae7fedd9ae8ee01c2221"
   },
   "services/knowledge_client.py": {
     "kind": "guarded",
@@ -1322,7 +1322,7 @@
   "services/shadow_eval_contract.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "e435ee51c9f902577a830c54490208e4a039e04151b1862d104c579d18129ba6"
+    "sha256": "d1edd785c7b1a717936e4ed3b843ba194fd4b3e25603d612c08fc37672ab9e25"
   },
   "services/shadow_eval_data_policy.py": {
     "kind": "non-provider",
@@ -1347,7 +1347,7 @@
   "services/shadow_eval_sampling.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "a6bfb6d8b1219e027b4d6dcd27a27e046cb6447bd4982f51ed503b16c313cbe4"
+    "sha256": "3c6d1ab4cb38b38daff5da8d40a4aa7060c0cf36652b2e57e20f9615a6047670"
   },
   "services/shadow_eval_store.py": {
     "kind": "non-provider",

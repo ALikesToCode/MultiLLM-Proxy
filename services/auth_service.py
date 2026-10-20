@@ -283,9 +283,9 @@ class AuthService:
 
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
-        from services.dispatch_policy import envelope
+        from services.dispatch_policy import envelope, verify
         return {
-            "data_policy": envelope(row),
+            "data_policy": verify(row["data_policy"]) if dict(row).get("data_policy") is not None else envelope(row),
             "username": row["username"],
             "api_key_hash": row["api_key_hash"],
             "api_key_prefix": row["api_key_prefix"],
