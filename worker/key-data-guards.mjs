@@ -39,22 +39,28 @@ export function mergePreferences(caller, forced) {
   return Object.fromEntries(entries);
 }
 
+/** Read current administrator controls without accepting policy from client headers. */
+export async function currentDataControls(env, authority) {
+  let user = authority.principal ?? {};
+  const id = authority.keyId;
+  if (env.INTELLIGENCE_DB && id) {
+    const stored = await env.INTELLIGENCE_DB.prepare(
+      "SELECT official_only, forced_provider_preferences FROM control_users WHERE username = ? AND revoked_at IS NULL")
+      .bind(id).first();
+    if (stored) {
+      if (!Object.hasOwn(stored, "official_only") || !Object.hasOwn(stored, "forced_provider_preferences")) throw new TypeError();
+      user = stored;
+    }
+  }
+  if (!validDataControls(user)) throw new TypeError();
+  return user;
+}
+
 /** Resolve controls from trusted authority or durable accounts, never client headers. */
 export async function guardNativeRequest(request, env, authority) {
   if (authority.authenticated !== true) return { request };
-  let user = authority.principal ?? {};
-  const id = authority.keyId;
   try {
-    if (env.INTELLIGENCE_DB && id) {
-      const stored = await env.INTELLIGENCE_DB.prepare(
-        "SELECT official_only, forced_provider_preferences FROM control_users WHERE username = ? AND revoked_at IS NULL")
-        .bind(id).first();
-      if (stored) {
-        if (!Object.hasOwn(stored, "official_only") || !Object.hasOwn(stored, "forced_provider_preferences")) throw new TypeError();
-        user = stored;
-      }
-    }
-    if (!validDataControls(user)) throw new TypeError();
+    const user = await currentDataControls(env, authority);
     if (!providerClassPermitted(user, authority.provider, env)) {
       return { response: Response.json({ error: { code: "provider_class_not_allowed" } }, { status: 403 }) };
     }

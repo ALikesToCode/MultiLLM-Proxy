@@ -1,4 +1,5 @@
 /** Native gateway authentication, ticket admission and approved Realtime dispatch. */
+import { currentDataControls, parsePreferences, providerClassPermitted } from "./key-data-guards.mjs";
 import { Buffer } from "node:buffer";
 import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import { activeUsersByPrefix, boundedBody, keyControlsPermit, validUser } from "./control-users-d1.mjs";
@@ -67,12 +68,22 @@ function modelGranted(patterns, model) {
   return patterns.split(",").some(pattern => new RegExp("^" + pattern.toLowerCase().split("*")
     .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$").test(model.toLowerCase()));
 }
-function permit(principal, request, model, now) {
+async function permit(principal, request, model, now, env) {
   if (!principal || principal.revoked_at || !keyControlsPermit(principal, request.headers.get("cf-connecting-ip"), now)) {
     throw new RealtimeError("invalid_api_key", 401);
   }
   if (!principal.scopes.includes("chat") || !principal.scopes.includes("audio") || !modelGranted(principal.allowed_models, model)) {
     throw new RealtimeError("model_not_granted", 403);
+  }
+  let controls;
+  try { controls = await currentDataControls(env, { principal, keyId: principal.owner }); }
+  catch { throw new RealtimeError("key_data_controls_unavailable", 503); }
+  if (!providerClassPermitted(controls, model.split(":", 1)[0], env)) {
+    throw new RealtimeError("provider_class_not_allowed", 403);
+  }
+  // Realtime frames cannot enforce HTTP provider preferences throughout a session.
+  if (parsePreferences(controls.forced_provider_preferences) !== null) {
+    throw new RealtimeError("forced_provider_preferences_not_supported", 403);
   }
   return principal;
 }
@@ -124,7 +135,7 @@ async function authenticate(request, env, model, now) {
   if (!principal) throw new RealtimeError("invalid_api_key", 401);
   await tenantPrincipal(env, principal);
   principal.principal_hash = await principalHash(`realtime-key:${digest(key)}`);
-  return permit(principal, request, model, now);
+  return permit(principal, request, model, now, env);
 }
 async function signingKey(env) {
   // Derive a domain-specific key from the existing gateway signing binding.
@@ -171,7 +182,7 @@ async function consumeTicket(ticket, request, env, model, now) {
     if (credential) principal = integration(await lookupIntegrationPrincipal(env.INTELLIGENCE_DB, credential.key_prefix));
   }
   if (!principal || principal.owner !== row.owner || !same(principal.credential_fingerprint, row.credential_fingerprint)) throw new RealtimeError("invalid_api_key", 401);
-  permit(principal, request, model, now);
+  await permit(principal, request, model, now, env);
   const consumed = await env.INTELLIGENCE_DB.prepare("UPDATE realtime_tickets SET consumed_at=? WHERE nonce=? AND consumed_at IS NULL AND expires_at>?")
     .bind(now, match[2], now).run();
   if (consumed.meta.changes !== 1) throw new RealtimeError("invalid_api_key", 401);

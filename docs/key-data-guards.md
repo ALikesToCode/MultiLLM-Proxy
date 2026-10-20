@@ -27,6 +27,12 @@ value says `allow`. Other caller preferences remain unless overridden. See
 for the supported preference fields. This control does not change another
 provider's request format.
 
+Realtime ticket issuance and socket admission re-read current key data controls.
+Restricted keys cannot open non-official models. Realtime refuses any key with
+forced preferences, including an empty object, because those preferences cannot
+be enforced throughout the socket session. Existing tickets do not bypass a
+subsequent control change.
+
 ## Provider classes
 
 `providers/data-classes.json` is shared by Flask and the Worker. Registry adapters
