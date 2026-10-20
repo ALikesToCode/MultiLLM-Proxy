@@ -146,6 +146,8 @@ export function remoteAppliedMigrations(database, run = defaultRun) {
 }
 
 function defaultRun(args) {
+  const config = process.env.MAIN_WORKER_CONFIG;
+  if (config) args = [...args, "--config", config];
   return execFileSync("npx", ["--no-install", "wrangler", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 }
 

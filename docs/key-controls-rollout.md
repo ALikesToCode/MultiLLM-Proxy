@@ -41,7 +41,7 @@ Enforcement advertises `key_controls: {protocol: 2, enforcement: true}`. A contr
 request probes the actual Container `/healthz` or private Knowledge `/ready` before
 sending its body. Missing, stale, malformed or unreadable capability refuses with 503.
 The Container independently checks the main Worker's account-RPC capability when
-loading controlled rows. The private Worker checks both current durable controls and
+admitting controlled provider dispatch. The private Worker checks both current durable controls and
 the sender's enforcement protocol. NULL-policy calls need no enforcement negotiation.
 
 Deployment preflight verifies configuration, migration ledger, policy columns, required
@@ -50,3 +50,63 @@ expansion. The tagged commit must be available in the checkout; a shallow build 
 fetch that history before release. It reads no secret values. Runtime peer readiness,
 rather than the tag, governs controlled dispatch. Bundle dry runs use isolated configs
 and never stand in for release admission.
+
+## Staging evidence and management compatibility
+
+Real staging of the earlier re-land reproduced both incident errors with mixed Worker
+and Container versions. The matched original enforcement release was healthy on 45 of
+46 requests. Forward negotiation fixed the new-Worker/old-Container mix, but the reverse
+rollback still produced roughly 50–55 seconds of chat 503s in two samples. Treat both
+RPC directions as compatibility requirements; a passing matched-version test is insufficient.
+
+The local matrix uses real migrated D1 rows, the account RPC and registered Container
+routes. Every A/B combination must keep unrestricted chat and Knowledge working, including
+rollback with restricted rows still stored. It also signs in both a controlled account
+and an unrestricted administrator, then reloads the complete management account list.
+Policy capability checks belong at provider dispatch/delegation, never a management read.
+A restricted row must not poison another account's login or dashboard. Management access
+does not grant generation authority; A's dispatch fence remains active after sign-in.
+These are local compatibility proofs; repeat them on staging before relying on plain rollback.
+
+## Deployment verification
+
+Before merging, disconnect Workers Builds or change its deploy command to
+`npx wrangler versions upload`, which uploads without promoting traffic. Use
+`scripts/deploy.sh` to preserve migrations → private Worker → main Worker → Container.
+The preflight's token permissions inside Workers Builds remain untested: they include D1,
+secret-list and deployment/version reads. Do not treat a locally passing preflight as
+proof that the Builds token has those permissions.
+
+Set `D1_DATABASE` explicitly, matching `INTELLIGENCE_DB` in both selected configs.
+For another environment also set `MAIN_WORKER_CONFIG`, `KNOWLEDGE_WORKER_CONFIG` and
+`DEPLOY_STATUS_URL`. Status reads require `--database` or `D1_DATABASE` and validate
+that target against both configurations; there is no implicit production database.
+Use `--config` and `--knowledge-config` for status against alternate configurations.
+
+Wrangler can print "Image already exists remotely" and "no changes" while leaving an
+old Container running, even with immediate rollout. Its application list can lag the
+application detail. The deploy script records the detail version/image before upload,
+adds a fresh build-only image identifier, and polls the detail after deployment. It
+requires a strictly newer version and changed image, plus matching actual Worker and
+Container artifact fingerprints on `/ready`. A no-op, unavailable probe or mismatch
+fails the deployment after a bounded wait. Never enable controls after such a failure.
+The GitHub deployment workflow uses the same capture and verification. These checks are
+read-only and do not change secret bindings, D1 data or rollout policy.
+
+Until A/B rollback has passed real staging, use the staging-verified Container-first
+rollback: from the newer Worker checkout, deploy a reviewed temporary config referencing
+the previous Container image digest (without the Dockerfile build command). Keep the
+newer Worker active. Verify that application detail advanced to that image and the
+responding Container has the intended previous fingerprint. Only then deploy the previous
+Worker with `--containers-rollout=none`. If Wrangler reports no changes, stop and resolve
+the image rollout; do not advance to the Worker rollback. Do not disable the normal
+preflight for routine deploys; an emergency digest rollback is a separately reviewed
+operation. Keep migrations and stored restrictions intact. Once A is installed everywhere,
+B→A rollback must retain unrestricted service and refuse controlled dispatch on every path.
+
+Mixed-load "Container suddenly disconnected" failures also occurred on old code
+(roughly 9–14% in that staging load). They are outside this rollout change. Zero policy
+errors in the compatibility matrix does not claim zero infrastructure disconnects.
+
+See [Container deployment semantics](https://developers.cloudflare.com/containers/guides/deploy/)
+and [rollout controls](https://developers.cloudflare.com/containers/configuration/rollouts/).

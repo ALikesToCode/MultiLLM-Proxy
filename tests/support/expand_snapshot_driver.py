@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
-revision = "8e34da7"
+revision = "7ff5a86"
 if revision:
     import importlib.abc
     import importlib.util

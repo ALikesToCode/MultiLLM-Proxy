@@ -7,7 +7,7 @@
   "cloudflare-worker.mjs": {
     "kind": "internal",
     "reason": "Registered Container forwarding; provider I/O reenters guarded Flask or Worker adapters.",
-    "sha256": "ee56a4b8ee4fae80c99e1e80f869bca8cb1b4d55ed4d00c7df7c3e87ebe11f42"
+    "sha256": "fc9fae652c0a1e7ad37b31b27f2d350266303aefa27911772377a0957bfcf866"
   },
   "config.py": {
     "kind": "guarded",
@@ -167,7 +167,7 @@
   "routes/core.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "37b851466b62cb272e7597b1772f3c5c5ec121a07d592a263dd38f2cd8b977be"
+    "sha256": "494de6e313116bd173153f9164d7258ef8bafa7ca5c0fb661f0a3b435a38d000"
   },
   "routes/credits.py": {
     "kind": "non-provider",
@@ -1177,7 +1177,7 @@
   "services/provider_dispatch.py": {
     "kind": "guarded",
     "reason": "Sole Flask provider HTTP boundary; fresh durable policy precedes requests.request or injected session.",
-    "sha256": "5df7d8a5ed174885c1bcee9727602f6bc34be857d1eb0c05d020a34eb487670c"
+    "sha256": "552818f7d912a67c2e82c6734a85625f71fc7f47aee2565cf2719dc086b98448"
   },
   "services/provider_prompt_cache.py": {
     "kind": "non-provider",
@@ -1467,7 +1467,7 @@
   "services/user_store.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "779faffcf4f3598ba23b02072a654577b924b96d310dded08379646ea895a988"
+    "sha256": "2d5329fdf6b5d141c6afe5d8c969573072988d62f53536f41d3c610a155e978d"
   },
   "services/video_generation.py": {
     "kind": "guarded",

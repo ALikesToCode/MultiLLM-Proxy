@@ -61,7 +61,7 @@ test("independent builds cannot upload through the default build without preflig
   assert.ok(manual.indexOf("key_data_preflight.mjs --check") < manual.indexOf("migrations apply"));
   assert.ok(workflow.indexOf("key_data_preflight.mjs --check") < workflow.indexOf("Apply D1 migrations"));
   assert.ok(workflow.indexOf("key_data_preflight.mjs --prepare") < workflow.indexOf("Deploy Knowledge Worker"));
-  assert.ok(manual.indexOf("key_data_preflight.mjs --prepare") < manual.indexOf("wrangler deploy --config wrangler.knowledge.jsonc"));
+  assert.ok(manual.indexOf("key_data_preflight.mjs --prepare") < manual.indexOf('wrangler deploy --config "$KNOWLEDGE_CONFIG"'));
 });
 
 test("a different expansion commit is compatible with independently deployed enforcement", () => {

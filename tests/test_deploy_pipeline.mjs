@@ -205,3 +205,62 @@ test("verification retries until the checks settle or the wait runs out", async 
   assert.equal(expired.checks.find(check => check.name === "/ready").state, "fail");
   assert.ok(calls >= 2 && calls <= 4);
 });
+
+
+test("status requires an explicit matching database and reads Worker names from the chosen configs", async () => {
+  const { deploymentTarget } = await import("../scripts/deployment_target.mjs");
+  const binding = { binding: "INTELLIGENCE_DB", database_name: "synthetic-stage-db", database_id: "synthetic-stage-id" };
+  const read = path => ({ name: path.includes("private") ? "synthetic-private" : "synthetic-main", d1_databases: [binding] });
+  const options = { mainConfig: "stage-main.jsonc", knowledgeConfig: "stage-private.jsonc", read, env: {} };
+  assert.throws(() => deploymentTarget(options), /explicitly/);
+  assert.throws(() => deploymentTarget({ ...options, database: "different-db" }), /match/);
+  const target = deploymentTarget({ ...options, env: { D1_DATABASE: "synthetic-stage-db" } });
+  assert.equal(target.database, "synthetic-stage-db");
+  assert.equal(target.workers.main.name, "synthetic-main");
+  assert.equal(target.workers.knowledge.name, "synthetic-private");
+});
+
+test("a fresh image build identifier changes each release without changing source configuration", async () => {
+  const { releaseConfig } = await import("../scripts/container_rollout.mjs");
+  const config = { containers: [{ image: "./Dockerfile", image_vars: { EXISTING: "value" } }] };
+  assert.notEqual(releaseConfig(config).containers[0].image_vars.MULTILLM_RELEASE_IMAGE_ID,
+    releaseConfig(config).containers[0].image_vars.MULTILLM_RELEASE_IMAGE_ID);
+  assert.deepEqual(config, { containers: [{ image: "./Dockerfile", image_vars: { EXISTING: "value" } }] });
+  assert.equal(releaseConfig(config).containers[0].image_vars.EXISTING, "value");
+});
+
+test("Container capture gets version from detail even when the list is stale", async () => {
+  const { captureApplication } = await import("../scripts/container_rollout.mjs");
+  const target = { mainConfig: "stage.jsonc", main: { name: "synthetic", containers: [{ class_name: "Example" }] } };
+  const result = captureApplication(target, args => JSON.stringify(args[1] === "list"
+    ? [{ id: "application", name: "synthetic-example", version: 7, configuration: { image: "stale" } }]
+    : { id: "application", version: 8, configuration: { image: "current" } }));
+  assert.deepEqual(result, { id: "application", version: 8, image: "current" });
+});
+
+test("Container rollout requires a newer detail version, new image and both actual fingerprints", async () => {
+  const { verifyRollout } = await import("../scripts/container_rollout.mjs");
+  const before = { id: "application", version: 8, image: "old" };
+  const expected = "c".repeat(64);
+  const good = { id: "application", version: 9, configuration: { image: "new" } };
+  const ready = { ok: true, worker: expected, container: expected };
+  for (const [application, probe] of [
+    [{ ...good, version: 8 }, ready], [ { ...good, configuration: { image: "old" } }, ready ],
+    [good, { ...ready, container: "d".repeat(64) }], [good, { ...ready, worker: "d".repeat(64) }],
+    [good, { ...ready, ok: false }], [good, {}],
+  ]) await assert.rejects(verifyRollout({ before, expected, waitSeconds: 0,
+    readApplication: async () => application, probe: async () => probe }), /unverified/);
+  assert.equal((await verifyRollout({ before, expected, waitSeconds: 0,
+    readApplication: async () => good, probe: async () => ready })).version, 9);
+});
+
+test("Container verification retries temporary swaps but stops at its deadline", async () => {
+  const { verifyRollout } = await import("../scripts/container_rollout.mjs");
+  const before = { id: "application", version: 8, image: "old" }, expected = "c".repeat(64);
+  let clock = 0, calls = 0;
+  const result = await verifyRollout({ before, expected, waitSeconds: 60, now: () => clock,
+    sleep: async ms => { clock += ms; },
+    readApplication: async () => { if (!calls++) throw Error("swap"); return { id: before.id, version: 9, configuration: { image: "new" } }; },
+    probe: async () => ({ ok: true, worker: expected, container: expected }) });
+  assert.equal(result.version, 9); assert.equal(calls, 2); assert.equal(clock, 10000);
+});

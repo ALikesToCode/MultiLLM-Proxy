@@ -537,6 +537,10 @@ def register_core_routes(app) -> None:
                     },
                 }
             )
+            from services.release_status import container_release
+            stamp = container_release()["build_id"]
+            if stamp:
+                response.headers["X-MultiLLM-Container-Build"] = stamp
             response.headers["Cache-Control"] = "no-store"
             return response, 200
         except Exception as error:

@@ -216,6 +216,11 @@ class LoginRedirectSecurityTest(unittest.TestCase):
             self.assertEqual(response.get_json()["status"], "healthy")
             self.assertEqual(response.headers["Cache-Control"], "no-store")
 
+    def test_health_stamp_comes_from_the_container_artifact(self):
+        with patch("services.release_status.container_release", return_value={"build_id": "c" * 64}):
+            response = self.client.get("/healthz")
+        self.assertEqual(response.headers["X-MultiLLM-Container-Build"], "c" * 64)
+
     def test_private_dashboard_responses_are_not_cached(self):
         self._set_admin_session()
         response = self.client.get("/", follow_redirects=False)

@@ -25,6 +25,11 @@ RUN addgroup --system multillm && \
     chmod -R a+rX /app && \
     chmod 0750 /app/instance /tmp/multillm
 
+# A fresh release identifier prevents stale application-list comparisons from
+# treating a reused image as an unchanged Container. It is not a source stamp.
+ARG MULTILLM_RELEASE_IMAGE_ID=local
+LABEL multillm.release_image_id=$MULTILLM_RELEASE_IMAGE_ID
+
 USER multillm
 
 EXPOSE 8080
