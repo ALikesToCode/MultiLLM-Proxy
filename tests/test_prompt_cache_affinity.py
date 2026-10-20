@@ -319,6 +319,7 @@ def test_registered_managed_alias_preserves_bytes_and_prefers_completed_key(monk
     monkeypatch.setattr(app_module.ProxyService, "probe_nanogpt_key", lambda *args: pytest.fail("unexpected live probe"))
     from services.protocol_translation import responses as responses_translation
     monkeypatch.setattr(responses_translation, "new_id", lambda prefix: f"{prefix}_synthetic")
+    monkeypatch.setattr(responses_translation, "unix_time", lambda: 1_700_000_000)
     CredentialPool.record("ce-gpt-plus", "synthetic-first", 429)
     client = app.test_client()
     headers = {"Authorization": "Bearer admin-test-key", "Session-Id": "conversation"}
