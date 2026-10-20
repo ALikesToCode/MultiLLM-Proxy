@@ -13,7 +13,7 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 import { controlNetwork } from "../worker/dispatch-network.mjs";
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 
-const EXPAND = "00705d9";
+const EXPAND = "b6b0e43";
 const { handleControlUsersRequest, providerFetch, providerOperation, legacyBindingControls } = await runtimeModule(`
 export {handleControlUsersRequest} from './worker/control-users-d1.mjs';
 export {providerFetch,providerOperation} from './worker/provider-dispatch.mjs';
@@ -90,7 +90,7 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
             JSON.stringify([["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"], ["/v1/chat/completions", "post"]])],
           { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
           const oldRows = oldManagement.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
-          assert.deepEqual(oldRows.slice(0, 3).map(row => row.status), [302, 302, 200]);
+          assert.deepEqual(oldRows.slice(0, 3).map(row => row.status), [policy === states[0] ? 302 : 503, 302, 200]);
           assert.equal(oldRows.at(-1).status, policy === states[0] ? 200 : 503);
           assert.equal(oldRows.at(-1).dispatches, policy === states[0] ? 1 : 0);
           const current = await db.prepare("SELECT official_only,forced_provider_preferences FROM control_users WHERE username='synthetic'").first();
