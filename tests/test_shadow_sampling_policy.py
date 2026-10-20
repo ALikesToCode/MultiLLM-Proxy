@@ -6,7 +6,6 @@ from unittest.mock import Mock
 import pytest
 from flask import Flask, Response, g
 
-from services.auth_service import AuthService
 from services.dispatch_policy import envelope
 from services.key_data_guards import has_data_controls
 from services.shadow_eval_contract import eligible, make_sample
@@ -25,6 +24,7 @@ PAYLOAD = {"model": "auto:synthetic", "messages": [{"role": "user", "content": "
 
 
 def loaded_account(policy):
+    from services.auth_service import AuthService
     raw = dict.fromkeys(USER_FIELDS)
     raw.update(username="synthetic", api_key_hash="synthetic", api_key_prefix="synthetic", scopes="chat",
                is_admin=0, created_at="2026-10-01T00:00:00Z", shadow_eval_rate=0.2,
@@ -36,6 +36,7 @@ def loaded_account(policy):
 
 @pytest.fixture
 def capture(monkeypatch):
+    monkeypatch.setenv("CONTENT_RETENTION_ENABLED", "false")
     pending = queue.Queue(maxsize=32)
     monkeypatch.setattr(sampling, "_QUEUE", pending)
     monkeypatch.setattr(sampling, "_WORKER", Mock(is_alive=Mock(return_value=True)))
@@ -76,7 +77,7 @@ def complete(user, stream=False):
 @pytest.mark.parametrize("stream", [False, True])
 def test_loaded_account_sample_success_captures_and_persists_only_null_policy(policy, stream, capture, monkeypatch):
     current = loaded_account(policy)
-    monkeypatch.setattr(AuthService, "_load_user_by_username", lambda _: current)
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda _: current)
     unrestricted = policy == POLICIES[0]
     assert has_data_controls(current) is not unrestricted
     assert eligible(PAYLOAD, current, "/v1/chat/completions", random_value=0) is unrestricted
@@ -95,7 +96,7 @@ def test_loaded_account_sample_success_captures_and_persists_only_null_policy(po
 @pytest.mark.parametrize("replacement", [*POLICIES[1:], None, {}])
 def test_policy_change_or_unreadable_authority_stops_deferred_retention(stage, replacement, capture, monkeypatch):
     current = loaded_account(POLICIES[0])
-    monkeypatch.setattr(AuthService, "_load_user_by_username", lambda _: current)
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda _: current)
     response = complete(current, stream=True)
     if stage == "persist":
         list(response.response)
@@ -118,6 +119,7 @@ def test_malformed_canonical_policy_cannot_fall_back_to_flat_nulls(policy):
 @pytest.mark.parametrize("policy", [{}, {"version": 1}, {"version": 0, **POLICIES[0]}])
 def test_account_loading_does_not_replace_malformed_envelopes_with_unrestricted_policy(policy):
     from error_handlers import APIError
+    from services.auth_service import AuthService
     with pytest.raises(APIError):
         AuthService._row_to_user({"data_policy": policy})
 
