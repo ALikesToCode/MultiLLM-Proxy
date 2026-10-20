@@ -2,7 +2,7 @@ import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import { dataPolicy } from "../worker/dispatch-policy.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { guardNativeRequest, mergePreferences, providerDataClass, validDataControls } from "../worker/key-data-guards.mjs";
 import { nativeGenerationFetch } from "../worker/gateway-extensions.mjs";
 import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
@@ -47,7 +47,7 @@ test("native direct requests refuse before calling any upstream", async () => {
     assert.equal((await response.json()).error.code, "provider_class_not_allowed");
   }
   let calls = 0;
-  const response = await nativeGenerationFetch(request("openai"), { INTELLIGENCE_DB: policyStore({ official_only: 1, forced_provider_preferences: null }), OPENAI_API_KEY: "synthetic-operator" }, {},
+  const response = await nativeGenerationFetch(new Request("https://api.openai.com/v1/chat/completions", request("openai")), { INTELLIGENCE_DB: policyStore({ official_only: 1, forced_provider_preferences: null }), OPENAI_API_KEY: "synthetic-operator" }, {},
     authority("openai", { official_only: 1 }), async () => { calls++; return new Response("{}"); });
   assert.equal(response.status, 200);
   assert.equal(calls, 1);

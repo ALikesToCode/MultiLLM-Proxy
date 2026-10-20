@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "./helpers/policy_test.mjs";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 async function runtime(t, outboundService) {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `

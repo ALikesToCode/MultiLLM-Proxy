@@ -1,3 +1,4 @@
+import { mockFetch } from "./helpers/network_fixture.mjs";
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -102,7 +103,7 @@ for (const [mode, status, calls, action] of [["off", 200, 1, null], ["log", 200,
   test(`authorized roleplay ${mode} dispatch and content-free headers/events`, async t => {
     const f = fixture(mode), bodies = [], logs = [];
     t.mock.method(console, "info", (...args) => logs.push(args));
-    t.mock.method(globalThis, "fetch", async (_url, init) => {
+    mockFetch(t, async (_url, init) => {
       bodies.push(JSON.parse(init.body));
       return Response.json({ choices: [{ message: { role: "assistant", content: "Fixture answer." }, finish_reason: "stop" }] });
     });
@@ -127,7 +128,7 @@ for (const [mode, status, calls, action] of [["off", 200, 1, null], ["log", 200,
 test("block precedes compaction and zero-retention storage", async t => {
   const f = fixture("block", { CONTENT_RETENTION_ENABLED: "true", CONTENT_RETENTION_POLICY_JSON: '{"default":"zero"}' });
   let calls = 0;
-  t.mock.method(globalThis, "fetch", async () => { calls += 1; throw new Error("Unexpected dispatch"); });
+  mockFetch(t, async () => { calls += 1; throw new Error("Unexpected dispatch"); });
   const response = await handleRoleplayEdgeRequest(new Request("https://proxy.example/v1/roleplay", {
     method: "POST", headers: { Authorization: "Bearer synthetic-admin", "Content-Type": "application/json" },
     body: JSON.stringify({ model: "roleplay:auto", session_id: "zero-injection", stream: false,
@@ -177,7 +178,7 @@ for (const [mode, text, bodyPolicy, action] of [
   test(`roleplay ${mode} ignores body policy for ${JSON.stringify(text)} and preserves forwarding`, async t => {
     const f = fixture(mode), bodies = [];
     t.mock.method(console, "info", () => {});
-    t.mock.method(globalThis, "fetch", async (_url, init) => {
+    mockFetch(t, async (_url, init) => {
       bodies.push(JSON.parse(init.body));
       return Response.json({ choices: [{ message: { role: "assistant", content: "Fixture answer." }, finish_reason: "stop" }] });
     });
@@ -209,7 +210,7 @@ test("limits include multibyte text and cyclic structures", () => {
 test("log header survives upstream failure without changing replay permission", async t => {
   const f = fixture("log"); let calls = 0;
   t.mock.method(console, "info", () => {});
-  t.mock.method(globalThis, "fetch", async () => { calls += 1; return Response.json({ error: "fixture" }, { status: 400 }); });
+  mockFetch(t, async () => { calls += 1; return Response.json({ error: "fixture" }, { status: 400 }); });
   const response = await handleRoleplayEdgeRequest(new Request("https://proxy.example/v1/roleplay", {
     method: "POST", headers: { Authorization: "Bearer synthetic-admin", "Content-Type": "application/json" },
     body: JSON.stringify({ model: "roleplay:auto", session_id: "log-failure", stream: false,
@@ -221,7 +222,7 @@ test("log header survives upstream failure without changing replay permission", 
 test("unauthorized roleplay does not scan or dispatch", async t => {
   const f = fixture("block"), logs = []; let calls = 0;
   t.mock.method(console, "info", (...args) => logs.push(args));
-  t.mock.method(globalThis, "fetch", async () => { calls += 1; throw new Error("Unexpected dispatch"); });
+  mockFetch(t, async () => { calls += 1; throw new Error("Unexpected dispatch"); });
   const response = await handleRoleplayEdgeRequest(new Request("https://proxy.example/v1/roleplay", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) }), f.env);
   assert.equal(response.status, 401); assert.equal(calls, 0); assert.deepEqual(logs, []);
@@ -230,7 +231,7 @@ test("unauthorized roleplay does not scan or dispatch", async t => {
 test("streaming log decision preserves terminal events and one dispatch", async t => {
   const f = fixture("log"); let calls = 0;
   t.mock.method(console, "info", () => {});
-  t.mock.method(globalThis, "fetch", async () => {
+  mockFetch(t, async () => {
     calls += 1;
     return new Response('data: {"choices":[{"delta":{"content":"Fixture answer."},"finish_reason":null}]}\n\n'
       + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "./helpers/policy_test.mjs";
 import { setTimeout } from "node:timers/promises";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 test("native Workflow accepts ingestion step contracts and publishes once", async t => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `

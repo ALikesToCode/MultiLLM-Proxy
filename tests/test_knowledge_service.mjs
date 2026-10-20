@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "./helpers/policy_test.mjs";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { dispatchKnowledge, maintainKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority, RECONCILE_BATCH } from "../worker/knowledge/authority.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";

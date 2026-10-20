@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "./helpers/policy_test.mjs";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { KnowledgeCorpus } from "../worker/knowledge/corpus.mjs";
 
 const text = "# Flask 3.1\n\nRequest limits support café and 東京.\n";

@@ -1,4 +1,9 @@
 {
+  "app.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "38480cbcaf363f62177f1449b73b12c6c1b379dbb938e0096d6ff3eebb65921e"
+  },
   "cloudflare-worker.mjs": {
     "kind": "internal",
     "reason": "Registered Container forwarding; provider I/O reenters guarded Flask or Worker adapters.",
@@ -9,10 +14,60 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "98e753d318ac39e0d6e3b1c5c9feb561faee62b97515055b5c05859bd3c6953f"
   },
+  "env_loader.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ddc4d2ed5a4acc6c93c57e35371119a6bda3965a8ba59ff4aa96522f623d621a"
+  },
+  "error_handlers.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8c8009220a718dfc3d4b1032c395f1c6fe32e639f208d6f81b1588d88e867493"
+  },
+  "index.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "83932c6dc1e6e3cf822217dba6a1a575bfc983ac53842d1bec9a1512a8332782"
+  },
+  "postcss.config.js": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d96a4fef9d253f0526603b86935d8e41f0731cc21b9232dd80bd5eed08bd8dd6"
+  },
+  "providers/__init__.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8fa961e52dc94a2923538ca3e639c04b01f1ffc955fcd8fe301e136ead81eadf"
+  },
   "providers/aihubmix.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "a061e555cab9b86da52910ee53d8bfe229a91f517f3617aaaa680a17be279b56"
+  },
+  "providers/anthropic.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "28ec570d523c8326c073ad8fc0aa051719e0aaaf2e8a468efe9e1061cdd9c528"
+  },
+  "providers/base.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a99d39fbbe56c002cb86ba0524748c98d1bf10e446118d40ae2bb2792db2e344"
+  },
+  "providers/cline_pass.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7b208a408a4484c969f44681e0be5da2317f5359d664677d18408139f21a9072"
+  },
+  "providers/codex_everywhere.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a1c14b9b39c3e65e3583766d98375031a923d312284b6f33da7f213a0c3d0787"
+  },
+  "providers/gpt_image_moderation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b21ca2efe3c94d39a4e89ddb6a485ad3bc909a4803485ca2c9a7d717b5a46036"
   },
   "providers/image_relays.py": {
     "kind": "guarded",
@@ -24,25 +79,125 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "d87cb7b407afba0ac15caa8b5dd290134b650fcaffd623cfa9a2e9136ccb30f9"
   },
+  "providers/nanogpt.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "21c97f8bf80f4003b87498ee999d2c248da031005037df4ce02e40ea1718d9ed"
+  },
+  "providers/navyai.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "09d0016f9eabecaf2c444c9394762b2a5ed7f65a709c3fe2d9624ffbc91459d9"
+  },
+  "providers/openai_compatible.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9864daa6b33894f3cce5600243ac175b06221fb87ff31416ba96be332d7976e8"
+  },
+  "providers/opencode_go.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0986fe1f497fcc01a28585089565a8fa127d212638b06afe197fbbdb90f54a0a"
+  },
+  "providers/protocols.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b546ee027579cca2e9a1ff17cfbfb446bb3d3f0abdae30baa183a03c4c7e055f"
+  },
+  "providers/registry.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f0d3808a1f0696db085f465a629cf329cd9347c0b60785c369006d4c2ba0913d"
+  },
   "proxy.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "d111384804103ded22cbb014ec1341185d7394721724461a2a3f9a75b9bf392d"
+  },
+  "request_validation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1c91cb634c91161b6e25917c1bd53c65c3b007c192a27b686affa698406056dd"
   },
   "route_helpers.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "d0c3c361f9a98d015a82fe1a9a9069de3534911f409b022cb9a9dca50108c60b"
   },
+  "routes/__init__.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "routes/alerts.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "12c4e91ff8c23beb7b1c092ac70fc2c13806b67e1ba7afd4dcc89babd26570f6"
+  },
+  "routes/auto_routes.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "05eb09d16ff8f001dd48a97a980c55e30777d3ec4294412db2a3b690b9283b1f"
+  },
+  "routes/cascade_deadline.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f0d107c6552541d925817a554563c6ca08543e0d10de53eb15badcc235170f99"
+  },
+  "routes/cascades.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "13b441e4f87b0656bfce994cf7c9d17ed22ed321bea0c604fc07eaa5a0f547fd"
+  },
+  "routes/chat_cache.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6abb810dc1ee1ce4d7a14416c8b1618773d4a1ca3f6e9e77a3df8d970eb9392b"
+  },
+  "routes/config_snapshots.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c2a72bbaf92cffa6c7547c3a51678a0e7e230aa7d8d88f8a2593aba8803e81a0"
+  },
+  "routes/context_pages.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2664df690add3c758ef2e711bac604a2d215f3b3a22cfc123c77bf5731c3b8e7"
+  },
   "routes/core.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "00e9c4d4373e9950a35a8debb96e714488f7c3ed42bd4d1f0f402d634fbd62f0"
   },
+  "routes/credits.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "952f5d13da6c66e0838e4d85ad1c9affea5faf318984b1f3eed781dbd453ad26"
+  },
+  "routes/csrf_errors.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "dcc9103be9eca895084d5dc0848fc367bc1c147bbfd973385254216f518c2c16"
+  },
   "routes/dashboard_chat.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "e4074f254cf32d43ee7de2ebd93f0c590454b246a23d558998c334ce7d28901f"
+  },
+  "routes/dashboard_security.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "38f9c7b9262fa1275c02a7a1c95b25e3b67d8e16744f8573797514ff87be2239"
+  },
+  "routes/documentation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d10850bfcc5715a3e11b9601cd1b3c43cc52fdbfbd0e3e4436d1ba044fd5cdea"
+  },
+  "routes/enterprise_preview.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "309e274dfb03e6a8dc9f7babb98f2fcc0a8951266661209687e9757bd4429448"
   },
   "routes/free_response.py": {
     "kind": "guarded",
@@ -54,10 +209,25 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "14a413e5b92e94315833fe0fc06ab7fad2fd92568c788d74565b2ac1d607aaba"
   },
+  "routes/gateway_batches.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a9cc3bc8eb3d25eaab4efefbde57bc6506d4af6f7d4518394c92af861bd4ac77"
+  },
   "routes/gateway_mcp.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "24d514965b61712a9e027860bd2a2d7aa6f4ba5a5929ba0a9f73a005707192f7"
+  },
+  "routes/image_quality.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7eca100834d2f02c896bd7775a170b805893a9d95f87752bf501fe2247b9bb11"
+  },
+  "routes/intelligence.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6bb99b0b757b5b25e90697415d1e41e7129dc7a7ca227915935afad56c7556d2"
   },
   "routes/intelligence_media.py": {
     "kind": "guarded",
@@ -69,25 +239,105 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "3bc186b4f812dc93c17756f4be0160c9d98d816956ade81f5bfb11161739fcfb"
   },
+  "routes/knowledge_alexandria.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b5cb8fe752664eebff7308de55c3283c2bb91c838c9a828f294d525d29a1d259"
+  },
+  "routes/knowledge_handoffs.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7b67f7c3da4c963dff6388fabfa4ba93b477404eefa846dcd9c341ffb0b73da8"
+  },
+  "routes/knowledge_management.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "55b14a47d162c272722c07082d1a263184cea73d8b7ff102b556c53f2ef675b8"
+  },
+  "routes/knowledge_mcp.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "488818e6f67a4ab50547588fd1371b30b587f79e3cafd3e28d145bb8e38cc47b"
+  },
+  "routes/knowledge_memos.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "de86c533b80a75d25fd5f3a77763e957a4308b39d2de33b381954c196eb5a4a9"
+  },
   "routes/knowledge_onboarding.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "5adf66ce4d4d733ef8ec551b2b92d0493164381c5537a3eab679b3e3c24f55b6"
+  },
+  "routes/knowledge_skills.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0f378fdaf735e7794496b4bc57d1d7815755cdce857936f60f84674a822496d7"
+  },
+  "routes/media.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "14e989ce1fb678535043b5a08139f37f1e10bf98c8c11ab360550bb22fd0c37e"
   },
   "routes/media_audio.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "ac1e69377343bdc41f19d66b756213571e6430bd28274146e9e25c2d60a11170"
   },
+  "routes/media_batches.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c58b066a6b37681212e6b8b55be8b01400fd64a337d54546b3002e1c33d7e32a"
+  },
   "routes/media_edits.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "30ed0f0f18529df52f06f1fcee0a2186f75c9376915d0759a6b036df46455149"
   },
+  "routes/media_files.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "67aa19f99f3c7fddb4f5f2c282f1712d29c745748b3e3078eaff98b8a6c642bf"
+  },
+  "routes/media_images.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "be9e194c9b2ad34cde76fb8367a735cc5d71f8b6141278fd02124840f26a3697"
+  },
   "routes/media_narration.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "ddef74e625989431fd9ddea741cb8315bc8b96db82e011d338c79b13668a8879"
+  },
+  "routes/model_discovery.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6ee413d25736340b784e1d718a3c50e5d7c1a483a2f4228a3fef5beccdbeddda"
+  },
+  "routes/moderations.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "11e5b53d8a37808f53adb1f8b8c0ea9d32ded688c74cebd4abf8e8ca115a729d"
+  },
+  "routes/optimized.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d4c565cabfb124acbbf2253e5e1e7337fe889425dc8d486d75cef8ce24746e72"
+  },
+  "routes/payments.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f7fd931e0bb1b807ee8182b54eb5b91f50866cdd0f47445020e4159eab4357b9"
+  },
+  "routes/prompt_templates.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ef3c1e67b43b98e64105ebc79e38f1a12fc245d6a8998db27f16c69072127343"
+  },
+  "routes/protocol_bridge.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "afbb07e2876724ae67bf4f665b6651af29da6ee4d732d9dec031a17a622ef92d"
   },
   "routes/provider_credentials.py": {
     "kind": "guarded",
@@ -99,55 +349,395 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "265e183e46865675ea3963f49546f650b3d0a04f98742f2dec63c7da862868a7"
   },
+  "routes/public_pages.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "121a7c8c51b8d8a290fefbffd2a31d392385c13694759d94c39e19d73b98c285"
+  },
+  "routes/responses_compat.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5c3cb763f26dab741a57699fa20ccc1e5435057ddff852669773ee8318ffff64"
+  },
+  "routes/responses_state.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "195d37cf285625fdde72dafd0d148325337dc46afdc6e683accd4b9e8b90f7cd"
+  },
+  "routes/safety.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b650a8ef7a81674b384eb192fa0a7d610ddafe948eabb241d9a88c4e4bd1ce9e"
+  },
+  "routes/saml_federation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8a8c12d9da440382a5479a3cdea6fdb15a1f6c67e92db1c4db0b37ad84098a34"
+  },
+  "routes/scim.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "20a69ef7eeb656377e73cd550ff2b247c970e49f72bd84b82654b33b4454bcce"
+  },
+  "routes/shadow_eval.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3c53c36a2869d5e3ad7093a7b95819ef04570f222f321660c45a35c459c64724"
+  },
+  "routes/status_page.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3e460f0ac27a7392b2552905a73211e13d5d71e7100cf5cf4193646eb3a72114"
+  },
+  "routes/tenants.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e395d65ae1f590baa76bbd09e0eb273bcb7fd83aa2e1e66e3e30b5fe3cc89ca5"
+  },
+  "routes/tool_repair.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "71f5d11cd649208d60b1508c6802760aaed18d2882d7ba4da2af832e9a89ebf9"
+  },
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "bcc073d8fc97c65c2b00b1d7b069284ddfcd1834ab610c640e0d1644a439415a"
+  },
+  "routes/unified_bridge.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "15b84736a4e28cb594e41b0495c1c064182229c76e9aa6258392579c65b69999"
+  },
+  "routes/unified_images.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f5de8bfacfb4d754f9c8e5d26f0833b6cc28de39aa3112aed94467f63942f550"
+  },
+  "routes/unified_messages.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e0f1a70c70d2f1a0020448978d366e4770b260e5aa662ece18d9d4d7a5dfcf81"
+  },
+  "routes/unified_transport.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cae7cf3b9ee2e74f0fec5cab3c55d71fa71db63facdc5e98f275fde4f3cebe87"
+  },
+  "routes/usage.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c222884e9bfda52a2db4b99ed88c49de4be5d27496e8806758a5c2d34ff9e362"
+  },
+  "routes/usage_receipts.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b4b8e72c0540be4e3c8241834918f3e535b36b0dea82c9d6da17df3a56ab02ac"
+  },
+  "routes/workbench.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0f5b2cf70441ada654990182353035db0bf8a1ae4af77abe87c2016e6860b9c8"
+  },
+  "security_config.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "26d999fe08561d26d7cf69a46656f575bf22d7d357fb9e4eee37c03a0211f7f7"
+  },
+  "services/accounted_dispatch.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "647d4233ca8d7927b71ee6c74aa414914cee1864bd979b4229741ab67d66bc35"
+  },
+  "services/adaptive_context_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c9b44d71b9d67d298c5c727b7e2f48fd10688c3f673cd181960ff40ce822d43d"
   },
   "services/admission_leases.py": {
     "kind": "internal",
     "reason": "Private admission lease RPC.",
     "sha256": "b6f26de1c81f38615f585b55d3585d2aa12ad74452b1677266af3a99979852ae"
   },
+  "services/admission_request.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b003b9c3bebaa1234b03ee956ddd21baf1a9f255f9d73d3278c96dcf71811443"
+  },
+  "services/agent_setup_prompt.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e6dc38246069e30b9cf5b14cd2bba10bc73846049be5ccf6024086a5e761befd"
+  },
+  "services/anthropic_catalog.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "818c1e657d2519390dd77843a483a64fc0252083a8e5572e94721a3898e8b6b9"
+  },
+  "services/audio_codec.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fa56ff06817eefe0cc33f4c87a6f85c52365129c724a8d331afcfb7729cabcf7"
+  },
+  "services/audit_log.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7b841926ed623f0c94c8fe864b3f25b1a6a5cbd222e77ad8c9788d05fc778901"
+  },
+  "services/auth_primitives.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0236bdad078e24d37db938cabe1db820094f05605f7ebd87c89597b0232143b8"
+  },
   "services/auth_service.py": {
     "kind": "non-provider",
     "reason": "OAuth credential refresh authenticates the operator; provider generation is separately admitted.",
     "sha256": "4b05ae698b86c28a9f1c07f1e4c447b00ae75c7c8ad7e6273984a1929d110150"
+  },
+  "services/auto_route_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f944b899963d1cb63c339dc36ebe5c7f20e139106964a86a4dab3b63a6ac8355"
   },
   "services/auto_route_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "8837d1dd009fc9bb8c16da383caa370cf3f89933cff9ec46b592448709bdb8d1"
   },
+  "services/bandit_recommendations.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2b0b86ba442b0fb9c5e9f1bfa8c27a84b6560d27bbf1bab9f796d9067c4cb43e"
+  },
+  "services/budget_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2bce627b9d973dc4fa989d1aff7e2226dea6cace8592d89485c49a8ff4066eed"
+  },
   "services/cache_policy.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "8d905ec9f2da11ed397f08aed091091057adbab9082f8668354c7eef91c47fab"
+  },
+  "services/cache_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b6e11421a1ec86a8e6b99f63a2ea71011a0cbe79b9773555f6839c527f581f0f"
+  },
+  "services/canary_traffic.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ab5e3f57b31e8afd6b1a3f2032094896cfd74ef9dd5381b092ef99f0dcad8dc5"
   },
   "services/capability_probes.py": {
     "kind": "non-provider",
     "reason": "Standalone diagnostic client calls the authenticated gateway; it cannot dispatch directly to a provider.",
     "sha256": "da5c7c9e93413dfbd26b63c3871e79a0d35f5cf046e5a0b10ef9395578ead3b0"
   },
+  "services/cascade_checks.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8eeb6a3cb749dd566d35dcbe8418ccdd9c66f4b9dd0d24f59587b0e4d6b4b043"
+  },
+  "services/cascade_config.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "553bdfcb6eb61f20045be3dc245594a403a993fa45d9f45a139b23e582dc9bae"
+  },
+  "services/cascade_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c232e46e097c2f36eb6eba36264070b330eb3a889ead2458738934e766b20b8e"
+  },
+  "services/cascade_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "201e349af7de489aa26014f316ccb98d853694eb0604cd99b478245635ba8b7c"
+  },
+  "services/child_safety.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4ab665ab1feed38228d8ad05422fbf7efcaef914042381d2d24caa2fce36c05c"
+  },
+  "services/child_safety_inputs.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e9ed64edc3ae20dc3e96dd5bea93850681b11ab9f70e50bf79c949243d231766"
+  },
+  "services/child_safety_settings.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cf0efe175e2cc70cc5d1e1bb9c0e075ed084b41af648eb95e2f62722b9eb2cf6"
+  },
+  "services/client_headers.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d7b07da139924e4153869b51e43f4bd2a6e9e9a8ae64ddccce1631fd4ae7b704"
+  },
   "services/cloudflare_ai.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "1d7a76d1da81202063b624e8d6058c0191b6c7f7155b0d7db26f8e016eecaedd"
+  },
+  "services/comparison_lab.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ea61b938ed812b1979e397b3c641bddc0ed91a0eecc1d47484633554fa4cf047"
   },
   "services/config_revision_sync.py": {
     "kind": "internal",
     "reason": "Private durable configuration reads, never a provider transport.",
     "sha256": "489a9573ba8c5c6de36af1b7d2fb53a687caf91b909584a9fc944f266c44c4c0"
   },
+  "services/config_snapshots.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "da52ed20947b939cd0b55d6759ce6d64d32011b6217e4ed3b1817e806fe4e051"
+  },
+  "services/connection_profiles.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a30c7f4b48f8f0db2ea99fc7c5f95c32dc9acc1da1ceb4ca3bb42d19738a27ef"
+  },
+  "services/context_analysis_cache.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "bfe23758188a1d40d720d4a4221b8da80f9776440f807cde1a1fb4bbe31fb84d"
+  },
+  "services/context_canary.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "23ff3a3a73fde62f7ea835a05e9091ed4f8602d759ad1e252dc8552d8a8fb56c"
+  },
+  "services/context_canary_hook.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "acb6e06daae2bed2773f93232f549517feb117369d2269f0617f14615ed2518b"
+  },
+  "services/context_optimizer.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "152fc1433e2ff265bcbf40d5699089af1526ee53339d4fbeac11afb1180a5d00"
+  },
+  "services/context_pages.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e6d95d1590ef50f525cda666c1be3782a9f5fd92d54a403ab371e93581dd3770"
+  },
+  "services/control_plane_backup.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6ef334a76f33c90292c2857fd170b8c2d5fc1abbdcb61313edce23381cda5943"
+  },
+  "services/control_state_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "33045f2a165f333094c34e9985e77851aa94d4e0293ea0915d01a8f5500007fb"
+  },
+  "services/conversion_diagnostics.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "de04c864969fc9b5b2a283775907562fb8aef80d9b425165249834967efe854a"
+  },
+  "services/cost_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2c51cf7c6558ea04123eb94361b942aa8958e465a76fceac06800ace1f09f4fd"
+  },
   "services/credential_context.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "d305faa4f30c9400f243639e0d775169c9f3adc4bef93669c517cedb6a331bdc"
   },
+  "services/credential_pool.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "aa6ca6ddfb0137452cc53ecff300d13f383c39836a3005a2a56e7481d6e90771"
+  },
+  "services/credits_admission.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2231471cfd1042e186d3e9af7c6f93fe0ab38dc363296acf977b24f82f55c2bb"
+  },
+  "services/credits_ledger.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "18d1033bc5c4fbe76f027fa818c0a06ff4257a8d58e6d80a4cab046419177c39"
+  },
+  "services/credits_payments.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d128d9cedca99ff187d064ccd88d70e4b0db1cef2f0e1867a45f83c3e0d8d0b6"
+  },
+  "services/dashboard_sso.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "500ebc3e06213f94cd0bef8594709b6ce5ef50c6bb9a6082144033973549c61e"
+  },
+  "services/deferred_tools.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b2a006acdaa5903e197610863f9576438e0a05f233986b9bc4bf1644a9270626"
+  },
+  "services/dispatch_network.py": {
+    "kind": "guarded",
+    "reason": "Origin-bound credential and network capability boundary, with current admission for each asset redirect.",
+    "sha256": "3322243fe6fe13f5e8d1cfaf666a806fe97a95f9b6737722230f478f782004a9"
+  },
+  "services/dispatch_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9ef501fd08282710e37a3c6c4f43a790c0472a9dbc925bd88680fe689f54d68b"
+  },
+  "services/enterprise_contract.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5ad07545aad25a83b2ff33757555a6cc05b61c8f6ea917ab80fa1cbc365998ee"
+  },
+  "services/evaluation_noise_floor.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a15da85e3639e4a6ba061a919bd55dbd76719894c8ff8c8520c944c96ffcf198"
+  },
+  "services/free_compatibility.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fc0d0eea4d8d63c59334c3686f00535ee9764eb3c8881fbbd10732b20c663a36"
+  },
+  "services/free_json_contract.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8bcd19b617b94cf006ba8a8d498c84b0fb17050b4af1df418d67e63d30a00cd0"
+  },
   "services/free_model_policy.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "0d0e2b03a2c68076b936e76e45498c2ff6365711019da0c6103722c8e89dc587"
+  },
+  "services/free_provider_catalog.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "729133dcf51aa218ec583cb5bea3dc80cb23287296ae45fddd1d71103164f34a"
+  },
+  "services/free_quota_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "217b385ac0a82541acf4bb08d3cb1dabc6c0ababd1cd46ffc86a211f8990e74d"
+  },
+  "services/free_quota_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c376f7cca1e95771f873a9176989fe6b7aa6d3abc01ef6fb07bf8bdd3e9e5e9d"
+  },
+  "services/free_route_diagnostics.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a7e9e2746f3c656edc203acf4404a131918b69a8a40fd75571b38a467d8fd33e"
+  },
+  "services/free_tool_contract.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fb689785e7ed1695c121d5bfafa50f53bd1aa42cc1f7a28c2b8ace91c34a37b6"
   },
   "services/gateway_alerts.py": {
     "kind": "guarded",
@@ -159,6 +749,11 @@
     "reason": "Private batch persistence RPC; managed execution reenters guarded Container.",
     "sha256": "7fbccd11aa42b4864b32a745377fd067ea281aab0ff2711e7934c4f2e37ba854"
   },
+  "services/gateway_extensions.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6cbdd3e49c37f99c3d2c83d110db0bbc5c503dc495fcaf03577f655ac7e70cd5"
+  },
   "services/gemini_audio.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -168,6 +763,21 @@
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "f8458ed0a5d9c02741d8b02fe16ab3c43d7d17bcc126f0e3abfced046f84f038"
+  },
+  "services/generation_deadline.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8c25159414aa80291d0d9794bdfa86a05c90d962d501ff81705063c21cd03cf5"
+  },
+  "services/health_checks.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "93cf31cb1115a10b66d51a0c3784db7d20cf0c7132b15ff39bb583c37a3fae28"
+  },
+  "services/hedged_requests.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6336d87f0ca70c0a17b252ec0eb2e93e47e3ac6031153e8d5df8cefb06a4aeb6"
   },
   "services/idempotency_store.py": {
     "kind": "internal",
@@ -179,15 +789,125 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "49f210a603bcd4b63160b3a6128e0b1a91cd9e9649da982dddeed55d48ac5714"
   },
+  "services/image_relay_catalog.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3ba2d17ed1234d08964fe1fd1e57a6e7d6e19f9ba7b9211f7a1e345c966b4f27"
+  },
+  "services/intelligence_anthropic.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "92776b86633baddf56345bed0b49c7d53f03cd3b01f8d7e98f89271c5065f240"
+  },
+  "services/intelligence_auth.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e512eb322e5e71e1a520a1db348a9e397d84f9957441ac335c4c9e9d28b9ad31"
+  },
+  "services/intelligence_cancellation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f197a9276f0281c17995fc5411a8dfff16e2a06dc960af9da5a9db7d891fb43d"
+  },
+  "services/intelligence_contract.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "be470d53857d00571267c8537f58571f7e93de014d9c8b6cbb369b40f31db3b1"
+  },
   "services/intelligence_d1_store.py": {
     "kind": "internal",
     "reason": "Private durable account and policy authority RPC; required before admission.",
     "sha256": "f6964a63f5cb996322ffedca041c9fac8a4b6cdeec2f96a69206fb930551b9e8"
   },
+  "services/intelligence_gateway.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "efac340e944c0444222a44a484c1abf2caf219458b4eaa5ed0f093ac143d0c91"
+  },
+  "services/intelligence_output.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e7c8b68e4adaa2b3a87e8cf7ceb85843b4b021beb095d395bdfec689dbcdb096"
+  },
+  "services/intelligence_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ea72592b6127f19c04411e8eb52eb5c1891c1c152e34b852c50d195472a8f2e3"
+  },
+  "services/intelligence_route_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d5f696a77cbd6388bae9a4e1b4b185fcacf69004c8c9fdeb3002a021c7aa33d3"
+  },
+  "services/intelligence_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f925c22ed7bc51bcced0597f8c769072125d326047b02893c326fd8f7ea70590"
+  },
+  "services/intelligence_stream.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7e812a2528b55ee943b4beef6cb4211894220eef368e4b6bb4316d741f4d520b"
+  },
+  "services/intelligence_tool_repair.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d76e8aa07901d1e3846f07d2cbcab94e151661aa5afa5f12e59d1eeb5f954d50"
+  },
+  "services/intelligence_transport.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2c3e234e66159f49d9cb55fcf586f5034d6adab9a169d564ac10d66372defd66"
+  },
+  "services/judge_routing.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f9e3ca391cb5e3172560cc7c32255f1f3a8f4d2e507bf0354997054846db0955"
+  },
+  "services/key_controls.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3d4b04334ba19c75a2921ebb93323a826e2c3d745e0bb3141f3d55108be06d25"
+  },
+  "services/key_data_guards.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "355a6183654ad51ed9bbe2b62b8901679e3680c5cb0aa5ff7f9bf08aec158b1a"
+  },
   "services/knowledge_client.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "915e9f2a8ae157ad0d87b08073f6198a70f3b00df778d00bc9d06fd943a7bf8c"
+  },
+  "services/knowledge_native.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b0560510e50edc6935f10c3dd21584a0cf40e0f8f2802c691f8b5041c7e8f3b6"
+  },
+  "services/latency_slo.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c529c365464c4b66995c8339add1eb03dbc3f5b2dd8dde6e9ff59d284179b1b1"
+  },
+  "services/latency_slo_candidates.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6cc84ea11dd2a034cda5a0735af7a08261a140144895ba535e8a14171aadf197"
+  },
+  "services/learned_cooldown.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3fb690e621ef2dd9a3a554f8bd6459f45631f16ea34be61f7a8b81e92e1c7c53"
+  },
+  "services/login_attempt_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "784600f2fd7e0108456baf6a534b951049e0e2f05a202283811f51ebd4a17276"
+  },
+  "services/login_attempt_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8a2f75ada5cd6e377ce7419ec38d4595777fa7d42eea9f6c2562210c1a722c7e"
   },
   "services/managed_dispatch.py": {
     "kind": "guarded",
@@ -199,6 +919,11 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "c619b5fd489667332193b797375f43eae84700cef42dd779b88bacac8f6c7f55"
   },
+  "services/mcp_contract_drift.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7b000cf59b897ed7ca96b246065c7b90f7aa62a13914c30c2b661d996fa0696c"
+  },
   "services/media_catalog.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -209,20 +934,65 @@
     "reason": "Private job persistence and scheduling RPC; execution reenters guarded Container.",
     "sha256": "b47be5492e36a219cd743b5dfb8c9467e172c678be588600495d5e1ab5118f13"
   },
+  "services/media_signing.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cbea9c4db4aed6aabb7d46faf402568f511ee03c2aa4ba173e421d543f052f08"
+  },
   "services/media_storage.py": {
     "kind": "guarded",
     "reason": "External downloads/imports use provider_http; remaining methods manage private R2 objects.",
-    "sha256": "a8a38dae79baaccf29d9ac29b8df40648cf96e2e4ba000c2e4ddcf2190485c7d"
+    "sha256": "c7eafb0cd39349ff767b8fe1365f3651b4e616608005e72c21dd1def8929440e"
   },
   "services/media_urls.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "27deaeb534d23e3622377742318173ead0b9f1a883a4c00f3a6be44cbddd8b78"
   },
+  "services/metrics_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d8894064ab2e8add6184c06c2ccf9303dc583ec9eecf0c0f7c5877fbdf58d880"
+  },
+  "services/model_catalog_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0fde859ed00e534a90c85891d8f182af6c7934c51e7c2c8c19a8dcd0be6a867b"
+  },
+  "services/model_cooldown.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "57e22aebb9fe3b7fc6e59715a7d3a667bae8ae3dfb512192af70bd371331cecb"
+  },
+  "services/model_override_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4df825212824d678e571da03983c5e3efba62b317e8cb0d0c382ab68b8708146"
+  },
+  "services/model_precision.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6cf35af44a625de049e0610e276114f4e2df35e44147363475ed74422a0c8815"
+  },
+  "services/model_registry.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a112631d7a4aecc391fe5f0951ab01d450c9690dc274c1f2d075e44b16f11847"
+  },
   "services/moderation_input.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "79d9e46bb2085859845153a084cbb912c2665222d2d1f78e2b5118dc0cc474de"
+  },
+  "services/nanogpt_key_pool.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "78d38e691062bc61dc94d0d4d5bf2ad64025d410b3429e63daffc418b6de2a1d"
+  },
+  "services/nanogpt_speed_breaker.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2c0015cb90af00adbd074fd85158566afde15e8e142472f4321f0b04ab95f15d"
   },
   "services/native_token_count.py": {
     "kind": "guarded",
@@ -234,6 +1004,21 @@
     "reason": "Explicit observability sink, not a provider generation transport.",
     "sha256": "1bbeb8bb3c74a42e996dc6c57c489203451c0b73f7f8ef31c2ffbf53981e5676"
   },
+  "services/openai_safety.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8614fe5f305e4fa322869f5adfb1fbee6da6dc4eae72a98646577a68b487ab44"
+  },
+  "services/openapi_spec.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4aadeecb28e6b81deb0f65b2e720782a6d2b02fc5137eb7a4bc71a719c488929"
+  },
+  "services/opencode_session.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "64a4b6f6458077825724549e07fff5709ff0d45bade57ca376abef0296bdcede"
+  },
   "services/output_schema_validation.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -244,10 +1029,115 @@
     "reason": "Payment checkout control API, not inference.",
     "sha256": "b8ed7c0d67fb2d1d0341fbc56cef18e03c92098ad9abd83b2b53a5322f8c5da8"
   },
+  "services/pii_redaction.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "683ca6757e9d77f3032a4bb6507d7d026588ba20bcdc955d0be2c00981c19e0d"
+  },
+  "services/pii_stream.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ced61ac817e74cd035de03ae60e46889f7b8683398251aebcff88c2c45a9181d"
+  },
+  "services/pool_reset_schedule.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7e76d2ca84c5f9e9934cca7a6fcf70fb89913e93cc65c0c7f347287356bae450"
+  },
+  "services/postgres_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "455a1428798977d982b96f8d9a7cb4d66c80f2ca19f9e4c4d6f0e0dcc09d64a1"
+  },
+  "services/probe_cost_forecast.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "15e5b3b8b896ea63faf2ca434734731e73f5ccf4bc7d45032a764d4e412600f1"
+  },
+  "services/prometheus_export.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e6463d21307cae24a620756492c5ad93907fe6642a2a0b1463f1ed75f1dc9b24"
+  },
+  "services/prompt_cache_affinity.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0b6ba053a2c58e8fa0fbbe50a3315042b371da126de935f58ff0d0fc0519cb1d"
+  },
+  "services/prompt_cache_cost.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "53ed7f57d5ed2ee3e13762f5686414b6a6e6f4b3a0d3f6c53f8ae1d37af274af"
+  },
+  "services/prompt_injection_detection.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5ccf79f9fffdc7d5877ffd36733fbfcaf9be9a67433481f3155b6ceb751c7633"
+  },
   "services/prompt_templates.py": {
     "kind": "internal",
     "reason": "Private prompt-template persistence RPC.",
     "sha256": "9e785abea29bb7abb88162f146d5eafa9d02fe57b23dd8bf1ece71a957f26bd9"
+  },
+  "services/protocol_extras.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7906366ac64f811f0bdf654312bf97ee4304da0f8365a3ff3557e84b9beaf2c1"
+  },
+  "services/protocol_translation/__init__.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "376ae90cf48be50da1c0f774262b8a9ff09b3d4ec4f3b759858057c3868f2386"
+  },
+  "services/protocol_translation/anthropic.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cff4c368369114275cf11f830cc3b53391c64a4c3e58a06b628e5156ee82133c"
+  },
+  "services/protocol_translation/anthropic_continuation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "876a709fcf9661f9508d6c6e566362901c5133880a80b46c98ac67b678dff7bb"
+  },
+  "services/protocol_translation/anthropic_request_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "61bb336865809714a61f7af0cc620ee618ab805f441744697e8c5758d6d0e062"
+  },
+  "services/protocol_translation/anthropic_stream.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b2709c2e9b6d1abd6996ef8ec9be59ab6cb1cbc291f3f4002c419edfa5c916f0"
+  },
+  "services/protocol_translation/anthropic_usage.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "965da99f1fd40f9c2526d6113a0c213a445d13a580c2faa49b6a52133c71a375"
+  },
+  "services/protocol_translation/common.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8e7824816c68a0ac6c5a9d0d0db7ee56561896f967e6ab8638e2f4ff546f9483"
+  },
+  "services/protocol_translation/responses.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "340a027eb1cd6778b557f9596f49e74efa7a507c2a8a296d573c299260f5fd0d"
+  },
+  "services/protocol_translation/responses_requests.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f1af21d6e83d3aa9dff063fd28a3a2ba17cf02ac4da813d3f0c617c92e1e48a3"
+  },
+  "services/provider_access_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "14a0ea1030daadc8c1c1992b2abdf90ee7c1746b649bb1d4ebad8430ea0fe606"
+  },
+  "services/provider_assets.py": {
+    "kind": "guarded",
+    "reason": "Origin-bound credential and network capability boundary, with current admission for each asset redirect.",
+    "sha256": "7becf18c378881506f2a20e1eebeb0b00f1be38786730eb41268554c93f5ab80"
   },
   "services/provider_authenticity.py": {
     "kind": "non-provider",
@@ -259,10 +1149,55 @@
     "reason": "Fixed public catalog metadata GET without account headers or user content.",
     "sha256": "da1ab5cf7982f600d22afdc125dfdddd92e6b1f943a927ff14e84f825aad385c"
   },
+  "services/provider_catalog_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "651d31ee1bdddb4dc5fe430a82a4c0cf1623ecaa72edeeb008e3cd2ebf9cfddd"
+  },
+  "services/provider_catalog_metadata.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c507e4d54a104fdeb3a06e211ab2ff4191424a764f14b09342dc134759dd6005"
+  },
+  "services/provider_catalog_refresh.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "007a2ff0c9f7498a276c146efd8fab9feca00d16c6d9bd429936e0d8834651a2"
+  },
+  "services/provider_catalog_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b1448a93e4602d1def01aecd20c3c3c9f00475e683d55d74effc56e2db495d01"
+  },
+  "services/provider_credentials.py": {
+    "kind": "guarded",
+    "reason": "Origin-bound credential and network capability boundary, with current admission for each asset redirect.",
+    "sha256": "babc974be1d465cf350e9f5d67f0e692bdf9733f62d475832e78e5f0d106a769"
+  },
   "services/provider_dispatch.py": {
     "kind": "guarded",
     "reason": "Sole Flask provider HTTP boundary; fresh durable policy precedes requests.request or injected session.",
-    "sha256": "2eddb06a2a247984b931ee58f3a05339b4167fd752ab79f492ba84fc0708f65b"
+    "sha256": "a510682dc221b452bc00361e4c5af5ac6bedde49748b5e9e25cef0c2cef0394a"
+  },
+  "services/provider_prompt_cache.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "537ae92b1ede73ae20f5b7a03353e5cdd6a3d7a1ce4c930dcada1465969e3c9f"
+  },
+  "services/provider_request_headers.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d59b8e720d732d1d1934361afc82130453cff502e67317aa67d66be29c694205"
+  },
+  "services/provider_usage_normalizers.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6b65f6f8367b47be6c882173820e4d8bc53936a3f2928dd4a6058e2916691c50"
+  },
+  "services/provider_usage_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "86e844a9e00cd2fc3609131f527b60f853f0d868f9bcd12bfb3f9956e053fbb6"
   },
   "services/proxy_documentation_service.py": {
     "kind": "guarded",
@@ -274,6 +1209,11 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "e4241056d6a511a101367ec27d46e6147ffd62f86a4feb91f6a133954f5ca505"
   },
+  "services/rate_limit_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e9872676cc6bd9ea8ec9741c2b8eaf42d78e007394d898071c34ab3bd6e2491f"
+  },
   "services/rate_limit_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -284,35 +1224,155 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "9ba417687b433147fe16b97238d94398d60bb782119536414aecc992fe108eec"
   },
+  "services/redaction.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9b8bb2d47102cb59e278f1b3c986451b808be3d504e2256f332bcf9a470eeedf"
+  },
   "services/release_status.py": {
     "kind": "non-provider",
     "reason": "Operator release and health metadata, not generation.",
     "sha256": "1ec73290f38b8896c0bbf179be435d5e55256cb257b97ea3bdf751e063db6ac8"
+  },
+  "services/request_accounting.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "da61afcdb7e66f1f43a7f9c315fab0de50440c2d0760b90d78a555bbe3b569dc"
+  },
+  "services/request_cancellation.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "efd3bb06aec60e0fc0621ad2e481dd7db5cf03bfbf613a061f8e3feb7f70f723"
+  },
+  "services/reservation_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fc98e355d1d52354219b05594b39d0f89412af753ab785debbf263124c975f63"
+  },
+  "services/resilience_service.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "591efe8a9a33ed172866bed6960a4d84122563bde85bef297d62614534604d8f"
   },
   "services/responses_state.py": {
     "kind": "internal",
     "reason": "Private Responses state persistence RPC.",
     "sha256": "5f247c4f39f97bdf54eba1e91a4090a4d147d0a0501074be6f697b78a001895e"
   },
+  "services/retention_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6de7def22c49e5e5017bc028bbc4340e8c84ade1870c6000c59a767a3443f953"
+  },
+  "services/retry_advice.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "09fa87b2d572be6d1a800a2aeceb6c650243a834a4cc10184b72f4dfdda28e3c"
+  },
+  "services/route_health.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "50d9c2477fa6c5f74a919d65bbaf45f4913e7e2311584dad4ce8529c0858ba09"
+  },
+  "services/route_health_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0f9ad892a772b8fa2302fd78de68bce4d9712562009b9aead1b0d84fba1bad27"
+  },
+  "services/route_health_sync.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0e01629b69c639a80380c9835540ecfb68c5b5ad4ce2cdec9e9cfb5afb0bb91b"
+  },
   "services/saml_federation.py": {
     "kind": "non-provider",
     "reason": "SAML metadata and URL handling, not provider dispatch.",
     "sha256": "5a7c15c202c8b85173cab71392e36f977a77acccbe6a11b38e33ad643d6b10c8"
+  },
+  "services/scim_provisioning.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e7a534b4954db0ca053bea696ff14fe3237c997c1a1d453f7ac9341cbbea3a34"
   },
   "services/secret_firewall.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "9ac96591c2fdaa4fb5e880f4a7aab5fa6b9d7604c299bcfba6b5d0de1d5bfbf1"
   },
+  "services/secret_scan.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "73a9d92bb572ef77a942505146f3ea2110d5dcdf5c2de62969f6fa1942236072"
+  },
   "services/semantic_generation_cache.py": {
     "kind": "internal",
     "reason": "Private semantic-cache persistence; embeddings use guarded ProxyService.",
     "sha256": "4f1d3bfb79533399a8210b84f9f6411840f36a8073f65aae9f2e06f6f8125d5c"
   },
+  "services/session_tiers.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "69c717b783b39074f673ff6ca6c92487ea518cf5e7e0e3512de4520c53a36ae5"
+  },
+  "services/shadow_eval_context.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e78eeb8c12885e2ee56d05d86aebbd87d665ddd145b4fd6d98821e205a72b8c8"
+  },
+  "services/shadow_eval_contract.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e435ee51c9f902577a830c54490208e4a039e04151b1862d104c579d18129ba6"
+  },
+  "services/shadow_eval_data_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "315cabecae855804deaeb033e1b0b3c9517306dc216acd6f51c03d1078bba3a2"
+  },
+  "services/shadow_eval_judge.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f88c2c49d9b5e6a0efbcf19ffd5e48a81e73993dc284efd177676bbd044df13f"
+  },
+  "services/shadow_eval_league.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ebc2b5432ba341909a1adb106bbec44306ad88a1790698ee6f979cf00b9b0563"
+  },
+  "services/shadow_eval_runner.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a6b6c7c27115c8fd7b318b2c2c9bc43df6af818217cc7e389a77bf1c4351f3c2"
+  },
+  "services/shadow_eval_sampling.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a6bfb6d8b1219e027b4d6dcd27a27e046cb6447bd4982f51ed503b16c313cbe4"
+  },
+  "services/shadow_eval_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "71c3664eb647f73cea18952c956851819877d9cb87e8923b9ec3e6fc68e4fda3"
+  },
   "services/shared_generation_cache.py": {
     "kind": "internal",
     "reason": "Private cache persistence RPC.",
     "sha256": "58ab29b11f7783626ae5b37438fe60f888b2bab03b1dbf771db7fab2fc24052c"
+  },
+  "services/sqlite_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "58c4a99a51395ee084aaec97a63df8b7ca76d09262a031ca75c437323dff2859"
+  },
+  "services/status_snapshot.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "346b8abd8279302f3defefb5c73475a670ea8bc29e64d80eab55bbc893a12044"
+  },
+  "services/stream_cost_breaker.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7b9b9155a0837671f4d159c694e558def292d3464daa77d26f0a37ad85f13894"
   },
   "services/stream_preflight.py": {
     "kind": "guarded",
@@ -322,32 +1382,122 @@
   "services/telemetry_export.py": {
     "kind": "non-provider",
     "reason": "Explicit telemetry sink, not a provider generation transport.",
-    "sha256": "067ad335e70e0816145142f4c38b85139ec49f0599b3077b8515685572d5b4e0"
+    "sha256": "07596f7c9628e83ac10a6aba05e61b80fb7792c9706a6a27a5704c5258ad9531"
+  },
+  "services/tenant_governance.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "99bee5a2c5818507bca232e244909d956d6519d124ea2bd9a6a06c43ba6a448b"
+  },
+  "services/tenant_hierarchy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2d3ed64f579d75766679d61fcc3128087fe17e10bc6251fa415797ac67968f14"
+  },
+  "services/tool_argument_parser.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "06c5ec7b9c0f11340b33d94904c04d0fd800241945443faafe7225775e3c4673"
+  },
+  "services/tool_argument_schema.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3b3e806762952725199d34d01334c98c6c4e2095b45a8571f5df7dfe6007bc1d"
+  },
+  "services/tool_call_repair.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9cdff918fa6c59ccec78b7b48fc02564b1e4316e15fe51c0d699ec50b5f74b52"
+  },
+  "services/tool_repair_runtime.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1d2c42df65624c21abf9e8fd3e7f2ac00f779983e0f773b499208b53e919cb39"
+  },
+  "services/tool_repair_stream.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cc695d54de018b74ce2ea335f334951b8c8cc0089a40bd21bd99d0d61f95549e"
+  },
+  "services/transport_policy.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "842411432b5ed2718d857a70c7cfde9137d00004c46434cb4ea186a1cd17e8bd"
   },
   "services/upstream_errors.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "69acb80ee747e3ecd87c596c2a581de624915ac119d3f0ab6cffe217547a0ca9"
   },
+  "services/upstream_outcome.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d164bf54137031072198ee944a537de9d6f4d77c967d9f5083a7c812169316ab"
+  },
   "services/upstream_transport.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "c27e7589a1efbc44b8bdd546199f087c4ec08c852e811156c6be149f0fa0690c"
   },
+  "services/usage_ledger.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3f5530de97b8947bcb949eecca11c4905153820d7297d3e683e7cbec92a93313"
+  },
+  "services/usage_receipts.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fc44eb84c4fdfdab36e27c5f747bad9453d8067c60f822d1215c3272ed05f5b6"
+  },
+  "services/usage_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1121631c97b778163533deba4bc523f5c6ae31a837ebb6d9a90cd5dfb21336af"
+  },
+  "services/usage_types.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d7b74bd38f673925fa882dd4bcd3a34bb2f85adb9ae4e488bfce12e5df43fc2b"
+  },
+  "services/user_provisioning.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "046c8ef1b03e93fe768494f4727f356f026b72b5eb550aeeb813e4d451d6f96e"
+  },
+  "services/user_store.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d0c9f6f6b6b3efb6a89ac0bfcd6e6f47cb0f1bfe87dac5b6aed85bfd6a2e859f"
+  },
   "services/video_generation.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "08e56ceebdbe6b8097fd03b7c1714ad6ef20d03f991d2ab024bf49b4aef7d45e"
+    "sha256": "f4b24fcc3509dfddca33a7be8ddb976e05f277b73fe73a4e7e8cbaa4bc2ca770"
+  },
+  "services/workbench_d1.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "74f87a7ad83256f28ae3577456c6c6007b8bf33fb283d129fd22b72dce93301c"
   },
   "services/workbench_gateway.py": {
     "kind": "internal",
     "reason": "Management RPC to the registered Worker; generation reenters guarded transport.",
     "sha256": "3b6b3a64aab462fe93bf1952de3c456124bbf4ec73d598c073881d191ac0373d"
   },
+  "tailwind.config.js": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "75e7d622614663d473b1e97a237d2ddd0fb840195013ac402520adacf41d2464"
+  },
+  "vercel.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7e04625f1b75e45a47d17879bf6d1ee03090403ee4aa499d2a657fe63883f4a7"
+  },
   "worker/access-sso.mjs": {
     "kind": "non-provider",
     "reason": "Authentication certificate discovery, not generation.",
-    "sha256": "591dd7561ac841b9bca38abacaad592c9ba0606de656f1cd27b3ab261b7da27d"
+    "sha256": "1a1535e5b8b04051812e723fa808c7c731fcb24695ad6b282c636f76e5940a1f"
   },
   "worker/admission-do.mjs": {
     "kind": "internal",
@@ -359,35 +1509,195 @@
     "reason": "Inference SDK calls use providerOperation; external result downloads use providerFetch.",
     "sha256": "b9bfbce10ceac9e665c270e4a42a54a06aecd709e35d5cde7594cd257668961f"
   },
+  "worker/alert-delivery.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "34849266d92a9fcd7eaccd323bdb552e0ff52640d69f5b7205c529e962b3ced4"
+  },
+  "worker/api-paths.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "378a091ba1b4f13ce2e75516eaa425a01c1655624970aac5bfd59627e5cf4a54"
+  },
+  "worker/auto-routes-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f250eb0fc1b0d59dccb0877a933e3af6cd6bfbd0f5d4d46e14f772becb6d5003"
+  },
+  "worker/batch-files.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4c89419f46d884f5fe0a34eb437d31ffd51644c1a3e8b56009e1c646a97dde9b"
+  },
   "worker/batch-jobs.mjs": {
     "kind": "internal",
     "reason": "Private Container batch dispatch; generation reenters guarded Flask transport.",
     "sha256": "20feb9a3ea43d46c7b862709989007eaebb143f8ed4561dfc35a053bf441aca4"
+  },
+  "worker/build-id.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3f187f55a86a64c8b9dff2b84c0828cf3d3e6e7b538b79364c5f72090ebfcf24"
+  },
+  "worker/canary-assignment.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "070d9969f6c5a17fa238c5c4eba2aefceb2cea99bf2c025563f19a7c479718db"
+  },
+  "worker/cascades-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "386648e0c5cd2b24f4d2341f72a4ec01fe869badd630fc1e049b60d140590caa"
+  },
+  "worker/child-safety-settings-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2f8ce0df2b8f9582c8c9605c846f04e8e65bc420ed8742a35926e5d872b1355f"
+  },
+  "worker/client-headers.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0ee194888a0c5f97105110b4811790c68e24333492e03464594e086f47bde9be"
+  },
+  "worker/config-revision.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "616e21f45629f3f1739c365a0c74cadae4a85814396d89dd98459a48da4d1671"
   },
   "worker/container-env.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "56f07b1a9d2f6451be990e16038e30d55afbee1dbf5a5e5ea82b30235558d790"
   },
+  "worker/context-canary.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "db09f569ea16239cc45cae1b379ccc46f52ab3395e098825a607b0dd7d3605b6"
+  },
   "worker/context-pages-d1.mjs": {
     "kind": "internal",
     "reason": "Private durable context-page RPC.",
     "sha256": "6ccd924a75e5f0cace2a4e6d02b180a08c57e88ec955beb3508f1467dba9f082"
+  },
+  "worker/control-audit-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3c4672f5836f29ffcdb259b8b727ab170bb9b515511999c53fb82be710c62790"
+  },
+  "worker/control-state-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f846d913d2acca4ea289217821a2927aa6fe0cd5aa4654578a67d4ae073b803c"
+  },
+  "worker/control-users-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1cb27d42b1a6bade132a01213aa954797344829d7cc72065331005905cdeef56"
+  },
+  "worker/cors-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "17ee44d44ae37d6bf63838775c1ce252704e48ba0d32aea3dcb7faa6a52fee9f"
+  },
+  "worker/credits-admission.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a4f5d892df430d60ae4721b9e42fbc4615f000a35fe1d7da391c5dea2c4f2d19"
+  },
+  "worker/credits-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "af2e83b617db442bb9acfccd6a006079addf3bc8f44e860f2626c2bff260e83a"
+  },
+  "worker/d1-schema.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "97848f176dba14a172ea8f0983f9bf09fde185bfefdb9a4ce4bc9603ecfc478b"
+  },
+  "worker/dispatch-network.mjs": {
+    "kind": "guarded",
+    "reason": "Origin-bound credential and network capability boundary, with current admission for each asset redirect.",
+    "sha256": "4df64b633e0800aae5d7228cc49df0980442e2983a87f19d5b6a629f7e4cb709"
+  },
+  "worker/dispatch-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ac63e1f4a06eecdb5eb57a930ec2169bea2ae88cda709aee4198a52e44f4285b"
+  },
+  "worker/enterprise-contract.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "deeaa3e515e758d2d1d84108738a29038f20b07f59e2bdd4fff68320d6b084b4"
+  },
+  "worker/exact-generation-cache.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d137c0f8a5214b51a00421435c33a16b0731de679f2834be6dacc88600b891f9"
+  },
+  "worker/fallback-page.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4abf38c486ce083f1065d8104209c1845cda3cb53a07b09c961e41500379b615"
   },
   "worker/gateway-extensions.mjs": {
     "kind": "guarded",
     "reason": "Wraps the native fetch delegate with providerFetch before middleware, embeddings, retries or fallback.",
     "sha256": "51c1e1d303e3113b03f9ec872e40135c08d2a3ccb150eda12079bfad03c5cadf"
   },
+  "worker/gateway-lifecycle.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b3c2d635a55c6656c27468c914a70dda8601fef341cd72464606128802c25e01"
+  },
+  "worker/generation-cache-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5c7289bd174df4ffb9ea80e63b1f7a1dfad4ec95c305c9edf08ea8b589732f68"
+  },
   "worker/generation-deadline.mjs": {
     "kind": "guarded",
     "reason": "Deadline wrapper calls the admitted native transport delegate.",
     "sha256": "03b7cbadf4c479c16e619f4a5bd0c8b18f33481b76d4580bb273401368fea8e8"
   },
+  "worker/gpt-image-moderation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "93a7abc49644407f59b4f3d8a69b24f77b9089d52830eabf9f308c0c3114411f"
+  },
   "worker/health-schedule.mjs": {
     "kind": "non-provider",
     "reason": "Private Container health/readiness checks, no provider generation.",
     "sha256": "05f0b9921e73ca05fcb5a670494794d2270aab2d1ef975a786ff0ced9b3c99fb"
+  },
+  "worker/idempotency-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a846c6e7216aa2b4eb46614f254c2031a65da5e6666e4485a676414771a4f34e"
+  },
+  "worker/intelligence-auth-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "663e170776310065af597f506356db95fc9a397c670f539e7006b8c081974392"
+  },
+  "worker/intelligence-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b0fc57c85159614e48fa82ec7f76c19cf73ba69f9fdd5a2823b106bcb5a2fc4c"
+  },
+  "worker/intelligence-outbound.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b562bc9345fc1c2570954acc89ebfaafb4c5e056154a9068124a4795c2ba86fa"
+  },
+  "worker/janitor-reasoning-response.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b9b8a35c3f764ebbd2f00a52e3845064457c8d588b0576827e75f4ec2f2c4a54"
+  },
+  "worker/key-data-guards.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "44bfc41aec4f842588b83fef4590ee00f30c3a6f17d4ff122ebd01d6f985a551"
   },
   "worker/knowledge-edge.mjs": {
     "kind": "internal",
@@ -399,20 +1709,80 @@
     "reason": "Private Knowledge binding; requires versioned identity for provider admission.",
     "sha256": "feea69b5b1313c937e423f94dfe2dc32ce1dc6e14596a9fa021f90c3684c4c41"
   },
+  "worker/knowledge/alexandria/catalogue.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "37e2293923b39027b34c7e4489db73559601cbc5803950f0256abbb1b9c1ab14"
+  },
+  "worker/knowledge/alexandria/contracts.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a9a00338aad163108446ae1bae62840da042540cb50989f5088245fc3fa46576"
+  },
   "worker/knowledge/alexandria/service.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "9abf7ac28c4dce81e98b393b06b3d0b58cb3ad87e53c6eec81ed812b53d333e3"
+  },
+  "worker/knowledge/artifact-eligibility.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7fd2d2ceac178d84bbdb7e0cea54bf3513cba292d6a9cf9179e38af78e063171"
   },
   "worker/knowledge/authority-client.mjs": {
     "kind": "internal",
     "reason": "Private catalogue persistence RPC.",
     "sha256": "d6a1734c1d3e1b6c016db1699dd82b571e9fa8d0113733c22dfdf833a89cb411"
   },
+  "worker/knowledge/authority.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1cb60b774b4a414ede0954a99323c25be254dc69d64949328fdc5b8371b9101b"
+  },
+  "worker/knowledge/cache.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9380eb3a1e7664bec6edcfed49f47b3b6574dd4208e7afa37452f982bb5a0a5b"
+  },
+  "worker/knowledge/contract-drift.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9193679ab2e6613cbd8446ba1d0b586d2df79467de39ef5d4b0b35b1a56794b3"
+  },
+  "worker/knowledge/contracts.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6a99f8fd80cbe2302f6a1207341cf794994fdbe7a643b87a93fd3bd9ea08e398"
+  },
   "worker/knowledge/corpus.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "0a1a3fd8ee3d75a5e2e4cd46693de1d746c6f32e4efa3776896a62e8544bef91"
+  },
+  "worker/knowledge/credentials.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f3a20a7b4e82e09e09295a7b3985be45cdffed95226ddd09c42a3b6c61bf9ce5"
+  },
+  "worker/knowledge/deferred-tools.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a31a100364f912eaf926a503e8f32a6d22d85421d896ebc2d5b770ec5b110f19"
+  },
+  "worker/knowledge/evidence.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "894510be603acd8bebeba30b2c01b80cd423206e1ff216a04782c243bd7dcb6d"
+  },
+  "worker/knowledge/handoff-contracts.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9444837e30380e38459f593642a69dc39d31895c10280955219837cfbc5c4c02"
+  },
+  "worker/knowledge/handoff-store.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4e499eb0d18a75ac239dbabebc3c28adc60faef8745700bd5a79e4e092b392fe"
   },
   "worker/knowledge/handoffs.mjs": {
     "kind": "internal",
@@ -429,6 +1799,21 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "966d0f64669bc6e2544b0c09a969c2ec16975916007f35f87c7eaea3ac08ba9c"
   },
+  "worker/knowledge/ledger.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "65afb28c5a155ac5057552c984ed98217a2343078d3ae0cd297c6bddec379788"
+  },
+  "worker/knowledge/memo-store.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9d725f49f93e218089276cc7acb1584c2b24fc5626681e788c7b3e6b72bf089a"
+  },
+  "worker/knowledge/memo-validation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2bf294d83c3fcb38692b0d539f4ddf67297d0c38d27bc63a5e1bcfc9c11e9d0a"
+  },
   "worker/knowledge/memos.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -439,10 +1824,70 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "3ae2923e3f94544dfef4da4c21c7c9d101f4aff2ae3cb042a17d138eeb3244a1"
   },
+  "worker/knowledge/operations.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1039c53b215b926079e995a9f1327dcfd1489420ea1ed208aef239373a4c938f"
+  },
+  "worker/knowledge/policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "70f3bd62a5b33670b0c3f3e9e6a079495942d73e777b495524ec3391734ccc7f"
+  },
+  "worker/knowledge/product-site-identities.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "44c1b51eef62735bfe7df380402898862f7de4faa1234738cb1326db004e466b"
+  },
+  "worker/knowledge/product-sites.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cc964879ca07a669f84fa24d42bc2921d58b0c0decaed543730219ec337e18b2"
+  },
+  "worker/knowledge/provider-site-filter.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1554ea597d9551dc0e767241dd0023a67392c3fba463c67cfb95cdb4a325d18c"
+  },
+  "worker/knowledge/providers/context7.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7973b19f165b17e922e64abf4aaf7ae19db06f2ac77cd7994d4d41720b2c5012"
+  },
+  "worker/knowledge/providers/errors.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8fcc775b14e92f2cf1ecdc870c7d0c32474e1a4f1f935be50289a2c1232b1e3f"
+  },
+  "worker/knowledge/providers/exa.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6abdf22644fb6ccc8be0919711209f34beecf9b6c9bdb5adadf70897a4911812"
+  },
+  "worker/knowledge/providers/firecrawl.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "940b5fc8e3cbbef6b67df416c1d6fe3e8f91786b1b88fa3c4498b0b6d15848b9"
+  },
   "worker/knowledge/providers/index.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "8bc1f67a0a75c6c3765a03b873dbe5dc768dd5e93388d265937153a89b55d3ee"
+  },
+  "worker/knowledge/providers/keys.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "44ca0feda59869c91b6a52c5c46a67f9b7526106db7de4820dde57d322a181d1"
+  },
+  "worker/knowledge/providers/mcp.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7a3b234117f8f3753e1731f991835a22a5d1c7c72f2ae617caa519e7aec77d8b"
+  },
+  "worker/knowledge/providers/source-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8064a15f5b74b26dd71573b3ad687d468c2ec7a014fd1c5cc06c8ebe9b32c477"
   },
   "worker/knowledge/providers/transport.mjs": {
     "kind": "guarded",
@@ -464,6 +1909,16 @@
     "reason": "Every marketplace/source read uses providerFetch immediately before fetch.",
     "sha256": "45ecea27eb4bbcc83d459519d6a28579de55acc3e7b9d3cfbb883c6c63c2aefe"
   },
+  "worker/knowledge/skills-index.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e52215beb724eb3819ee05cdf2a53153506bede5b55949837951e06d4eb71ec4"
+  },
+  "worker/knowledge/skills-ledger.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4d718520cf80bf5f384ddf54de16834cba4f2be9a2bf2caf0f8144407cb976a5"
+  },
   "worker/knowledge/skills-market.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
@@ -474,10 +1929,40 @@
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "4ae9c433aeff9afe2e9b42c001b7b908254ad510fef3924893c11ef1be237186"
   },
+  "worker/knowledge/skills-validation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9a9d5f9552297444e4800207a363c47271ce60e6c0f9641eab2a2669c96e660b"
+  },
   "worker/knowledge/skills.mjs": {
     "kind": "internal",
     "reason": "Private skills RPC propagates identity; marketplace HTTP uses guarded provider transport.",
     "sha256": "0d1ec24d0bd5766c70b77548f72084b48ad70894db575eaee98672a61e3b1de4"
+  },
+  "worker/latency-slo.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "98375b156d17b704ed06dd6c78e227c10d2953fe1537bd0d91b6f7989cc2125c"
+  },
+  "worker/learned-cooldown-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b60fa2f0641f3bf08d9206585527ee4e61e5a6793f2f41cc46443139e3682dde"
+  },
+  "worker/log.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d276aaeff69d0c73f4e935e3bcc8aef2a5f3d045d5e6b57de86fa0704189f637"
+  },
+  "worker/managed-state-dispatch.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "45a6141e259548b450e85375d5f26613d1b6f5efea563dbd890f8b319f5c3f7a"
+  },
+  "worker/media-files.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "eb14b537492aa1cb60cc910d43d5cb87138a999d21b2f970a0eda6e9f789f08a"
   },
   "worker/media-jobs.mjs": {
     "kind": "non-provider",
@@ -489,40 +1974,170 @@
     "reason": "External assets use providerFetch; remaining operations manage private R2 objects.",
     "sha256": "afa2dbf2607b778c5b736bec68193ac7f902cc8f34f1340a2391b35c36ea23e6"
   },
+  "worker/media-signing.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8fec18f88b01b3947252489743856ea3c90a3a750455a91f918e34bd8f5cd756"
+  },
   "worker/media-workflow.mjs": {
     "kind": "internal",
     "reason": "Private Container job dispatch; generation reenters guarded Flask transport.",
     "sha256": "32029d79c9b304b80ed9606a4680fa3517f8d4c856614e396ee70716f88afc30"
+  },
+  "worker/native-config-sync.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ff7115f5d9c88d92274808f9958568d60b7a5584a76771c62ca787048ed57cf9"
   },
   "worker/observability-export.mjs": {
     "kind": "non-provider",
     "reason": "Explicit observability export, no provider generation.",
     "sha256": "3c3ac74a0d718362a8fcdef1c7d1f6b0a171efe866796e950c80a2b83f063133"
   },
+  "worker/opencode-session.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "155251c715ca64be5bd04c3dea5405b9ae04fcda2910dada3a84119f5bb649e7"
+  },
   "worker/opencode/reasoning-policy.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "ae655230b797ec9589a5172b05249f9cece612e09e539cb0542c1839583cf034"
+  },
+  "worker/opencode/reasoning-request.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "3be9b47cc17a2ca9f70ab03f9228887d4e8245659494b7b6f7dd62c2ccb38994"
+  },
+  "worker/opencode/reasoning-response.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e8c45e0273c5fb2113289c81dae3802347cf9f77cac0b71447b084a86bb4db40"
+  },
+  "worker/payment-webhooks.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9a952e1abf42772625faf313ac16cb13bb87e8aa84e1cbb29214f5b532500659"
+  },
+  "worker/pii-redaction.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "51d45b86ff66a1c26cfa959b097a593fe529406001acea65dde074d2689bfeb6"
   },
   "worker/pii-rehydration.mjs": {
     "kind": "guarded",
     "reason": "Payload transformation wrapper calls the admitted native or roleplay transport delegate.",
     "sha256": "919be3b88a68aeaddaba22c63c6e20e19d658964f3cb338dabea6eada0d702ed"
   },
+  "worker/prometheus.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0726a06b13c968ac8ec13f61f59fd07591e7985e9223660f94afd7ee6eb97d1c"
+  },
+  "worker/prompt-injection-detection.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2a2844dee9774075926ec3ee3d0a67b17c7b531b390e0f5b240403ed1067c936"
+  },
+  "worker/prompt-templates-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "266511dd14adee22d1828fd8c3e70a47bb5cff75268a535dfc64687567aa1e5d"
+  },
   "worker/provider-dispatch.mjs": {
     "kind": "guarded",
     "reason": "Sole Worker HTTP/SDK boundary; fresh durable policy precedes fetch or admitted callbacks.",
-    "sha256": "980a669bee91225963581842eba645ad304b104a8692fb72b9ae15f1363e7e81"
+    "sha256": "c6886319a12f270a1ff3e06b4e770d43ffd75e5ea203662dc4d0df99b81b5828"
+  },
+  "worker/realtime-metering.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9ef22465b3c5034a5df87dcb2f2d9d0c209dbe6969cf5d7f4b02c9f88afc88ee"
+  },
+  "worker/realtime-session.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "de5730ce8269079a7cf152e6eba01cdc688b4810d7786e4c7b0b468246fef18e"
   },
   "worker/realtime.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "78f30da2e56ec8c552322fd6db11ba3d6d9f7c454cda8771e1db2c76c566e63b"
   },
+  "worker/request-telemetry.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b8a54faaaf40fdc957a933313b1718e09e25f707d63c2dedf6963a8560a9ae0f"
+  },
+  "worker/reservations-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ba1a1a5bc15fc58bca1c695a22fd0ec22411621e0a093d87c89406a75e410861"
+  },
+  "worker/responses-state-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cbca75eb921b8e029861867b6799df8ef9d2d9a644fe8418da311922f085c7a7"
+  },
+  "worker/retention-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "52a2bf7d5c44953eabcbc6b05519f8c96b51d9be786cca33d2edd7284428d6b1"
+  },
+  "worker/roleplay/candidate-context.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cccfbec402dc653d67d8bd340d3335296ad2bb72264ac8b9a7bea3bbac4a20c9"
+  },
+  "worker/roleplay/capacity.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f8068b510268924b570e0277a097790898b861b75458e9cfa564f419d2d180a4"
+  },
+  "worker/roleplay/checkpoint.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "60c194f4b523fc8fb9a1da5cca1113539bc97061802fcaefd2453088fc9c650d"
+  },
+  "worker/roleplay/compaction-budget.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1e0b66156c1f307d63ec632f055868a2c3b638710cce1930eb92ad9d4d328d13"
+  },
+  "worker/roleplay/compaction-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "34a81069dfed8e393ac2c3e3d0986da3ce4adac980e675676a012df6bfee87c7"
+  },
+  "worker/roleplay/compatibility.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "45ed9b8a1e00b29f0d08de993434b0646aee396ab692cf79e44add3f9666ba99"
+  },
+  "worker/roleplay/completion-result.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "924b5dd596ac8ef89f8bd13f04bc7e1067546ed092e47435e3417b66728f1761"
+  },
+  "worker/roleplay/config.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ea0007c314192ae4718fee801465e8678cf5ec8edd7ffd84e9a70480cc10d1ee"
+  },
+  "worker/roleplay/continuation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0a3abcb3358db0112e4b6e22cf07695947f8bd2d4cde253de033b7f55c29e5b5"
+  },
   "worker/roleplay/credential-health.mjs": {
     "kind": "guarded",
     "reason": "Provider credential probes use providerFetch with current durable administrator controls.",
     "sha256": "6bb21614ba698b8bb55edef2d1ebb475d7645ac1dbbf5a1269e2c7b6ca3745ca"
+  },
+  "worker/roleplay/directives.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "159d5cb7aeafc3de73f9f03ea0bcf79bd929998b2f6b5ea777a19e3d1ca1edfe"
   },
   "worker/roleplay/edge.mjs": {
     "kind": "internal",
@@ -534,34 +2149,274 @@
     "reason": "Private session handler; generation and compaction use guarded transport.",
     "sha256": "9e460b4d4cd420c7692406a7ba03248b73413c830be54423fdb57fe208a6d3cb"
   },
+  "worker/roleplay/fallback-memory.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "af6e3d57a05edabfa704602c00b3d8e3e258a93462c19f88286127bfd86f494e"
+  },
+  "worker/roleplay/history-reconciliation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "0012faf5281555123f48e01caa0177913e82dc030daaed1b5a9ded4b233b5694"
+  },
+  "worker/roleplay/memory.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9466e85cb1186b33f98fa4ae7d863071788ffc41f3e5b4bad172b4668aae8b51"
+  },
+  "worker/roleplay/message-fragments.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "677018d928dcf2f069f483c1e09bdb4fe76179c4788262c2584b0b52477c50fc"
+  },
+  "worker/roleplay/message-validation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "fc99aa511590f79f8b3e33a96cf679ace137a767f0c2a94dfcca2890038efdd0"
+  },
+  "worker/roleplay/model-performance.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f13af718076e01ea366fd5c5baa9b2daf386e75ee88a8aaf76e301c30bbc8583"
+  },
+  "worker/roleplay/model-selection.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "87e782e35c4ad4ee6e5df2c0264e9cb9b8118298bc8be0f418c270385b7ee576"
+  },
+  "worker/roleplay/nonstream-repair.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "8d3166d81f7be6d0e6f25760a7c05866c4cd5c23eaad36300b8d7f2e3a03e196"
+  },
   "worker/roleplay/operator-edge.mjs": {
     "kind": "internal",
     "reason": "Private roleplay management/session RPC; generation enters guarded transport.",
     "sha256": "24d1de1b071f8be482873ae11d3f2ce0d4eb4bfe2ff564691305e7521e718e7a"
+  },
+  "worker/roleplay/operator-memory.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d03a800eb9fa7c74d1ed7f717d2f983a0fa70fe0521eef8998b667f68c76db20"
+  },
+  "worker/roleplay/output-budget.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "ce1bafa71dfa0186b6685cefd0502b31fba339464d8072b1a6c36f42660c6217"
+  },
+  "worker/roleplay/output-contract.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a1b2d7727840b0de8aa810c22584c7064954129aff17b1449b6000c124d1f17b"
+  },
+  "worker/roleplay/profile-receipt.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f7214fe4b10d9f3d4deeee997b83f199e758e72d860586c3df21d8307db25dbd"
+  },
+  "worker/roleplay/prompt-cache.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "aaae8c7fd84221d1cccc28896b2c25fdc3bc2393e1b10aaa836f2666357e376e"
+  },
+  "worker/roleplay/provider-errors.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "28d78891411589354ab9f1d8a3157369dd018afaa9c7ff6875b1475afebedff1"
+  },
+  "worker/roleplay/quality-routing.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "c3b37c7521d3813942ef7f80d94a18f8f27717bbf67a6655b23429334419db7a"
+  },
+  "worker/roleplay/reasoning-output.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7c92345894b68d7c0fd93d7774ad4745e04b4197329fd872ab4930b6804a0591"
+  },
+  "worker/roleplay/reasoning.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "65f296d79de04c79b0b5565a97a87b3c69111dc12c2f4b46f573c79a8c2f4dbe"
+  },
+  "worker/roleplay/recovery.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "023fecbb3d0a4ca6310dfaeea67ccf8fa2bae5db2ac19549d7ef648535736460"
+  },
+  "worker/roleplay/refusal-fallback.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a645bf4983ec4affddf33dff3c96b2ec14831e432b64510534dff0690cb606e0"
+  },
+  "worker/roleplay/routing-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "648f241ab460a37b70d26e1b9a1e2349d2fc03e6e61d2a953ea9a44ac1926dbf"
+  },
+  "worker/roleplay/session-metrics.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "39735a84caf51e261ea91a3d881281d629c9419ffb39aa94cf823f078f75444d"
+  },
+  "worker/roleplay/session-storage.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e09f9b499a3efb77fb29390aeefeb79ad2dfb18c40b08f406c3ea91bec641ba5"
+  },
+  "worker/roleplay/session-tier-policy.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f3c3b3b11b567ba8ab57c976bd1d3a65a7eda31a9cefc27069dd30ad07300907"
+  },
+  "worker/roleplay/sse-collector.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "d609605183dd3f8f2b90f2f7402ba2f45afb797f88297d11460de31ed36e9997"
+  },
+  "worker/roleplay/state-runtime.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "e59cd25c50546c28c1a7b0aaa1301d4854d6d7ad55bc9c2837ebeaae3d9f0246"
+  },
+  "worker/roleplay/stream-validation-gate.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "457c2a917a0cc43e16567a9d28e4e43503e133f1e1be15302fa7955276d4e77b"
+  },
+  "worker/roleplay/streaming.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cfa1ae35acfbddf5d6f8cd362b13c24247b38df78cbca3fd0bc545924a89b372"
   },
   "worker/roleplay/transport.mjs": {
     "kind": "guarded",
     "reason": "Every candidate, compaction and fallback uses providerFetch, including Container egress.",
     "sha256": "fb1f50e58dd75196d6920a542df1c262e811a1c4e86d701d21366aa1d1540eb3"
   },
+  "worker/roleplay/turn-runtime.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "309d852b4164430143e4fceb4c67ce9c9fe614e2fcb35819467aad8b2cbe65a9"
+  },
+  "worker/roleplay/turn-trace.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1cc028a2a7bef7e0e1540e1a99792e7651203b965b1562823e347c1d6474074e"
+  },
+  "worker/roleplay/validation.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6383634dd3186799e0138897cb2023e888151062d52677d8cb89934d93583f02"
+  },
+  "worker/route-health-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "bf916fee4d656378b95bd3f1c7239d5c7d8b2e8591ceaec64cb48a7f5b4f0772"
+  },
+  "worker/runtime-feature-flags.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "acf379482beccbaa1faae4f1b872ee5ed613f3f3abfd600e60fb5fff1a4464fd"
+  },
+  "worker/saml-identity.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5f1de1406099bd3c199a89913d85948f3c303f0222521fc7a6d4d527a6f296b9"
+  },
   "worker/scheduled-maintenance.mjs": {
     "kind": "non-provider",
     "reason": "Explicit maintenance webhook delivery, no provider generation.",
-    "sha256": "5f3e752776c5426984e3667bfd7818037ed3420e07ec6fc6b5caa06ab947d3a8"
+    "sha256": "7302ed3f218a47fa3afe7a65f5e2a4353a0be24847279be128782d6a0553129e"
+  },
+  "worker/scim-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "438e925647db4851a088c4ebe83dcb6791dc06631a384b2057a52b24284b09d6"
+  },
+  "worker/secret-digest.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "63572c2322a6a29e602964fe2b8136cb0e563cb34aee17956ac90779f8d93396"
   },
   "worker/secret-firewall.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "bd79e15c3b2d4f29916c4c2c5601284f953ff142cad80198a5155985b2560203"
   },
+  "worker/secret-scan.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "31a08d14c47a58ec405505b45dd254edc48f06863e1d234b10db7fb611b06a02"
+  },
+  "worker/semantic-cache-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "1acc71757514b0e73acea66000758f4cee55e261c19b11ba5f26f608004185ff"
+  },
   "worker/semantic-generation-cache.mjs": {
     "kind": "guarded",
     "reason": "Embedding delegate is the native providerFetch wrapper, including the embedding provider authority.",
     "sha256": "ba3f547d794cb9b323c6927ca65e3b45e816e73a215e97218ab023584ca68a90"
   },
+  "worker/shadow-eval-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2b1a2b3b7c6551683025c80050a0d36f961c8e20106a26ba578358a97bb56e29"
+  },
+  "worker/shadow-eval-schedule.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "b83c12aee761dfa21a0b942b8c8187e48d2af3a7dc4d015495b74d9614f03741"
+  },
+  "worker/sse-heartbeat.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "4eae26738d0e8d7768a829396a82d83ba65792a1a9119689fd9b6031be9db670"
+  },
+  "worker/status-page.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "af6c1272b8537020da0e435e04b1f8ac94a1bbe3d9c40eb16a24433016f5bb51"
+  },
+  "worker/stream-cost-breaker.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5317e648a4dbb6fee35d45ae294ccee128d9296751ed1c941f578223d1be0640"
+  },
+  "worker/tenant-governance-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "6b4f0d97520e9bfc07ee5b9879a017ccf94ca8b48a800793886f332c6933c451"
+  },
+  "worker/tenants-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "a33aa142fea6154ce16983ad9dcdde9220ac5dbc954422abfea8d4e7a02fe50e"
+  },
   "worker/upstream-cancellation.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "44c67fd5404a2ed8acc3d74f4ccf35f1944e9bddacb44fd7177a5d829d4aef04"
+  },
+  "worker/usage-buckets-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "7d35b0203ce30441977df2e458e825e0fb5dd0f26db81b963a0cc1c2606dc996"
+  },
+  "worker/usage-ledger-d1.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "5430e78972b43f5257c3eddb1533586243b9e27092e0ce5517e1752232c5146e"
+  },
+  "worker/usage-receipts.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "347edf7943143eec7bac78e79fd234a9a98940358f1839d9274abb5c7240c89b"
+  },
+  "wsgi.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f07b32f2824b0b30479f475d276816223b4d4486fff067503c3ce054042e9053"
   }
 }

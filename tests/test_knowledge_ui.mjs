@@ -1,3 +1,4 @@
+import { clientNetwork } from "./helpers/network_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "./helpers/policy_test.mjs";
 import { api, queryPayload, sourcePayload } from "../static/js/knowledge/api.mjs";
@@ -128,7 +129,7 @@ test("admin transport sends CSRF on mutations without client credentials", async
   dom();
   let call;
   globalThis.fetch = async (url, options) => { call = { url, options }; return Response.json({ id: "s1" }); };
-  await api("sources", { method: "POST", body: { product: "flask" } });
+  await clientNetwork("/admin/knowledge/sources", () => api("sources", { method: "POST", body: { product: "flask" } }));
   assert.equal(call.url, "/admin/knowledge/sources");
   assert.equal(call.options.headers.get("X-CSRFToken"), "synthetic-csrf");
   assert.equal(call.options.credentials, "same-origin");
@@ -140,7 +141,7 @@ test("admin transport reports a conflict and never retries automatically", async
   dom();
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return Response.json({ error: { code: "revision_conflict", message: "Reload the current policy." } }, { status: 409 }); };
-  await assert.rejects(api("policy", { method: "PUT", body: {} }), /Reload the current policy/);
+  await assert.rejects(clientNetwork("/admin/knowledge/policy", () => api("policy", { method: "PUT", body: {} })), /Reload the current policy/);
   assert.equal(calls, 1);
 });
 

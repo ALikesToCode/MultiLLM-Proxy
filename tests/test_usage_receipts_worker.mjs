@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { canonicalBytes, appendReceipt, verifyChain, handleUsageReceiptRequest, handleUsageReceiptStoreRequest } from "../worker/usage-receipts.mjs";
 import { handleManagedStateRequest } from "../worker/managed-state-dispatch.mjs";
 import { handleUsageLedgerRequest } from "../worker/usage-ledger-d1.mjs";

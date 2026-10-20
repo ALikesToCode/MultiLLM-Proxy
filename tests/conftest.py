@@ -24,3 +24,22 @@ def _fresh_public_capability_cache():
     reset_public_capability_cache()
     yield
     reset_public_capability_cache()
+
+
+@pytest.fixture(autouse=True)
+def _outbound_connections_require_dispatch(monkeypatch):
+    """All HTTP clients, including unlisted modules and SDKs, meet this boundary."""
+    import socket
+    from services.dispatch_network import network_admitted
+
+    def guard(original):
+        def checked(*args, **kwargs):
+            address = args[1] if args and isinstance(args[0], socket.socket) else (args[0] if args else kwargs.get("address"))
+            if not network_admitted(address):
+                raise AssertionError("Outbound connection outside provider chokepoint")
+            return original(*args, **kwargs)
+        return checked
+
+    monkeypatch.setattr(socket, "create_connection", guard(socket.create_connection))
+    monkeypatch.setattr(socket.socket, "connect", guard(socket.socket.connect))
+    monkeypatch.setattr(socket.socket, "connect_ex", guard(socket.socket.connect_ex))

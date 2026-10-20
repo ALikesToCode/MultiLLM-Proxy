@@ -1,10 +1,11 @@
+import { mockFetch } from "./helpers/network_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { handlePaymentStoreRequest, verifyPaymentSignature, paymentSettings } from "../worker/payment-webhooks.mjs";
 
@@ -170,7 +171,7 @@ test("Worker forwards unauthenticated webhook raw bytes and signature to the Con
   const worker = (await loadWorkerModule()).default;
   const raw = new TextEncoder().encode(' {"fixture":"é"}\r\n');
   let forwards = 0;
-  t.mock.method(globalThis, "fetch", () => assert.fail("unexpected external network"));
+  mockFetch(t, () => assert.fail("unexpected external network"));
   const env = { MULTILLM_PROXY_CONTAINER: { getByName(name) {
     assert.equal(name, "primary");
     return { async fetch(request) {

@@ -1,5 +1,5 @@
 // Shared D1 fixtures for the config revision Worker and integration suites.
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "../helpers/local_miniflare.mjs";
 import { handleIntelligenceOutbound } from "../../worker/intelligence-outbound.mjs";
 import { handleRevisionedAutoRoutes } from "../../worker/config-revision.mjs";
 import { handleAutoRoutesRequest } from "../../worker/auto-routes-d1.mjs";

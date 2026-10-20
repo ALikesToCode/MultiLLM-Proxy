@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {convertV4MiniflareOptions,Miniflare} from "miniflare";
+import {convertV4MiniflareOptions,Miniflare} from "./helpers/local_miniflare.mjs";
 import {handleIntelligenceAuthRequest} from "../worker/intelligence-auth-d1.mjs";
 
 const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);

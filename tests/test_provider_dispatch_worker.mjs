@@ -9,7 +9,7 @@ import { makeRoleplayEnv, roleplayRequest, withGlobalFetch } from "./helpers/rol
 
 const worker = (await loadWorkerModule()).default;
 const authority = { authenticated: true, keyId: "synthetic-reader" };
-const input = () => new Request("https://provider.example/v1/chat/completions", {
+const input = (provider = "openrouter") => new Request((provider === "gemini" ? "https://generativelanguage.googleapis.com" : "https://openrouter.ai") + "/v1/chat/completions", {
   method: "POST", headers: { "content-type": "application/json", authorization: "Bearer synthetic-cached" },
   body: JSON.stringify({ provider: { data_collection: "allow", sort: "price" }, messages: [] }),
 });
@@ -63,11 +63,11 @@ test("forced routing preferences and current attested credentials replace cached
 
 test("Gemini never uses cached or query credentials for a restricted principal", async () => {
   const env = { INTELLIGENCE_DB: policyStore({ official_only: 1, forced_provider_preferences: null }), GEMINI_DATA_TIER: "paid" };
-  await assert.rejects(providerFetch("gemini", input(), {}, { env, authority }), { code: "attested_credential_unavailable" });
+  await assert.rejects(providerFetch("gemini", input("gemini"), {}, { env, authority }), { code: "attested_credential_unavailable" });
   env.GEMINI_API_KEY = "synthetic-attested";
   await assert.rejects(providerFetch("gemini", "https://provider.example/generate?key=synthetic-caller", {}, { env, authority }),
     { code: "provider_credential_not_allowed", status: 403 });
-  await providerFetch("gemini", input(), {}, { env, authority, send: request => {
+  await providerFetch("gemini", input("gemini"), {}, { env, authority, send: request => {
     assert.equal(request.headers.get("authorization"), null);
     assert.equal(request.headers.get("x-goog-api-key"), "synthetic-attested");
     return new Response("{}");

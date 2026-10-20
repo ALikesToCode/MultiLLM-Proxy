@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { d1Readiness, REQUIRED_D1_TABLES } from "../worker/d1-schema.mjs";
 import { applyMigrations, migrationNames } from "./d1_migrations.mjs";

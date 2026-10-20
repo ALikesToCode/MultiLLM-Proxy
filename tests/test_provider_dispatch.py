@@ -64,7 +64,7 @@ def test_forced_preferences_merge_at_actual_http_boundary(monkeypatch):
     send = Mock()
     with Flask(__name__).test_request_context():
         g.authenticated_user = account()
-        provider_http("openrouter", "POST", "https://provider.example/generate", transport=send,
+        provider_http("openrouter", "POST", "https://openrouter.ai/api/v1/chat/completions", transport=send,
             json={"provider": {"data_collection": "allow", "sort": "price"}}, headers={"Authorization": "Bearer synthetic-cached"})
     assert send.call_args.kwargs["json"]["provider"] == {"data_collection": "deny", "sort": "price"}
     assert send.call_args.kwargs["headers"]["Authorization"] == "Bearer synthetic-operator"
@@ -153,7 +153,7 @@ def test_video_deferred_operations_recheck_current_policy_and_attestation(operat
     job = {"p": "gemini", "u": "operations/synthetic", "m": "veo-synthetic", "t": 1}
     def execute():
         if operation == "content":
-            return video_generation.stream_content("https://provider.example/synthetic.mp4", {"x-goog-api-key": "synthetic-cached"}, provider="gemini")
+            return video_generation.stream_content("https://generativelanguage.googleapis.com/v1beta/files/synthetic.mp4", {"x-goog-api-key": "synthetic-cached"}, provider="gemini")
         return video_generation.job_status(job, "synthetic-job", "synthetic-cached", "https://provider.example")
     with app.test_request_context():
         g.authenticated_user = current

@@ -95,13 +95,27 @@ their source account identity across scheduling, retries and reconciliation.
 Imported-skill watches also retain the importing account; legacy imports without
 that identity refuse upstream checks until explicitly imported again.
 Restricted requests replace cached credentials with
-the current attested operator binding, and reject caller Gemini credentials.
+an operator credential freshly resolved for an allowlisted provider API origin,
+and reject caller Gemini credentials. Vertex refreshes the current service-account
+binding (JSON or file) or the currently selected gcloud account, without using the
+legacy process token cache. Missing, changed or malformed bindings refuse dispatch.
+Public video assets still require policy admission but never receive API credentials.
+Video relay and storage downloads follow at most five HTTPS redirects, rechecking
+current policy at each hop. An origin change permanently strips credential headers;
+unresolved redirects are errors rather than successful content.
 Forced routing preferences merge at the final JSON submission. Realtime and
 roleplay refuse forced preferences because their full transports cannot enforce
 them. Missing accounts, missing fields, malformed envelopes and store outages
-refuse dispatch. The outbound inventory test pins reviewed transport modules and
-rejects new call sites; private persistence, storage management, authentication,
-telemetry, public capability metadata and webhook delivery are classified separately.
+refuse dispatch. The static outbound inventory pins every runtime source module,
+independently of HTTP client spelling. Suite-wide runtime guards require an active
+network capability at Python socket connection APIs and Worker fetch/socket calls,
+even when tests replace fetch. Admission issues a capability only for the transport
+operation and revokes it on completion or failure. Mutation tests cover urllib3,
+fetch-based adapters, Node HTTP and raw sockets outside those boundaries.
+Private persistence, storage management, authentication, telemetry, public capability
+metadata and webhook delivery are separate control traffic. Their tested network
+scopes are destination-bound; local D1 fixtures register only their own disposable
+loopback ports. Test gateway clients likewise scope only their local server.
 
 New columns hold
 the two controls and provider-reported `cached_input_tokens` / `reasoning_tokens`.

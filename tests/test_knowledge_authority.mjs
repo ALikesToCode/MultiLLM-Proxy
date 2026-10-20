@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "./helpers/policy_test.mjs";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";
 import { createArtifact, normalizeSourceText, packEvidence, validateChunk, versionEvidence } from "../worker/knowledge/evidence.mjs";
 import { parseQuery, publicHost, publicUrl } from "../worker/knowledge/contracts.mjs";

@@ -6,7 +6,6 @@ generation authority. Private service bindings receive the same verified referen
 """
 
 import json
-import os
 from contextvars import ContextVar
 from contextlib import contextmanager
 from urllib.parse import parse_qsl, urlsplit
@@ -15,7 +14,8 @@ import requests
 from flask import current_app, g, has_app_context, has_request_context, request
 
 from error_handlers import APIError
-from services.auth_primitives import provider_api_key_env_names, usable_credential
+from services.provider_credentials import api_origin, operator_credential, strip_credentials, unavailable_credential
+from services.dispatch_network import admitted_network
 from services.dispatch_policy import unavailable, verify
 from services.key_data_guards import has_data_controls, merge_preferences, model_permitted, preferences
 
@@ -84,10 +84,12 @@ def capture_dispatch(callback, *, reference=None):
     return bound
 
 
-def _credential(provider, user, url, options):
+def _credential(provider, user, url, options, *, public_asset=False):
+    headers = dict(options.get("headers") or {})
+    if public_asset:
+        return {**options, "headers": strip_credentials(headers)}
     if not has_data_controls(user):
         return options
-    headers = dict(options.get("headers") or {})
     if any(name.lower() == "key" for name, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)) or any(
             name.lower() == "key" for name in (options.get("params") or {})):
         raise APIError("Caller provider credentials are not allowed", 403, {"error": "provider_credential_not_allowed"})
@@ -101,24 +103,22 @@ def _credential(provider, user, url, options):
     # A private binding uses the operator's binding rather than a bearer credential.
     if provider == "cloudflare" or urlsplit(url).hostname in {"ai.internal", "knowledge.internal", "media.internal"}:
         return options
-    names = ("GEMINI_API_KEY",) if provider == "gemini" else provider_api_key_env_names(provider)
-    key = next((usable_credential(os.environ.get(name), name) for name in names if usable_credential(os.environ.get(name))), None)
-    if not key:
-        raise APIError("Attested provider credential is unavailable", 503, {"error": "attested_credential_unavailable"})
-    # Discard every legacy/cached credential. The currently attested operator binding
-    # is selected here, after all adapters, pooling, retries and fallback selection.
-    headers = {name: value for name, value in headers.items()
-               if name.lower() not in {"authorization", "x-api-key", "x-goog-api-key", "api-key"}}
+    if not api_origin(provider, url):
+        raise unavailable_credential()
+    # Resolve only after current-policy admission, including OAuth token exchange.
+    with admitted_network():
+        key = operator_credential(provider)
+    headers = strip_credentials(headers)
     header = {"gemini": "x-goog-api-key", "anthropic": "x-api-key", "azure": "api-key"}.get(provider, "Authorization")
     headers[header] = f"Bearer {key}" if header == "Authorization" else key
     return {**options, "headers": headers}
 
 
-def prepare_dispatch(provider, url, options, *, reference=None, binding=False):
+def prepare_dispatch(provider, url, options, *, reference=None, binding=False, public_asset=False):
     user = current_principal(reference)
     if not binding and not model_permitted(user, provider + ":*"):
         raise APIError("This API key cannot use this provider data class", 403, {"error": "provider_class_not_allowed"})
-    options = _credential(provider, user, url, dict(options))
+    options = _credential(provider, user, url, dict(options), public_asset=public_asset)
     forced = preferences(user["forced_provider_preferences"])
     if provider == "openrouter" and forced is not None and (options.get("data") is not None or "json" in options):
         try:
@@ -136,9 +136,10 @@ def prepare_dispatch(provider, url, options, *, reference=None, binding=False):
     return {**options, "headers": headers}
 
 
-def provider_http(provider, method, url, *, transport=None, reference=None, binding=False, **options):
-    options = prepare_dispatch(provider, url, options, reference=reference, binding=binding)
+def provider_http(provider, method, url, *, transport=None, reference=None, binding=False, public_asset=False, **options):
+    options = prepare_dispatch(provider, url, options, reference=reference, binding=binding, public_asset=public_asset)
     # Redirects are separate dispatches and must never forward an attested credential
     # to a provider-selected host without another admission.
     options["allow_redirects"] = False
-    return (transport or requests.request)(method=method, url=url, **options)
+    with admitted_network():
+        return (transport or requests.request)(method=method, url=url, **options)

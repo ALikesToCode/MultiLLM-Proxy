@@ -295,11 +295,11 @@ def stream_content(url: str, headers: dict, *, provider: str) -> Response:
     if not url.startswith("https://"):
         raise APIError("The provider returned an unsupported video location", status_code=502)
     try:
-        from services.provider_dispatch import provider_http
-        upstream = provider_http(provider, "GET", url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True)
+        from services.provider_assets import asset_http
+        upstream = asset_http(provider, url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True)
     except requests.exceptions.RequestException:
         raise APIError("The video could not be downloaded; try again", status_code=502) from None
-    if upstream.status_code >= 400:
+    if upstream.status_code != 200:
         upstream.close()
         raise APIError("The video is not available", status_code=409 if upstream.status_code in (404, 409) else 502)
     length = int(upstream.headers.get("Content-Length") or 0)

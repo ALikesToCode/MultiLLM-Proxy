@@ -366,9 +366,9 @@ def video_file_id(job_id: str) -> str:
 def store_video(file_id: str, url: str, headers: dict, *, owner: str, model: str | None) -> dict | None:
     """Copy a finished video into R2 once; None when its size is unknown or too large."""
     try:
-        from services.provider_dispatch import provider_http
+        from services.provider_assets import asset_http
         provider = str(model or "unknown").split(":", 1)[0]
-        upstream = provider_http(provider, "GET", url, headers=headers, timeout=VIDEO_TIMEOUT, stream=True,
+        upstream = asset_http(provider, url, headers=headers, timeout=VIDEO_TIMEOUT, stream=True,
                                  reference={"username": owner})
     except requests.exceptions.RequestException:
         return None

@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 import { promisify } from "node:util";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { applyMigrations } from "./d1_migrations.mjs";
 

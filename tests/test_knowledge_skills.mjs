@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { SkillsStore } from "../worker/knowledge/skills-store.mjs";
 import { SkillsIndex, terms } from "../worker/knowledge/skills-index.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, SKILLS_LIMIT, SYNC_REQUEST_BYTES } from "../worker/knowledge/skills-validation.mjs";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { createUsageObserver } from "../worker/request-telemetry.mjs";
 import { handleUsageLedgerRequest, recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
