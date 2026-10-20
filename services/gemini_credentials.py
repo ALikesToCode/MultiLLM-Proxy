@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def restricted(provider):
-    return provider == "gemini" and has_request_context() and bool(
-        (getattr(g, "authenticated_user", None) or {}).get("official_only"))
+    from services.key_data_guards import has_data_controls
+    return provider == "gemini" and has_request_context() and has_data_controls(
+        getattr(g, "authenticated_user", None) or {})
 
 
 def _refuse_override():

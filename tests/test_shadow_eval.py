@@ -23,6 +23,12 @@ from services.intelligence_store import IntelligenceStore
 from tests.test_intelligence_policy import candidate, policy
 
 
+@pytest.fixture(autouse=True)
+def sampling_authority(monkeypatch):
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username",
+                        lambda username: sampling_user() if username == "sampled-user" else None)
+
+
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv("INTELLIGENCE_STORAGE_BACKEND", "")
@@ -35,9 +41,13 @@ def store(tmp_path, monkeypatch):
     return Store
 
 
+def sampling_user(**fields):
+    return {"username": "sampled-user", "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}, **fields}
+
+
 def sample(**changes):
     value = make_sample({"model": "auto:test", "messages": [{"role": "user", "content": "Synthetic greeting"}]},
-        {"username": "sampled-user"}, "auto:test", {"content": "Synthetic answer"}, "openai:production", 100,
+        sampling_user(), "auto:test", {"content": "Synthetic answer"}, "openai:production", 100,
         {"prompt_tokens": 4, "completion_tokens": 2})
     return {**value, **changes}
 
@@ -52,7 +62,7 @@ def configured(store, **changes):
 @pytest.mark.parametrize("rate,draw,accepted", [(None, 0, False), (0, 0, False), (0.2, 0.199, True), (0.2, 0.2, False), (0.21, 0, False), (True, 0, False)])
 def test_sampling_probability(rate, draw, accepted):
     payload = {"model": "auto:test", "messages": []}
-    assert eligible(payload, {"shadow_eval_rate": rate}, "/v1/chat/completions", random_value=draw) is accepted
+    assert eligible(payload, sampling_user(shadow_eval_rate=rate), "/v1/chat/completions", random_value=draw) is accepted
 
 
 @pytest.mark.parametrize("model,path,expected", [("auto:test", "/v1/chat/completions", True), ("cascade:test", "/v1/chat/completions", True),
@@ -62,7 +72,7 @@ def test_sampling_probability(rate, draw, accepted):
     ("openai:concrete", "/v1/messages", False), ("openai:concrete", "/optimize/v1/chat/completions", False),
     ("auto:test", "/v1/knowledge", False), ("openai:concrete", "/intelligence/v1/chat/completions", True)])
 def test_eligibility(model, path, expected):
-    assert eligible({"model": model, "messages": []}, {"shadow_eval_rate": 0.1}, path, random_value=0) is expected
+    assert eligible({"model": model, "messages": []}, sampling_user(shadow_eval_rate=0.1), path, random_value=0) is expected
 
 
 @pytest.mark.parametrize("payload,task", [({"tools": [{}]}, "coding"), ({"messages": [{"content": "```python\nx=1"}]}, "coding"),
@@ -75,7 +85,7 @@ def test_task_classification(payload, task):
 
 def test_secret_skip_size_caps_and_heuristic_preservation():
     payload = {"model": "auto:test", "messages": [{"role": "user", "content": "Hello"}]}
-    args = ({"username": "sampled-user"}, "auto:test", {"content": "Synthetic answer"}, "openai:production", 1, {})
+    args = (sampling_user(), "auto:test", {"content": "Synthetic answer"}, "openai:production", 1, {})
     secret = "sk-" + "proj-" + "Abc0123456789" * 6
     assert make_sample({**payload, "messages": [{"content": secret}]}, *args) is None
     assert make_sample({**payload, "metadata": {"private": secret}}, *args) is None
@@ -90,7 +100,7 @@ def test_secret_skip_size_caps_and_heuristic_preservation():
 @pytest.mark.parametrize("rate", [-0.1, 0.21, True, float("nan"), float("inf"), "bad"])
 def test_key_rate_validation(rate):
     with pytest.raises(APIError):
-        key_controls.validate({"shadow_eval_rate": rate})
+        key_controls.validate(sampling_user(shadow_eval_rate=rate))
 
 
 def test_key_rate_storage_and_default():
@@ -315,7 +325,7 @@ def test_sampling_hook_never_fails_response_and_has_no_recursive_internal_sample
     monkeypatch.setattr("services.shadow_eval_sampling.submit", lambda value: captures.append(value))
     @app.post("/v1/chat/completions")
     def complete():
-        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        g.authenticated_user = sampling_user(shadow_eval_rate=0.2)
         return response("Synthetic answer", "openai:production")
     payload = {"model": "auto:test", "messages": [{"content": "Synthetic greeting"}]}
     client = app.test_client()
@@ -367,7 +377,7 @@ def test_native_dispatch_is_sampled_once_after_normalization(monkeypatch):
 
     @app.post("/v1/responses")
     def respond():
-        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        g.authenticated_user = sampling_user(shadow_eval_rate=0.2)
         return dispatch(app, None, None, None, {"model": "auto:test", "messages": [{"role": "user", "content": "Synthetic"}]})
 
     assert app.test_client().post("/v1/responses", json={"model": "auto:test", "input": "Synthetic"}).status_code == 200
@@ -525,7 +535,7 @@ def test_judge_message_budget_keeps_newest_and_whole_request_drops_oldest_first(
 def test_sample_contract_retains_request_limits_and_finish_reason(store):
     from services.shadow_eval_contract import valid_sample
     value = make_sample({"model": "auto:test", "messages": [], "max_tokens": 500, "max_completion_tokens": 600},
-        {"username": "sampled-user"}, "auto:test", {"content": "Synthetic"}, "openai:production", 1, {}, finish_reason="length")
+        sampling_user(), "auto:test", {"content": "Synthetic"}, "openai:production", 1, {}, finish_reason="length")
     assert value["production_finish_reason"] == "length"
     assert value["request"]["max_tokens"] == 500 and value["request"]["max_completion_tokens"] == 600
     store.put(value)
@@ -544,7 +554,7 @@ def test_capture_preserves_nonstream_and_stream_finish_reasons(monkeypatch):
     init_shadow_sampling(app)
     payload = {"model": "auto:test", "messages": []}
     with app.test_request_context("/v1/chat/completions", method="POST", json=payload):
-        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        g.authenticated_user = sampling_user(shadow_eval_rate=0.2)
         g.shadow_eval_started = time.monotonic()
         response = app.json.response({"choices": [{"message": {"content": "Synthetic"}, "finish_reason": "length"}],
                                      "multillm": {"selected_model": "openai:production"}})
@@ -584,7 +594,7 @@ def test_accounted_subrequest_cannot_consume_outer_sampling_decision(monkeypatch
         return response("Synthetic answer", "openai:production")
 
     def outer():
-        g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+        g.authenticated_user = sampling_user(shadow_eval_rate=0.2)
         # Even a routed subrequest with an otherwise eligible payload must be ignored.
         accounted_dispatch({**payload, "model": "auto:internal"}, lambda data: chat_dispatch(app, None, None, None, data), kind="chat")
         assert not getattr(g, "gateway_subrequest", False)
@@ -631,7 +641,7 @@ def test_sampling_counters_cover_rate_secret_size_queue_error_and_are_bounded(mo
     payload = {"model": "auto:test", "messages": [{"role": "user", "content": "Synthetic"}]}
     def visit(body, reply=None):
         with app.test_request_context("/v1/chat/completions", method="POST", json=body):
-            g.authenticated_user = {"username": "sampled-user", "shadow_eval_rate": 0.2}
+            g.authenticated_user = sampling_user(shadow_eval_rate=0.2)
             g.shadow_eval_started = time.monotonic()
             reply = reply if reply is not None else response("Synthetic", "openai:production")
             assert coverage.sample_success(reply, body) is reply
@@ -655,7 +665,7 @@ def test_sampling_counters_cover_rate_secret_size_queue_error_and_are_bounded(mo
 
 def test_answer_secret_and_size_skips_are_visible(coverage):
     reasons = []
-    args = ({"model": "auto:test", "messages": []}, {"username": "synthetic"}, "auto:test")
+    args = ({"model": "auto:test", "messages": []}, sampling_user(), "auto:test")
     secret = "sk-" + "proj-" + "Abc0123456789" * 6
     assert make_sample(*args, {"content": secret}, "openai:production", 1, {}, on_skip=reasons.append) is None
     assert make_sample(*args, {"content": "x" * 32768}, "openai:production", 1, {}, on_skip=reasons.append) is None
