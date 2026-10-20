@@ -10,7 +10,7 @@ import { applyMigrations } from "./d1_migrations.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { requirePeer } from "../worker/peer-capability.mjs";
 
-const run = promisify(execFile), A = "7ff5a86", versions = [A, ""];
+const run = promisify(execFile), A = "9153952", versions = [A, ""];
 const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url)));
 const policies = [
   { official_only: null, forced_provider_preferences: null },

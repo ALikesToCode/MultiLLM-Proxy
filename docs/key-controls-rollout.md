@@ -11,7 +11,8 @@ Their readiness responses advertise `key_controls: {protocol: 1, enforcement: fa
 The main Worker also exposes the Container readiness result separately. Verify each
 component before proceeding; a build tag alone does not prove the running capability.
 
-Existing accounts have NULL policy columns and retain their existing behavior. The
+Existing accounts have NULL policy columns and retain their existing behavior. Any non-NULL policy value,
+including `official_only=0` or an empty preference object, activates the expansion refusal fence. The
 expansion accepts additive RPC fields and both account row shapes, sends the legacy
 protocol, and does not expose setters for restrictions. Legacy account writes preserve
 both policy columns in the same SQL statement, including concurrent writes.
@@ -31,7 +32,9 @@ Deploy the enforcement revision only after all three components advertise expans
 support. Verify enforcement capability on every component before enabling restrictions.
 Controlled delegation requires a fresh enforcement-capability response from the actual
 peer before any content is sent. Unrestricted traffic remains compatible with expansion
-peers during independent deployments. Keep deployment preflight enabled.
+peers during independent deployments. Keep deployment preflight enabled. Expansion
+already checks the required secret names, both account tables' policy columns and the
+complete migration ledger before main upload; enforcement retains those checks.
 
 Rollback from enforcement to expansion leaves policy columns intact and refuses
 controlled accounts. Restore enforcement-capable components to resume those accounts;
@@ -70,12 +73,23 @@ These are local compatibility proofs; repeat them on staging before relying on p
 
 ## Deployment verification
 
+Expansion release admission runs from the default main Worker build and both deployment
+entry points. Before private upload, `--prepare` verifies the exact local migration ledger,
+`control_users` and `intelligence_principals` policy columns, and the required main binding
+names (`ADMIN_API_KEY`, `FLASK_SECRET_KEY`, `JWT_SECRET`), without reading secret values.
+Before main upload it also verifies a single fully active private deployment tagged with
+an expansion-capable source revision. Keep that revision's history available locally.
+These deployment checks are separate from runtime capability probes and the final
+Container version/image/fingerprint verification. All remote migration commands require
+an explicit database argument or `D1_DATABASE`; there is no production fallback.
+
 Before merging, disconnect Workers Builds or change its deploy command to
 `npx wrangler versions upload`, which uploads without promoting traffic. Use
 `scripts/deploy.sh` to preserve migrations → private Worker → main Worker → Container.
 The preflight's token permissions inside Workers Builds remain untested: they include D1,
-secret-list and deployment/version reads. Do not treat a locally passing preflight as
-proof that the Builds token has those permissions.
+secret-list and deployment/version reads, plus Container list/detail for rollout
+verification. Do not treat a locally passing preflight as proof that the Builds token
+has those permissions.
 
 Set `D1_DATABASE` explicitly, matching `INTELLIGENCE_DB` in both selected configs.
 For another environment also set `MAIN_WORKER_CONFIG`, `KNOWLEDGE_WORKER_CONFIG` and

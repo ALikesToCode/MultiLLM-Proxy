@@ -158,7 +158,7 @@ def _send(method: str, url: str, *, provider: str, timeout, **kwargs) -> request
         kwargs["data"] = protect_body(kwargs["data"], kwargs.get("headers"), provider="video")
     try:
         from services.provider_dispatch import provider_http
-        return provider_http(provider, method, url, timeout=timeout, **kwargs)
+        return provider_http(provider, method, url, timeout=timeout, allow_redirects=False, **kwargs)
     except requests.exceptions.ConnectTimeout:
         return _failure(502, "The video provider could not be reached", "connect")
     except requests.exceptions.ConnectionError as error:

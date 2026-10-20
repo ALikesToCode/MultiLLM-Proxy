@@ -13,7 +13,7 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 import { controlNetwork } from "../worker/dispatch-network.mjs";
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 
-const EXPAND = "7ff5a86";
+const EXPAND = "9153952";
 const { handleControlUsersRequest, providerFetch, providerOperation, legacyBindingControls } = await runtimeModule(`
 export {handleControlUsersRequest} from './worker/control-users-d1.mjs';
 export {providerFetch,providerOperation} from './worker/provider-dispatch.mjs';
@@ -23,6 +23,8 @@ const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.
 const states = [
   { official_only: null, forced_provider_preferences: null },
   { official_only: 1, forced_provider_preferences: null },
+  { official_only: 0, forced_provider_preferences: null },
+  { official_only: null, forced_provider_preferences: '{}' },
   { official_only: null, forced_provider_preferences: '{"data_collection":"deny"}' },
 ];
 

@@ -11,6 +11,7 @@ function release(changes = {}) {
   const evidence = {
     migrations: [{ name: "0043_integration_data_policy.sql" }],
     columns: ["official_only", "forced_provider_preferences", "max_stream_cost_microusd"].map(name => ({ name })),
+    integrationColumns: ["official_only", "forced_provider_preferences"].map(name => ({ name })),
     secrets: ["ADMIN_API_KEY", "FLASK_SECRET_KEY", "JWT_SECRET"].map(name => ({ name, type: "secret_text" })),
     versions: [{ version_id: "private-version", percentage: 100 }], tag: commit, capability: { protocol: 1, enforcement: false }, ...changes,
   };
@@ -19,7 +20,7 @@ function release(changes = {}) {
     if (args[0] === "deployments") return JSON.stringify({ versions: evidence.versions });
     if (args[0] === "versions") return JSON.stringify({ annotations: { "workers/tag": evidence.tag } });
     if (args[0] === "d1") return JSON.stringify([{ success: true,
-      results: args.at(-1).includes("PRAGMA") ? evidence.columns : evidence.migrations }]);
+      results: args.at(-1).includes("PRAGMA") ? (args.at(-1).includes("intelligence_principals") ? evidence.integrationColumns : evidence.columns) : evidence.migrations }]);
     throw new Error("Unexpected release probe");
   } };
 }
@@ -38,7 +39,8 @@ test("prerequisites refuse missing main bindings before updating the private Wor
   assert.doesNotThrow(() => checkPrerequisites(release({ tag: "b".repeat(40) })));
 });
 test("missing credentials, schema, migrations or current private version refuse deployment", () => {
-  for (const changes of [{ secrets: [] }, { columns: [] }, { migrations: [] }, { capability: null },
+  for (const changes of [{ secrets: [] }, { columns: [] }, { integrationColumns: [] }, { migrations: [] },
+    { migrations: [{ name: "0043_integration_data_policy.sql" }, { name: "0044_unexpected.sql" }] }, { capability: null },
     { versions: [] }, { versions: [{ version_id: "old", percentage: 50 }, { version_id: "new", percentage: 50 }] }]) {
     assert.throws(() => checkRelease(release(changes)));
   }

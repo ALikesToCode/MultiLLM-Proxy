@@ -577,7 +577,7 @@
   "services/cloudflare_ai.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "1d7a76d1da81202063b624e8d6058c0191b6c7f7155b0d7db26f8e016eecaedd"
+    "sha256": "614a13e4109ab76be440e3f3e6c4da562e2477bc937578f439539bb1cc0b202e"
   },
   "services/comparison_lab.py": {
     "kind": "non-provider",
@@ -872,7 +872,7 @@
   "services/key_data_guards.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "355a6183654ad51ed9bbe2b62b8901679e3680c5cb0aa5ff7f9bf08aec158b1a"
+    "sha256": "b3f15798579c3ce577eab8be43529a9b5735249fadf84c507b72336f03069fdf"
   },
   "services/knowledge_client.py": {
     "kind": "guarded",
@@ -1472,7 +1472,7 @@
   "services/video_generation.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "f4b24fcc3509dfddca33a7be8ddb976e05f277b73fe73a4e7e8cbaa4bc2ca770"
+    "sha256": "62e59dc4ad4c6192cec297178bed33ffd4a6a9f510d2daa16b9f8769ec079d0f"
   },
   "services/workbench_d1.py": {
     "kind": "non-provider",
@@ -1977,7 +1977,7 @@
   "worker/media-outbound.mjs": {
     "kind": "guarded",
     "reason": "External assets use providerFetch; remaining operations manage private R2 objects.",
-    "sha256": "afa2dbf2607b778c5b736bec68193ac7f902cc8f34f1340a2391b35c36ea23e6"
+    "sha256": "5f6e01800ca85e10076581b3a8a8fdf5a9e48f753f909e4ce1ff8cd2aa0bf1bf"
   },
   "worker/media-signing.mjs": {
     "kind": "non-provider",
@@ -2432,7 +2432,7 @@
   "services/key_controls_capability.py": {
     "kind": "internal",
     "reason": "Capability negotiation and current-policy admission before controlled delegation.",
-    "sha256": "e5825928da3dd8fbf35104d32a733006909b01adce0c551943822337a7c14d38"
+    "sha256": "8b68cc533d11a40d9a4477ab2c73f984cd7c96d30ce993918c4f26d765b80b2f"
   },
   "worker/peer-capability.mjs": {
     "kind": "internal",
@@ -2447,7 +2447,7 @@
   "worker/key-controls-capability.mjs": {
     "kind": "internal",
     "reason": "Capability negotiation and current-policy admission before controlled delegation.",
-    "sha256": "f79aaa27509fe6f76f9b86239c9e79ef8a472a4294a57d072c401619b9248e61"
+    "sha256": "90591998960f0ac17f898e7be64b18bad6d0429d666c27894bbab3e42aae6925"
   },
   "worker/legacy-binding-policy.mjs": {
     "kind": "internal",

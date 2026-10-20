@@ -70,8 +70,9 @@ def provider_data_class(provider, config=None):
 
 
 def has_data_controls(user):
-    """Even an empty forced object represents an administrator-owned data policy."""
-    return bool(user.get("official_only")) or user.get("forced_provider_preferences") is not None
+    """Any stored non-NULL value represents an administrator-owned data policy."""
+    from services.key_controls_capability import policy_present
+    return policy_present(user)
 
 
 def model_permitted(user, model, config=None):

@@ -3,13 +3,17 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { deploymentTarget } from "./deployment_target.mjs";
 import { localMigrations, remoteAppliedMigrations } from "./verify_d1_migrations.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const MAIN_CONFIG = process.env.MAIN_WORKER_CONFIG || "wrangler.jsonc";
 const KNOWLEDGE_CONFIG = process.env.KNOWLEDGE_WORKER_CONFIG || "wrangler.knowledge.jsonc";
 const REQUIRED_SECRETS = ["ADMIN_API_KEY", "FLASK_SECRET_KEY", "JWT_SECRET"];
-const REQUIRED_COLUMNS = ["official_only", "forced_provider_preferences", "max_stream_cost_microusd"];
+const REQUIRED_COLUMNS = {
+  control_users: ["official_only", "forced_provider_preferences", "max_stream_cost_microusd"],
+  intelligence_principals: ["official_only", "forced_provider_preferences"],
+};
 class PreflightError extends Error {}
 const requireThat = (condition, message) => { if (!condition) throw new PreflightError(message); };
 
@@ -36,9 +40,13 @@ export function checkPrerequisites({ main, knowledge, run, migrations = localMig
   const applied = remoteAppliedMigrations(database, run);
   requireThat(migrations.every(name => applied.includes(name)) && applied.every(name => migrations.includes(name)),
     "D1 migration ledger must exactly match this release");
-  const results = JSON.parse(run(["d1", "execute", database, "--remote", "--json", "--command", "PRAGMA table_info(control_users)"]));
-  const columns = results.flatMap(item => item.results ?? []).map(item => item.name);
-  requireThat(REQUIRED_COLUMNS.every(name => columns.includes(name)), "Account policy columns are missing from D1");
+  for (const [table, required] of Object.entries(REQUIRED_COLUMNS)) {
+    const results = JSON.parse(run(["d1", "execute", database, "--remote", "--json", "--command", `PRAGMA table_info(${table})`]));
+    requireThat(Array.isArray(results) && results.every(item => item.success === true && Array.isArray(item.results)),
+      "Account schema could not be verified");
+    const columns = results.flatMap(item => item.results).map(item => item.name);
+    requireThat(required.every(name => columns.includes(name)), "Account policy columns are missing from D1");
+  }
   const secrets = JSON.parse(run(["secret", "list", "--config", MAIN_CONFIG]));
   requireThat(REQUIRED_SECRETS.every(name => main.vars?.[name] || secrets.some(item => item.name === name)),
     "Main Worker needs ADMIN_API_KEY, FLASK_SECRET_KEY and JWT_SECRET bindings");
@@ -76,6 +84,7 @@ function main(args) {
       return 0;
     }
     requireThat(["--prepare", "--deploy"].includes(args[0]), "Use --check, --prepare or --deploy");
+    deploymentTarget({ mainConfig: MAIN_CONFIG, knowledgeConfig: KNOWLEDGE_CONFIG });
     const git = args => execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     const commit = git(["rev-parse", "HEAD"]);
     requireThat(!git(["status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude)worker/build-id.mjs"]),

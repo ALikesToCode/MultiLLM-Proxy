@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-import { checkMigrations, destructiveChanges, localMigrations, numberingProblems, sqlStatements }
+import { checkMigrations, destructiveChanges, localMigrations, numberingProblems, sqlStatements, remoteOptions, remoteAppliedMigrations }
   from "../scripts/verify_d1_migrations.mjs";
 import { buildIdFromBundle, cloudflareApi, collectStatus, describeVersion, evaluate, readyVerdict, renderMarkdown, renderText,
   verifyUntilSettled, wranglerFailure } from "../scripts/deploy_status.mjs";
@@ -13,6 +13,21 @@ const OLD_COMMIT = "b".repeat(40);
 const FINGERPRINT = "c".repeat(64);
 const TOKEN = "synthetic-token-not-real";
 const ACCOUNT = "0".repeat(32);
+
+test("every remote migration read requires an explicit target before running Wrangler", () => {
+  for (const args of [[], ["--pending"], ["--remote"], ["--pending", "--remote"]]) {
+    assert.throws(() => remoteOptions(args, {}), /explicitly/);
+  }
+  assert.deepEqual(remoteOptions(["--remote", "synthetic-db"], {}), { database: "synthetic-db", listOnly: false });
+  assert.deepEqual(remoteOptions(["--pending"], { D1_DATABASE: "synthetic-stage-db" }),
+    { database: "synthetic-stage-db", listOnly: true });
+  assert.throws(() => remoteOptions(["--unknown"], {}));
+  let calls = 0;
+  for (const database of [undefined, null, "", "--remote"]) {
+    assert.throws(() => remoteAppliedMigrations(database, () => { calls++; }), /explicitly/);
+  }
+  assert.equal(calls, 0);
+});
 
 test("the committed migrations pass the static checks", () => {
   const names = readdirSync(MIGRATIONS);

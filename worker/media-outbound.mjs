@@ -78,7 +78,7 @@ export async function boundedBytes(response, maxBytes) {
 export async function fetchPublic(value, { accept = "image/*", fetcher = fetch } = {}) {
   let url = publicHttpsUrl(value);
   for (let hop = 0; url && hop <= MAX_REDIRECTS; hop += 1) {
-    const response = await providerFetch("media", url.href, { headers: { accept }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }, { publicAsset: true, send: checked => fetcher(checked.url, { headers: checked.headers, redirect: checked.redirect, signal: checked.signal }) });
+    const response = await providerFetch("media", url.href, { headers: { accept }, redirect: "manual", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }, { publicAsset: true, send: checked => fetcher(checked.url, { headers: checked.headers, redirect: checked.redirect, signal: checked.signal }) });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers.get("location");
     await response.body?.cancel();
