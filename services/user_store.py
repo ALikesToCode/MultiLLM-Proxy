@@ -62,12 +62,6 @@ def _call(operation, **values):
     for attempt in range(1, attempts + 1):
         try:
             response = request_private_intelligence({"operation": operation, "data_policy_version": 1, **values}, endpoint="users")
-            rows = response.get("users", [response.get("user")]) if isinstance(response, dict) else []
-            from services.key_data_guards import has_data_controls
-            if operation in READ_OPERATIONS and any(isinstance(row, dict) and has_data_controls(row) for row in rows):
-                capability = request_private_intelligence({"operation": "capabilities"}, endpoint="users").get("key_controls")
-                from services.peer_capability import require_enforcement
-                require_enforcement(capability)
             return response
         except Exception as error:
             cause = (f"{error.status} {error.code}" if isinstance(error, PrivateIntelligenceError)

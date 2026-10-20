@@ -146,7 +146,7 @@ policy-signing secret. Both `CONFIG_REVISION_SYNC_ENABLED` and
 `STREAM_COST_BREAKER_ENABLED` default off when unset, and the Container receives
 explicitly configured flag values through `collectContainerEnv`.
 
-An earlier Container checks the exact account field set. Sending the three new
+A pre-expansion Container checks the exact account field set. Sending the three new
 policy fields to it produces `account_storage_unavailable`. Version negotiation
 therefore preserves its earlier row shape only for accounts whose current policy
 is verified and unrestricted. An expansion reader receives controlled rows and refuses their provider dispatch.
@@ -159,9 +159,20 @@ with realistic metadata and defaulted policy columns, and runs `/v1/models` and
 `/v1/chat/completions` through registered Flask routes over HTTP to the main
 Worker's real account handler. Only the external provider is mocked. It also
 checks current controls, revocation and legacy reads/writes. Matching current
-runtimes succeed with both flags unset; this does not establish the exact version
-combination or error cause in a historical deployment without its logs or
-Container fingerprint.
+runtimes succeed with both flags unset. Subsequent real staging reproduced both
+incident errors as mixed-version failures: the original new Worker with an old
+Container returned `account_storage_unavailable`, and the reverse mix returned
+`key_data_controls_unavailable`. Matched original runtimes were healthy on 45 of
+46 probes. The first re-land fixed only the forward mix; its reverse rollback
+still interrupted chat for roughly 50–55 seconds. See the expanded A/B matrix and
+[staging/rollback guidance](key-controls-rollout.md#staging-evidence-and-management-compatibility).
+
+Reading an account for login, session refresh or listing is management, not provider
+dispatch. These reads decode both expansion/enforcement policies without requiring
+main-Worker enforcement capability. A restricted row cannot disable everyone else's
+sign-in by poisoning a full account-cache reload. The Container checks the current
+main account-RPC capability only when admitting a controlled provider dispatch;
+management access never grants generation authority.
 
 The default Wrangler build runs `scripts/key_data_preflight.mjs --deploy` before
 upload. It checks the D1 binding and migration ledger, actual policy columns,
@@ -176,7 +187,9 @@ CI uses `scripts/check_worker_bundle.mjs` after that check. The wrapper removes
 the release build command only from a temporary config and always passes
 `--dry-run`; it cannot upload or attest live readiness.
 
-Workers Builds can deploy the main Worker and Container without waiting for the
+Disconnect automatic promotion in Workers Builds, or use `wrangler versions upload`.
+Its token permissions for the preflight remain untested. Workers Builds can deploy
+the main Worker and Container without waiting for the
 GitHub deploy workflow, which owns the private Knowledge Worker. First deploy
 expansion everywhere and verify each component's capability. Enforcement can then
 roll independently: NULL-policy traffic keeps working with expansion peers, while

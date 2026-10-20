@@ -43,6 +43,10 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
       await db.prepare(`INSERT INTO control_users(username,api_key_hash,api_key_prefix,scopes,is_admin,created_at)
         VALUES('synthetic',?,?,'chat,models,knowledge:read,knowledge:manage',0,'2026-10-01T00:00:00Z')`)
         .bind(`scrypt:32768:8:1$syntheticsalt$${digest}`, "mllm_mllm_syn").run();
+      // A restricted neighbour must not interrupt a different NULL-policy account.
+      await db.prepare(`INSERT INTO control_users(username,api_key_hash,api_key_prefix,scopes,is_admin,created_at,official_only)
+        VALUES('synthetic-neighbour',?,'synthetic-other-prefix','chat',0,'2026-10-01T00:00:00Z',1)`)
+        .bind(`scrypt:32768:8:1$syntheticsalt$${digest}`).run();
       const settings = collectContainerEnv({ ...config.vars, ADMIN_API_KEY: "synthetic-bootstrap-long-key",
         FLASK_SECRET_KEY: "synthetic-session-long-enough", JWT_SECRET: "synthetic-jwt-long-enough", OPENROUTER_API_KEY: "synthetic-operator" });
       for (const container of versions) for (const privateRef of versions) for (const [index, policy] of policies.entries()) {
@@ -68,14 +72,31 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
             if (!health) forwarded++;
             const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
               (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), container,
-              JSON.stringify([[path, health ? "get" : "post"]])],
+              JSON.stringify([[path, health || request.method === "GET" ? "get" : "post"]])],
             { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
             const row = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse).at(-1);
             containerDispatches += row.dispatches;
             if (row.dispatches) submittedPreferences = row.preferences;
             return Response.json(row.body, { status: row.status });
           } }) };
+          // Read the complete account set with real login/session/CSRF handling.
+          // Neither the current user's policy nor another user's may disable management.
+          const { stdout: management, stderr: managementErrors } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
+            (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), container,
+            JSON.stringify([["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"]])],
+          { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
+          const results = management.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
+          assert.deepEqual(results.map(row => row.status), [302, 302, 200], managementErrors);
+          assert.ok(results.every(row => row.dispatches === 0));
+          assert.deepEqual(await db.prepare("SELECT official_only,forced_provider_preferences FROM control_users WHERE username='synthetic'").first(), policy,
+            "Dashboard sign-in must preserve stored restrictions");
           const worker = mains.get(main);
+          if (index === 0) {
+            const models = await worker.fetch(new Request("https://gateway.example/v1/models", {
+              headers: { authorization: `Bearer ${key}` },
+            }), env, { waitUntil() {} });
+            assert.equal(models.status, 200, "unrestricted models during rollback: " + await models.clone().text());
+          }
           const chat = await worker.fetch(new Request("https://gateway.example/v1/chat/completions", {
             method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
             body: JSON.stringify({ model: "openrouter:example", messages: [{ role: "user", content: "synthetic" }] }),

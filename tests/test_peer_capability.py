@@ -1,4 +1,4 @@
-"""Controlled Container reads require the current main's enforcement capability."""
+"""Management reads are independent of current dispatch enforcement authority."""
 import pytest
 
 from error_handlers import APIError
@@ -26,12 +26,18 @@ def test_current_main_capability_is_required_only_for_controlled_rows(controls, 
 
     monkeypatch.setattr(user_store, "request_private_intelligence", rpc)
     monkeypatch.setattr(user_store, "READ_RETRY_DELAY_SECONDS", 0)
+    # Account decoding is management, even when another account is restricted.
+    assert user_store.get_user("synthetic")["username"] == "synthetic"
+    assert calls == ["get"]
+    from services.auth_service import AuthService
+    from services.provider_dispatch import current_principal
+    monkeypatch.setenv("AUTH_STORAGE_BACKEND", "d1")
+    monkeypatch.setattr(AuthService, "_load_user_by_username", lambda _: row)
     controlled = controls["official_only"] or controls["forced_provider_preferences"] is not None
     if controlled and capability != {"protocol": 2, "enforcement": True}:
         with pytest.raises(APIError) as error:
-            user_store.get_user("synthetic")
+            current_principal({"username": "synthetic"})
         assert error.value.status_code == 503
     else:
-        assert user_store.get_user("synthetic")["username"] == "synthetic"
-    if not controlled:
-        assert calls == ["get"]
+        assert current_principal({"username": "synthetic"})["username"] == "synthetic"
+    assert calls == (["get", "capabilities"] if controlled else ["get"])

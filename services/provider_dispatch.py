@@ -65,6 +65,12 @@ def current_principal(reference=None):
         if reference.get("api_key_prefix") and reference["api_key_prefix"] != user.get("api_key_prefix"):
             raise unavailable()
         policy = verify(user.get("data_policy"))
+        if has_data_controls(policy) and not str(reference["username"]).startswith("integration:"):
+            from services import user_store
+            if user_store.using_d1():
+                from services.peer_capability import require_enforcement
+                capability = user_store.request_private_intelligence({"operation": "capabilities"}, endpoint="users")
+                require_enforcement(capability.get("key_controls"))
         return {**user, **policy}
     except Exception:
         raise unavailable() from None
