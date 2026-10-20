@@ -20,6 +20,9 @@ def account(policy):
 @pytest.mark.parametrize("controls", [
     {"official_only": None, "forced_provider_preferences": None},
     {"official_only": 1, "forced_provider_preferences": None},
+    {"official_only": 0, "forced_provider_preferences": None},
+    {"official_only": False, "forced_provider_preferences": None},
+    {"official_only": None, "forced_provider_preferences": '{}'},
     {"official_only": None, "forced_provider_preferences": '{"data_collection":"deny"}'},
 ])
 @pytest.mark.parametrize("provider", ["openai", "gemini", "openrouter", "linkapi", "knowledge", "cloudflare"])
@@ -28,7 +31,7 @@ def test_future_policies_refuse_before_every_transport_but_nulls_keep_working(co
     monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda _: current)
     send = Mock()
     with dispatch_as({"username": "synthetic"}):
-        if controls["official_only"] or controls["forced_provider_preferences"] is not None:
+        if controls["official_only"] is not None or controls["forced_provider_preferences"] is not None:
             with pytest.raises(APIError) as error:
                 provider_http(provider, "POST", "https://provider.example/generate", transport=send)
             assert error.value.status_code == 503
@@ -73,6 +76,9 @@ def test_malformed_current_policy_never_dispatches(policy, monkeypatch):
 
 
 @pytest.mark.parametrize("controls", [{"official_only": 1, "forced_provider_preferences": None},
+                                     {"official_only": 0, "forced_provider_preferences": None},
+                                     {"official_only": False, "forced_provider_preferences": None},
+                                     {"official_only": None, "forced_provider_preferences": '{}'},
                                      {"official_only": None, "forced_provider_preferences": '{"data_collection":"deny"}'}])
 def test_media_and_both_shadow_dispatches_refuse_future_controls(controls, monkeypatch):
     from services.media_storage import fetch_public
@@ -144,3 +150,17 @@ def test_expansion_boundary_keeps_explicit_python_redirect_mode(redirects, null_
     send = Mock()
     provider_http("xai", "GET", "https://api.x.ai/v1/videos/synthetic", transport=send, allow_redirects=redirects)
     assert send.call_args.kwargs["allow_redirects"] is redirects
+
+
+@pytest.mark.parametrize("controls", [
+    {"official_only": 0, "forced_provider_preferences": None},
+    {"official_only": False, "forced_provider_preferences": None},
+    {"official_only": None, "forced_provider_preferences": {}},
+    {"official_only": None, "forced_provider_preferences": '{}'},
+])
+def test_non_null_policies_never_enter_shadow_sampling(controls):
+    from services.shadow_eval_contract import eligible, make_sample
+    user = {"username": "synthetic", "shadow_eval_rate": 0.2, **controls}
+    payload = {"model": "auto:synthetic", "messages": [{"role": "user", "content": "synthetic"}]}
+    assert not eligible(payload, user, "/v1/chat/completions")
+    assert make_sample(payload, user, "auto:synthetic", {"content": "synthetic"}, "openai:synthetic", 1, {}) is None

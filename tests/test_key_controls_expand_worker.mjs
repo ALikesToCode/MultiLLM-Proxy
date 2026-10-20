@@ -18,6 +18,8 @@ const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.
 const states = [
   { official_only: null, forced_provider_preferences: null },
   { official_only: 1, forced_provider_preferences: null },
+  { official_only: 0, forced_provider_preferences: null },
+  { official_only: null, forced_provider_preferences: '{}' },
   { official_only: null, forced_provider_preferences: '{"data_collection":"deny"}' },
 ];
 
