@@ -884,8 +884,8 @@ npm run test:worker
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a Pull Request.
 
 ## License
 
-This project is source-available: free for personal non-commercial use by individuals; any organisation or commercial use needs written approval. See [LICENSE](LICENSE) for the terms and [LICENSING.md](LICENSING.md) for who needs approval and how to ask.
+Source-available software, free for personal, non-commercial use; commercial and organisational licensing available by written permission. See [LICENSE](LICENSE) for the terms, [LICENSING.md](LICENSING.md) for guidance, [LICENSE-MIT](LICENSE-MIT) for earlier versions, and [CONTRIBUTING.md](CONTRIBUTING.md) for contributions.
