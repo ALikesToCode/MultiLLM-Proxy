@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { readFileSync } from "node:fs";
 import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";

@@ -1,4 +1,3 @@
-import { controlNetwork } from "./dispatch-network.mjs";
 /**
  * Cloudflare Access single sign-on for the dashboard. On the sign-in path only, the Worker
  * verifies the Access application token (RS256 against the team's published keys, then
@@ -121,10 +120,9 @@ async function boundedText(response, maxBytes) {
 }
 
 async function fetchSigningKeys(teamDomain, fetchImpl) {
-  const url = `${teamDomain}/cdn-cgi/access/certs`;
-  const response = await controlNetwork(url, () => fetchImpl(url, {
+  const response = await fetchImpl(`${teamDomain}/cdn-cgi/access/certs`, {
     headers: { accept: "application/json" }, redirect: "manual", signal: AbortSignal.timeout(KEYS_TIMEOUT_MS),
-  }));
+  });
   if (response.status !== 200) {
     void response.body?.cancel().catch(() => {});
     throw new Error(`Access keys answered HTTP ${response.status}`);

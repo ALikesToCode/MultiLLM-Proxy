@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { MemoStore } from "../worker/knowledge/memo-store.mjs";

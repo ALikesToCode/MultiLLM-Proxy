@@ -1,16 +1,9 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
-async function loadWorkerModule(...args) {
-  const module = await rawLoadWorkerModule(...args);
-  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
-    return module.default.fetch(request, policyFixtureEnv(env), ctx);
-  } } };
-}
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { canonicalContract, canonicalValue, contractDigest, catalogueDigest, discoveryContract, digestsEnabled, checkContractPin } from "../worker/knowledge/contract-drift.mjs";
 import { dispatchNative } from "../worker/knowledge/native.mjs";
-import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { generateIntegrationCredential } from "../scripts/intelligence_operator.mjs";
 import { fixture, principal } from "./knowledge_fixture.mjs";
 

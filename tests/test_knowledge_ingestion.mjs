@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { defaultPolicy } from "../worker/knowledge/policy.mjs";
 import { metered } from "../worker/knowledge/operations.mjs";

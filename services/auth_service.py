@@ -153,8 +153,6 @@ class AuthService:
             "expires_at": "TEXT",
             "secret_scan_mode": "TEXT",  # nosec B105 - a column type, not a password
             "shadow_eval_rate": "DOUBLE PRECISION",
-            "official_only": "INTEGER",
-            "forced_provider_preferences": "TEXT",
         }
         for column_name, column_definition in required_columns.items():
             if column_name not in columns:
@@ -195,9 +193,7 @@ class AuthService:
                 allowed_ips TEXT,
                 expires_at TEXT,
                 secret_scan_mode TEXT,
-                shadow_eval_rate DOUBLE PRECISION,
-                official_only INTEGER,
-                forced_provider_preferences TEXT
+                shadow_eval_rate DOUBLE PRECISION
             )
             """
         )
@@ -283,9 +279,7 @@ class AuthService:
 
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
-        from services.dispatch_policy import envelope
         return {
-            "data_policy": envelope(row),
             "username": row["username"],
             "api_key_hash": row["api_key_hash"],
             "api_key_prefix": row["api_key_prefix"],
@@ -317,7 +311,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                         FROM users
                         ORDER BY username
                         """)
@@ -342,7 +336,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                         FROM users
                         WHERE username = ?
                         """),
@@ -372,7 +366,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                         FROM users
                         WHERE api_key_prefix = ? AND revoked_at IS NULL
                         ORDER BY username
@@ -444,9 +438,9 @@ class AuthService:
                         username, api_key_hash, api_key_prefix, scopes, is_admin,
                         created_at, last_login, last_used_at, last_used_ip,
                         created_by, rotated_at, revoked_at, daily_budget_usd,
-                        monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
+                        monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(username) DO UPDATE SET
                         api_key_hash = excluded.api_key_hash,
                         api_key_prefix = excluded.api_key_prefix,
@@ -465,9 +459,7 @@ class AuthService:
                         allowed_ips = excluded.allowed_ips,
                         expires_at = excluded.expires_at,
                         secret_scan_mode = excluded.secret_scan_mode,
-                        shadow_eval_rate = excluded.shadow_eval_rate,
-                        official_only = excluded.official_only,
-                        forced_provider_preferences = excluded.forced_provider_preferences
+                        shadow_eval_rate = excluded.shadow_eval_rate
                     """,
                     (
                         username,
@@ -923,7 +915,6 @@ class AuthService:
             "rotated_at": serialize_datetime(user["rotated_at"]),
             "revoked_at": serialize_datetime(user["revoked_at"]),
             **key_controls.public(user),
-            "data_policy": user.get("data_policy"),
         }
 
     @staticmethod

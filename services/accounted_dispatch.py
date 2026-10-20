@@ -29,10 +29,6 @@ def release_outer_accounting() -> None:
 def accounted_dispatch(payload: dict, dispatch, *, kind: str, skip_rate: bool = False):
     user = getattr(g, "authenticated_user", None) or {}
     model = payload["model"]
-    from services.key_data_guards import model_permitted
-    if not model_permitted(user, model):
-        raise APIError("This API key cannot use this provider data class", 403,
-                       {"error": "provider_class_not_allowed"})
     if not key_controls.model_allowed(user, model):
         raise APIError("This API key is not allowed to use the subrequest model", 403,
                        payload={"error": "model_not_allowed"})

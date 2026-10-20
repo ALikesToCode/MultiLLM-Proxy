@@ -8,12 +8,6 @@ from unittest.mock import Mock, patch
 import requests
 
 
-
-import pytest
-from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
-
-pytestmark = pytest.mark.usefixtures("verified_transport_principal")
-
 class FakeSession:
     def __init__(self, responses):
         self.responses = list(responses)

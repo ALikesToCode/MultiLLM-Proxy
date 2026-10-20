@@ -8,7 +8,7 @@ const worker = (await loadWorkerModule()).default;
 for (const mode of ["off", "observe", "redact", "block"]) test(`direct edge provider ${mode}`, async () => {
   const events = [], bodies = [];
   const env = { ADMIN_API_KEY: "synthetic-bootstrap", OPENCODE_GO_API_KEY: "synthetic-upstream", OPENCODE_EDGE_FETCH: "true",
-    SECRET_SCAN_DEFAULT: mode, INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => ({ official_only: null, forced_provider_preferences: null }) }; } }; return { bind(...args) { events.push(args); return { run: async () => ({}) }; } }; } } };
+    SECRET_SCAN_DEFAULT: mode, INTELLIGENCE_DB: { prepare() { return { bind(...args) { events.push(args); return { run: async () => ({}) }; } }; } } };
   const original = globalThis.fetch;
   globalThis.fetch = async req => { bodies.push(await req.text()); return Response.json({ choices: [{ message: { content: "ok" } }] }); };
   let response;

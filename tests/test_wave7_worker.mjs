@@ -1,12 +1,3 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
-const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
-  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
-async function loadWorkerModule(...args) {
-  const module = await rawLoadWorkerModule(...args);
-  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
-    return module.default.fetch(request, policyFixtureEnv(env), ctx);
-  } } };
-}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -16,7 +7,7 @@ import { createCreditsLifecycle, CreditsAdmissionError } from "../worker/credits
 import { appendCredit, readCredits, contextOwner } from "../worker/credits-d1.mjs";
 import { handleTenantGovernanceRequest } from "../worker/tenant-governance-d1.mjs";
 import { handleReservationsRequest } from "../worker/reservations-d1.mjs";
-import { nativeGenerationFetch as rawNativeGenerationFetch, nativeGenerationSetup } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, nativeGenerationSetup } from "../worker/gateway-extensions.mjs";
 import { exactCacheIdentity } from "../worker/exact-generation-cache.mjs";
 import { semanticPartition } from "../worker/semantic-generation-cache.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
@@ -27,7 +18,7 @@ import { recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { tenantStorageKey } from "../worker/tenants-d1.mjs";
 import { retentionRequestId } from "../worker/retention-policy.mjs";
 import { USER_FIELDS } from "../worker/control-users-d1.mjs";
-import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { handleManagedStateRequest } from "../worker/managed-state-dispatch.mjs";
 
 const request = path => new Request(`http://intelligence.internal${path}`, {
@@ -57,7 +48,7 @@ function fixture(t, flags = {}) {
   for (const migration of ["0003_control_users.sql", "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql",
     "0017_control_revisions.sql", "0019_generation_cache.sql", "0020_usage_reservations.sql", "0023_idempotency.sql",
     "0024_context_pages.sql", "0026_semantic_cache.sql", "0028_responses_state.sql", "0033_tenant_hierarchy.sql", "0034_tenant_governance.sql",
-    "0035_saml_federation.sql", "0036_scim_provisioning.sql", "0037_credits_ledger.sql", "0038_payment_billing.sql", "0041_key_data_guards.sql", "0042_usage_token_details.sql"])
+    "0035_saml_federation.sql", "0036_scim_provisioning.sql", "0037_credits_ledger.sql", "0038_payment_billing.sql"])
     sql.exec(readFileSync(new URL(`../intelligence-migrations/${migration}`, import.meta.url), "utf8"));
   const operations = [];
   let failBatch = false;

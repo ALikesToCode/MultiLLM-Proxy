@@ -11,12 +11,6 @@ import requests
 from werkzeug.datastructures import MultiDict
 
 
-
-import pytest
-from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
-
-pytestmark = pytest.mark.usefixtures("verified_transport_principal")
-
 class RawPassthroughTest(unittest.TestCase):
     def setUp(self):
         self.original_env = os.environ.copy()

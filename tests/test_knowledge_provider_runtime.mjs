@@ -1,25 +1,23 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 async function runtime(t, outboundService) {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
-    import { withDispatchPrincipal } from "./worker/provider-dispatch.mjs";
-    import { policyStore } from "./tests/helpers/dispatch_fixture.mjs";
     import { requestJSON, jsonPost } from "./worker/knowledge/providers/transport.mjs";
     export default { async fetch() {
       try {
-        const result = await withDispatchPrincipal({ INTELLIGENCE_DB: policyStore() }, { authenticated: true, keyId: "fixture-reader" }, () => requestJSON("firecrawl", "scrape", "https://api.firecrawl.dev/v2/scrape",
+        const result = await requestJSON("firecrawl", "scrape", "https://api.firecrawl.dev/v2/scrape",
           jsonPost({ url: "https://docs.python.org/" }), {
             env: { FIRECRAWL_API_KEY: "synthetic-key" }, fetchImpl: fetch,
             invoke: (_provider, _operation, callback) => callback(),
-          }));
+          });
         return Response.json(result);
       } catch (error) { return Response.json({ code: error.code }, { status: 502 }); }
     }};
-  ` }, bundle: true, write: false, format: "esm", platform: "neutral", external: ["node:*"] });
-  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], script: bundle.outputFiles[0].text,
+  ` }, bundle: true, write: false, format: "esm", platform: "neutral" });
+  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, script: bundle.outputFiles[0].text,
     compatibilityDate: "2026-07-28", outboundService }));
   t.after(() => mf.dispose());
   return mf;

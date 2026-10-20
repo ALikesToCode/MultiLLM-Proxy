@@ -1,6 +1,5 @@
 """Local-only client tests with temporary libraries and a synthetic HTTP server."""
 
-from contextvars import copy_context
 import importlib.util
 import json
 from pathlib import Path
@@ -11,8 +10,6 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-
-from services.dispatch_network import control_network
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -156,8 +153,7 @@ def fake_server():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    with control_network(f"http://127.0.0.1:{server.server_port}"):
-        yield f"http://127.0.0.1:{server.server_port}", received
+    yield f"http://127.0.0.1:{server.server_port}", received
     server.shutdown()
     server.server_close()
     thread.join()
@@ -239,9 +235,7 @@ def test_hook_real_rest_find_uses_fast_limit_three(fake_server, monkeypatch):
     base_url, received = fake_server
     monkeypatch.setenv("MULTILLM_BASE_URL", base_url)
     monkeypatch.setenv("MULTILLM_KNOWLEDGE_API_KEY", "synthetic-hook-key")
-    context = copy_context()
-    result = hook.hint({"prompt": "Test regression behavior"},
-                       fetcher=lambda *args, **kwargs: context.run(hook.fetch, *args, **kwargs))
+    result = hook.hint({"prompt": "Test regression behavior"})
     assert "Relevant skills: Testing" in result["hookSpecificOutput"]["additionalContext"]
     assert received == [{"query": "Test regression behavior", "mode": "fast", "limit": 3, "min_confidence": "high"}]
 

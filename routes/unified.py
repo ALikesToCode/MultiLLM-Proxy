@@ -101,8 +101,6 @@ RAW_CHAT_PASSTHROUGH_PROVIDERS = RAW_PASSTHROUGH_PROVIDERS
 
 
 def _resolve_enabled_model(app, model_id: str):
-    from services.key_data_guards import require_provider
-    require_provider(model_id.split(":", 1)[0])
     check_managed_candidate(model_id)
     provider, provider_model = ModelRegistry.parse_model_id(model_id)
     adapter = get_adapter(provider, app.config["API_BASE_URLS"])
@@ -271,9 +269,7 @@ def validate_unified_chat_target(
     route = AutoRouteService.get_route(model_id)
     if route is None:
         raise APIError(f"Auto route not found: {model_id}", status_code=404)
-    from services.key_data_guards import eligible_models
-    eligible = eligible_models(route.candidates, getattr(g, "authenticated_user", None) or {})
-    for candidate in eligible:
+    for candidate in route.candidates:
         try:
             _validate_direct_chat_target(
                 app,

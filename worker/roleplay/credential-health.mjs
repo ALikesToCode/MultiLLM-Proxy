@@ -1,4 +1,3 @@
-import { providerFetch } from "../provider-dispatch.mjs";
 import { buildProviderHeaders } from "./config.mjs";
 
 const DEFINITE_KEY_FAILURES = new Set([401, 402, 403, 429]);
@@ -53,13 +52,12 @@ async function probeCredential(candidate, env, settings, signal) {
     settings.nanogptKeyCheckTimeoutMs,
   );
   try {
-    return await providerFetch(candidate.provider, candidate.catalogEndpoint, {
+    return await fetch(candidate.catalogEndpoint, {
       method: "GET",
       headers: buildProviderHeaders(candidate, env),
       redirect: "manual",
       signal: controller.signal,
-    }, { env, unsupportedPreferences: true, authority: { authenticated: true, keyId: env.ADMIN_USERNAME || "admin" },
-      send: checked => fetch(checked.url, { method: checked.method, headers: checked.headers, redirect: checked.redirect, signal: checked.signal }) });
+    });
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", forwardAbort);

@@ -10,12 +10,6 @@ import requests
 from flask import Response
 
 
-
-import pytest
-from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
-
-pytestmark = pytest.mark.usefixtures("verified_transport_principal")
-
 class OpenCodeProviderRouteTest(unittest.TestCase):
     def setUp(self):
         self.original_env = os.environ.copy()
@@ -499,11 +493,6 @@ class ProxyServiceStreamingNormalizationTest(unittest.TestCase):
             sys.modules.pop(module_name, None)
 
         self.proxy_module = importlib.import_module("services.proxy_service")
-        from services.dispatch_policy import envelope
-        store = patch("services.auth_service.AuthService._load_user_by_username", return_value={
-            "username": "synthetic-transport", "data_policy": envelope({"official_only": None, "forced_provider_preferences": None})})
-        store.start()
-        self.addCleanup(store.stop)
 
     def tearDown(self):
         os.environ.clear()

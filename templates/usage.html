@@ -83,7 +83,7 @@
         <header class="panel__header"><div><h2 id="usage-models-heading">By model</h2><p>The model that served each request; automatic routes show their selected candidate.</p></div></header>
         <div class="table-scroll">
             <table class="data-table">
-                <thead><tr><th scope="col">Model</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Tokens in / out</th><th scope="col" class="numeric">Cache hit %</th><th scope="col" class="numeric">Reasoning tokens</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
+                <thead><tr><th scope="col">Model</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Tokens in / out</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
                 <tbody id="usage-models"></tbody>
             </table>
         </div>
@@ -94,7 +94,7 @@
         <header class="panel__header"><div><h2 id="usage-keys-heading">By key</h2><p>Select a key to see its budget and controls.</p></div></header>
         <div class="table-scroll">
             <table class="data-table">
-                <thead><tr><th scope="col">Key</th><th scope="col" class="numeric">Cache hit %</th><th scope="col" class="numeric">Reasoning tokens</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
+                <thead><tr><th scope="col">Key</th><th scope="col" class="numeric">Requests</th><th scope="col" class="numeric">Errors</th><th scope="col" class="numeric">Cost (USD)</th><th scope="col" class="numeric">p50 ms</th><th scope="col" class="numeric">p95 ms</th></tr></thead>
                 <tbody id="usage-keys"></tbody>
             </table>
         </div>
@@ -104,5 +104,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/usage.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/usage.js', v='1') }}"></script>
 {% endblock %}

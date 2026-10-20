@@ -3,7 +3,7 @@ import { lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { handleIntelligenceAuthRequest } from "../worker/intelligence-auth-d1.mjs";
 import {
   generateIntegrationCredential, hashIntegrationKey, openRemoteDatabase, runOperator,

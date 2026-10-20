@@ -11,7 +11,7 @@ const millis = value => Math.min(86_400_000, Math.max(0, Math.round(value)));
 
 export function createUsageObserver(sse = false, onToken = () => {}) {
   let carry = new Uint8Array(), data = [], dataBytes = 0, oversized = false, eventOversized = false;
-  let usage = { input_tokens: null, output_tokens: null, cached_input_tokens: null, reasoning_tokens: null }, completed = false, failed = false;
+  let usage = { input_tokens: null, output_tokens: null }, completed = false, failed = false;
   const consume = text => {
     if (text.trim() === "[DONE]") { completed = true; return; }
     let value;
@@ -19,14 +19,7 @@ export function createUsageObserver(sse = false, onToken = () => {}) {
     if (!value || typeof value !== "object") return;
     const observed = value.usage ?? value.response?.usage ?? value.message?.usage;
     if (observed && typeof observed === "object") {
-      let input = component(observed.prompt_tokens ?? observed.input_tokens);
-      const cached = component(observed.prompt_tokens_details?.cached_tokens ?? observed.input_tokens_details?.cached_tokens ?? observed.cache_read_input_tokens);
-      const reasoning = component(observed.completion_tokens_details?.reasoning_tokens ?? observed.output_tokens_details?.reasoning_tokens);
-      if (cached !== null) usage.cached_input_tokens = cached;
-      if (reasoning !== null) usage.reasoning_tokens = reasoning;
-      if (input !== null && (Object.hasOwn(observed, "cache_read_input_tokens") || Object.hasOwn(observed, "cache_creation_input_tokens"))) {
-        input += (cached ?? 0) + (component(observed.cache_creation_input_tokens) ?? 0);
-      }
+      const input = component(observed.prompt_tokens ?? observed.input_tokens);
       const output = component(observed.completion_tokens ?? observed.output_tokens);
       if (input !== null) usage.input_tokens = input;
       if (output !== null) usage.output_tokens = output;

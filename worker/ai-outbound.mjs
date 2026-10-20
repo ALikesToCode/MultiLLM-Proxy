@@ -1,4 +1,3 @@
-import { bindingPrincipal, withDispatchPrincipal, providerFetch, providerOperation, dispatchFailure, DispatchError } from "./provider-dispatch.mjs";
 /**
  * Cloudflare AI for the Container, reachable only through its private outbound handler
  * (`http://ai.internal`). Third-party models (OpenAI GPT Image, Google Veo) run through
@@ -95,7 +94,7 @@ async function imageData(image, responseFormat) {
   if (typeof image !== "string" || !image) return null;
   if (/^https:\/\//i.test(image)) {
     if (responseFormat === "url") return { url: image };
-    const response = await providerFetch("cloudflare", image, { signal: AbortSignal.timeout(30000) });
+    const response = await fetch(image, { signal: AbortSignal.timeout(30000) });
     const length = Number(response.headers.get("content-length") ?? 0);
     if (!response.ok || length > MAX_FETCHED_IMAGE_BYTES) throw new Error(`Image download failed with HTTP ${response.status}`);
     const bytes = await response.arrayBuffer();
@@ -107,7 +106,7 @@ async function imageData(image, responseFormat) {
 }
 
 async function run(env, model, input) {
-  const response = await providerOperation("cloudflare", () => env.AI.run(model, input, { gateway: { id: env.AI_GATEWAY_ID || "default" } }));
+  const response = await env.AI.run(model, input, { gateway: { id: env.AI_GATEWAY_ID || "default" } });
   return isRecord(response?.result) ? response.result : response;
 }
 
@@ -159,7 +158,7 @@ async function speech(env, body) {
   if (!encoding) return failure("invalid_request", "Unsupported response_format.", 400);
   const input = { text: body.input, speaker: AURA_SPEAKERS.has(body.voice) ? body.voice : "luna", encoding,
     ...(container ? { container } : {}) };
-  const result = await providerOperation("cloudflare", () => env.AI.run(body.model, input, { gateway: { id: env.AI_GATEWAY_ID || "default" } }));
+  const result = await env.AI.run(body.model, input, { gateway: { id: env.AI_GATEWAY_ID || "default" } });
   let audio = null;
   if (result instanceof ReadableStream) audio = result;
   else if (result instanceof Response) audio = result.body;
@@ -196,7 +195,7 @@ async function generateVideo(env, body) {
   return Response.json({ status: "completed", video_url: result.video, model: body.model }, { headers: { "cache-control": "no-store" } });
 }
 
-async function runAiOutbound(request, env) {
+export async function handleAiOutbound(request, env) {
   const url = new URL(request.url);
   if (url.origin !== "http://ai.internal" || url.search || url.hash || url.username || url.password || request.method !== "POST") {
     return failure("not_found", "Unknown Cloudflare AI operation.", 404);
@@ -223,15 +222,8 @@ async function runAiOutbound(request, env) {
     if (url.pathname === "/v1/videos/generations") return await generateVideo(env, body);
     return failure("not_found", "Unknown Cloudflare AI operation.", 404);
   } catch (error) {
-    if (error instanceof DispatchError) return dispatchFailure(error);
     const [code, status] = refusal(error);
     logFailure("cloudflare_ai_failed", error, { model: typeof body.model === "string" ? body.model.slice(0, 80) : "unknown", code });
     return failure(code, "Cloudflare AI could not complete the generation.", status);
   }
-}
-
-export async function handleAiOutbound(request, env) {
-  if (new URL(request.url).origin !== "http://ai.internal") return failure("not_found", "Unknown Cloudflare AI operation.", 404);
-  try { return await withDispatchPrincipal(env, bindingPrincipal(request), () => runAiOutbound(request, env)); }
-  catch (error) { return dispatchFailure(error); }
 }

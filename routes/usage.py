@@ -34,7 +34,7 @@ def _range(days: int) -> tuple[str, str]:
 
 
 def _combined(rows: list) -> dict:
-    totals = {name: 0 for name in usage_store.SUMMARY_COLUMNS}
+    totals = {name: 0 for name in usage_store.TOTAL_COLUMNS[:7]}
     buckets = [0] * len(usage_store.BUCKET_COLUMNS)
     for row in rows:
         for name in totals:
@@ -80,7 +80,7 @@ def register_usage_routes(app, csrf) -> None:
         if workspace:
             scoped = workspace["workspace"]
             return jsonify({"object": "usage", "principal": principal, "key_prefix": user.get("api_key_prefix"),
-                "controls": {name: controls[name] for name in ("allowed_models", "allowed_ips", "expires_at", "official_only", "forced_provider_preferences")},
+                "controls": {name: controls[name] for name in ("allowed_models", "allowed_ips", "expires_at")},
                 "budget": {"daily_budget_usd": user.get("daily_budget_usd"),
                            "monthly_budget_usd": user.get("monthly_budget_usd")},
                 "history_available": True, "range": scoped["range"], "daily": scoped["daily"], "models": scoped["models"],
@@ -92,7 +92,7 @@ def register_usage_routes(app, csrf) -> None:
             "principal": principal,
             "key_prefix": user.get("api_key_prefix"),
             "budget": BudgetService.status(user),
-            "controls": {name: controls[name] for name in ("allowed_models", "allowed_ips", "expires_at", "official_only", "forced_provider_preferences")},
+            "controls": {name: controls[name] for name in ("allowed_models", "allowed_ips", "expires_at")},
             **usage_history(principal, _days()),
             **workspace,
         })

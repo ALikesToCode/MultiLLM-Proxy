@@ -1,6 +1,5 @@
-import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { errorReply } from "../worker/knowledge/contracts.mjs";
 import { digest } from "../worker/knowledge/evidence.mjs";
@@ -61,7 +60,7 @@ function library(t) {
     catch (error) { db.exec("ROLLBACK"); throw error; }
   } };
   const files = new Map();
-  const env = { INTELLIGENCE_DB: policyStore(), KNOWLEDGE_SNAPSHOTS: { put: async (key, bytes) => files.set(key, bytes), delete: async () => {}, get: async key => {
+  const env = { KNOWLEDGE_SNAPSHOTS: { put: async (key, bytes) => files.set(key, bytes), delete: async () => {}, get: async key => {
     const bytes = files.get(key); return bytes && { arrayBuffer: async () => bytes.buffer };
   } } };
   return { env, store: new SkillsStore(storage, env) };
@@ -73,7 +72,7 @@ async function seed(store) {
     description: "Postgres patterns for this team", files: [{ path: "SKILL.md", content, sha256: await digest(content) }] }] });
 }
 
-const submit = (env, operation, payload, options) => dispatchKnowledge({ INTELLIGENCE_DB: policyStore(), ...env }, { version: 1, operation,
+const submit = (env, operation, payload, options) => dispatchKnowledge(env, { version: 1, operation,
   principal: { id: "synthetic-principal", scopes: ["knowledge:read"] }, payload }, options);
 
 test("discover merges marketplaces by repository, withholds flagged skills and reports every source", async t => {

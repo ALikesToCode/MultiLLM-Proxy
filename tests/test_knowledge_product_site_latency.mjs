@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { fixture, principal, request } from "./knowledge_fixture.mjs";
 

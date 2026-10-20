@@ -66,7 +66,6 @@ def load_env_choice(
 
 
 class Config:
-    GEMINI_DATA_TIER = os.environ.get("GEMINI_DATA_TIER", "free").strip().lower()
     FREE_ROUTE_EXTRA_PROVIDERS = os.environ.get('FREE_ROUTE_EXTRA_PROVIDERS', '')
     FREE_ROUTE_WORKERSAI_ACCOUNT_ID = os.environ.get('FREE_ROUTE_WORKERSAI_ACCOUNT_ID', '')
     FREE_ROUTE_FREE_TIER_PROVIDERS = os.environ.get('FREE_ROUTE_FREE_TIER_PROVIDERS', '')

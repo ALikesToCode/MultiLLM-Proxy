@@ -140,8 +140,6 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             ):
                 api_provider = "kimi-code"
                 raise APIError("Invalid Kimi Code path", status_code=400)
-            from services.key_data_guards import require_provider
-            require_provider(api_provider)
             if api_provider not in app.config["API_BASE_URLS"]:
                 raise APIError(f"Unsupported API provider: {api_provider}", status_code=400)
             if api_provider == "linkapi" and any(delimiter in path for delimiter in "?#"):

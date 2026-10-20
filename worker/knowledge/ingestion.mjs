@@ -1,4 +1,3 @@
-import { dispatchContext, withDispatchPrincipal } from "../provider-dispatch.mjs";
 import { publicUrl } from "./contracts.mjs";
 import { createArtifact, normalizeSourceText } from "./evidence.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
@@ -25,9 +24,7 @@ const REFUSED_ERRORS = new Set(["provider_disabled", "allowance_exhausted", "led
 // false "Worker's code had hung" cancellation (cloudflare/workers-sdk#14959). Results cached
 // as objects by instances started before this change are still accepted.
 async function durableStep(step, name, config, callback) {
-  const state = dispatchContext();
-  const value = await step.do(name, config, () => withDispatchPrincipal(state?.env, state?.authority,
-    async () => JSON.stringify(await callback())));
+  const value = await step.do(name, config, async () => JSON.stringify(await callback()));
   return typeof value === "string" ? JSON.parse(value) : value;
 }
 

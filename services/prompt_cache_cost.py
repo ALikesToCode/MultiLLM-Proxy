@@ -89,12 +89,12 @@ class CacheObservation(UsageObservation):
             key in usage for key in ("cache_read_input_tokens", "cache_creation_input_tokens"))
         details = usage.get("prompt_tokens_details", usage.get("input_tokens_details"))
         details = details if isinstance(details, dict) else {}
-        raw = count(usage.get("input_tokens")) if anthropic else count(typed.input_tokens)
+        raw = count(typed.input_tokens)
         read = count(usage.get("cache_read_input_tokens")) if anthropic else count(details.get("cached_tokens"))
         write = count(usage.get("cache_creation_input_tokens")) if anthropic else count(details.get("cache_write_tokens", 0 if raw is not None or details else None))
         source = "anthropic" if anthropic else "openai" if raw is not None or details else "unknown"
         total = _sum((raw, read, write)) if anthropic else raw
-        return cls(total, count(typed.output_tokens), typed.basis, typed.provenance, raw, read, write, source, cached_input_tokens=typed.cached_input_tokens, reasoning_tokens=typed.reasoning_tokens)
+        return cls(total, count(typed.output_tokens), typed.basis, typed.provenance, raw, read, write, source)
 
     def merge(self, later: UsageObservation) -> CacheObservation:
         if not isinstance(later, CacheObservation):
@@ -110,8 +110,7 @@ class CacheObservation(UsageObservation):
         output = latest(self.output_tokens, later.output_tokens)
         known = any(v is not None for v in (raw, read, write, output))
         return CacheObservation(total, output, "provider" if known else "unknown", ("provider",) if known else (),
-                                raw, read, write, source, cached_input_tokens=read,
-                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens)
+                                raw, read, write, source)
 
 
 def buckets_from(usage: UsageObservation | None) -> dict:

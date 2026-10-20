@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { applyMigrations, migrationNames } from "./d1_migrations.mjs";
 

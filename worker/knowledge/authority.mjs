@@ -61,8 +61,7 @@ async function evictDiscovery(tx, sources) {
 
 async function createSource(tx, input, now, discovered = false) {
   const policy = await policyOf(tx);
-  const { dispatch_principal, ...sourceInput } = input;
-  const parsed = parseSource(sourceInput, policy);
+  const parsed = parseSource(input, policy);
   const id = await digest(`${parsed.url}\0${parsed.product}\0${parsed.version}`);
   const existing = await tx.get(`source:${id}`);
   if (existing && (discovered || existing.identity_confirmed)) return existing;
@@ -78,7 +77,6 @@ async function createSource(tx, input, now, discovered = false) {
     ? { ...existing, ...parsed, title: parsed.title || existing.title, identity_confirmed: true, revision: existing.revision + 1 }
     : { ...parsed, id, identity_confirmed: !discovered, revision: 1, fence: 0, current_artifact: null,
       created_at: new Date(now).toISOString(), last_checked_at: null };
-  if (dispatch_principal?.authenticated === true && typeof dispatch_principal.keyId === "string") source.dispatch_principal = dispatch_principal;
   await tx.put(`source:${id}`, source);
   // A new discovery has no revision yet, so no cached answer or excerpt depends on it.
   // Bumping here made every parallel query that discovered a source fail with corpus_changed.
@@ -140,9 +138,7 @@ async function enqueue(tx, input, now) {
     retainedByPolicy(artifact, await policyOf(tx));
     Object.assign(job, { status: "snapshot", artifact_id: artifact.id, index_key: artifact.index_key });
   }
-  const principal = source.dispatch_principal ?? input.dispatch_principal;
-  if (principal?.authenticated === true && typeof principal.keyId === "string") job.dispatch_principal = principal;
-  await tx.put(`source:${source.id}`, { ...source, ...(job.dispatch_principal ? { dispatch_principal: job.dispatch_principal } : {}), fence: job.fence });
+  await tx.put(`source:${source.id}`, { ...source, fence: job.fence });
   await tx.put(`job:${id}`, job);
   return job;
 }

@@ -16,7 +16,7 @@ export const LATENCY_BUCKETS = Object.freeze([250, 500, 1000, 2000, 4000, 8000, 
 const BUCKET_COLUMNS = [...LATENCY_BUCKETS.map(bound => `lat_le_${bound}`), "lat_gt_120000"];
 const GROUPS = Object.freeze({ day: "day", model: "model", principal: "principal" });
 const EVENT_COLUMNS = ["id", "at", "principal", "key_prefix", "kind", "endpoint", "requested_model", "selected_model",
-  "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id", "cached_input_tokens", "reasoning_tokens"];
+  "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id"];
 const ROW_FIELDS = EVENT_COLUMNS.slice(1);
 const MAX_BODY_BYTES = 262144;
 const MAX_ROWS = 500;
@@ -49,15 +49,14 @@ const APPLIED = "EXISTS (SELECT 1 FROM usage_batches WHERE id = ?2 AND token = ?
 const INSERT_EVENTS = `INSERT INTO usage_events (at, day, ${ROW_FIELDS.slice(1).join(", ")})
   SELECT ${field("at")}, substr(${field("at")}, 1, 10), ${ROW_FIELDS.slice(1).map(field).join(", ")}
   FROM json_each(?1) WHERE ${APPLIED}`;
-const TOTALS = ["requests", "errors", "input_tokens", "output_tokens", "cost_usd", "priced_requests", "latency_ms_total", ...BUCKET_COLUMNS, "cached_input_tokens", "reasoning_tokens"];
+const TOTALS = ["requests", "errors", "input_tokens", "output_tokens", "cost_usd", "priced_requests", "latency_ms_total", ...BUCKET_COLUMNS];
 const UPSERT_DAILY = `INSERT INTO usage_daily (day, principal, model, ${TOTALS.join(", ")})
   SELECT substr(${field("at")}, 1, 10) AS usage_day, ${field("principal")} AS usage_principal,
     COALESCE(${field("selected_model")}, ${field("requested_model")}, 'unknown') AS usage_model,
     COUNT(*), SUM(${field("status")} >= 400), COALESCE(SUM(${field("input_tokens")}), 0),
     COALESCE(SUM(${field("output_tokens")}), 0), COALESCE(SUM(${field("cost_usd")}), 0),
     SUM(${field("cost_usd")} IS NOT NULL), SUM(${field("latency_ms")}),
-    ${BUCKET_COLUMNS.map((_, index) => `SUM(${field("bucket")} = ${index})`).join(", ")},
-    COALESCE(SUM(${field("cached_input_tokens")}), 0), COALESCE(SUM(${field("reasoning_tokens")}), 0)
+    ${BUCKET_COLUMNS.map((_, index) => `SUM(${field("bucket")} = ${index})`).join(", ")}
   FROM json_each(?1) WHERE ${APPLIED}
   GROUP BY usage_day, usage_principal, usage_model
   ON CONFLICT(day, principal, model) DO UPDATE SET ${TOTALS.map(name => `${name} = ${name} + excluded.${name}`).join(", ")}`;
@@ -65,7 +64,7 @@ const SUMS = TOTALS.map(name => `SUM(${name}) AS ${name}`).join(", ");
 
 function summaryRow(group, row) {
   const result = { [group]: row[group] };
-  for (const name of [...TOTALS.slice(0, 7), "cached_input_tokens", "reasoning_tokens"]) result[name] = row[name] ?? 0;
+  for (const name of TOTALS.slice(0, 7)) result[name] = row[name] ?? 0;
   result.latency_buckets = BUCKET_COLUMNS.map(name => row[name] ?? 0);
   return result;
 }
@@ -204,7 +203,7 @@ export async function recordNativeUsage(env, event, ctx) {
   const row = { at: new Date().toISOString(), principal: organisationsEnabled(env) ? tenantStorageKey(event.principal, event.tenantContext) : event.principal, key_prefix: null,
     kind, endpoint: event.endpoint, requested_model: model, selected_model: model,
     status: event.status, latency_ms: event.duration_ms, input_tokens: event.input_tokens,
-    output_tokens: event.output_tokens, cached_input_tokens: event.cached_input_tokens ?? null, reasoning_tokens: event.reasoning_tokens ?? null, cost_usd: event.cost_usd, cost_basis: event.cost_basis,
+    output_tokens: event.output_tokens, cost_usd: event.cost_usd, cost_basis: event.cost_basis,
     request_id: event.requestId };
   if (!validRow(row)) throw new Error("Invalid native usage metadata");
   submitNativeEvent(env, event, ctx);

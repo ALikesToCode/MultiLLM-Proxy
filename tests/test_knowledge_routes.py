@@ -344,18 +344,15 @@ class FakeResponse:
 
 
 def test_private_transport_uses_one_fixed_submission(monkeypatch):
-    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda username: {"username": username,
-        "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}})
     monkeypatch.setenv("KNOWLEDGE_SERVICE_ENABLED", "true")
     with patch.object(knowledge_client.requests, "Session") as factory:
         session = factory.return_value.__enter__.return_value
-        session.request.return_value = FakeResponse({"version": 1, "result": {"status": "ok"}})
+        session.post.return_value = FakeResponse({"version": 1, "result": {"status": "ok"}})
         result = knowledge_client.dispatch("context", {"username": "reader", "scopes": ["knowledge:read", "chat"]}, {"query": "limits"})
     assert result == {"status": "ok"}
-    assert session.request.call_count == 1
-    assert session.request.call_args.kwargs["method"] == "POST"
-    assert session.request.call_args.kwargs["url"] == "http://knowledge.internal/v1/dispatch"
-    arguments = session.request.call_args.kwargs
+    assert session.post.call_count == 1
+    assert session.post.call_args.args == ("http://knowledge.internal/v1/dispatch",)
+    arguments = session.post.call_args.kwargs
     assert arguments["allow_redirects"] is False
     assert session.trust_env is False
     assert "Authorization" not in arguments["headers"]
@@ -454,15 +451,13 @@ def test_alexandria_mcp_surfaces_unknown_cost_as_tool_error(app, keys):
 
 
 def test_alexandria_private_operation_is_allowlisted(monkeypatch):
-    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda username: {"username": username,
-        "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}})
     monkeypatch.setenv("KNOWLEDGE_SERVICE_ENABLED", "true")
     with patch.object(knowledge_client.requests, "Session") as factory:
         session = factory.return_value.__enter__.return_value
-        session.request.return_value = FakeResponse({"version": 1, "result": {"tools": [], "cost": {"credits": 0, "state": "confirmed"}}})
+        session.post.return_value = FakeResponse({"version": 1, "result": {"tools": [], "cost": {"credits": 0, "state": "confirmed"}}})
         result = knowledge_client.dispatch("alexandria.search", {"username": "reader", "scopes": ["knowledge:read"]}, {"query": "podcasts"})
     assert result["cost"]["credits"] == 0
-    assert json.loads(session.request.call_args.kwargs["data"])["operation"] == "alexandria.search"
+    assert json.loads(session.post.call_args.kwargs["data"])["operation"] == "alexandria.search"
 
 
 def test_provider_tools_forward_native_arguments_over_mcp_and_rest(app, keys):

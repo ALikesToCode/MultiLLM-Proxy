@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { handleIntelligenceStoreRequest } from "../worker/intelligence-d1.mjs";
 
 const source = await readFile(new URL("../worker/intelligence-d1.mjs", import.meta.url), "utf8");

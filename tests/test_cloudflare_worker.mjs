@@ -1,4 +1,3 @@
-import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -6,10 +5,7 @@ import test from "node:test";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const workerModule = await loadWorkerModule();
-const worker = { ...workerModule.default, fetch(request, env, ctx) {
-  return workerModule.default.fetch(request, new URL(request.url).pathname === "/ready" ? env
-    : { INTELLIGENCE_DB: policyStore(), ...env }, ctx);
-} };
+const worker = workerModule.default;
 const { MultiLLMProxyContainer } = workerModule;
 
 function makeEnv(fetchImpl, envOverrides = {}) {

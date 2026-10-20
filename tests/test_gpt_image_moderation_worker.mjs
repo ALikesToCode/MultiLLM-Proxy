@@ -1,14 +1,7 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
-async function loadWorkerModule(...args) {
-  const module = await rawLoadWorkerModule(...args);
-  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
-    return module.default.fetch(request, policyFixtureEnv(env), ctx);
-  } } };
-}
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const worker = (await loadWorkerModule()).default;
 

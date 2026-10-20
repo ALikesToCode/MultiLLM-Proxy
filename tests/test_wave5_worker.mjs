@@ -1,26 +1,15 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
-const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
-  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
-async function loadWorkerModule(...args) {
-  const module = await rawLoadWorkerModule(...args);
-  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
-    return module.default.fetch(request, policyFixtureEnv(env), ctx);
-  } } };
-}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { nativeGenerationFetch as rawNativeGenerationFetch, nativeCacheHeader } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch, nativeCacheHeader } from "../worker/gateway-extensions.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { runScheduledMaintenance, scheduledMaintenanceEnabled } from "../worker/scheduled-maintenance.mjs";
 import { ObservabilityExporter, setObservabilityExporter } from "../worker/observability-export.mjs";
 import { guardHash } from "../worker/semantic-generation-cache.mjs";
 import { prepareCanary } from "../worker/canary-assignment.mjs";
-import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
-import { makeRoleplayEnv as rawMakeRoleplayEnv, roleplayRequest, handleRoleplayEdgeRequest, withGlobalFetch, completionResponse } from "./helpers/roleplay_fixture.mjs";
-
-const makeRoleplayEnv = overrides => rawMakeRoleplayEnv(policyFixtureEnv(overrides));
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { makeRoleplayEnv, roleplayRequest, handleRoleplayEdgeRequest, withGlobalFetch, completionResponse } from "./helpers/roleplay_fixture.mjs";
 
 const route = "/codex-easy/v1/chat/completions";
 const authority = { route, provider: "codex-easy", principal: { id: "admin", keyHash: "a".repeat(64) } };
@@ -98,10 +87,8 @@ test("observability alone flushes content-free native observations through waitU
   const waits = [], exported = [], env = { OBSERVABILITY_EXPORTERS_JSON: JSON.stringify([{ type: "langfuse", endpoint: "https://collector.invalid/ingest",
     allowed_origins: ["https://collector.invalid"], credential_env: "FIXTURE_EXPORT_CREDENTIAL" }]), FIXTURE_EXPORT_CREDENTIAL: "synthetic" };
   const exporter = new ObservabilityExporter(env, { transport: async (_url, options) => { exported.push(options.body); return new Response(null, { status: 200 }); } });
-  const guardedEnv = policyFixtureEnv(env);
-  setObservabilityExporter(guardedEnv, exporter);
-  const res = await rawNativeGenerationFetch(request(), guardedEnv, { waitUntil: promise => waits.push(promise) },
-    { authenticated: true, ...authority }, response);
+  setObservabilityExporter(env, exporter);
+  const res = await nativeGenerationFetch(request(), env, { waitUntil: promise => waits.push(promise) }, authority, response);
   assert.equal(await res.text(), complete); await Promise.all(waits);
   assert.equal(exported.length, 1); assert.doesNotMatch(exported[0], /Explain caching|fixture|placeholder/);
   assert.equal(exporter.status().accepted, 1);
@@ -134,7 +121,7 @@ test("semantic maintenance uses at most three bounded pages and is off by defaul
 
 function durableFixture(t) {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
-  for (const name of ["0003_control_users", "0005_auto_routes", "0007_usage_ledger", "0041_key_data_guards", "0042_usage_token_details", "0019_generation_cache",
+  for (const name of ["0003_control_users", "0005_auto_routes", "0007_usage_ledger", "0019_generation_cache",
     "0020_usage_reservations", "0024_context_pages", "0025_canary_traffic", "0026_semantic_cache"]) {
     sql.exec(readFileSync(new URL(`../intelligence-migrations/${name}.sql`, import.meta.url), "utf8"));
   }

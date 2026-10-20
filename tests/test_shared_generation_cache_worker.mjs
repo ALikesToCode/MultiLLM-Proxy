@@ -1,12 +1,3 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
-const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
-  request, policyFixtureEnv(env), ctx, { authenticated: true, keyId: authority?.principal?.id ?? "admin", ...authority }, ...rest);
-async function loadWorkerModule(...args) {
-  const module = await rawLoadWorkerModule(...args);
-  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
-    return module.default.fetch(request, policyFixtureEnv(env), ctx);
-  } } };
-}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -14,16 +5,14 @@ import { DatabaseSync } from "node:sqlite";
 import { GenerationCacheD1, cleanupGenerationCache, CACHE_PREFIX } from "../worker/generation-cache-d1.mjs";
 import { generationCacheSettings, exactCacheIdentity, eligibleRequest, prepareNativeCache } from "../worker/exact-generation-cache.mjs";
 import { completeCacheBody } from "../worker/generation-cache-d1.mjs";
-import { nativeGenerationFetch as rawNativeGenerationFetch } from "../worker/gateway-extensions.mjs";
-import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { nativeGenerationFetch } from "../worker/gateway-extensions.mjs";
+import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { handleControlStateRequest } from "../worker/control-state-d1.mjs";
 
 const MIGRATION = "0019_generation_cache.sql";
 function database() {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL(`../intelligence-migrations/${MIGRATION}`, import.meta.url), "utf8"));
-  for (const file of ["0003_control_users.sql", "0041_key_data_guards.sql"])
-    db.exec(readFileSync(new URL(`../intelligence-migrations/${file}`, import.meta.url), "utf8"));
   const execute = (sql, args) => {
     const numbered = /\?[1-9]/.test(sql);
     const statement = db.prepare(sql.replace(/\?(\d+)/g, (_, number) => `$v${number}`));

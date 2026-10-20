@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";
 import { createArtifact, normalizeSourceText, packEvidence, validateChunk, versionEvidence } from "../worker/knowledge/evidence.mjs";
 import { parseQuery, publicHost, publicUrl } from "../worker/knowledge/contracts.mjs";
@@ -22,7 +22,7 @@ const bundled = await build({ stdin: { resolveDir: process.cwd(), sourcefile: "k
     }
   }
   export default { fetch(request, env) { return env.CATALOGUE.get(env.CATALOGUE.idFromName('personal')).fetch(request); } };
-` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"], write: false });
+` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers"], write: false });
 
 function enabledPolicy(limit = 10) {
   const { revision, ...policy } = defaultPolicy();
@@ -34,7 +34,7 @@ function enabledPolicy(limit = 10) {
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "knowledge-authority-"));
-  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], compatibilityDate: "2026-07-28",
+  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28",
     script: bundled.outputFiles[0].text, resourcePersistencePath: directory,
     durableObjects: { CATALOGUE: { className: "Catalogue", useSQLite: true } } }));
   let mf = create();
@@ -71,13 +71,12 @@ test("SQLite Durable Object serializes concurrent reservations and survives reop
   })));
   assert.equal(attempts.filter(item => item.status === 200).length, 5);
   assert.equal(attempts.filter(item => item.status === 429).length, 20);
-  const acceptedId = `query-${attempts.findIndex(item => item.status === 200)}`;
   await f.reopen();
   const usage = (await f.call("snapshot")).result.usage.find(item => item.provider === "firecrawl");
   assert.equal(usage.total, 5);
   assert.equal(usage.pending, 5);
-  assert.equal((await f.call("reserve", { operation_id: acceptedId, provider: "firecrawl", background: false })).result.replay, true);
-  assert.equal((await f.call("reserve", { operation_id: acceptedId, provider: "exa", background: false })).status, 409);
+  assert.equal((await f.call("reserve", { operation_id: "query-0", provider: "firecrawl", background: false })).result.replay, true);
+  assert.equal((await f.call("reserve", { operation_id: "query-0", provider: "exa", background: false })).status, 409);
 });
 
 test("credential failover persists across SQLite restarts and concurrent selection", async t => {
@@ -264,25 +263,4 @@ test("product-site learning and overrides survive Durable Object reopen and rebu
   assert.equal(rebuilt.sites["palletsprojects.com"].verified, 1);
   assert.ok(rebuilt.sites["python.org"].pinned);
   assert.deepEqual(rebuilt.blocked, overrides.blocked);
-});
-
-
-test("background refresh and reconciliation retain the source account identity", async t => {
-  const f = await fixture(t);
-  const owner = { authenticated: true, keyId: "source-key" };
-  const other = { authenticated: true, keyId: "admin" };
-  const source = (await f.call("source.create", { url: "https://flask.palletsprojects.com/en/3.1.3/api/",
-    product: "flask", version: "3.1.3", dispatch_principal: owner })).result;
-  const job = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
-  assert.deepEqual(job.dispatch_principal, owner);
-  const replay = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
-  assert.equal(replay.id, job.id);
-  assert.deepEqual(replay.dispatch_principal, owner);
-  await f.call("job.cancel", { id: job.id });
-  await f.reopen();
-  const replacement = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
-  assert.notEqual(replacement.id, job.id);
-  assert.deepEqual(replacement.dispatch_principal, owner);
-  const persisted = (await f.call("job.get", { id: replacement.id })).result;
-  assert.deepEqual(persisted.source.dispatch_principal, owner);
 });

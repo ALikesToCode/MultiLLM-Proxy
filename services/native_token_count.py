@@ -130,8 +130,7 @@ def count_native_tokens(
     session = ProxyService._get_provider_session(provider, raw_passthrough=True)
     response = None
     try:
-        from services.provider_dispatch import provider_http
-        response = provider_http(provider, "POST", url, transport=session.request, headers=headers, json=body, stream=True,
+        response = session.post(url=url, headers=headers, json=body, stream=True,
                                 allow_redirects=False, timeout=(5, 10))
         status = response.status_code
         if status >= 400:

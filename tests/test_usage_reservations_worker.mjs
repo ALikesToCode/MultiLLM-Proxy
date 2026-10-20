@@ -214,11 +214,7 @@ test("registered native dispatch preserves response bytes and completes the inje
     const { operation, id: ignored, ...values } = reserve();
     return values;
   } });
-  const { nativeGenerationFetch: rawNativeGenerationFetch } = await import("../worker/gateway-extensions.mjs");
-  const { policyFixtureEnv } = await import("./helpers/dispatch_fixture.mjs");
-  const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
-  request, policyFixtureEnv(env), ctx, { authenticated: true, keyId: authority?.principal?.id ?? "admin", ...authority }, ...rest);
-
+  const { nativeGenerationFetch } = await import("../worker/gateway-extensions.mjs");
   const body = '{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20}}';
   const response = await nativeGenerationFetch(new Request("http://localhost/openai/v1/chat/completions", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: "test" }),

@@ -179,8 +179,6 @@ def dispatch_auto_route(
 
     canary = canary_traffic.prepare_request(route, payload)
     candidates = canary.dispatch_order if canary is not None else route.candidates
-    from services.key_data_guards import eligible_models
-    candidates = tuple(eligible_models(candidates, getattr(g, "authenticated_user", None) or {}))
     order = RouteHealth.order(route.id, candidates, circuit_state=_circuit_state)
     if canary is not None:
         canary.observe(order.candidates)

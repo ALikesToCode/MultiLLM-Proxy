@@ -5,7 +5,7 @@ export const BUCKET_FIELDS = Object.freeze(["ordinary_input_tokens", "cache_read
   "ordinary_input_cost_microusd", "cache_read_input_cost_microusd", "cache_write_input_cost_microusd", "output_cost_microusd",
   "bucket_basis", "bucket_source"]);
 const BASE_FIELDS = Object.freeze(["at", "principal", "key_prefix", "kind", "endpoint", "requested_model", "selected_model",
-  "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id", "cached_input_tokens", "reasoning_tokens"]);
+  "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id"]);
 const KINDS = new Set(["chat", "responses", "images", "videos", "embeddings", "audio", "proxy"]);
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}$/;
 const ENDPOINT = /^\/[A-Za-z0-9._~:/@+-]{0,255}$/;
@@ -19,14 +19,12 @@ const count = (value, maximum = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger
 const timestamp = value => typeof value === "string" && AT.test(value) && Number.isFinite(Date.parse(value));
 
 export function validBaseUsageRow(row) {
-  if (row) row = { cached_input_tokens: null, reasoning_tokens: null, ...row };
   return row !== null && typeof row === "object" && !Array.isArray(row) && fields(row, BASE_FIELDS)
     && timestamp(row.at) && text(row.principal, 256) && optional(row.key_prefix, value => text(value, 64))
     && KINDS.has(row.kind) && typeof row.endpoint === "string" && ENDPOINT.test(row.endpoint)
     && optional(row.requested_model, value => typeof value === "string" && MODEL.test(value))
     && optional(row.selected_model, value => typeof value === "string" && MODEL.test(value))
     && Number.isSafeInteger(row.status) && row.status >= 100 && row.status <= 599
-    && optional(row.cached_input_tokens, count) && optional(row.reasoning_tokens, count)
     && count(row.latency_ms, 86_400_000) && optional(row.input_tokens, count) && optional(row.output_tokens, count)
     && optional(row.cost_usd, value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000)
     && (row.cost_basis === null || row.cost_basis === "usage" || row.cost_basis === "estimate")
@@ -53,7 +51,7 @@ export function usageBucketsEnabled(env) {
 
 export function serializeUsageBuckets(row, env) {
   if (!row || typeof row !== "object" || Array.isArray(row)) throw new TypeError("invalid usage row");
-  const base = Object.fromEntries(BASE_FIELDS.map(name => [name, row[name] ?? null]));
+  const base = Object.fromEntries(BASE_FIELDS.map(name => [name, row[name]]));
   if (!validBaseUsageRow(base)) throw new TypeError("invalid usage row");
   const allowed = new Set([...BASE_FIELDS, ...BUCKET_FIELDS]);
   if (Object.keys(row).some(name => !allowed.has(name))) throw new TypeError("invalid usage fields");
@@ -93,7 +91,7 @@ export async function recordUsageWithBuckets(env, body, { recordBase, recordExte
   } catch {
     return Response.json({ version: 1, error: { code: "invalid_request", message: "Usage ledger operation failed" } }, { status: 400 });
   }
-  const legacy = { ...body, rows: rows.map(row => Object.fromEntries(BASE_FIELDS.map(name => [name, row[name] ?? null]))) };
+  const legacy = { ...body, rows: rows.map(row => Object.fromEntries(BASE_FIELDS.map(name => [name, row[name]]))) };
   const headers = { "cache-control": "no-store" };
   if (!enabled) return Response.json(await recordBase(legacy), { headers });
   try {

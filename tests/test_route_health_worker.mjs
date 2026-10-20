@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
+import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { fetchIfRunning, runScheduledHealth, scheduleSettings } from "../worker/health-schedule.mjs";

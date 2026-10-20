@@ -14,8 +14,6 @@ from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import Mock, patch
 
-from services.dispatch_network import control_network
-
 import pytest
 from scripts import handoff
 import handoff_contracts as contracts
@@ -85,8 +83,7 @@ def server():
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
     state["base"] = f"http://127.0.0.1:{http.server_port}"
-    with control_network(state["base"]):
-        yield state
+    yield state
     http.shutdown()
     http.server_close()
     thread.join(2)

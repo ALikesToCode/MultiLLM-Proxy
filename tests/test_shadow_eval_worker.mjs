@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { convertV4MiniflareOptions, Miniflare } from './helpers/local_miniflare.mjs';
+import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
 import { applyMigrations } from './d1_migrations.mjs';
 import { handleShadowEvalRequest, validConfig, validSample, validResult } from '../worker/shadow-eval-d1.mjs';
 import { runScheduledShadowEval } from '../worker/shadow-eval-schedule.mjs';

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { createArtifact, dropForeignProviderSections, site } from "../worker/knowledge/evidence.mjs";
 import { parseProductSites, SITE_LIMIT, PAGE_LIMIT } from "../worker/knowledge/product-sites.mjs";
 import { filterProviderSites } from "../worker/knowledge/provider-site-filter.mjs";

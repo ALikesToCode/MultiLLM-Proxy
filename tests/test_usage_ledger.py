@@ -178,7 +178,7 @@ def test_d1_store_speaks_the_private_usage_operations(monkeypatch):
         if payload["operation"] == "totals":
             return {"version": 1, "totals": {"day_usd": 1.5, "month_usd": 3.0, "day_requests": 2, "month_requests": 4}}
         if payload["operation"] == "summary":
-            return {"version": 1, "rows": [{"model": "openai:gpt-4.1", **dict.fromkeys(usage_store.SUMMARY_COLUMNS, 1),
+            return {"version": 1, "rows": [{"model": "openai:gpt-4.1", **dict.fromkeys(usage_store.TOTAL_COLUMNS[:7], 1),
                                             "latency_buckets": [1] + [0] * 10}]}
         raise PrivateIntelligenceError(503, "storage_unavailable")
 

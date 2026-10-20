@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "./helpers/policy_test.mjs";
+import test from "node:test";
 import { configuredKeys, MAX_KEYS } from "../worker/knowledge/providers/keys.mjs";
 import { upstreamError } from "../worker/knowledge/providers/errors.mjs";
 import { requestJSON } from "../worker/knowledge/providers/transport.mjs";

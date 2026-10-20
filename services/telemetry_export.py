@@ -21,8 +21,6 @@ from urllib.parse import unquote
 
 import requests
 
-from services.dispatch_network import control_network
-
 from services.observability_adapters import OBSERVABILITY_EXPORTER
 
 logger = logging.getLogger(__name__)
@@ -140,9 +138,8 @@ class TelemetryExporter:
             if not target:
                 continue
             try:
-                with control_network(target):
-                    response = requests.post(target, json=payload, headers=headers(signal), timeout=TIMEOUT,
-                                             allow_redirects=False)
+                response = requests.post(target, json=payload, headers=headers(signal), timeout=TIMEOUT,
+                                         allow_redirects=False)
                 if response.status_code >= 300:
                     raise ValueError(f"HTTP {response.status_code}")
                 sent = True

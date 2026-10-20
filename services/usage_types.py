@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 UsageBasis = Literal["provider", "estimated", "unknown"]
@@ -19,8 +19,6 @@ class UsageObservation:
     output_tokens: int | None = None
     basis: UsageBasis = "unknown"
     provenance: tuple[str, ...] = ()
-    cached_input_tokens: int | None = field(default=None, kw_only=True)
-    reasoning_tokens: int | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_body(cls, value: Any) -> UsageObservation | None:
@@ -37,21 +35,12 @@ class UsageObservation:
             return None
         input_tokens = _component(usage.get("prompt_tokens", usage.get("input_tokens")))
         output_tokens = _component(usage.get("completion_tokens", usage.get("output_tokens")))
-        input_details = usage.get("prompt_tokens_details", usage.get("input_tokens_details"))
-        output_details = usage.get("completion_tokens_details", usage.get("output_tokens_details"))
-        cached = _component(input_details.get("cached_tokens")) if isinstance(input_details, dict) else None
-        reasoning = _component(output_details.get("reasoning_tokens")) if isinstance(output_details, dict) else None
-        if "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage:
-            cached = _component(usage.get("cache_read_input_tokens"))
-            written = _component(usage.get("cache_creation_input_tokens"))
-            if input_tokens is not None:
-                input_tokens += (cached or 0) + (written or 0)
         data = value.get("data")
         if isinstance(data, list) and any(isinstance(item, dict) and "embedding" in item for item in data):
             output_tokens = 0
         known = input_tokens is not None or output_tokens is not None
         return cls(input_tokens, output_tokens, "provider" if known else "unknown",
-                   ("provider",) if known else (), cached_input_tokens=cached, reasoning_tokens=reasoning)
+                   ("provider",) if known else ())
 
     def merge(self, later: UsageObservation) -> UsageObservation:
         """Use the latest valid value for each component; null never erases a count."""
@@ -60,9 +49,7 @@ class UsageObservation:
         provenance = tuple(dict.fromkeys((*self.provenance, *later.provenance)))
         basis: UsageBasis = "estimated" if "request_estimate" in provenance else (
             "provider" if input_tokens is not None or output_tokens is not None else "unknown")
-        return UsageObservation(input_tokens, output_tokens, basis, provenance,
-                                cached_input_tokens=later.cached_input_tokens if later.cached_input_tokens is not None else self.cached_input_tokens,
-                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens)
+        return UsageObservation(input_tokens, output_tokens, basis, provenance)
 
     def with_estimates(self, input_tokens: int | None, output_tokens: int | None) -> UsageObservation:
         """Fill missing components explicitly, retaining measured zero and provenance."""
@@ -72,8 +59,7 @@ class UsageObservation:
             return self
         return UsageObservation(self.input_tokens if self.input_tokens is not None else estimated_input,
                                 self.output_tokens if self.output_tokens is not None else estimated_output,
-                                "estimated", tuple(dict.fromkeys((*self.provenance, "request_estimate"))),
-                                cached_input_tokens=self.cached_input_tokens, reasoning_tokens=self.reasoning_tokens)
+                                "estimated", tuple(dict.fromkeys((*self.provenance, "request_estimate"))))
 
     def storage_basis(self, cost: float | None) -> str | None:
         """Map internal provenance to the existing strict SQL/D1 cost-basis vocabulary."""

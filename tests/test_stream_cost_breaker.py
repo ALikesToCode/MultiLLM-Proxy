@@ -184,8 +184,6 @@ def test_strict_d1_rows_missing_schema_and_off_wire(monkeypatch):
     monkeypatch.setattr(user_store,"_call",lambda *a,**k:{"user":row})
     with pytest.raises(APIError) as error: breaker.get_user("reader")
     assert error.value.status_code==503 and error.value.payload["error"]=="stream_cost_storage_unavailable"
-    from services.dispatch_policy import envelope
-    row["data_policy"] = envelope(row)
     row["max_stream_cost_microusd"]=4
     assert breaker.get_user("reader")["max_stream_cost_microusd"]==4
     row["unknown"]=None

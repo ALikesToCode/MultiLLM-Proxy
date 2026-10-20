@@ -11,11 +11,6 @@ from services.secret_scan import scan_text
 
 TOKEN = "AK" + "IA" + "AB12CD34EF56GH78"
 
-
-from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
-
-pytestmark = pytest.mark.usefixtures("verified_transport_principal")
-
 @pytest.fixture(autouse=True)
 def reset_audit_window(monkeypatch):
     monkeypatch.setattr(firewall, "_audit_events", OrderedDict())

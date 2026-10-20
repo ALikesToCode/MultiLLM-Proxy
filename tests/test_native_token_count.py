@@ -18,7 +18,7 @@ class NativeTokenCountTest(UnifiedApiTestCase):
         super().setUp()
         os.environ["NATIVE_TOKEN_COUNT_ENDPOINTS_JSON"] = json.dumps({"opencode": "/v1/messages/count_tokens"})
         self.session = Mock()
-        self.session.request.return_value = self.upstream({"input_tokens": 123})
+        self.session.post.return_value = self.upstream({"input_tokens": 123})
         self.session_patch = patch("services.proxy_service.ProxyService._get_provider_session", return_value=self.session)
         self.session_factory = self.session_patch.start()
         self.addCleanup(self.session_patch.stop)
@@ -109,15 +109,15 @@ class NativeTokenCountTest(UnifiedApiTestCase):
                 "tools": [{"name": "f", "input_schema": {"type": "object"}}],
                 "tool_choice": {"type": "auto"}, "thinking": {"type": "enabled", "budget_tokens": 100},
                 "max_tokens": 999, "stream": True, "temperature": 0.5, "foreign_extra": "omit"}
-        upstream = self.session.request.return_value
+        upstream = self.session.post.return_value
         response = self.post("native", body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json, {"input_tokens": 123})
         self.assertEqual(response.headers["X-MultiLLM-Token-Count"], "provider")
         self.assertNotIn("X-MultiLLM-Token-Count-Fallback", response.headers)
         self.session_factory.assert_called_once_with("opencode", raw_passthrough=True)
-        self.session.request.assert_called_once()
-        kwargs = self.session.request.call_args.kwargs
+        self.session.post.assert_called_once()
+        kwargs = self.session.post.call_args.kwargs
         self.assertEqual(kwargs["url"], "https://opencode.ai/v1/messages/count_tokens")
         self.assertEqual(kwargs["json"], {key: value for key, value in body.items()
                                         if key in {"messages", "system", "tools", "tool_choice", "thinking"}}
@@ -143,7 +143,7 @@ class NativeTokenCountTest(UnifiedApiTestCase):
             response = self.post("native", {**self.BODY, "model": "linkapi:claude-model"})
         self.assertEqual(response.json, {"input_tokens": 123})
         self.assertEqual(prepare.call_args.kwargs["upstream_path"], "/v1/messages/count_tokens")
-        self.assertEqual(self.session.request.call_args.kwargs["headers"]["X-Api-Key"], "linkapi-provider-key")
+        self.assertEqual(self.session.post.call_args.kwargs["headers"]["X-Api-Key"], "linkapi-provider-key")
 
     def test_unsupported_modes_are_explicit(self):
         for model in ("auto:route", "minimax-m3", "unknown:model", "opencode:"):
@@ -196,10 +196,10 @@ class NativeTokenCountTest(UnifiedApiTestCase):
         for base in ("https://trusted.example/v1", "https://trusted.example/api/coding/v1/", "https://trusted.example:8443/v1"):
             with self.subTest(base=base), patch.dict(os.environ, {"NATIVE_TOKEN_COUNT_ENDPOINTS_JSON": json.dumps({"opencode": "/api/coding/v1/messages/count_tokens"})}):
                 self.app.config["API_BASE_URLS"] = {"opencode": base}
-                self.session.request.return_value = self.upstream({"input_tokens": 0})
+                self.session.post.return_value = self.upstream({"input_tokens": 0})
                 self.assertEqual(self.post("native").json, {"input_tokens": 0})
                 origin = base.split("/v1")[0] if "/api" not in base else "https://trusted.example"
-                self.assertEqual(self.session.request.call_args.kwargs["url"], origin + "/api/coding/v1/messages/count_tokens")
+                self.assertEqual(self.session.post.call_args.kwargs["url"], origin + "/api/coding/v1/messages/count_tokens")
 
     def test_invalid_trusted_origin_never_dispatches(self):
         for base in ("file:///v1", "https:///v1", "https://user:password@trusted.example/v1",
@@ -215,30 +215,30 @@ class NativeTokenCountTest(UnifiedApiTestCase):
             for status in (400, 401, 403, 404, 429, 500, 502, 503, 504):
                 with self.subTest(mode=mode, status=status):
                     upstream = self.upstream({"error": {"message": "provider rejected request"}}, status)
-                    self.session.request.return_value = upstream
+                    self.session.post.return_value = upstream
                     self.assert_error(self.post(mode), status)
                     upstream.close.assert_called_once()
-        self.assertEqual(self.session.request.call_count, 18)
+        self.assertEqual(self.session.post.call_count, 18)
         self.generation.assert_not_called()
 
     def test_redirects_are_terminal_protocol_errors(self):
         upstream = self.upstream(status=307, raw=b"redirect")
         upstream.headers["Location"] = "https://other.example"
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assert_error(self.post("auto"), 502)
-        self.session.request.assert_called_once()
+        self.session.post.assert_called_once()
         upstream.close.assert_called_once()
 
     def test_timeout_and_transport_failures_do_not_retry(self):
         for mode in ("auto", "native"):
             for error, status in ((requests.Timeout("private detail"), 504), (requests.ConnectionError("private detail"), 502)):
                 with self.subTest(mode=mode, error=type(error)):
-                    self.session.request.reset_mock()
-                    self.session.request.side_effect = error
+                    self.session.post.reset_mock()
+                    self.session.post.side_effect = error
                     response = self.post(mode)
                     self.assert_error(response, status)
                     self.assertNotIn("private detail", response.get_data(as_text=True))
-                    self.session.request.assert_called_once()
+                    self.session.post.assert_called_once()
 
     def test_invalid_counts_and_json_are_terminal_errors(self):
         for body in ({}, [], {"input_tokens": True}, {"input_tokens": "123"}, {"input_tokens": -1},
@@ -246,23 +246,23 @@ class NativeTokenCountTest(UnifiedApiTestCase):
                      {"input_tokens": float("nan")}, {"input_tokens": 4, "extra": float("nan")}):
             with self.subTest(body=body):
                 upstream = self.upstream(body)
-                self.session.request.return_value = upstream
+                self.session.post.return_value = upstream
                 self.assert_error(self.post("auto"), 502)
                 upstream.close.assert_called_once()
         upstream = self.upstream(raw=b"not json")
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assert_error(self.post("native"), 502)
         upstream.close.assert_called_once()
 
     def test_response_limit_and_read_timeout_close_once(self):
         for raw in (b" " * 65537, b'{"input_tokens":1,"padding":"' + b"x" * 65536 + b'"}'):
             upstream = self.upstream(raw=raw)
-            self.session.request.return_value = upstream
+            self.session.post.return_value = upstream
             self.assert_error(self.post("native"), 502)
             upstream.close.assert_called_once()
         upstream = self.upstream({"input_tokens": 1})
         upstream.iter_content = Mock(side_effect=requests.Timeout("read timed out"))
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assert_error(self.post("auto"), 504)
         upstream.close.assert_called_once()
 
@@ -271,20 +271,20 @@ class NativeTokenCountTest(UnifiedApiTestCase):
 
         upstream = self.upstream({"input_tokens": 1})
         upstream.iter_content = Mock(side_effect=requests.ConnectionError(ReadTimeoutError(None, None, "read timeout")))
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assert_error(self.post("auto"), 504)
-        self.session.request.assert_called_once()
+        self.session.post.assert_called_once()
         upstream.close.assert_called_once()
 
     def test_exact_response_bound_and_chunked_json(self):
         raw = b'{"input_tokens":42}'
         upstream = self.upstream(raw=raw + b" " * (65536 - len(raw)))
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assertEqual(self.post("native").json, {"input_tokens": 42})
         upstream.close.assert_called_once()
         upstream = self.upstream()
         upstream.iter_content = Mock(return_value=iter([b'{"input_', b'tokens":', b"42}"]))
-        self.session.request.return_value = upstream
+        self.session.post.return_value = upstream
         self.assertEqual(self.post("native").json, {"input_tokens": 42})
         upstream.close.assert_called_once()
 
@@ -292,7 +292,7 @@ class NativeTokenCountTest(UnifiedApiTestCase):
         headers = {**self.HEADERS, "Authorization": "Bearer untrusted-caller-value", "anthropic-beta": "count-test",
                    "X-MultiLLM-Api-Key": "admin-test-key", "x-api-key": "untrusted-caller-value", "Cookie": "stream=true"}
         self.assertEqual(self.post("native", headers=headers).status_code, 200)
-        forwarded = self.session.request.call_args.kwargs["headers"]
+        forwarded = self.session.post.call_args.kwargs["headers"]
         self.assertEqual(forwarded["Authorization"], "Bearer opencode-provider-key")
         self.assertEqual(forwarded["Anthropic-Beta"], "count-test")
         self.assertNotIn("untrusted-caller-value", str(forwarded))

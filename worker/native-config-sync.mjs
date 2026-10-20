@@ -28,7 +28,6 @@ async function loadAccounts(db) {
       after = row.username;
       // Bootstrap admin keys use environment authority, never these stored key hashes.
       controls.set(row.username, Object.freeze({ scopes: row.scopes, allowed_models: row.allowed_models,
-        official_only: row.official_only, forced_provider_preferences: row.forced_provider_preferences,
         revoked_at: row.revoked_at, expires_at: row.expires_at, allowed_ips: row.allowed_ips }));
     }
     if (results.length < 200) return controls;

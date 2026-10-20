@@ -1,4 +1,3 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import test from "node:test";
@@ -46,8 +45,7 @@ export function memoryBucket() {
 }
 
 const metadata = value => Buffer.from(JSON.stringify(value)).toString("base64url");
-const outbound = (path, init, env) => handleMediaOutbound(new Request(`http://media.internal${path}`, { ...init,
-  headers: { ...init?.headers, "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"admin"}' } }), policyFixtureEnv(env));
+const outbound = (path, init, env) => handleMediaOutbound(new Request(`http://media.internal${path}`, init), env);
 
 async function signedLink(secret, id, expires) {
   return `https://gateway.example/v1/media/files/${id}?expires=${expires}&signature=${

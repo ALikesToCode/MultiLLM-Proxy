@@ -206,9 +206,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
             try:
                 return video_generation.create_job(provider, provider_model, video_request, key, base_url, owner)
             except APIError as error:
-                if error.status_code in _PRE_GENERATION_STATUSES and (error.payload or {}).get("error") not in {
-                    "provider_credential_not_allowed", "attested_credential_unavailable",
-                    "key_data_controls_unavailable", "provider_class_not_allowed"}:
+                if error.status_code in _PRE_GENERATION_STATUSES:
                     raise AutoRouteCandidateUnavailable(error.message) from error
                 raise
 
@@ -284,7 +282,7 @@ def register_media_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 pass
         key, base_url = video_credentials(job["p"])
         url, headers = video_generation.content_source(job, key, base_url)
-        return video_generation.stream_content(url, headers, provider=job["p"])
+        return video_generation.stream_content(url, headers)
 
     @app.route("/v1/media/providers", methods=["GET", "OPTIONS"])
     @csrf.exempt

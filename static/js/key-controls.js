@@ -5,8 +5,6 @@
     /** The PUT /users/<name>/controls body for the dialog's field values. */
     function controlsPayload(fields) {
         return {
-            official_only: fields.official_only === "on" || fields.official_only === true,
-            forced_provider_preferences: fields.forced_provider_preferences ? JSON.parse(fields.forced_provider_preferences) : null,
             secret_scan_mode: fields.secret_scan_mode || null,
             shadow_eval_rate: amount(fields.shadow_eval_rate),
             daily_budget_usd: amount(fields.daily_budget_usd),
@@ -45,8 +43,6 @@
             controls = {};
         }
         document.getElementById('key-controls-user').textContent = username;
-        field('official_only').checked = controls.official_only === true;
-        field('forced_provider_preferences').value = controls.forced_provider_preferences ? JSON.stringify(controls.forced_provider_preferences, null, 2) : '';
         field('daily_budget_usd').value = controls.daily_budget_usd ?? '';
         field('monthly_budget_usd').value = controls.monthly_budget_usd ?? '';
         field('allowed_models').value = (controls.allowed_models || []).join('\n');

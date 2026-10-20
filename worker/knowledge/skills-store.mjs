@@ -1,4 +1,3 @@
-import { dispatchContext, providerOperation } from "../provider-dispatch.mjs";
 import { fail, fields, isRecord } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, skillKey, SKILLS_LIMIT } from "./skills-validation.mjs";
@@ -23,7 +22,7 @@ async function bounded(callback, milliseconds) {
 export class SkillsStore {
   constructor(storage, env, { embed, clock = Date.now } = {}) {
     Object.assign(this, { storage, sql: storage.sql, env, clock });
-    this.embed = embed ?? (text => providerOperation("cloudflare", () => env.KNOWLEDGE_SEARCH_AI?.run("@cf/baai/bge-m3", { text: [text] })));
+    this.embed = embed ?? (text => env.KNOWLEDGE_SEARCH_AI?.run("@cf/baai/bge-m3", { text: [text] }));
     this.index = null;
     this.syncTail = Promise.resolve();
     this.pendingR2 = new Map();
@@ -136,7 +135,7 @@ export class SkillsStore {
     const { record, files } = validated, old = this.read(record.skill_id);
     if (old && old.root !== record.root) return { skill_id: record.skill_id, status: "rejected", reason: "root_conflict" };
     const status = !old ? "created" : old.content_hash === record.content_hash ? "unchanged" : "updated";
-    if (status === "unchanged" && origin && !dryRun && (pinOf(old.origin) !== pinOf(origin) || !old.origin?.dispatch_principal)) {
+    if (status === "unchanged" && origin && !dryRun && pinOf(old.origin) !== pinOf(origin)) {
       // Identical content at a new pin moves only the pin.
       this.storage.transactionSync(() => {
         const row = this.rows("SELECT record FROM skills WHERE skill_id = ?", record.skill_id)[0];
@@ -214,9 +213,7 @@ export class SkillsStore {
       return { skill_id: skill.skill_id, status: "rejected", reason: "skills_limit" };
     }
     const result = await this.syncSkill(skill, payload.dry_run === true, performance.now() + 45000,
-      { ...origin, dispatch_principal: existing?.origin?.dispatch_principal ?? (dispatchContext()?.authority?.authenticated === true
-        ? { authenticated: true, keyId: dispatchContext().authority.keyId } : null),
-        imported_at: new Date(this.clock()).toISOString() });
+      { ...origin, imported_at: new Date(this.clock()).toISOString() });
     if (!payload.dry_run && result.status !== "rejected") this.ledger.forget(skill.skill_id);
     return result;
   }

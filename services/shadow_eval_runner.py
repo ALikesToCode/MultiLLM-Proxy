@@ -15,7 +15,6 @@ from services.request_accounting import price
 from services.shadow_eval_contract import TASKS, clean_usage, encoded, finite
 from services.shadow_eval_judge import judge_payload, outcome, parse_judgment, random_order, tool_validity
 from services.shadow_eval_store import ShadowEvalStore
-from services.shadow_eval_data_policy import guarded_dispatch, source_allows_replay
 from services import evaluation_noise_floor as noise_floor
 
 PRINCIPAL = "internal:shadow-evaluation"
@@ -77,7 +76,6 @@ def replay_payload(sample, candidate):
 
 
 def evaluate(sample, candidate, config, dispatch, *, deadline):
-    dispatch = guarded_dispatch(sample, dispatch)
     result = {"sample_id": sample["id"], "task_type": sample["task_type"], "candidate_model": candidate,
         "candidate_route": candidate, "production_model": sample["production_model"], "outcome": "failed",
         "judge_model": config["judge_model"], "latencies": {"production": sample["latency_ms"], "candidate": 0, "judges": []},
@@ -148,7 +146,7 @@ def run(app, dispatch, *, store=ShadowEvalStore, options=None):
                 if (count + 1) * units > config["max_replays_per_run"] or time.monotonic() >= deadline:
                     return count
                 sample = store.pending(task, model)
-                if not sample or not source_allows_replay(sample):
+                if not sample:
                     continue
                 identifier = uuid.uuid4().hex
                 reserve = noise_floor.claim if options is not None else lambda storage, *args: storage.claim(*args)
@@ -157,7 +155,7 @@ def run(app, dispatch, *, store=ShadowEvalStore, options=None):
                 count += 1
                 progressed = True
                 if options is not None:
-                    result = noise_floor.evaluate_three_arm(sample, model, config, guarded_dispatch(sample, dispatch), deadline=deadline,
+                    result = noise_floor.evaluate_three_arm(sample, model, config, dispatch, deadline=deadline,
                         options=options, run_id=run_id, call=call)
                 else:
                     result = evaluate(sample, model, config, dispatch, deadline=deadline)

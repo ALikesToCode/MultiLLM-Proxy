@@ -2,8 +2,6 @@
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
-import { dataPolicy } from "./dispatch-policy.mjs";
-import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
 import { logFailure } from "./log.mjs";
@@ -11,7 +9,7 @@ import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate", "official_only", "forced_provider_preferences"]);
+  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate"]);
 // Migration 0007 added the per-key controls. Until it is applied, reads return the
 // older columns with no controls, so deploying before migrating cannot lock keys out.
 const CONTROL_FIELDS = USER_FIELDS.slice(12);
@@ -44,9 +42,6 @@ export function validUser(user) {
     if (!validStreamCap(user[STREAM_CAP_FIELD])) return false;
     user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== STREAM_CAP_FIELD));
   }
-  if (user && Object.hasOwn(user, "data_policy")) {
-    user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== "data_policy"));
-  }
   if (user && !Object.hasOwn(user, "shadow_eval_rate")) user = { ...user, shadow_eval_rate: null };
   if (user && !Object.hasOwn(user, "secret_scan_mode")) user = { ...user, secret_scan_mode: null };
   return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS)
@@ -58,8 +53,6 @@ export function validUser(user) {
     && (user.secret_scan_mode === null || ["off", "observe", "redact", "block"].includes(user.secret_scan_mode))
     && (user.shadow_eval_rate === null || (typeof user.shadow_eval_rate === "number"
       && Number.isFinite(user.shadow_eval_rate) && user.shadow_eval_rate >= 0 && user.shadow_eval_rate <= 0.2))
-    && validDataControls(user)
-    && (user.forced_provider_preferences === null || typeof user.forced_provider_preferences === "string")
     && budget(user.daily_budget_usd) && budget(user.monthly_budget_usd)
     && list(user.allowed_models, MODEL_PATTERNS) && list(user.allowed_ips, IP_RANGES)
     && (user.expires_at === null || (text(user.expires_at, 64) && Number.isFinite(Date.parse(user.expires_at))));
@@ -146,16 +139,11 @@ async function read(query) {
 
 /** Run an account query with every column, or with the pre-0007 columns and no controls. */
 async function readUsers(query, env = {}) {
-  const stamp = row => row && { ...row, data_policy: dataPolicy(row) };
-  if (streamCostEnabled(env) || revisionSyncSettings(env).enabled) {
-    const rows = await read(() => query(streamUserFields(env).join(", ")));
-    return Array.isArray(rows) ? rows.map(stamp) : stamp(rows);
-  }
-  for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, USER_FIELDS.length - 3, USER_FIELDS.length - 4, 12]) {
+  if (streamCostEnabled(env)) return read(() => query(streamUserFields(env).join(", ")));
+  for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
     try {
       const rows = await read(() => query(USER_FIELDS.slice(0, end).join(", ")));
-      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row,
-        data_policy: end === USER_FIELDS.length ? dataPolicy(row) : null };
+      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row };
       return Array.isArray(rows) ? rows.map(defaults) : defaults(rows);
     } catch (error) {
       if (!missingColumn(error) || end === 12) throw error;
@@ -231,7 +219,7 @@ export async function handleControlUsersRequest(request, env) {
           ? db.prepare(`SELECT ${columns} FROM control_users ORDER BY username LIMIT ?`).bind(body.limit)
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
         ).all()).results;
-        const users = await readUsers(query, env);
+        const users = revisionSyncSettings(env).enabled ? await read(() => query(streamUserFields(env).join(", "))) : await readUsers(query, env);
         return reply({ version: 1, users });
       }
       case "get": {
@@ -247,7 +235,7 @@ export async function handleControlUsersRequest(request, env) {
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"]) || !validUser(body.user)) break;
         if (!streamCostEnabled(env) && body.user[STREAM_CAP_FIELD] != null) return reply({ error: "invalid_request" }, 400);
-        const user = { official_only: null, forced_provider_preferences: null, shadow_eval_rate: null, secret_scan_mode: null, ...body.user };
+        const user = { shadow_eval_rate: null, secret_scan_mode: null, ...body.user };
         if (grantsAdmin(user) && !adminUsernames(env).has(user.username)) {
           logFailure("account_admin_refused", new Error("Administration is not configured for this username"));
           await audit(db, "upsert", "refused", user).run();
@@ -264,7 +252,7 @@ export async function handleControlUsersRequest(request, env) {
           return reply({ version: 1, stored: true });
         }
         // The write and its audit row commit together, or neither does.
-        for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, USER_FIELDS.length - 3, USER_FIELDS.length - 4, 12]) {
+        for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
           if (USER_FIELDS.slice(end).some(name => user[name] !== null)) throw new Error("Account controls require migration");
           try {
             const statements = [upsertStatement(db, user, USER_FIELDS.slice(0, end)), audit(db, "upsert", "stored", user)];

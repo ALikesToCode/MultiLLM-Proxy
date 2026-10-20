@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {convertV4MiniflareOptions,Miniflare} from "./helpers/local_miniflare.mjs";
+import {convertV4MiniflareOptions,Miniflare} from "miniflare";
 import {handleIntelligenceAuthRequest} from "../worker/intelligence-auth-d1.mjs";
 
 const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);
@@ -23,16 +23,6 @@ test("D1 credentials survive new callers, rotate atomically and retain revocatio
     assert.equal((await call(provision)).status,409);
     const lookup = async keyPrefix => (await (await call({operation:"lookup",keyPrefix})).json()).principal;
     assert.equal((await lookup(prefix)).id,"integration:omni");
-    const dispatchPolicy = () => call({operation:"dispatch_policy",principalId:"integration:omni"});
-    assert.equal((await dispatchPolicy()).status,503);
-    const policyMigration = await readFile(new URL("../intelligence-migrations/0043_integration_data_policy.sql", import.meta.url),"utf8");
-    for (const statement of policyMigration.split(";").filter(x=>x.trim())) await db.prepare(statement).run();
-    assert.deepEqual((await (await dispatchPolicy()).json()).principal.data_policy,
-      {version:1,official_only:null,forced_provider_preferences:null});
-    await db.prepare("UPDATE intelligence_principals SET official_only=1, forced_provider_preferences=? WHERE id=?")
-      .bind('{"data_collection":"deny"}',"integration:omni").run();
-    assert.deepEqual((await (await dispatchPolicy()).json()).principal.data_policy,
-      {version:1,official_only:1,forced_provider_preferences:{data_collection:"deny"}});
     const next = "mllm_intelligence_" + "b".repeat(16);
     const rotate = {operation:"rotate",principalId:"integration:omni",expectedVersion:1,keyPrefix:next,keyHash:hash};
     const races = await Promise.all([call(rotate),call(rotate)]);
@@ -42,7 +32,6 @@ test("D1 credentials survive new callers, rotate atomically and retain revocatio
     assert.equal((await call({...rotate,expectedVersion:2,keyPrefix:prefix})).status,409);
     assert.equal((await call({operation:"revoke",principalId:"integration:omni",expectedVersion:2})).status,200);
     assert.ok((await lookup(next)).revokedAt);
-    assert.equal((await (await dispatchPolicy()).json()).principal,null);
     assert.equal((await call({...rotate,expectedVersion:2,keyPrefix:"mllm_intelligence_"+"c".repeat(16)})).status,409);
     assert.equal((await call(provision)).status,409);
   } finally { await mf.dispose(); }

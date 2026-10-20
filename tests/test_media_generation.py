@@ -223,10 +223,11 @@ class VideoJobTest(UnifiedApiTestCase):
         stream.status_code = 200
         stream.raw = __import__("io").BytesIO(b"mp4-bytes")
         stream.headers["Content-Type"] = "video/mp4"
-        with patch("services.video_generation.requests.request", side_effect=lambda method, url, **kw: stream if url == "https://vidgen.x.ai/v.mp4" else provider(method, url, **kw)) as download:
+        with patch("services.video_generation.requests.request", side_effect=provider), \
+                patch("services.video_generation.requests.get", return_value=stream) as download:
             content = self.client.get(f"/v1/videos/{job['id']}/content", headers=ADMIN)
         self.assertEqual((content.status_code, content.data, content.mimetype), (200, b"mp4-bytes", "video/mp4"))
-        self.assertEqual(download.call_args.kwargs["url"], "https://vidgen.x.ai/v.mp4")
+        self.assertEqual(download.call_args.args[0], "https://vidgen.x.ai/v.mp4")
 
     def test_video_jobs_belong_to_their_creator_and_tampered_ids_are_unknown(self):
         from services import video_generation

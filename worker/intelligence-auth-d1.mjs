@@ -1,4 +1,3 @@
-import { dataPolicy } from "./dispatch-policy.mjs";
 import { logFailure } from "./log.mjs";
 
 export const INTEGRATION_SCOPES = Object.freeze(["chat", "models", "audio", "embeddings",
@@ -75,14 +74,6 @@ export async function handleIntelligenceAuthRequest(request, env) {
       return reply({version: 1, principal: await lookupIntegrationPrincipal(db, body.keyPrefix)});
     }
     if (typeof body.principalId !== "string" || !idPattern.test(body.principalId)) return reply({error: "invalid_request"}, 400);
-    if (body.operation === "dispatch_policy") {
-      if (!fields(body, ["version", "operation", "principalId"])) return reply({error: "invalid_request"}, 400);
-      const row = await db.prepare(`SELECT p.official_only, p.forced_provider_preferences, c.key_prefix
-        FROM intelligence_principals p JOIN intelligence_credentials c ON c.principal_id=p.id AND c.version=p.version
-        WHERE p.id=? AND p.revoked_at IS NULL`).bind(body.principalId).first();
-      return reply({version: 1, principal: row ? { username: body.principalId, api_key_prefix: row.key_prefix,
-        data_policy: dataPolicy(row) } : null});
-    }
     const now = new Date().toISOString();
     if (body.operation === "provision") {
       if (!fields(body, ["version", "operation", "principalId", "keyPrefix", "keyHash", "scopes"])
