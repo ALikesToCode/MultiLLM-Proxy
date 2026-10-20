@@ -1,6 +1,7 @@
 """Registered Container routes, using actual HTTP to the disposable main Worker."""
 import json
 import os
+import re
 import sys
 import tempfile
 import types
@@ -86,13 +87,36 @@ def transport(self, method, url, **kwargs):
 requests.sessions.Session.request = transport
 from app import app  # noqa: E402
 
+if revision:
+    from jinja2 import FunctionLoader
+
+    def versioned_template(name):
+        if ".." in name or name.startswith("/"):
+            return None
+        result = subprocess.run(["git", "show", revision + ":templates/" + name],
+                                cwd=root, capture_output=True, text=True)
+        return result.stdout if result.returncode == 0 else None
+
+    app.jinja_loader = FunctionLoader(versioned_template)
 client = app.test_client()
 headers = {"Authorization": "Bearer mllm_synthetic_incident_key_long_enough"}
-for path, method in [("/v1/models", "get"), ("/v1/chat/completions", "post")]:
+requests_to_run = json.loads(sys.argv[4]) if len(sys.argv) > 4 else [("/v1/models", "get"), ("/v1/chat/completions", "post")]
+for operation in requests_to_run:
+    path, method = operation[:2]
+    if path == "/login":
+        username = operation[2]
+        client = app.test_client()
+        page = client.get("/login")
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+        response = client.post("/login", data={"username": username, "csrf_token": token,
+            "api_key": "mllm_synthetic_incident_key_long_enough" if username == "synthetic" else os.environ["ADMIN_API_KEY"]})
+        print(json.dumps({"path": path, "status": response.status_code, "dispatches": len(seen)}))
+        continue
     arguments = {"json": {"model": "openrouter:openai/gpt-6-luna", "messages": [
         {"role": "user", "content": "synthetic"},
     ]}} if method == "post" else {}
-    response = getattr(client, method)(path, headers=headers, **arguments)
+    request_headers = {"Authorization": "Bearer " + os.environ["ADMIN_API_KEY"]} if len(operation) > 2 and operation[2] == "admin" else headers
+    response = getattr(client, method)(path, headers=request_headers, **arguments)
     print(json.dumps({"path": path, "status": response.status_code,
         "error": response.json.get("error") if isinstance(response.json, dict) else None,
         "dispatches": len(seen), "preferences": seen[-1].get("provider") if seen else None}))

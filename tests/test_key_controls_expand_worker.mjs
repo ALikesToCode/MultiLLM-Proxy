@@ -54,6 +54,17 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
         assert.deepEqual(rows.map(row => row.status), [200, 200]);
       });
       if (!revision) {
+        // A future controlled row must never poison login or a full management cache reload.
+        await db.prepare("UPDATE control_users SET official_only=1 WHERE username='synthetic'").run();
+        const { stdout: management } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
+          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), "",
+          JSON.stringify([["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"], ["/v1/chat/completions", "post", "admin"]])],
+        { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
+        const results = management.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
+        assert.deepEqual(results.map(row => row.status), [302, 302, 200, 200]);
+        assert.ok(results.slice(0, 3).every(row => row.dispatches === 0));
+        assert.equal(results.at(-1).dispatches, 1);
+        assert.equal((await db.prepare("SELECT official_only FROM control_users WHERE username='synthetic'").first()).official_only, 1);
         for (const policy of states.slice(1)) {
           await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
             .bind(policy.official_only, policy.forced_provider_preferences).run();
