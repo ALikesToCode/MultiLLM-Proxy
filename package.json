@@ -27,7 +27,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "devDependencies": {
     "@cloudflare/containers": "^0.3.7",
     "@tailwindcss/cli": "^4.3.3",

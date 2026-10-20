@@ -888,4 +888,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is source-available: free for personal non-commercial use by individuals; any organisation or commercial use needs written approval. See [LICENSE](LICENSE) for the terms and [LICENSING.md](LICENSING.md) for who needs approval and how to ask.

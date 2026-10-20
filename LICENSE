@@ -1,21 +1,23 @@
-MIT License
+MultiLLM Proxy Licence (personal use only)
 
-Copyright (c) 2024 MultiLLM Proxy
+Copyright (c) 2024-2026 Abhyudaya Baiju Tharakan (https://github.com/ALikesToCode). All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Personal use. If you are an individual, you may download, run, study and modify this software for your own personal, non-commercial use, and not on behalf of anyone else.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. Everything else needs written approval. Any other use needs the copyright holder's prior written approval. This includes:
+   - any use by, for or on behalf of an organisation of any kind, such as a company, partnership, government body or department, school, college, university, charity, non-profit or research institution;
+   - any commercial use;
+   - offering the software, or what it does, as a service to others;
+   - distributing the software or a modified version of it.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE. 
+3. Notices. Every copy must keep this licence and the copyright notice.
+
+4. Earlier versions. Versions published before this licence was added were released under the MIT licence and stay under it. This licence applies to this version and every later version.
+
+5. GitHub. Nothing here limits the rights that GitHub's Terms of Service give users to view and fork this repository on GitHub.
+
+6. Ending. If you break these terms, your permission under them ends automatically.
+
+7. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+8. Asking for approval. Ask through https://github.com/ALikesToCode.
