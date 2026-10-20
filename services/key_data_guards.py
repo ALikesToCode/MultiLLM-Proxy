@@ -69,6 +69,11 @@ def provider_data_class(provider, config=None):
     return DATA_CLASSES.get(provider, "subscription" if provider.startswith("ce-") else "reseller")
 
 
+def has_data_controls(user):
+    """Even an empty forced object represents an administrator-owned data policy."""
+    return bool(user.get("official_only")) or user.get("forced_provider_preferences") is not None
+
+
 def model_permitted(user, model, config=None):
     if not user.get("official_only"):
         return True

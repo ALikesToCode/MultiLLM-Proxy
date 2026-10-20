@@ -33,6 +33,11 @@ forced preferences, including an empty object, because those preferences cannot
 be enforced throughout the socket session. Existing tickets do not bypass a
 subsequent control change.
 
+Requests from keys with either data control are excluded from shadow sampling.
+Stored samples recheck their source key before replay and before every candidate
+or judge dispatch, including three-arm comparisons. Controlled, inactive, missing
+or unverifiable source accounts are skipped; existing samples expire normally.
+
 ## Provider classes
 
 `providers/data-classes.json` is shared by Flask and the Worker. Registry adapters

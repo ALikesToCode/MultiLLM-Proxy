@@ -30,6 +30,8 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTROL_PLANE_DATABASE_URL", "")
     monkeypatch.setenv("MODEL_REGISTRY_DB_PATH", str(tmp_path / "eval.sqlite3"))
     monkeypatch.delenv("SHADOW_EVAL_JUDGE_MODEL", raising=False)
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username",
+                        lambda username: {"username": username} if username == "sampled-user" else None)
     return Store
 
 
