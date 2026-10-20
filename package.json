@@ -27,7 +27,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "SEE LICENSE IN LICENSE",
   "devDependencies": {
     "@cloudflare/containers": "^0.3.7",
     "@tailwindcss/cli": "^4.3.3",

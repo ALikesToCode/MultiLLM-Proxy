@@ -888,4 +888,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is source-available, free for noncommercial use; commercial use needs written approval. See [LICENSE](LICENSE) for the PolyForm Noncommercial License 1.0.0 and [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md) to request commercial permission.
+This project is source-available: free for personal non-commercial use by individuals; any organisation or commercial use needs written approval. See [LICENSE](LICENSE) for the terms and [LICENSING.md](LICENSING.md) for who needs approval and how to ask.
