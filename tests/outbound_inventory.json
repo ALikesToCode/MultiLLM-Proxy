@@ -1467,7 +1467,7 @@
   "services/user_store.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "aae3a7501cd93490c746edd66bdb19e32679c4e6e689d14160cadea00b4408ab"
+    "sha256": "6ce9dad31606745046116d9bb05cc5ac1bafa854905135aa781e8c3a220ab662"
   },
   "services/video_generation.py": {
     "kind": "guarded",

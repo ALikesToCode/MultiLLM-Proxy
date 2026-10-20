@@ -75,9 +75,13 @@ test("migrated account rows cross the real private RPC and registered Container 
     assert.equal(rows[1].preferences.data_collection, "deny");
   });
   await t.test("legacy readers and writers cannot erase or bypass controlled accounts", async () => {
-    const expanded = await rpc({ operation: "get", username: "synthetic" });
-    assert.equal(expanded.status, 200);
-    assert.equal(expanded.body.user.official_only, 1);
+    assert.equal((await rpc({ operation: "get", username: "synthetic" })).status, 503);
+    const management = await rpc({ operation: "list", after: null, limit: 200 });
+    assert.equal(management.status, 200);
+    const projected = management.body.users.find(row => row.username === "synthetic");
+    assert.equal(Object.hasOwn(projected, "data_policy"), false);
+    assert.equal(Object.hasOwn(projected, "official_only"), false);
+    assert.equal(Object.hasOwn(projected, "forced_provider_preferences"), false);
     const current = (await rpc({ operation: "get", username: "synthetic", data_policy_version: 1 })).body.user;
     const legacy = Object.fromEntries(Object.entries(current).filter(([name]) => !["data_policy", "official_only", "forced_provider_preferences"].includes(name)));
     assert.equal((await rpc({ operation: "upsert", user: legacy })).status, 200);
