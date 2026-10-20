@@ -27,9 +27,11 @@ if commit="$(git rev-parse HEAD 2>/dev/null)"; then
   fi
 fi
 
+node scripts/key_data_preflight.mjs --check
 node scripts/verify_d1_migrations.mjs --check
 npx --no-install wrangler d1 migrations apply "$DATABASE" --remote --config "$MAIN_CONFIG"
 node scripts/verify_d1_migrations.mjs "$DATABASE"
+node scripts/key_data_preflight.mjs --prepare
 npx --no-install wrangler deploy --config "$KNOWLEDGE_CONFIG" ${annotations[@]+"${annotations[@]}"}
 npx --no-install wrangler deploy --config "$release_config" ${annotations[@]+"${annotations[@]}"} "$@"
 node scripts/container_rollout.mjs --verify --state "$state" --config "$MAIN_CONFIG" --knowledge-config "$KNOWLEDGE_CONFIG"
