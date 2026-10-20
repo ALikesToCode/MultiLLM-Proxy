@@ -1,3 +1,4 @@
+import { legacyBindingControls } from "./legacy-binding-policy.mjs";
 import { KEY_CONTROLS } from "./key-controls-capability.mjs";
 /** Sole provider network boundary. Deferred work carries identity, never cached policy. */
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -30,7 +31,7 @@ async function admission(provider, options) {
   const state = options.env ? options : dispatchContext();
   try {
     if (!KEY_CONTROLS.enforcement && state?.env && (!state.authority || state.authority.legacyBinding)) {
-      return { ...state, policy: await legacyDataControls(state.env) };
+      return { ...state, policy: await (state.authority?.legacyBinding ? legacyBindingControls(state.env) : legacyDataControls(state.env)) };
     }
     if (!state?.authority || state.authority.authenticated !== true) throw Error();
     const user = await currentDataControls(state.env, state.authority);

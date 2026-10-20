@@ -20,7 +20,10 @@ If a later revision enables an account restriction, rolling back to this revisio
 refuses provider dispatch with 503 before sending content. This dormant fence includes
 native routes, private bindings, Knowledge, Realtime and deferred work. A malformed or
 unreadable current policy cannot grant dispatch. Legacy background jobs without an
-identity run only while a fresh durable read proves every policy is NULL.
+identity run only while a fresh durable read proves every policy is NULL. Headerless
+private calls from a verified expansion Container remain compatible beside controlled
+accounts: that Container applies its current-account refusal fence before the hop.
+An unreadable or malformed store cannot use this compatibility proof.
 
 ## Contract
 

@@ -1,4 +1,4 @@
-import { KEY_CONTROLS, expansionFence } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled, expansionFence } from "./key-controls-capability.mjs";
 /** Shared provider classes and administrator-owned preferences at native dispatch. */
 import classes from "../providers/data-classes.json" with { type: "json" };
 
@@ -84,7 +84,7 @@ export async function legacyDataControls(env) {
   if (!Array.isArray(rows?.results)) throw new TypeError("Unverifiable legacy controls");
   for (const row of rows.results) {
     if (!validDataControls(row)) throw new TypeError("Unverifiable legacy controls");
-    expansionFence(row);
+    if (controlled(row)) { const error = new TypeError("Legacy controlled accounts"); error.code = "legacy_controlled_accounts"; throw error; }
   }
   return { official_only: null, forced_provider_preferences: null };
 }

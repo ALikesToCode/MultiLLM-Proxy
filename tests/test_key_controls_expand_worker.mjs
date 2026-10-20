@@ -158,3 +158,25 @@ test("registered Container forwarding refuses controlled accounts before sending
     assert.equal(sent, policy === states[0] ? 1 : 0, path);
   }
 });
+
+test("a fenced expansion Container preserves a NULL private call beside other controlled accounts", async () => {
+  const { legacyBindingControls } = await import("../worker/legacy-binding-policy.mjs");
+  for (const policy of states.slice(1)) {
+    const database = policyStore(policy);
+    for (const capability of [{ protocol: 1, enforcement: false }, { protocol: 0 }, null]) {
+      let probes = 0;
+      const env = { INTELLIGENCE_DB: database, MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch(url, init) {
+        probes++; assert.equal(new URL(url).pathname, "/healthz"); assert.equal(init.method, "GET");
+        return Response.json({ key_controls: capability });
+      } }) } };
+      if (capability?.protocol === 1) assert.deepEqual(await legacyBindingControls(env), states[0]);
+      else await assert.rejects(legacyBindingControls(env));
+      assert.equal(probes, 1);
+    }
+  }
+  let probes = 0;
+  await assert.rejects(legacyBindingControls({ INTELLIGENCE_DB: policyStore({}), MULTILLM_PROXY_CONTAINER: {
+    getByName() { probes++; assert.fail("Unreadable policy must not negotiate a fallback"); },
+  } }));
+  assert.equal(probes, 0);
+});
