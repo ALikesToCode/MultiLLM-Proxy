@@ -26,6 +26,6 @@ test("zero and empty policies survive the negotiated account reply", () => {
     { official_only: null, forced_provider_preferences: {} }]) {
     const row = { username: "synthetic", ...policy, data_policy: { version: 1, ...policy } };
     assert.equal(accountReply(row, 1), row);
-    assert.equal(accountReply(row, null), row);
+    assert.deepEqual(accountReply(row, null), { username: "synthetic" });
   }
 });

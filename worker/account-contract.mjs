@@ -16,10 +16,9 @@ export const hasAccountPolicy = controlled;
 
 export function accountReply(row, version) {
   if (!row || version === ACCOUNT_POLICY_VERSION) return row;
-  // Expansion decoders understand controlled rows and refuse their dispatch.
-  // Older strict decoders also refuse this shape; never project controls away.
+  // Management remains readable to strict legacy decoders. Authentication by
+  // prefix refuses controlled rows separately, before projection.
   verifyDataPolicy(row.data_policy);
-  if (hasAccountPolicy(row)) return row;
   return Object.fromEntries(Object.entries(row).filter(([name]) => !POLICY_FIELDS.has(name)));
 }
 

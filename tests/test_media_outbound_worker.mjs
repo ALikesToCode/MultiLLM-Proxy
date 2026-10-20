@@ -5,7 +5,7 @@ import test from "./helpers/policy_test.mjs";
 import { fetchPublic, handleMediaOutbound, publicHttpsUrl } from "../worker/media-outbound.mjs";
 import { OLD, runtimeModule } from "./helpers/runtime_versions.mjs";
 
-const EXPAND = "e5e5a4a"; // The contract layer pins its expansion rollback target here.
+const EXPAND = "085399e"; // The contract layer pins its expansion rollback target here.
 
 const fetchImage = body => handleMediaOutbound(new Request("http://media.internal/v1/fetch", {
   method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"fixture-reader"}' }, body: JSON.stringify(body) }), { INTELLIGENCE_DB: policyStore() });

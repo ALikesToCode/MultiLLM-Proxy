@@ -633,7 +633,9 @@ def test_cascade_is_sampled_once_as_the_outer_request_and_never_per_tier(context
     submitted = []
     monkeypatch.setattr(sampling, "submit", submitted.append)
     monkeypatch.setattr(sampling.random, "random", lambda: 0.0)
-    g.authenticated_user = {"username": "synthetic", "is_admin": True, "shadow_eval_rate": 0.2}
+    g.authenticated_user = {"username": "synthetic", "is_admin": True, "shadow_eval_rate": 0.2,
+                            "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}}
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda _: g.authenticated_user)
     g.shadow_eval_started = 0.0
 
     @sampling.sample_chat_dispatch

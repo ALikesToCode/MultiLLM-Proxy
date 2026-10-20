@@ -311,6 +311,8 @@ class AccountAuthority:
                 return {"version": 1, "revisions": {name: state["revisions"].get(name, 0) for name in payload["domains"]}}
             return {"version": 1, "overrides": []}
         if endpoint == "users":
+            if payload["operation"] == "capabilities":
+                return {"version": 1, "key_controls": {"protocol": 2, "enforcement": True}}
             assert payload["operation"] == "list", "Enabled authentication must use the installed copy"
             users = [row for row in state["users"] if payload["after"] is None or row["username"] > payload["after"]]
             return {"version": 1, "users": users[:payload["limit"]]}

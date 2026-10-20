@@ -4,7 +4,7 @@ import { accountPolicyVersion, accountReply, accountWrite } from "./account-cont
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
 import { dataPolicy } from "./dispatch-policy.mjs";
-import { KEY_CONTROLS } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled } from "./key-controls-capability.mjs";
 import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
@@ -248,7 +248,9 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "by_prefix": {
         if (!fields(body, ["version", "operation", "prefix"]) || !text(body.prefix, 64)) break;
-        return reply({ version: 1, users: (await activeUsersByPrefix(db, body.prefix, env)).map(user => accountReply(user, policyVersion)) });
+        const users = await activeUsersByPrefix(db, body.prefix, env);
+        if (policyVersion !== 1 && users.some(controlled)) throw Error("key_controls_require_upgrade");
+        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"])) break;

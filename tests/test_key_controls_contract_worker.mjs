@@ -10,7 +10,7 @@ import { applyMigrations } from "./d1_migrations.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { requirePeer } from "../worker/peer-capability.mjs";
 
-const run = promisify(execFile), A = "e5e5a4a", versions = [A, ""];
+const run = promisify(execFile), A = "085399e", versions = [A, ""];
 const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url)));
 const policies = [
   { official_only: null, forced_provider_preferences: null },
@@ -123,8 +123,8 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
           const response = await worker.fetch(new Request("https://gateway.example/v1/knowledge/native/exa_search", {
             method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ query: "synthetic" }),
           }), env, { waitUntil() {} });
-          if (index === 0 || index === 3 && !main && !privateRef) {
-            assert.equal(response.status, 200, "admitted Knowledge: " + await response.clone().text());
+          if (index === 0) {
+            assert.equal(response.status, 200, "unrestricted Knowledge: " + await response.clone().text());
             assert.equal(external, 1);
           } else {
             assert.ok(response.status >= 400, "controlled Knowledge must be enforced or refused");
