@@ -1502,7 +1502,7 @@
   "worker/account-contract.mjs": {
     "kind": "internal",
     "reason": "Negotiates private account RPC metadata; no provider dispatch.",
-    "sha256": "241a044ecade58e0000b56ca41233e242a040ad73a49a6bded169aefedb036b3"
+    "sha256": "7d4e309ebafd2da9143d9bc19562173626466a2947428273c4686a04fc3c0f76"
   },
   "worker/admission-do.mjs": {
     "kind": "internal",
@@ -1597,7 +1597,7 @@
   "worker/control-users-d1.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "fb66cec8052bd9743460e28878f223cfa1c5f7825281927e6ba12c619da1a1d2"
+    "sha256": "4f7a8ae40dd9fdf5997a1a28c348680faf509b1834030fa8d988e5468668956b"
   },
   "worker/cors-policy.mjs": {
     "kind": "non-provider",

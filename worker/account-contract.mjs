@@ -14,11 +14,12 @@ export function accountPolicyVersion(body) {
 
 export const hasAccountPolicy = controlled;
 
-export function accountReply(row, version) {
+export function accountReply(row, version, { management = false } = {}) {
   if (!row || version === ACCOUNT_POLICY_VERSION) return row;
   // Management remains readable to strict legacy decoders. Authentication by
   // prefix refuses controlled rows separately, before projection.
   verifyDataPolicy(row.data_policy);
+  if (hasAccountPolicy(row) && !management) throw new Error("key_controls_require_upgrade");
   return Object.fromEntries(Object.entries(row).filter(([name]) => !POLICY_FIELDS.has(name)));
 }
 

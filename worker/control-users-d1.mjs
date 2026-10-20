@@ -4,7 +4,7 @@ import { accountPolicyVersion, accountReply, accountWrite } from "./account-cont
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
 import { dataPolicy } from "./dispatch-policy.mjs";
-import { KEY_CONTROLS, controlled } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS } from "./key-controls-capability.mjs";
 import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
@@ -238,7 +238,7 @@ export async function handleControlUsersRequest(request, env) {
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
         ).all()).results;
         const users = await readUsers(query, env);
-        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
+        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion, { management: true })) });
       }
       case "get": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
@@ -249,7 +249,6 @@ export async function handleControlUsersRequest(request, env) {
       case "by_prefix": {
         if (!fields(body, ["version", "operation", "prefix"]) || !text(body.prefix, 64)) break;
         const users = await activeUsersByPrefix(db, body.prefix, env);
-        if (policyVersion !== 1 && users.some(controlled)) throw Error("key_controls_require_upgrade");
         return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
       }
       case "upsert": {

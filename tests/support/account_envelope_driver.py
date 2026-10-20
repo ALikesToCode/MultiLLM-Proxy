@@ -107,6 +107,27 @@ headers = {"Authorization": "Bearer mllm_synthetic_incident_key_long_enough"}
 requests_to_run = json.loads(sys.argv[4]) if len(sys.argv) > 4 else [("/v1/models", "get"), ("/v1/chat/completions", "post")]
 for operation in requests_to_run:
     path, method = operation[:2]
+    if path == "/probe/integration":
+        from error_handlers import APIError
+        from services.provider_dispatch import provider_http
+
+        def integration_send(**kwargs):
+            from services.dispatch_network import network_admitted
+            assert network_admitted()
+            seen.append(kwargs)
+            response = requests.Response()
+            response.status_code = 200
+            return response
+
+        try:
+            response = provider_http("openrouter", "POST", "https://openrouter.ai/api/v1/chat/completions",
+                reference={"username": "integration:synthetic", "api_key_prefix": "mllm_intelligence_aaaaaaaaaaaaaaaa"},
+                transport=integration_send, json={"messages": []})
+            status = response.status_code
+        except APIError as error:
+            status = error.status_code
+        print(json.dumps({"path": path, "status": status, "dispatches": len(seen)}))
+        continue
     if path == "/login":
         username = operation[2]
         client = app.test_client()

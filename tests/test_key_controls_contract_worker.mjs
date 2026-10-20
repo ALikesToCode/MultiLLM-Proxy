@@ -49,19 +49,25 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
       await db.prepare(`INSERT INTO control_users(username,api_key_hash,api_key_prefix,scopes,is_admin,created_at,official_only)
         VALUES('synthetic-neighbour',?,'synthetic-other-prefix','chat',0,'2026-10-01T00:00:00Z',1)`)
         .bind(`scrypt:32768:8:1$syntheticsalt$${digest}`).run();
+      await db.prepare("INSERT INTO intelligence_principals(id,scopes,version,created_at) VALUES('integration:synthetic','[\"chat\"]',1,'2026-10-01T00:00:00Z')").run();
+      await db.prepare("INSERT INTO intelligence_credentials(principal_id,version,key_prefix,key_hash) VALUES('integration:synthetic',1,'mllm_intelligence_aaaaaaaaaaaaaaaa',?)")
+        .bind(`scrypt:32768:8:1$syntheticsalt$${digest}`).run();
       const settings = collectContainerEnv({ ...config.vars, ADMIN_API_KEY: "synthetic-bootstrap-long-key",
         FLASK_SECRET_KEY: "synthetic-session-long-enough", JWT_SECRET: "synthetic-jwt-long-enough", OPENROUTER_API_KEY: "synthetic-operator" });
       // Exercise Container authentication directly too: front-door rejection alone
       // cannot prove that a legacy account RPC preserved the rollback fence.
-      for (const policy of policies) {
+      for (const policy of policies) for (const reader of [A, "9153952"]) {
         await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
           .bind(policy.official_only, policy.forced_provider_preferences).run();
+        await db.prepare("UPDATE intelligence_principals SET official_only=?,forced_provider_preferences=? WHERE id='integration:synthetic'")
+          .bind(policy.official_only, policy.forced_provider_preferences).run();
         const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
-          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), A],
+          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), reader,
+          JSON.stringify([["/v1/chat/completions", "post"], ["/probe/integration", "post"]])],
         { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
         const rows = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
-        assert.equal(rows.at(-1).status, policy === policies[0] ? 200 : 503);
-        assert.equal(rows.at(-1).dispatches, policy === policies[0] ? 1 : 0);
+        assert.deepEqual(rows.map(row => row.status), policy === policies[0] ? [200, 200] : [503, 503]);
+        assert.deepEqual(rows.map(row => row.dispatches), policy === policies[0] ? [1, 2] : [0, 0]);
       }
       for (const container of versions) for (const privateRef of versions) for (const [index, policy] of policies.entries()) {
         await t.test(`${main || "B"}/${container || "B"}/${privateRef || "B"}/policy-${index}`, async () => {
