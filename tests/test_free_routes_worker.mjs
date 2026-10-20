@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 
 const worker = (await loadWorkerModule()).default;
 const origin = "https://example.test";
@@ -15,7 +16,7 @@ test("deployments preserve operator-owned free-tier settings", async () => {
 });
 
 function environment(fetch) {
-  return { MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch }) } };
+  return policyFixtureEnv({ ADMIN_API_KEY: "test-proxy-key", MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch }) } });
 }
 
 test("free pool preflight is answered at the edge without starting a container", async () => {

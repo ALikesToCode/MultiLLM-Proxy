@@ -17,10 +17,12 @@
  * main Worker is deployed by Workers Builds, so a mismatch there is only a warning.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { localMigrations, pendingMigrations, remoteAppliedMigrations } from "./verify_d1_migrations.mjs";
+
+import { deploymentTarget } from "./deployment_target.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -29,7 +31,7 @@ export const WORKERS = Object.freeze({
   main: { label: "Main Worker", name: "multillm-proxy", config: "wrangler.jsonc", fingerprinted: true },
   knowledge: { label: "Knowledge Worker", name: "multillm-knowledge", config: "wrangler.knowledge.jsonc", fingerprinted: false },
 });
-const USAGE = `Usage: node scripts/deploy_status.mjs [--json] [--url <origin>] [--database <name>]
+const USAGE = `Usage: node scripts/deploy_status.mjs [--json] [--url <origin>] --database <name> [--config <file>] [--knowledge-config <file>]
        node scripts/deploy_status.mjs --verify --commit <sha> --main-worker actions|workers-builds
                                       [--wait <seconds>] [--markdown <file>]`;
 
@@ -174,9 +176,9 @@ export function localRelease(root, exec) {
     fingerprint: FINGERPRINT.test(fingerprint ?? "") ? fingerprint : null };
 }
 
-export async function collectStatus({ run, api, fetchImpl, origin, database, local }) {
+export async function collectStatus({ run, api, fetchImpl, origin, database, local, workers: definitions = WORKERS }) {
   const workers = {};
-  for (const [key, worker] of Object.entries(WORKERS)) workers[key] = await workerStatus(worker, { run, api });
+  for (const [key, worker] of Object.entries(definitions)) workers[key] = await workerStatus(worker, { run, api });
   return { checked_at: new Date().toISOString(), local, workers, d1: d1Status(database, run), ready: await probeReady(origin, fetchImpl) };
 }
 
@@ -255,7 +257,7 @@ function describeLocal(local) {
 function rows(status) {
   return [
     ["Local checkout", describeLocal(status.local)],
-    ...Object.entries(WORKERS).map(([key, worker]) => [worker.label, describeWorker(status.workers[key], status.local)]),
+    ...Object.entries(status.workers).map(([key, worker]) => [WORKERS[key].label, describeWorker(worker, status.local)]),
     ["D1 migrations", describeD1(status.d1)],
     ["/ready", `${status.ready.status ?? "no response"} ${status.ready.detail} (${status.ready.url})`],
   ];
@@ -289,18 +291,13 @@ export async function verifyUntilSettled({ collect, evaluateOptions, waitSeconds
   }
 }
 
-function defaultOrigin() {
-  const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
-  return config.vars?.WORKBENCH_WORKER_URL;
-}
-
 async function main(argv) {
   let options;
   try {
     ({ values: options } = parseArgs({ args: argv, options: {
       json: { type: "boolean" }, verify: { type: "boolean" }, commit: { type: "string" }, url: { type: "string" },
       "main-worker": { type: "string" }, wait: { type: "string", default: "0" }, markdown: { type: "string" },
-      database: { type: "string", default: "multillm-intelligence" }, help: { type: "boolean" },
+      database: { type: "string" }, config: { type: "string" }, "knowledge-config": { type: "string" }, help: { type: "boolean" },
     } }));
   } catch (error) {
     console.error(`${error.message}\n${USAGE}`);
@@ -317,18 +314,21 @@ async function main(argv) {
     console.error(`--verify needs --commit <40-character sha>; --main-worker is actions or workers-builds.\n${USAGE}`);
     return 2;
   }
-  const origin = options.url || process.env.DEPLOY_STATUS_URL || defaultOrigin();
+  let target;
+  try { target = deploymentTarget({ database: options.database, mainConfig: options.config, knowledgeConfig: options["knowledge-config"] }); }
+  catch (error) { console.error(error.message); return 2; }
+  const origin = options.url || target.origin;
   if (!URL.canParse(origin ?? "")) {
     console.error(`Pass the Worker origin with --url; ${JSON.stringify(origin ?? null)} is not a URL.`);
     return 2;
   }
-  const run = args => execFileSync("npx", ["--no-install", "wrangler", ...args], {
+  const run = args => execFileSync("npx", ["--no-install", "wrangler", ...args, ...(args[0] === "d1" ? ["--config", target.mainConfig] : [])], {
     cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, WRANGLER_SEND_METRICS: "false", FORCE_COLOR: "0" },
   });
   const local = localRelease(ROOT, execFileSync);
   const collect = () => collectStatus({ run, api: cloudflareApi(process.env), fetchImpl: fetch, origin,
-    database: options.database, local });
+    database: target.database, workers: target.workers, local });
   const { status, checks } = options.verify
     ? await verifyUntilSettled({ collect, evaluateOptions: { commit: options.commit, mainWorker }, waitSeconds: wait,
       sleep: ms => new Promise(resolve => setTimeout(resolve, ms)), now: Date.now })

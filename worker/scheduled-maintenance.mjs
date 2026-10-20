@@ -1,3 +1,4 @@
+import { controlNetwork } from "./dispatch-network.mjs";
 /** Bounded shared-cache maintenance and content-free alert delivery. */
 import { cleanupGenerationCache } from "./generation-cache-d1.mjs";
 import { generationCacheSettings } from "./exact-generation-cache.mjs";
@@ -34,8 +35,8 @@ export async function collectAlertAggregates(env, rules, now = new Date()) {
 
 export function alertTransport(destination, options) {
   // The delivery owner provides its three-second abort signal and bounds the payload.
-  return fetch(destination, { method: "POST", headers: options.headers, body: options.body,
-    redirect: "error", signal: options.signal });
+  return controlNetwork(destination, () => fetch(destination, { method: "POST", headers: options.headers, body: options.body,
+    redirect: "error", signal: options.signal }));
 }
 
 /** Scheduled work is registered only when a feature that needs it is enabled. */

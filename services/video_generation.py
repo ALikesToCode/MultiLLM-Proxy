@@ -150,14 +150,15 @@ def _failure(status: int, message: str, transport: str | None = None) -> Respons
     return response
 
 
-def _send(method: str, url: str, *, timeout, **kwargs) -> requests.Response | Response:
+def _send(method: str, url: str, *, provider: str, timeout, **kwargs) -> requests.Response | Response:
     """One provider call without retries: a sent job may already be accepted and billed."""
     if "json" in kwargs:
         kwargs["json"] = protect_payload(kwargs["json"], provider="video")
     if "data" in kwargs:
         kwargs["data"] = protect_body(kwargs["data"], kwargs.get("headers"), provider="video")
     try:
-        return requests.request(method, url, timeout=timeout, allow_redirects=False, **kwargs)
+        from services.provider_dispatch import provider_http
+        return provider_http(provider, method, url, timeout=timeout, allow_redirects=False, **kwargs)
     except requests.exceptions.ConnectTimeout:
         return _failure(502, "The video provider could not be reached", "connect")
     except requests.exceptions.ConnectionError as error:
@@ -186,14 +187,14 @@ def create_job(provider: str, model: str, request: VideoRequest, key: str | None
                 "seconds": str(_nearest(request.seconds, (4, 8, 12)))}
         if request.image_url:
             body["input_reference"] = {"image_url": request.image_url}
-        response = _send("POST", f"{base_url.rstrip('/')}/v1/videos", timeout=CREATE_TIMEOUT, json=body,
+        response = _send("POST", f"{base_url.rstrip('/')}/v1/videos", provider=provider, timeout=CREATE_TIMEOUT, json=body,
                          headers={"Authorization": f"Bearer {key}"})
     elif provider == "xai":
         body = {"model": model, "prompt": request.prompt, "duration": min(15, request.seconds),
                 "aspect_ratio": request.aspect_ratio, "resolution": request.resolution}
         if request.image_url:
             body["image"] = {"url": request.image_url}
-        response = _send("POST", f"{base_url.rstrip('/')}/v1/videos/generations", timeout=CREATE_TIMEOUT, json=body,
+        response = _send("POST", f"{base_url.rstrip('/')}/v1/videos/generations", provider=provider, timeout=CREATE_TIMEOUT, json=body,
                          headers={"Authorization": f"Bearer {key}"})
     elif provider == "gemini":
         instance: dict[str, object] = {"prompt": request.prompt}
@@ -204,7 +205,7 @@ def create_job(provider: str, model: str, request: VideoRequest, key: str | None
         body = {"instances": [instance], "parameters": {
             "sampleCount": 1, "aspectRatio": aspect_ratio, "resolution": request.resolution,
             "durationSeconds": _nearest(request.seconds, (4, 6, 8))}}
-        response = _send("POST", f"{GEMINI_BASE}/models/{model}:predictLongRunning", timeout=CREATE_TIMEOUT,
+        response = _send("POST", f"{GEMINI_BASE}/models/{model}:predictLongRunning", provider=provider, timeout=CREATE_TIMEOUT,
                          json=body, headers={"x-goog-api-key": key})
     elif provider == "cloudflare":
         if not cloudflare_ai.enabled():
@@ -240,10 +241,10 @@ def job_status(job: dict, job_id: str, key: str | None, base_url: str) -> dict:
     if provider == "cloudflare":
         return {**public, "status": "completed", "progress": 100}
     if provider in ("openai", "xai"):
-        response = _send("GET", f"{base_url.rstrip('/')}/v1/videos/{upstream}", timeout=POLL_TIMEOUT,
+        response = _send("GET", f"{base_url.rstrip('/')}/v1/videos/{upstream}", provider=provider, timeout=POLL_TIMEOUT,
                          headers={"Authorization": f"Bearer {key}"})
     else:
-        response = _send("GET", f"{GEMINI_BASE}/{upstream}", timeout=POLL_TIMEOUT, headers={"x-goog-api-key": key})
+        response = _send("GET", f"{GEMINI_BASE}/{upstream}", provider=provider, timeout=POLL_TIMEOUT, headers={"x-goog-api-key": key})
     if isinstance(response, Response) or response.status_code >= 500:
         # A failed status read is not a failed job: report it and let the caller poll again.
         return {**public, "status": "in_progress", "poll_error": "The provider status could not be read; poll again"}
@@ -275,13 +276,13 @@ def content_source(job: dict, key: str | None, base_url: str) -> tuple[str, dict
     if provider == "openai":
         return f"{base_url.rstrip('/')}/v1/videos/{upstream}/content", {"Authorization": f"Bearer {key}"}
     if provider == "xai":
-        response = _send("GET", f"{base_url.rstrip('/')}/v1/videos/{upstream}", timeout=POLL_TIMEOUT,
+        response = _send("GET", f"{base_url.rstrip('/')}/v1/videos/{upstream}", provider=provider, timeout=POLL_TIMEOUT,
                          headers={"Authorization": f"Bearer {key}"})
         url = ((_json(response).get("video") or {}).get("url") if not isinstance(response, Response) else None)
         if not url:
             raise APIError("The video is not ready", status_code=409)
         return url, {}
-    response = _send("GET", f"{GEMINI_BASE}/{upstream}", timeout=POLL_TIMEOUT, headers={"x-goog-api-key": key})
+    response = _send("GET", f"{GEMINI_BASE}/{upstream}", provider=provider, timeout=POLL_TIMEOUT, headers={"x-goog-api-key": key})
     samples = (((_json(response).get("response") or {}).get("generateVideoResponse") or {}).get("generatedSamples")
                if not isinstance(response, Response) else None) or []
     uri = ((samples[0] or {}).get("video") or {}).get("uri") if samples else None
@@ -290,14 +291,15 @@ def content_source(job: dict, key: str | None, base_url: str) -> tuple[str, dict
     return uri, {"x-goog-api-key": key}
 
 
-def stream_content(url: str, headers: dict) -> Response:
+def stream_content(url: str, headers: dict, *, provider: str) -> Response:
     if not url.startswith("https://"):
         raise APIError("The provider returned an unsupported video location", status_code=502)
     try:
-        upstream = requests.get(url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True, allow_redirects=True)
+        from services.provider_assets import asset_http
+        upstream = asset_http(provider, url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True)
     except requests.exceptions.RequestException:
         raise APIError("The video could not be downloaded; try again", status_code=502) from None
-    if upstream.status_code >= 400:
+    if upstream.status_code != 200:
         upstream.close()
         raise APIError("The video is not available", status_code=409 if upstream.status_code in (404, 409) else 502)
     length = int(upstream.headers.get("Content-Length") or 0)

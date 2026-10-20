@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -50,6 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -84,6 +86,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -106,6 +109,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
@@ -119,11 +123,15 @@ jobs:
         run: git diff --exit-code -- static/css/style.css
       - name: Frontend build contracts
         run: node --test tests/test_frontend_build.mjs
+      - name: Check release configuration
+        run: node scripts/key_data_preflight.mjs --check
+      # Bundle-only checks cannot attest remote deployment prerequisites. The
+      # normal Wrangler build enforces those before a real upload.
       - name: Validate Knowledge Worker bundle
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --config wrangler.knowledge.jsonc --dry-run --outdir /tmp/knowledge-worker
+        run: node scripts/check_worker_bundle.mjs --config wrangler.knowledge.jsonc --outdir /tmp/knowledge-worker
       - name: Validate main Worker bundle
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --dry-run --containers-rollout=none --outdir /tmp/main-worker
+        run: node scripts/check_worker_bundle.mjs --config wrangler.jsonc --outdir /tmp/main-worker

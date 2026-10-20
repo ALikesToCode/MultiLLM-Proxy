@@ -1,3 +1,4 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -6,7 +7,7 @@ import { DeferredTools, deferredEnabled, readGrantSnapshot, handleDeferredMcp } 
 import { catalogueDigest } from "../worker/knowledge/contract-drift.mjs";
 import { rankToolDefinitions } from "../worker/knowledge/skills-index.mjs";
 import * as deferred from "../worker/knowledge/deferred-tools.mjs";
-import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { handleControlStateRequest } from "../worker/control-state-d1.mjs";
 import { generateIntegrationCredential } from "../scripts/intelligence_operator.mjs";
 
@@ -314,3 +315,8 @@ test("loading the module makes no random values, which Workers forbid in global 
     else delete globalThis.crypto.randomUUID;
   }
 });
+
+function handleKnowledgeEdgeRequest(request, env, ...args) {
+  if (env.INTELLIGENCE_DB) { env.INTELLIGENCE_DB = policyFixtureEnv(env).INTELLIGENCE_DB; }
+  return rawhandleKnowledgeEdgeRequest(request, env, ...args);
+}

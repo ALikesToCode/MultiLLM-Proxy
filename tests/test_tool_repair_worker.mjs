@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { CORS_DEFAULT_HEADERS, CORS_EXPOSE_HEADERS } from "../worker/cors-policy.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerWithUnrestrictedControls as loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 test("tool repair default reaches the container", () => {
   assert.equal(collectContainerEnv({ TOOL_CALL_REPAIR_DEFAULT: "full" }).TOOL_CALL_REPAIR_DEFAULT, "full");

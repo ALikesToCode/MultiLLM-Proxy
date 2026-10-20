@@ -1,3 +1,4 @@
+from services import key_controls_capability
 import json
 import logging
 import os
@@ -529,12 +530,17 @@ def register_core_routes(app) -> None:
             response = jsonify(
                 {
                     "status": "healthy",
+                    "key_controls": key_controls_capability.CAPABILITY,
                     "config": {
                         "host": os.environ.get("SERVER_HOST", Config.DEFAULT_HOST),
                         "port": int(os.environ.get("SERVER_PORT", Config.DEFAULT_PORT)),
                     },
                 }
             )
+            from services.release_status import container_release
+            stamp = container_release()["build_id"]
+            if stamp:
+                response.headers["X-MultiLLM-Container-Build"] = stamp
             response.headers["Cache-Control"] = "no-store"
             return response, 200
         except Exception as error:

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
@@ -10,7 +10,7 @@ const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "chat,models", is_admin: 0,
   created_at: "2026-09-26T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
   created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-  allowed_models: null, allowed_ips: null, expires_at: null, ...changes,
+  allowed_models: null, allowed_ips: null, expires_at: null, official_only: null, forced_provider_preferences: null, ...changes,
 });
 const event = (action, outcome, actor, target, detail) => ({ operation: "audit_record", action, outcome, actor, target, detail });
 const list = (changes = {}) => ({ operation: "audit_list", actor: null, target: null, action: null,
@@ -25,7 +25,7 @@ async function database(t) {
   const env = { INTELLIGENCE_DB: db, ADMIN_USERNAME: "owner" };
   const call = async body => {
     const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }) }), env);
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, data_policy_version: 1, ...body }) }), env);
     return { status: response.status, body: await response.json() };
   };
   return { db, call };
@@ -132,7 +132,7 @@ test("an unavailable audit table fails closed without revealing storage details"
   const env = { INTELLIGENCE_DB: { prepare() { throw new Error("private database detail"); } } };
   for (const body of [list(), event("sign_out", "succeeded", "owner", null, null)]) {
     const response = await handleControlUsersRequest(new Request("http://intelligence.internal/v1/users", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }) }), env);
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, data_policy_version: 1, ...body }) }), env);
     assert.equal(response.status, 503);
     assert.equal((await response.text()).includes("private database detail"), false);
   }

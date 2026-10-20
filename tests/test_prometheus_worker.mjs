@@ -3,7 +3,7 @@ import test, { before } from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { resetStatusMemo } from "../worker/status-page.mjs";
 import { escapeLabel, renderStatusMetrics } from "../worker/prometheus.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerWithUnrestrictedControls as loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 let worker;
 before(async () => { worker = (await loadWorkerModule()).default; });

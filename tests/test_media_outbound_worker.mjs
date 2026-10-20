@@ -1,10 +1,14 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 
 import { fetchPublic, handleMediaOutbound, publicHttpsUrl } from "../worker/media-outbound.mjs";
+import { OLD, runtimeModule } from "./helpers/runtime_versions.mjs";
+
+const EXPAND = ""; // The contract layer pins its expansion rollback target here.
 
 const fetchImage = body => handleMediaOutbound(new Request("http://media.internal/v1/fetch", {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), {});
+  method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"fixture-reader"}' }, body: JSON.stringify(body) }), { INTELLIGENCE_DB: policyStore() });
 
 async function withFetch(handler, run) {
   const original = globalThis.fetch;
@@ -57,4 +61,40 @@ test("the private media host refuses other origins and operations", async () => 
   assert.equal((await handleMediaOutbound(new Request("http://media.internal/v1/fetch?x=1", { method: "POST" }), {})).status, 404);
   assert.equal((await handleMediaOutbound(new Request("http://media.internal/v1/unknown", { method: "POST" }), {})).status, 404);
   assert.equal((await fetchImage({ url: "https://10.1.2.3/a.png" })).status, 400);
+});
+
+test("OLD and expansion media transports retain manual admission on every redirect hop", async () => {
+  for (const revision of [OLD, EXPAND]) {
+    const media = await runtimeModule("export {fetchPublic} from './worker/media-outbound.mjs';"
+      + (revision === OLD ? "" : "export {withDispatchPrincipal} from './worker/provider-dispatch.mjs';"), revision);
+    for (const destination of ["https://cdn.example.com/final", "http://cdn.example.com/final", "https://127.0.0.1/final", "loop"]) {
+      const seen = [];
+      const retrieve = () => media.fetchPublic("https://images.example.com/start", { fetcher: async (url, init) => {
+        seen.push(url);
+        // Model an actual fetcher's automatic-follow behavior: admission would be bypassed.
+        if (init.redirect !== "manual") return new Response("automatically followed");
+        if (url.endsWith("/final")) return new Response("image");
+        return new Response(null, { status: 302, headers: { location: destination === "loop" ? url : destination } });
+      } });
+      const response = media.withDispatchPrincipal ? await media.withDispatchPrincipal(
+        { INTELLIGENCE_DB: policyStore() }, { authenticated: true, keyId: "synthetic" }, retrieve) : await retrieve();
+      if (destination === "https://cdn.example.com/final") {
+        assert.equal(await response.text(), "image");
+        assert.deepEqual(seen, ["https://images.example.com/start", destination]);
+      } else {
+        assert.equal(response, null);
+        assert.equal(seen.length, destination === "loop" ? 4 : 1);
+      }
+    }
+  }
+});
+
+test("expansion providerFetch preserves each caller's redirect mode", async () => {
+  const { providerFetch } = await runtimeModule("export {providerFetch} from './worker/provider-dispatch.mjs';", EXPAND);
+  for (const redirect of ["manual", "error", "follow"]) {
+    await providerFetch("media", new Request("https://images.example.com/asset", { redirect }), {}, {
+      env: { INTELLIGENCE_DB: policyStore() }, authority: { authenticated: true, keyId: "synthetic" },
+      send: request => { assert.equal(request.redirect, redirect); return new Response(); },
+    });
+  }
 });

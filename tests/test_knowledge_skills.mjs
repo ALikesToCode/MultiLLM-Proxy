@@ -1,11 +1,12 @@
+import { policyFixtureEnv, initializePolicyAccount } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { SkillsStore } from "../worker/knowledge/skills-store.mjs";
 import { SkillsIndex, terms } from "../worker/knowledge/skills-index.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, SKILLS_LIMIT, SYNC_REQUEST_BYTES } from "../worker/knowledge/skills-validation.mjs";
@@ -13,8 +14,8 @@ import { quantizeEmbedding } from "../worker/knowledge/memo-store.mjs";
 import { digest } from "../worker/knowledge/evidence.mjs";
 import { errorReply } from "../worker/knowledge/contracts.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
-import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
-import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
+import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeOutbound as rawhandleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 
 async function skill(name = "testing", description = "Test regression behavior", root = "agents", extra = []) {
   const content = `---\nname: ${name}\ndescription: ${description}\n---\n# ${name}\nTest guide`;
@@ -149,14 +150,15 @@ test("real Skills Durable Object survives restart with R2 files and helpful coun
   const bundled = await build({ stdin: { resolveDir: process.cwd(), contents: `
     export { KnowledgeSkills } from './worker/knowledge/index.mjs';
     export default { fetch(request, env) { return env.KNOWLEDGE_SKILLS.get(env.KNOWLEDGE_SKILLS.idFromName('personal')).fetch(request); } };
-  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers"], write: false });
+  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"], write: false });
   const directory = await mkdtemp(join(tmpdir(), "knowledge-skills-"));
-  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28", script: bundled.outputFiles[0].text,
-    resourcePersistencePath: directory, durableObjects: { KNOWLEDGE_SKILLS: { className: "KnowledgeSkills", useSQLite: true } }, r2Buckets: ["KNOWLEDGE_SNAPSHOTS"] }));
+  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], compatibilityDate: "2026-07-28", script: bundled.outputFiles[0].text,
+    resourcePersistencePath: directory, d1Databases: ["INTELLIGENCE_DB"], durableObjects: { KNOWLEDGE_SKILLS: { className: "KnowledgeSkills", useSQLite: true } }, r2Buckets: ["KNOWLEDGE_SNAPSHOTS"] }));
   let mf = create();
+  await initializePolicyAccount(mf, "synthetic-principal");
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });
   const call = async (operation, payload) => {
-    const response = await mf.dispatchFetch("http://skills.internal/dispatch", { method: "POST", headers: { "content-type": "application/json" },
+    const response = await mf.dispatchFetch("http://skills.internal/dispatch", { method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"synthetic-principal"}' },
       body: JSON.stringify({ operation, payload, principal: "synthetic-principal" }) });
     assert.equal(response.status, 200);
     return (await response.json()).result;
@@ -394,14 +396,18 @@ test("hybrid semantic confidence requires explicit calibration and fast mode nev
 test("8 MiB sync ingress and outbound boundary accept exact size and reject one extra byte", async () => {
   assert.equal(SYNC_REQUEST_BYTES, 8 * 1024 * 1024);
   const env = { ADMIN_API_KEY: "synthetic-skills-boundary", ADMIN_USERNAME: "operator", KNOWLEDGE_SERVICE: { fetch: async () => Response.json({ version: 1, result: { results: [] } }) } };
-  const request = (url, body) => new Request(url, { method: "POST", headers: { authorization: "Bearer synthetic-skills-boundary", "content-type": "application/json" }, body });
+  const request = (url, body) => new Request(url, { method: "POST", headers: { authorization: "Bearer synthetic-skills-boundary", "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"synthetic-principal"}' }, body });
   const raw = JSON.stringify({ skills: [] });
   for (const [bytes, expected] of [[SYNC_REQUEST_BYTES, 200], [SYNC_REQUEST_BYTES + 1, 413]]) {
     const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills", raw.padEnd(bytes)), env);
     assert.equal(response.status, expected);
-    const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync" }).padEnd(bytes)), env);
+    const outbound = await handleKnowledgeOutbound(request("http://knowledge.internal/v1/dispatch", JSON.stringify({ operation: "skills.sync", principal: { id: "synthetic" } }).padEnd(bytes)), env);
     assert.equal(outbound.status, expected);
   }
   const response = await handleKnowledgeEdgeRequest(request("https://gateway.example/v1/knowledge/skills/find", JSON.stringify({ query: "x" }).padEnd(65537)), env);
   assert.equal(response.status, 413);
 });
+
+function handleKnowledgeEdgeRequest(request, env, ...args) { return rawhandleKnowledgeEdgeRequest(request, policyFixtureEnv(env), ...args); }
+
+function handleKnowledgeOutbound(request, env, ...args) { return rawhandleKnowledgeOutbound(request, policyFixtureEnv(env), ...args); }

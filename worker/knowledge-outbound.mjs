@@ -9,6 +9,7 @@ export async function handleKnowledgeOutbound(request, env) {
     if (!env.KNOWLEDGE_SERVICE) fail("knowledge_not_configured", "The private Knowledge service binding is not configured.", 503);
     const payload = await readJson(request, SYNC_REQUEST_BYTES);
     if (payload.operation !== "skills.sync" && new TextEncoder().encode(JSON.stringify(payload)).length > 65536) fail("request_too_large", "Request is too large.", 413);
+    await (await import("./key-data-guards.mjs")).currentDataControls(env, { keyId: payload.principal?.id });
     return env.KNOWLEDGE_SERVICE.fetch("http://knowledge.internal/v1/dispatch", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: request.signal,
     });

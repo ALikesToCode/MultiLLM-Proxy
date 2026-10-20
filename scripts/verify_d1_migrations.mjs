@@ -2,8 +2,9 @@
  * Guards for the D1 migrations in intelligence-migrations/.
  *
  *   node scripts/verify_d1_migrations.mjs --check              Static checks, no network (CI).
- *   node scripts/verify_d1_migrations.mjs --pending [database]  Print migrations not yet applied remotely.
- *   node scripts/verify_d1_migrations.mjs [database]            Fail unless every file is applied remotely.
+ *   node scripts/verify_d1_migrations.mjs --pending <database> Print migrations not yet applied remotely.
+ *   node scripts/verify_d1_migrations.mjs <database>           Fail unless every file is applied remotely.
+ * D1_DATABASE may supply an explicit target; there is no default database.
  *
  * The static check fails when a file name is malformed, when numbering has a gap or a
  * duplicate (two branches that each added the same number), or when a migration drops or
@@ -17,7 +18,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const DIRECTORY = new URL("../intelligence-migrations/", import.meta.url);
-const DEFAULT_DATABASE = "multillm-intelligence";
 export const MIGRATION_NAME = /^(\d{4})_[a-z0-9_]+\.sql$/;
 const MARKER = /^--[ \t]*destructive-migration:[ \t]*(\S.*)?$/m;
 const DESTRUCTIVE = [
@@ -141,11 +141,16 @@ export function localMigrations(directory = DIRECTORY) {
 }
 
 export function remoteAppliedMigrations(database, run = defaultRun) {
+  if (typeof database !== "string" || !database.trim() || database.startsWith("-")) {
+    throw new Error("Select a database explicitly with an argument or D1_DATABASE before a remote migration read");
+  }
   return appliedFromWrangler(run(["d1", "execute", database, "--remote", "--json",
     "--command", "SELECT name FROM d1_migrations ORDER BY id"]));
 }
 
 function defaultRun(args) {
+  const config = process.env.MAIN_WORKER_CONFIG;
+  if (config) args = [...args, "--config", config];
   return execFileSync("npx", ["--no-install", "wrangler", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
 }
 
@@ -184,10 +189,26 @@ function remote(database, { listOnly }) {
   console.log(`All ${files.length} D1 migrations are applied to ${database}.`);
 }
 
-function main(args) {
-  if (args[0] === "--check") return check();
-  if (args[0] === "--pending") return remote(args[1] || DEFAULT_DATABASE, { listOnly: true });
-  return remote(args[0] || DEFAULT_DATABASE, { listOnly: false });
+export function remoteOptions(args, env = process.env) {
+  const flags = args.filter(arg => arg.startsWith("--"));
+  const targets = args.filter(arg => !arg.startsWith("--"));
+  if (flags.some(arg => !["--pending", "--remote"].includes(arg)) || targets.length > 1) {
+    throw new Error("Use [--pending] [--remote] <database>, or --check for local validation");
+  }
+  const database = targets[0] || env.D1_DATABASE;
+  if (typeof database !== "string" || !database.trim() || database.startsWith("-")) {
+    throw new Error("Select a database explicitly with an argument or D1_DATABASE before a remote migration read");
+  }
+  return { database, listOnly: flags.includes("--pending") };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
+function main(args) {
+  if (args[0] === "--check") return check();
+  const { database, listOnly } = remoteOptions(args);
+  return remote(database, { listOnly });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try { main(process.argv.slice(2)); }
+  catch (error) { console.error(error.message); process.exitCode = 1; }
+}

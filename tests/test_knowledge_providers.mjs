@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { PROVIDERS, providerStatus, ProviderError, retrieve } from "../worker/knowledge/providers/index.mjs";
 import { sourceLinks, sourceOperation, sourceURL } from "../worker/knowledge/providers/source-policy.mjs";
 

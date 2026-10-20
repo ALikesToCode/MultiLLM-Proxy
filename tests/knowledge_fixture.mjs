@@ -1,3 +1,4 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";
 import { defaultPolicy } from "../worker/knowledge/policy.mjs";
@@ -63,7 +64,7 @@ export async function fixture() {
     async match(key) { return cacheEntries.get(key.url)?.clone(); },
     async put(key, value) { cacheEntries.set(key.url, value.clone()); },
   };
-  const env = { KNOWLEDGE_SNAPSHOTS: {}, KNOWLEDGE_INDEX: {}, EXA_API_KEY: "synthetic-test-key" };
+  const env = { INTELLIGENCE_DB: policyStore(), KNOWLEDGE_SNAPSHOTS: {}, KNOWLEDGE_INDEX: {}, EXA_API_KEY: "synthetic-test-key" };
   const retrieve = async (provider, intent, { invoke }) => invoke(provider, "lookup", async () => {
     counts.providers++;
     return { observations: [{ kind: "source_excerpt", url: source.url, text, provider, freshness: "live" }], warnings: [] };

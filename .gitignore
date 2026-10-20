@@ -151,3 +151,6 @@ user_data.json
 .container-build-id
 # Local browser verification artifacts
 output/playwright/
+
+# Temporary deployment configuration (build arguments only).
+.release-wrangler-*

@@ -11,6 +11,11 @@ from services.proxy_service import ProxyService
 from services.resilience_service import ResilienceService
 
 
+
+from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("verified_transport_principal")
+
 class Clock:
     def __init__(self):
         self.now = 100.0

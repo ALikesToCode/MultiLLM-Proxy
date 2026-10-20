@@ -8,6 +8,11 @@ import pytest
 import requests
 
 
+
+from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("verified_transport_principal")
+
 @pytest.fixture(autouse=True)
 def settings(monkeypatch):
     monkeypatch.delenv("UPSTREAM_RETRY_AFTER_ADVICE_ENABLED", raising=False)

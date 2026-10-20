@@ -2,6 +2,9 @@
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
+import { dataPolicy } from "./dispatch-policy.mjs";
+import { KEY_CONTROLS, expansionFence } from "./key-controls-capability.mjs";
+import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
 import { logFailure } from "./log.mjs";
@@ -9,7 +12,7 @@ import { AUDIT_OPERATIONS, handleAuditOperation } from "./control-audit-d1.mjs";
 
 export const USER_FIELDS = Object.freeze(["username", "api_key_hash", "api_key_prefix", "scopes", "is_admin",
   "created_at", "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate"]);
+  "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate", "official_only", "forced_provider_preferences"]);
 // Migration 0007 added the per-key controls. Until it is applied, reads return the
 // older columns with no controls, so deploying before migrating cannot lock keys out.
 const CONTROL_FIELDS = USER_FIELDS.slice(12);
@@ -31,7 +34,7 @@ const list = (value, pattern) => value === null || (typeof value === "string" &&
 const reply = (value, status = 200) => Response.json(value.error
   ? { version: 1, error: { code: value.error, message: "Account storage operation failed" } }
   : value, { status, headers: { "cache-control": "no-store" } });
-const fields = (body, names) => Object.keys(body).length === names.length && names.every(key => Object.hasOwn(body, key));
+const fields = (body, names) => names.every(key => Object.hasOwn(body, key));
 
 export function streamUserFields(env) {
   return streamCostEnabled(env) ? [...USER_FIELDS, STREAM_CAP_FIELD] : USER_FIELDS;
@@ -42,9 +45,12 @@ export function validUser(user) {
     if (!validStreamCap(user[STREAM_CAP_FIELD])) return false;
     user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== STREAM_CAP_FIELD));
   }
+  if (user && Object.hasOwn(user, "data_policy")) {
+    user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== "data_policy"));
+  }
   if (user && !Object.hasOwn(user, "shadow_eval_rate")) user = { ...user, shadow_eval_rate: null };
   if (user && !Object.hasOwn(user, "secret_scan_mode")) user = { ...user, secret_scan_mode: null };
-  return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS)
+  return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS) && Object.keys(user).every(name => USER_FIELDS.includes(name))
     && text(user.username, 128) && text(user.api_key_hash, 512) && text(user.api_key_prefix, 64)
     && typeof user.scopes === "string" && user.scopes.length <= 512 && /^[A-Za-z0-9:_.,-]*$/.test(user.scopes)
     && (user.is_admin === 0 || user.is_admin === 1) && text(user.created_at, 64)
@@ -53,6 +59,8 @@ export function validUser(user) {
     && (user.secret_scan_mode === null || ["off", "observe", "redact", "block"].includes(user.secret_scan_mode))
     && (user.shadow_eval_rate === null || (typeof user.shadow_eval_rate === "number"
       && Number.isFinite(user.shadow_eval_rate) && user.shadow_eval_rate >= 0 && user.shadow_eval_rate <= 0.2))
+    && validDataControls(user)
+    && (user.forced_provider_preferences === null || typeof user.forced_provider_preferences === "string")
     && budget(user.daily_budget_usd) && budget(user.monthly_budget_usd)
     && list(user.allowed_models, MODEL_PATTERNS) && list(user.allowed_ips, IP_RANGES)
     && (user.expires_at === null || (text(user.expires_at, 64) && Number.isFinite(Date.parse(user.expires_at))));
@@ -139,11 +147,16 @@ async function read(query) {
 
 /** Run an account query with every column, or with the pre-0007 columns and no controls. */
 async function readUsers(query, env = {}) {
-  if (streamCostEnabled(env)) return read(() => query(streamUserFields(env).join(", ")));
-  for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
+  const stamp = row => row && { ...row, data_policy: dataPolicy(row) };
+  if (streamCostEnabled(env) || revisionSyncSettings(env).enabled) {
+    const rows = await read(() => query(streamUserFields(env).join(", ")));
+    return Array.isArray(rows) ? rows.map(stamp) : stamp(rows);
+  }
+  for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, USER_FIELDS.length - 3, USER_FIELDS.length - 4, 12]) {
     try {
       const rows = await read(() => query(USER_FIELDS.slice(0, end).join(", ")));
-      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row };
+      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row,
+        data_policy: end === USER_FIELDS.length ? dataPolicy(row) : null };
       return Array.isArray(rows) ? rows.map(defaults) : defaults(rows);
     } catch (error) {
       if (!missingColumn(error) || end === 12) throw error;
@@ -152,9 +165,9 @@ async function readUsers(query, env = {}) {
   }
 }
 
-function upsertStatement(db, user, fields) {
+function upsertStatement(db, user, fields, policyWrite = false) {
   return db.prepare(`INSERT INTO control_users (${fields.join(", ")}) VALUES (${fields.map(() => "?").join(", ")})
-    ON CONFLICT(username) DO UPDATE SET ${fields.slice(1).map(name => `${name}=excluded.${name}`).join(", ")}`)
+    ON CONFLICT(username) DO UPDATE SET ${fields.slice(1).filter(name => policyWrite || !["official_only", "forced_provider_preferences"].includes(name)).map(name => `${name}=excluded.${name}`).join(", ")}`)
     .bind(...fields.map(name => user[name]));
 }
 
@@ -206,6 +219,13 @@ export async function handleControlUsersRequest(request, env) {
     if (!body || Array.isArray(body) || typeof body !== "object" || body.version !== 1) return reply({ error: "invalid_request" }, 400);
   } catch { return reply({ error: "invalid_request" }, 400); }
   const db = env.INTELLIGENCE_DB;
+  const policyVersion = body.data_policy_version === 1 ? 1 : null;
+  delete body.data_policy_version;
+  if (body.operation === "capabilities") return reply({ version: 1, key_controls: KEY_CONTROLS });
+  const accountReply = user => {
+    if (!user || policyVersion === 1) return user;
+    return Object.fromEntries(Object.entries(user).filter(([name]) => !["official_only", "forced_provider_preferences", "data_policy"].includes(name)));
+  };
   try {
     if (AUDIT_OPERATIONS.has(body.operation)) {
       const result = await handleAuditOperation(db, body);
@@ -219,23 +239,28 @@ export async function handleControlUsersRequest(request, env) {
           ? db.prepare(`SELECT ${columns} FROM control_users ORDER BY username LIMIT ?`).bind(body.limit)
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
         ).all()).results;
-        const users = revisionSyncSettings(env).enabled ? await read(() => query(streamUserFields(env).join(", "))) : await readUsers(query, env);
-        return reply({ version: 1, users });
+        const users = await readUsers(query, env);
+        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
       }
       case "get": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
         const user = await readUsers(columns => db.prepare(`SELECT ${columns} FROM control_users WHERE username=?`)
           .bind(body.username).first(), env);
-        return reply({ version: 1, user: user ?? null });
+        if (policyVersion !== 1 && user) expansionFence(user);
+        return reply({ version: 1, user: accountReply(user ?? null, policyVersion) });
       }
       case "by_prefix": {
         if (!fields(body, ["version", "operation", "prefix"]) || !text(body.prefix, 64)) break;
-        return reply({ version: 1, users: await activeUsersByPrefix(db, body.prefix, env) });
+        const users = await activeUsersByPrefix(db, body.prefix, env);
+        if (policyVersion !== 1) users.forEach(expansionFence);
+        return reply({ version: 1, users: users.map(accountReply) });
       }
       case "upsert": {
-        if (!fields(body, ["version", "operation", "user"]) || !validUser(body.user)) break;
+        if (!fields(body, ["version", "operation", "user"])) break;
+        body.user = { official_only: null, forced_provider_preferences: null, ...body.user };
+        if (!validUser(body.user)) break;
         if (!streamCostEnabled(env) && body.user[STREAM_CAP_FIELD] != null) return reply({ error: "invalid_request" }, 400);
-        const user = { shadow_eval_rate: null, secret_scan_mode: null, ...body.user };
+        const user = { official_only: null, forced_provider_preferences: null, shadow_eval_rate: null, secret_scan_mode: null, ...body.user };
         if (grantsAdmin(user) && !adminUsernames(env).has(user.username)) {
           logFailure("account_admin_refused", new Error("Administration is not configured for this username"));
           await audit(db, "upsert", "refused", user).run();
@@ -245,17 +270,17 @@ export async function handleControlUsersRequest(request, env) {
           // Verify schema even when an omitted cap must be preserved.
           await db.prepare("SELECT max_stream_cost_microusd FROM control_users LIMIT 1").first();
           const columns = Object.hasOwn(user, STREAM_CAP_FIELD) ? streamUserFields(env) : USER_FIELDS;
-          const statements = [upsertStatement(db, user, columns), audit(db, "upsert", "stored", user)];
+          const statements = [upsertStatement(db, user, columns, policyVersion === 1), audit(db, "upsert", "stored", user)];
           if (revisionSyncSettings(env).enabled) {
             if (!await commitRevision(db, ["key_controls", "model_grants"], statements)) return reply({ error: "revision_conflict" }, 409);
           } else await db.batch(statements);
           return reply({ version: 1, stored: true });
         }
         // The write and its audit row commit together, or neither does.
-        for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, 12]) {
+        for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, USER_FIELDS.length - 3, USER_FIELDS.length - 4, 12]) {
           if (USER_FIELDS.slice(end).some(name => user[name] !== null)) throw new Error("Account controls require migration");
           try {
-            const statements = [upsertStatement(db, user, USER_FIELDS.slice(0, end)), audit(db, "upsert", "stored", user)];
+            const statements = [upsertStatement(db, user, USER_FIELDS.slice(0, end), policyVersion === 1), audit(db, "upsert", "stored", user)];
             if (revisionSyncSettings(env).enabled) {
               if (!await commitRevision(db, ["key_controls", "model_grants"], statements)) return reply({ error: "revision_conflict" }, 409);
             } else await db.batch(statements);

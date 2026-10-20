@@ -7,7 +7,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DATABASE="${D1_DATABASE:-multillm-intelligence}"
+DATABASE="${D1_DATABASE:?Set D1_DATABASE explicitly to the configured target database}"
+MAIN_CONFIG="${MAIN_WORKER_CONFIG:-wrangler.jsonc}"
+KNOWLEDGE_CONFIG="${KNOWLEDGE_WORKER_CONFIG:-wrangler.knowledge.jsonc}"
+export MAIN_WORKER_CONFIG="$MAIN_CONFIG" KNOWLEDGE_WORKER_CONFIG="$KNOWLEDGE_CONFIG"
+# Validate target identity before any migration, upload or remote read.
+node --input-type=module -e 'import { deploymentTarget } from "./scripts/deployment_target.mjs"; deploymentTarget({ mainConfig: process.env.MAIN_WORKER_CONFIG, knowledgeConfig: process.env.KNOWLEDGE_WORKER_CONFIG });'
+state="$(mktemp)"
+release_config="$(mktemp .release-wrangler-XXXXXX.jsonc)"
+trap 'rm -f -- "$state" "$release_config"' EXIT
+node scripts/container_rollout.mjs --prepare --state "$state" --output "$release_config" --config "$MAIN_CONFIG" --knowledge-config "$KNOWLEDGE_CONFIG"
 annotations=()
 if commit="$(git rev-parse HEAD 2>/dev/null)"; then
   # The deploy build rewrites worker/build-id.mjs, which is not a source change.
@@ -18,8 +27,11 @@ if commit="$(git rev-parse HEAD 2>/dev/null)"; then
   fi
 fi
 
+node scripts/key_data_preflight.mjs --check
 node scripts/verify_d1_migrations.mjs --check
-npx --no-install wrangler d1 migrations apply "$DATABASE" --remote
+npx --no-install wrangler d1 migrations apply "$DATABASE" --remote --config "$MAIN_CONFIG"
 node scripts/verify_d1_migrations.mjs "$DATABASE"
-npx --no-install wrangler deploy --config wrangler.knowledge.jsonc ${annotations[@]+"${annotations[@]}"}
-npx --no-install wrangler deploy ${annotations[@]+"${annotations[@]}"} "$@"
+node scripts/key_data_preflight.mjs --prepare
+npx --no-install wrangler deploy --config "$KNOWLEDGE_CONFIG" ${annotations[@]+"${annotations[@]}"}
+npx --no-install wrangler deploy --config "$release_config" ${annotations[@]+"${annotations[@]}"} "$@"
+node scripts/container_rollout.mjs --verify --state "$state" --config "$MAIN_CONFIG" --knowledge-config "$KNOWLEDGE_CONFIG"

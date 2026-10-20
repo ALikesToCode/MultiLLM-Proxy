@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
+import { convertV4MiniflareOptions, Miniflare } from './helpers/local_miniflare.mjs';
 import { BUCKET_FIELDS, serializeUsageBuckets, recordUsageWithBuckets, bucketInsertStatement } from '../worker/usage-buckets-d1.mjs';
 import { validRow } from '../worker/usage-ledger-d1.mjs';
 import { applyMigrations } from './d1_migrations.mjs';

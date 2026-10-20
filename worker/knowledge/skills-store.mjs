@@ -1,3 +1,4 @@
+import { providerOperation } from "../provider-dispatch.mjs";
 import { fail, fields, isRecord } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { parseFind, parseGet, parseSync, validateSkill, skillKey, SKILLS_LIMIT } from "./skills-validation.mjs";
@@ -22,7 +23,7 @@ async function bounded(callback, milliseconds) {
 export class SkillsStore {
   constructor(storage, env, { embed, clock = Date.now } = {}) {
     Object.assign(this, { storage, sql: storage.sql, env, clock });
-    this.embed = embed ?? (text => env.KNOWLEDGE_SEARCH_AI?.run("@cf/baai/bge-m3", { text: [text] }));
+    this.embed = embed ?? (text => providerOperation("cloudflare", () => env.KNOWLEDGE_SEARCH_AI?.run("@cf/baai/bge-m3", { text: [text] })));
     this.index = null;
     this.syncTail = Promise.resolve();
     this.pendingR2 = new Map();

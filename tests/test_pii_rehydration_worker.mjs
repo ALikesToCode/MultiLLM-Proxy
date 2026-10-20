@@ -115,7 +115,9 @@ test("event fragments, terminal prefixes, bounds and cancellation", async () => 
 });
 
 test("native roleplay transport redacts after firewall and restores", async () => {
-  const { attemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { attemptRoleplayCandidates: rawAttemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { policyFixtureEnv } = await import("./helpers/dispatch_fixture.mjs");
+  const attemptRoleplayCandidates = (...args) => { args[3] = policyFixtureEnv(args[3]); return rawAttemptRoleplayCandidates(...args); };
   const previous = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (_url, init) => {
@@ -137,7 +139,9 @@ test("native roleplay transport redacts after firewall and restores", async () =
 });
 
 test("required failure never dispatches or falls back; best effort preserves payload", async () => {
-  const { attemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { attemptRoleplayCandidates: rawAttemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { policyFixtureEnv } = await import("./helpers/dispatch_fixture.mjs");
+  const attemptRoleplayCandidates = (...args) => { args[3] = policyFixtureEnv(args[3]); return rawAttemptRoleplayCandidates(...args); };
   const previous = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async (_url, init) => { calls += 1; return Response.json({ content: JSON.parse(init.body).messages.map(message => message.content).join("") }); };
@@ -168,7 +172,9 @@ test("abort during nonstream restoration clears state and cancels pending reader
 });
 
 test("restoration failure after output cannot authorize another provider", async () => {
-  const { attemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { attemptRoleplayCandidates: rawAttemptRoleplayCandidates } = await import("../worker/roleplay/transport.mjs");
+  const { policyFixtureEnv } = await import("./helpers/dispatch_fixture.mjs");
+  const attemptRoleplayCandidates = (...args) => { args[3] = policyFixtureEnv(args[3]); return rawAttemptRoleplayCandidates(...args); };
   const previous = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return Response.json({ content: "__MLPII_" }); };

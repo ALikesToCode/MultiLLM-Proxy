@@ -5,7 +5,7 @@ import {
   resolveSseHeartbeatMs,
   withSseHeartbeat,
 } from "../worker/sse-heartbeat.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerWithUnrestrictedControls as loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const encoder = new TextEncoder();
 

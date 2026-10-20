@@ -1,3 +1,4 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";

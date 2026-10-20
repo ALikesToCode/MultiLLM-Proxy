@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
+export const { policyStore, policyFixtureEnv } = await import(new URL("./dispatch_fixture.mjs", import.meta.url));
 
 function dataModuleUrl(source) {
+  source = source.replaceAll('from "./worker/build-id.mjs"', `from "${new URL("../../worker/build-id.mjs", import.meta.url)}"`);
+  source = source.replaceAll('from "./worker/peer-controls.mjs"', `from "${new URL("../../worker/peer-controls.mjs", import.meta.url)}"`);
+  source = source.replaceAll('from "./worker/provider-dispatch.mjs"', `from "${new URL("../../worker/provider-dispatch.mjs", import.meta.url)}"`);
+  source = source.replaceAll('from "./worker/key-controls-capability.mjs"', `from "${new URL("../../worker/key-controls-capability.mjs", import.meta.url)}"`);
+  source = source.replaceAll('from "../provider-dispatch.mjs"', `from "${new URL("../../worker/provider-dispatch.mjs", import.meta.url)}"`);
   return `data:text/javascript;base64,${Buffer.from(source, "utf8").toString("base64")}`;
 }
 
@@ -795,4 +801,13 @@ export async function loadWorkerModule({ transformSource = source => source } = 
     );
 
   return import(dataModuleUrl(patchedSource));
+}
+
+
+/** Header and rendering contracts explicitly use a readable unrestricted store. */
+export async function loadWorkerWithUnrestrictedControls(options) {
+  const module = await loadWorkerModule(options), worker = module.default;
+  return { ...module, default: { ...worker, fetch(request, env, ctx) {
+    return worker.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
 }

@@ -38,6 +38,12 @@ def test_invalid_config_is_off_without_logging_values(raw, caplog):
     assert raw not in caplog.text
 
 
+@pytest.fixture(autouse=True)
+def readable_controls(monkeypatch):
+    monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda username: {
+        "username": username, "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}})
+
+
 def app_fixture(monkeypatch):
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -49,7 +55,8 @@ def app_fixture(monkeypatch):
     upstream = Mock()
     @app.before_request
     def auth():
-        g.authenticated_user = {"id": "test-key", "username": "reader", "shadow_eval_rate": 0.2}
+        g.authenticated_user = {"id": "test-key", "username": "reader", "shadow_eval_rate": 0.2,
+                                "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}}
     @app.post("/v1/chat/completions")
     @chat_cache.cached_chat_completion
     def complete():
@@ -115,7 +122,7 @@ def test_stream_callback_keeps_request_policy_after_context_and_config_change(mo
     monkeypatch.setattr(sampling, "submit", lambda sample, **kw: submitted.append((sample, kw)))
     events = [b'data: {"choices":[{"delta":{"content":"fixture"},"finish_reason":"stop"}]}\n\n', b'data: [DONE]\n\n']
     with app.test_request_context("/v1/chat/completions", method="POST", json={"model":"auto:test", "messages":[{"content":"fixture"}]}):
-        g.authenticated_user = {"id":"test-key", "shadow_eval_rate":0.2}
+        g.authenticated_user = {"id":"test-key", "shadow_eval_rate":0.2, "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}}
         g.shadow_eval_started = 0
         with patch.object(sampling.random, "random", return_value=0):
             response = sampling.sample_success(Response(iter(events), mimetype="text/event-stream",
@@ -125,7 +132,7 @@ def test_stream_callback_keeps_request_policy_after_context_and_config_change(mo
     assert list(response.response) == events
     assert len(submitted) == 1 and submitted[0][1]["retention_policy"] == policy
     with app.test_request_context("/v1/chat/completions", method="POST", headers={"X-MultiLLM-Retention":"zero"}):
-        g.authenticated_user = {"id":"test-key", "shadow_eval_rate":0.2}
+        g.authenticated_user = {"id":"test-key", "shadow_eval_rate":0.2, "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}}
         untouched = iter(events)
         private = sampling.sample_success(Response(untouched, mimetype="text/event-stream"))
     assert private.response is untouched
@@ -136,7 +143,7 @@ def test_background_persistence_uses_captured_policy(monkeypatch):
     monkeypatch.setattr(sampling, "_WORKER", Mock(is_alive=lambda: True))
     enqueue = Mock()
     monkeypatch.setattr(sampling._QUEUE, "put_nowait", enqueue)
-    sampling.submit({"request": "fixture"}, retention_policy=policy)
+    sampling.submit({"key_id": "test-key", "request": "fixture"}, retention_policy=policy)
     queued = enqueue.call_args.args[0]
     monkeypatch.setenv("CONTENT_RETENTION_POLICY_JSON", '{"default":"zero"}')
     getter = Mock(side_effect=[queued, StopIteration])
@@ -144,7 +151,7 @@ def test_background_persistence_uses_captured_policy(monkeypatch):
     monkeypatch.setattr(sampling._QUEUE, "task_done", Mock())
     with patch.object(sampling.ShadowEvalStore, "put") as persisted, pytest.raises(StopIteration):
         sampling._persist()
-    persisted.assert_called_once_with({"request": "fixture"})
+    persisted.assert_called_once_with({"key_id": "test-key", "request": "fixture"})
 
 
 from tests.unified_api_test_case import UnifiedApiTestCase

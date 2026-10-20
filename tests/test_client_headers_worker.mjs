@@ -5,6 +5,7 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 import { MAX_SESSION_BODY_BYTES, withOpencodeRequestSession } from "../worker/opencode-session.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { completionResponse, makeRoleplayEnv, roleplayRequest, withGlobalFetch } from "./helpers/roleplay_fixture.mjs";
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 
 const { default: worker } = await loadWorkerModule();
 
@@ -80,7 +81,7 @@ test("stalled affinity discovery times out without consuming the original upload
 
 test("every direct OpenCode protocol supplies a session without harness headers", async () => {
   for (const path of ["/opencode/v1/chat/completions", "/opencode/v1/responses", "/opencode/v1/messages", "/opencode/v1/models"]) {
-    const env = { ADMIN_API_KEY: "admin-test", OPENCODE_GO_API_KEY: "opencode-test", OPENCODE_EDGE_FETCH: "true" };
+    const env = policyFixtureEnv({ ADMIN_API_KEY: "admin-test", OPENCODE_GO_API_KEY: "opencode-test", OPENCODE_EDGE_FETCH: "true" });
     let seen;
     const response = await withGlobalFetch(async (request) => {
       seen = request.headers;
@@ -94,6 +95,20 @@ test("every direct OpenCode protocol supplies a session without harness headers"
     assert.equal(response.status, 200, path);
     assert.match(seen.get("x-opencode-session"), /^multillm_(v1|request)_/, path);
     assert.equal(seen.get("User-Agent"), "codex-cli", path);
+  }
+});
+
+test("direct OpenCode requests refuse absent or unreadable current controls", async () => {
+  for (const store of [undefined, { prepare() { throw new Error("Synthetic control-store outage"); } }]) {
+    const env = { ADMIN_API_KEY: "admin-test", OPENCODE_GO_API_KEY: "opencode-test", OPENCODE_EDGE_FETCH: "true",
+      ...(store ? { INTELLIGENCE_DB: store } : {}) };
+    const response = await withGlobalFetch(() => assert.fail("Unverified request reached the provider"), () => worker.fetch(
+      new Request("https://proxy.example/opencode/v1/chat/completions", {
+        method: "POST", headers: { Authorization: "Bearer admin-test", "Content-Type": "application/json" },
+        body: '{"input":"Synthetic request"}',
+      }), env));
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error.code, "key_data_controls_unavailable");
   }
 });
 
@@ -140,11 +155,11 @@ test("all Worker provider namespaces carry defaults and caller overrides", async
         requests.push(request);
         return new Response('{"data":[]}', { headers: { "Content-Type": "application/json" } });
       };
-      const env = {
+      const env = policyFixtureEnv({
         ADMIN_API_KEY: "admin-test", OPENCODE_GO_API_KEY: "opencode-test", OPENCODE_EDGE_FETCH: "true",
         LINKAPI_KEY: "linkapi-test", CODEX_EASY_API_KEY: "easy-test", KIMI_CODE_API_KEY: "kimi-test",
         MULTILLM_PROXY_CONTAINER: { getByName: () => ({ fetch: receive }) },
-      };
+      });
       const isGet = path.endsWith("/models");
       const response = await withGlobalFetch(receive, () => worker.fetch(new Request(`https://proxy.example${path}`, {
         method: isGet ? "GET" : "POST",

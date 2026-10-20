@@ -11,6 +11,8 @@ from flask import g, request
 
 from services.shadow_eval_contract import ANSWER_BYTES, REQUEST_BYTES, REQUEST_FIELDS, clean_usage, eligible, encoded, make_sample
 from services.shadow_eval_store import ShadowEvalStore
+from services.shadow_eval_data_policy import source_allows_replay
+from services.key_data_guards import account_controls
 from services.retention_policy import RetentionPolicy, request_policy
 
 logger = logging.getLogger(__name__)
@@ -62,7 +64,8 @@ def _persist():
                 sample, retention = sample
                 if not retention.allows_content:
                     continue
-            ShadowEvalStore.put(sample)
+            if source_allows_replay(sample):
+                ShadowEvalStore.put(sample)
         except Exception as error:
             count("skipped_error")
             logger.warning("Shadow sample not stored (%s)", type(error).__name__)
@@ -198,7 +201,8 @@ def _sampling_decision(payload):
     if report["high"] or report["truncated"]:
         count("skipped_secret" if report["high"] else "skipped_error")
         return None
-    return json.loads(encoded(payload)), {"username": user.get("username"), "id": user.get("id")}
+    return json.loads(encoded(payload)), {"username": user.get("username"), "id": user.get("id"),
+                                           "data_policy": {"version": 1, **account_controls(user)}}
 
 
 def sample_success(response, payload=None):
@@ -219,7 +223,7 @@ def sample_success(response, payload=None):
         model = response.headers.get("X-MultiLLM-Auto-Selected-Model") or getattr(g, "multillm_model", None)
 
         def capture(answer, selected, usage, finish_reason=None):
-            if not retention.allows_content:
+            if not retention.allows_content or not source_allows_replay({"key_id": user.get("username") or user.get("id")}):
                 return
             sample = make_sample(payload, user, route, answer, selected,
                 (time.monotonic() - started) * 1000, usage, finish_reason=finish_reason, on_skip=count)

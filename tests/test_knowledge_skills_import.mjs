@@ -1,5 +1,6 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { digest } from "../worker/knowledge/evidence.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
@@ -23,7 +24,7 @@ function library(t, clock) {
     catch (error) { db.exec("ROLLBACK"); throw error; }
   } };
   const files = new Map();
-  const env = { KNOWLEDGE_SNAPSHOTS: { put: async (key, bytes) => files.set(key, bytes), delete: async () => {}, get: async key => {
+  const env = { INTELLIGENCE_DB: policyStore(), KNOWLEDGE_SNAPSHOTS: { put: async (key, bytes) => files.set(key, bytes), delete: async () => {}, get: async key => {
     const bytes = files.get(key); return bytes && { arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
   } } };
   return { env, store: new SkillsStore(storage, env, clock ? { clock } : {}) };
