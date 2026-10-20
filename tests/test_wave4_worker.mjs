@@ -1,14 +1,23 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { nativeGenerationFetch, forwardedGenerationHeaders, nativeGenerationSetup, generationErrorResponse } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, forwardedGenerationHeaders, nativeGenerationSetup, generationErrorResponse } from "../worker/gateway-extensions.mjs";
 import { runScheduledMaintenance, scheduledMaintenanceEnabled, collectAlertAggregates } from "../worker/scheduled-maintenance.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { handleAlertState, normalizeAlertRules } from "../worker/alert-delivery.mjs";
 import { retentionRequestId } from "../worker/retention-policy.mjs";
 import { generationDeadlineHook } from "../worker/generation-deadline.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const authority = { route: "/openai/v1/chat/completions", provider: "openai", principal: { id: "admin" } };
 const completed = JSON.stringify({ choices: [{ message: { content: "fixture" }, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 2 } });

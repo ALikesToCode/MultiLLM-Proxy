@@ -1,3 +1,4 @@
+import { bindingPrincipal, withDispatchPrincipal } from "../provider-dispatch.mjs";
 import { DurableObject, WorkflowEntrypoint } from "cloudflare:workers";
 import { KnowledgeAuthority } from "./authority.mjs";
 import { dispatchKnowledge, maintainKnowledge } from "./service.mjs";
@@ -73,6 +74,7 @@ export class KnowledgeHandoffs extends DurableObject {
 export class KnowledgeSkills extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
     this.skills = new SkillsStore(ctx.storage, env);
   }
   async fetch(request) {
@@ -81,13 +83,13 @@ export class KnowledgeSkills extends DurableObject {
       const body = await readJson(request, SYNC_REQUEST_BYTES);
       fields(body, ["operation", "payload", "principal"], ["operation", "payload", "principal"]);
       if (typeof body.principal !== "string" || !body.principal || body.principal.length > 256) fail("invalid_principal", "Invalid skills principal.", 403);
-      return reply(await this.skills.call(body.operation, body.payload, body.principal));
+      return await withDispatchPrincipal(this.env, bindingPrincipal(request), async () => reply(await this.skills.call(body.operation, body.payload, body.principal)));
     } catch (error) { return failure("knowledge_skills_failed", error); }
   }
 }
 
 export class KnowledgeIngestion extends WorkflowEntrypoint {
-  async run(event, step) { return runIngestion(this.env, step, event.payload.job_id); }
+  async run(event, step) { return withDispatchPrincipal(this.env, event.payload.dispatch_principal, () => runIngestion(this.env, step, event.payload.job_id)); }
 }
 
 export default {
@@ -98,6 +100,8 @@ export default {
         || url.search || url.hash || url.username || url.password) fail("not_found", "Unknown Knowledge route.", 404);
       const body = await readJson(request, SYNC_REQUEST_BYTES);
       if (body.operation !== "skills.sync" && new TextEncoder().encode(JSON.stringify(body)).length > 65536) fail("request_too_large", "Request is too large.", 413);
+      const source = bindingPrincipal(request);
+      if (source.keyId !== body.principal?.id) fail("invalid_principal", "The dispatch principal does not match.", 403);
       let decision;
       const result = await dispatchKnowledge(env, body, { signal: request.signal, waitUntil: promise => ctx.waitUntil(promise), onSecretScan: value => { decision = value; } });
       const response = reply(result);
@@ -108,6 +112,6 @@ export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(maintainKnowledge(env).catch(error => { logFailure("knowledge_maintenance_failed", error); throw error; }));
     // Separate so an upstream check failure cannot stop catalogue maintenance.
-    ctx.waitUntil(watchImportedSkills(env).catch(error => logFailure("knowledge_skills_watch_failed", error)));
+    ctx.waitUntil(withDispatchPrincipal(env, { authenticated: true, keyId: env.ADMIN_USERNAME || "admin" }, () => watchImportedSkills(env)).catch(error => logFailure("knowledge_skills_watch_failed", error)));
   },
 };

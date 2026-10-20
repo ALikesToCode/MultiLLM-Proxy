@@ -19,6 +19,7 @@ import math
 import re
 import time
 from collections.abc import Callable
+from services.provider_dispatch import capture_dispatch
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -295,7 +296,7 @@ class NarrationRun:
                     break
         if shots:
             with ThreadPoolExecutor(max_workers=min(SHOT_PARALLELISM, len(shots))) as pool:
-                futures = [pool.submit(copy_current_request_context(lambda shot=shot: self.shot(shot, model)))
+                futures = [pool.submit(capture_dispatch(copy_current_request_context(lambda shot=shot: self.shot(shot, model))))
                            for shot in shots]
                 for shot, future in zip(shots, futures, strict=True):
                     entries[shot.index] = future.result()

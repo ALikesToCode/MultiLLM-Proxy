@@ -14,7 +14,8 @@ test("new edge dispatches require a firewall coverage review", () => {
   assert.ok(!/await fetch\(upstreamRequest/.test(source));
   const roleplay = readFileSync(new URL("../worker/roleplay/transport.mjs", import.meta.url), "utf8");
   assert.ok(roleplay.includes("await firewallFetch(new Request"));
-  assert.ok(roleplay.includes("await containerNamespace.getByName"));
+  assert.ok(roleplay.includes("transformed => providerFetch(candidate.provider"));
+  assert.ok(roleplay.includes('send: async permitted => useOpenCodeContainer ? containerNamespace.getByName("primary").fetch(permitted)'));
 });
 
 test("new edge routes and modules require reviewing the dispatch inventory", () => {

@@ -121,6 +121,8 @@ jobs:
         run: npm install --global "$(node -p "require('./package.json').packageManager")"
       - name: Install deployment dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check release configuration
+        run: node scripts/key_data_preflight.mjs --check
       - name: Check migration files
         run: node scripts/verify_d1_migrations.mjs --check
       - name: List pending D1 migrations
@@ -136,6 +138,11 @@ jobs:
         run: |
           pnpm exec wrangler d1 migrations apply "$D1_DATABASE" --remote
           node scripts/verify_d1_migrations.mjs "$D1_DATABASE"
+      - name: Check migrated schema and required bindings
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/key_data_preflight.mjs --prepare
       - name: Deploy Knowledge Worker
         id: knowledge
         env:
@@ -148,7 +155,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --tag "$SHA" --message "$DEPLOY_MESSAGE"
+        run: |
+          pnpm exec wrangler deploy --containers-rollout=none --tag "$SHA" --message "$DEPLOY_MESSAGE"
+          pnpm exec wrangler deploy --tag "$SHA" --message "$DEPLOY_MESSAGE"
       - name: Verify deployment
         id: verify
         env:

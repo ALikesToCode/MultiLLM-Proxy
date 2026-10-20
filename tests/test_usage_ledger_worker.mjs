@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { handleUsageLedgerRequest, latencyBucket, LATENCY_BUCKETS, validRow } from "../worker/usage-ledger-d1.mjs";
@@ -64,8 +64,8 @@ test("a flush stores raw rows and daily totals once, even when the batch is retr
   assert.equal(recent[0].status, 502);
   const older = (await call({ operation: "recent", since: "2026-09-01T00:00:00.000Z", principal: null, before: recent[0].id, limit: 10 })).body.rows;
   assert.deepEqual(older.map(item => [item.principal, item.status]), [["alice", 200]]);
-  assert.deepEqual(Object.keys(recent[0]).sort(), ["at", "cost_basis", "cost_usd", "endpoint", "id", "input_tokens", "key_prefix", "kind",
-    "latency_ms", "output_tokens", "principal", "request_id", "requested_model", "selected_model", "status"]);
+  assert.deepEqual(Object.keys(recent[0]).sort(), ["at", "cached_input_tokens", "cost_basis", "cost_usd", "endpoint", "id", "input_tokens", "key_prefix", "kind",
+    "latency_ms", "output_tokens", "principal", "reasoning_tokens", "request_id", "requested_model", "selected_model", "status"]);
 
   const pruned = (await call({ operation: "prune", events_before: "2026-09-26T00:00:00.000Z", rollups_before: "2026-09-26", limit: 100 })).body;
   assert.deepEqual(pruned.pruned, { events: 1, batches: 0, rollups: 1 });

@@ -177,6 +177,11 @@ def dispatch_cascade(payload, dispatch, *, timeout=120):
     user = getattr(g, "authenticated_user", None) or {}
     if not model_allowed(user, config["name"]):
         raise APIError("This API key is not allowed to use this cascade", 403, {"error": "model_not_allowed"})
+    from services.key_data_guards import model_permitted
+    tiers = [tier for tier in config["tiers"] if model_permitted(user, tier["model"])]
+    if not tiers:
+        raise APIError("No eligible provider data class remains", 403, {"error": "provider_class_not_allowed"})
+    config = {**config, "tiers": tiers}
     if "routing" in payload:
         raise APIError("Cascades do not accept intelligence routing overrides", 400)
     if payload.get("n", 1) != 1:
@@ -284,7 +289,13 @@ def validate_cascade_target(app, auth, model, proxy):
     config = CascadeService.get_route(model)
     if config is None:
         raise APIError(f"Cascade not found: {model}", 404)
-    for tier in config["tiers"]:
+    from services.key_data_guards import model_permitted
+    user = getattr(g, "authenticated_user", None) or {}
+    tiers = [tier for tier in config["tiers"] if model_permitted(user, tier["model"])]
+    if not tiers:
+        raise APIError("No eligible provider data class remains", 403, {"error": "provider_class_not_allowed"})
+    denied = 0
+    for tier in tiers:
         try:
             if tier["model"] == "auto:intelligence":
                 from routes.intelligence import load_policy
@@ -292,6 +303,7 @@ def validate_cascade_target(app, auth, model, proxy):
                 if any(model_allowed(getattr(g, "authenticated_user", {}) or {}, candidate["model"])
                        for candidate in policy["candidates"]):
                     return "cascade"
+                denied += int(bool(user.get("official_only")))
                 continue
             if tier["model"].startswith("free:"):
                 from services.free_model_policy import FREE_MODELS
@@ -300,8 +312,13 @@ def validate_cascade_target(app, auth, model, proxy):
                 continue
             validate_unified_chat_target(app, auth, tier["model"], proxy)
             return "cascade"
-        except (APIError, ValueError, GatewayError):
+        except APIError as error:
+            denied += int((error.payload or {}).get("error") == "provider_class_not_allowed")
             continue
+        except (ValueError, GatewayError):
+            continue
+    if denied == len(tiers):
+        raise APIError("No eligible provider data class remains", 403, {"error": "provider_class_not_allowed"})
     raise APIError(f"No configured provider is available for cascade: {model}", 503)
 
 

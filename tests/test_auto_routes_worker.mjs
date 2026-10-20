@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";

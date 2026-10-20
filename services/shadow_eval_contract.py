@@ -8,6 +8,7 @@ import time
 import uuid
 
 from services.secret_scan import scan_payload
+from services.key_data_guards import has_data_controls
 
 TASKS = ("coding", "extraction", "writing", "reasoning", "chat")
 REQUEST_BYTES = 65536
@@ -69,7 +70,7 @@ def task_type(payload):
 def eligible(payload, user, path, *, random_value=None):
     model = payload.get("model")
     rate = user.get("shadow_eval_rate")
-    return (path in {"/v1/chat/completions", "/v1/responses", "/intelligence/v1/chat/completions",
+    return (not has_data_controls(user) and path in {"/v1/chat/completions", "/v1/responses", "/intelligence/v1/chat/completions",
                         "/v1/messages", "/optimize/v1/chat/completions"}
             and isinstance(payload.get("messages"), list)
             and ((isinstance(model, str) and model.startswith(("auto:", "cascade:")))
@@ -78,6 +79,8 @@ def eligible(payload, user, path, *, random_value=None):
 
 
 def make_sample(payload, user, route, answer, model, latency_ms, usage, *, now=None, finish_reason=None, on_skip=None):
+    if has_data_controls(user):
+        return None
     request = {name: payload[name] for name in REQUEST_FIELDS if name in payload}
     answer = {name: answer[name] for name in ("content", "tool_calls") if name in answer}
     def reject(reason):

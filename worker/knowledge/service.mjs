@@ -1,3 +1,4 @@
+import { dispatchContext, withDispatchPrincipal } from "../provider-dispatch.mjs";
 import { authorize, fail, fields, parseQuery, publicUrl, validId } from "./contracts.mjs";
 import { getAuthority } from "./authority-client.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
@@ -61,10 +62,10 @@ export async function scheduleSource(env, authority, sourceId, signal, artifactI
     return allocation.enabled && allocation.background_limit >= allocation.units_per_call;
   })) fail("background_disabled", "Enable source and index background allowances before scheduling ingestion.", 409);
   active();
-  const job = await authority.call("job.enqueue", { source_id: sourceId, ...(artifactId ? { artifact_id: artifactId } : {}) });
+  const job = await authority.call("job.enqueue", { source_id: sourceId, dispatch_principal: dispatchContext()?.authority, ...(artifactId ? { artifact_id: artifactId } : {}) });
   try {
     active();
-    const created = await env.KNOWLEDGE_INGESTION.createBatch([{ id: job.id, params: { job_id: job.id } }]);
+    const created = await env.KNOWLEDGE_INGESTION.createBatch([{ id: job.id, params: { job_id: job.id, dispatch_principal: job.dispatch_principal } }]);
     if (!created.length) {
       active();
       const instance = await env.KNOWLEDGE_INGESTION.get(job.id);
@@ -101,7 +102,7 @@ async function artifactResult(env, authority, id, corpus) {
   return { artifact, text };
 }
 
-export async function dispatchKnowledge(env, envelope, options = {}) {
+async function runKnowledge(env, envelope, options = {}) {
   fields(envelope, ["version", "operation", "principal", "payload", "secret_scan_mode", "secret_scan_checked", "retention_policy"], ["version", "operation", "principal", "payload"]);
   if (envelope.version !== 1 || !OPERATIONS.has(envelope.operation)) fail("unknown_operation", "Unknown Knowledge operation.", 404);
   const { operation, principal, payload } = envelope;
@@ -145,7 +146,7 @@ export async function dispatchKnowledge(env, envelope, options = {}) {
     return memos.call(operation === "memos.stats" ? "stats" : "purge", parsed);
   }
   if (operation === "policy.update") return { policy: await authority.call("policy.update", payload) };
-  if (operation === "sources.create") return { source: await authority.call("source.create", payload), job: null };
+  if (operation === "sources.create") return { source: await authority.call("source.create", { ...payload, dispatch_principal: dispatchContext()?.authority }), job: null };
   if (operation === "sources.update") return { source: await authority.call("source.update", payload) };
   fields(payload, ["id"], ["id"]);
   if (operation === "sources.refresh") return { job: await scheduleSource(env, authority, payload.id) };
@@ -165,7 +166,10 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
   for (const artifact of await authority.call("artifacts.expired")) {
     try {
       const claimed = await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
-      await corpus.removeArtifact(claimed);
+      // Fixed storage cleanup uses the current durable operator account; ingestion
+      // and reconciliation Workflows continue to carry the original source account.
+      await withDispatchPrincipal(env, { authenticated: true, keyId: env.ADMIN_USERNAME || "admin" },
+        () => corpus.removeArtifact(claimed));
       await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
     } catch (error) {
       // The claimed revision stays unreadable until a later run removes it.
@@ -179,4 +183,8 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
     await scheduleSource(env, authority, job.source_id, undefined, job.artifact_id ?? undefined)
       .catch(error => logFailure("knowledge_reconcile_not_scheduled", error, { job_id: job.id }));
   }
+}
+
+export async function dispatchKnowledge(env, envelope, options = {}) {
+  return withDispatchPrincipal(env, { authenticated: true, keyId: envelope?.principal?.id }, () => runKnowledge(env, envelope, options));
 }

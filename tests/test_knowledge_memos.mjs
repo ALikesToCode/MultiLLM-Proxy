@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { providerBinding } from "./helpers/provider_binding.mjs";
+import test from "./helpers/policy_test.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -320,7 +321,7 @@ test("embedding or memo backend errors degrade to ordinary retrieval", async t =
 test("Workers AI binding receives bge-m3 request and storage uses waitUntil", async t => {
   const f = await setup(t);
   let called;
-  f.env.KNOWLEDGE_SEARCH_AI = { run: async (...args) => { called = args; return { data: [[0.5, 1, -1]] }; } };
+  f.env.KNOWLEDGE_SEARCH_AI = providerBinding({ run: async (...args) => { called = args; return { data: [[0.5, 1, -1]] }; } });
   const tasks = [];
   await f.run(f.query, { embed: undefined, waitUntil: promise => tasks.push(promise) });
   await Promise.all(tasks);
@@ -395,9 +396,9 @@ test("real KnowledgeMemos SQLite Durable Object survives restart with hit counts
   const bundled = await build({ stdin: { resolveDir: process.cwd(), contents: `
     export { KnowledgeMemos } from './worker/knowledge/index.mjs';
     export default { fetch(request, env) { return env.MEMOS.get(env.MEMOS.idFromName('personal')).fetch(request); } };
-  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers"], write: false });
+  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"], write: false });
   const directory = await mkdtemp(join(tmpdir(), "knowledge-memos-"));
-  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28",
+  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], compatibilityDate: "2026-07-28",
     script: bundled.outputFiles[0].text, resourcePersistencePath: directory, durableObjects: { MEMOS: { className: "KnowledgeMemos", useSQLite: true } } }));
   let mf = create();
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });

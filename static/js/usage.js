@@ -113,7 +113,8 @@
         ], 'No billable requests in this range.');
         fillTable('usage-models', data.models || [], [
             (row) => row.model, (row) => formatNumber(row.requests), formatErrors,
-            (row) => `${formatNumber(row.input_tokens)} / ${formatNumber(row.output_tokens)}`, (row) => formatCost(row.cost_usd), ...latency,
+            (row) => `${formatNumber(row.input_tokens)} / ${formatNumber(row.output_tokens)}`,
+            (row) => `${Number(row.cache_hit_rate || 0).toFixed(1)}%`, (row) => formatNumber(row.reasoning_tokens), (row) => formatCost(row.cost_usd), ...latency,
         ], 'No billable requests in this range.');
         if (isAdmin) {
             const keysPanel = document.getElementById('usage-keys-panel');
@@ -122,7 +123,8 @@
             }
             const principals = data.principals || [];
             fillTable('usage-keys', principals, [
-                (row) => keyButton(row.principal), (row) => formatNumber(row.requests), formatErrors, (row) => formatCost(row.cost_usd), ...latency,
+                (row) => keyButton(row.principal), (row) => `${Number(row.cache_hit_rate || 0).toFixed(1)}%`,
+                (row) => formatNumber(row.reasoning_tokens), (row) => formatNumber(row.requests), formatErrors, (row) => formatCost(row.cost_usd), ...latency,
             ], 'No billable requests in this range.');
             principals.forEach((row) => {
                 if (principalSelect && !knownPrincipals.has(row.principal)) {

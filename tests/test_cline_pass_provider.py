@@ -41,6 +41,12 @@ RECOMMENDED_MODELS = {
 }
 
 
+
+import pytest
+from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("verified_transport_principal")
+
 class ClinePassProviderTest(unittest.TestCase):
     def test_chat_goes_to_the_cline_api_with_a_long_timeout(self):
         adapter = get_adapter("cline-pass", Config.API_BASE_URLS)

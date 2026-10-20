@@ -1,3 +1,5 @@
+import { DispatchError, providerFetch, withDispatchPrincipal, dispatchFailure } from "./provider-dispatch.mjs";
+import { guardNativeRequest } from "./key-data-guards.mjs";
 import { governanceEnabled, GovernanceError } from "./tenant-governance-d1.mjs";
 import { creditsEnforcement } from "./credits-d1.mjs";
 import { CreditsAdmissionError } from "./credits-admission.mjs";
@@ -332,7 +334,20 @@ async function runNativeLifecycle(request, env, ctx, authority, fetcher, registr
 }
 
 export async function nativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators = []) {
+  const send = fetcher;
+  fetcher = async (outbound, runtime, current) => {
+    try { return await providerFetch(current.provider, outbound, {}, { env: runtime, authority: current,
+      send: checked => send(checked, runtime, current) }); }
+    catch (error) { if (!(error instanceof DispatchError)) throw error; return dispatchFailure(error); }
+  };
+  return withDispatchPrincipal(env, authority, () => runNativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators));
+}
+
+async function runNativeGenerationFetch(request, env, ctx, authority, fetcher, collaborators = []) {
   const path = authority.route ?? new URL(request.url).pathname;
+  const guarded = await guardNativeRequest(request, env, authority);
+  if (guarded.response) { authority.deadlineHook?.deadline?.stop(); return guarded.response; }
+  request = guarded.request;
   if (!generationPath(request, path)) return fetcher(request, env, authority);
   let enterprise = authority.authenticated === true && (governanceEnabled(env) || creditsEnforcement(env) !== "off");
   if ((organisationsEnabled(env) || enterprise) && authority.authenticated === true) {

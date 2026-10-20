@@ -1,4 +1,4 @@
-import { loadRoleplayModule } from "./load_cloudflare_worker.mjs";
+import { loadRoleplayModule, policyStore } from "./load_cloudflare_worker.mjs";
 
 const {
   RoleplaySession,
@@ -60,6 +60,7 @@ export function makeRoleplayEnv(overrides = {}) {
   const storageBySession = new Map();
   const waits = [];
   const env = {
+    INTELLIGENCE_DB: policyStore(),
     ADMIN_API_KEY: "admin-roleplay-key",
     ROLEPLAY_API_KEY: "janitor-roleplay-key",
     OPENCODE_GO_API_KEY: "opencode-roleplay-key",

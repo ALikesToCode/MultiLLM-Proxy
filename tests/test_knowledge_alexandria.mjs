@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority } from "../worker/knowledge/authority.mjs";
 import { defaultPolicy, validatePolicy } from "../worker/knowledge/policy.mjs";

@@ -26,6 +26,7 @@ from requests.adapters import HTTPAdapter
 from error_handlers import APIError
 from services.media_signing import FILE_ID, file_link_params
 from services.media_urls import public_https_url
+from services.provider_dispatch import provider_http
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def fetch_public(url: str, *, max_bytes: int = MAX_FETCH_BYTES, field: str = "im
     url = public_https_url(url, field)
     with _session() as session:
         try:
-            with session.post(f"{ORIGIN}/v1/fetch", json={"url": url, "max_bytes": max_bytes}, timeout=FETCH_TIMEOUT,
+            with provider_http("media", "POST", f"{ORIGIN}/v1/fetch", transport=session.request, binding=True, json={"url": url, "max_bytes": max_bytes}, timeout=FETCH_TIMEOUT,
                               allow_redirects=False, stream=True) as response:
                 if response.status_code != 200:
                     code = _error_code(response)
@@ -168,7 +169,7 @@ def import_url(file_id: str, url: str, *, owner: str, kind: str, model: str | No
     """The Worker downloads a provider URL straight into R2."""
     try:
         with _session() as session:
-            response = session.post(_file_url(file_id, "/import"), timeout=STORE_TIMEOUT, allow_redirects=False,
+            response = provider_http("media", "POST", _file_url(file_id, "/import"), transport=session.request, binding=True, timeout=STORE_TIMEOUT, allow_redirects=False,
                                     json={"url": url, "metadata": {"owner": owner, "kind": kind,
                                                                    **({"model": model} if model else {})}})
             return _stored(response)
@@ -365,7 +366,10 @@ def video_file_id(job_id: str) -> str:
 def store_video(file_id: str, url: str, headers: dict, *, owner: str, model: str | None) -> dict | None:
     """Copy a finished video into R2 once; None when its size is unknown or too large."""
     try:
-        upstream = requests.get(url, headers=headers, timeout=VIDEO_TIMEOUT, stream=True, allow_redirects=True)
+        from services.provider_assets import asset_http
+        provider = str(model or "unknown").split(":", 1)[0]
+        upstream = asset_http(provider, url, headers=headers, timeout=VIDEO_TIMEOUT, stream=True,
+                                 reference={"username": owner})
     except requests.exceptions.RequestException:
         return None
     with upstream:

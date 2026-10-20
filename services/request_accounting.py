@@ -271,6 +271,9 @@ def begin() -> Optional[Response]:
         return None
     payload = _payload()
     models, provider = _requested_models(kind, payload)
+    from services.key_data_guards import model_permitted
+    if any(not model_permitted(user, model) for model in models) or (provider and not model_permitted(user, provider + ":*")):
+        return _error(403, "provider_class_not_allowed", "This API key cannot use this provider data class.")
     for model in models:
         if not key_controls.model_allowed(user, model):
             return _error(403, "model_not_allowed",
@@ -511,8 +514,7 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
 
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
     if usage is not None and context.path == "/v1/embeddings":
-        usage = (replace(usage, output_tokens=0) if isinstance(usage, prompt_cache_cost.CacheObservation)
-                 else UsageObservation(usage.input_tokens, 0, "provider", ("provider",)))
+        usage = replace(usage, output_tokens=0)
     qualified = [_qualified(model, context.provider) for model in context.models]
     requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
     selected = context.selected or (requested if requested and requested != "mixed"
@@ -550,6 +552,8 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         "latency_ms": min(86_400_000, max(0, round((time.perf_counter() - context.started) * 1000))),
         "input_tokens": usage.input_tokens if usage is not None else None,
         "output_tokens": usage.output_tokens if usage is not None else None,
+        "cached_input_tokens": usage.cached_input_tokens if usage is not None else None,
+        "reasoning_tokens": usage.reasoning_tokens if usage is not None else None,
         "cost_usd": cost,
         "cost_basis": basis,
         "request_id": context.request_id,

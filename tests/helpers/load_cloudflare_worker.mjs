@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
+export const { policyStore } = await import(new URL("./dispatch_fixture.mjs", import.meta.url));
 
 function dataModuleUrl(source) {
+  source = source.replaceAll('from "../provider-dispatch.mjs"', `from "${new URL("../../worker/provider-dispatch.mjs", import.meta.url)}"`);
   return `data:text/javascript;base64,${Buffer.from(source, "utf8").toString("base64")}`;
 }
 
