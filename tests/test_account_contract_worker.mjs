@@ -19,3 +19,13 @@ test("legacy account projection refuses missing or malformed verification", () =
     username: "synthetic", official_only: null, forced_provider_preferences: null,
   });
 });
+
+
+test("zero and empty policies survive the negotiated account reply", () => {
+  for (const policy of [{ official_only: 0, forced_provider_preferences: null },
+    { official_only: null, forced_provider_preferences: {} }]) {
+    const row = { username: "synthetic", ...policy, data_policy: { version: 1, ...policy } };
+    assert.equal(accountReply(row, 1), row);
+    assert.equal(accountReply(row, null), row);
+  }
+});

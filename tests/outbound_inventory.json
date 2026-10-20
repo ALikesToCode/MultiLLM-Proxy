@@ -147,7 +147,7 @@
   "routes/cascades.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "13b441e4f87b0656bfce994cf7c9d17ed22ed321bea0c604fc07eaa5a0f547fd"
+    "sha256": "7d398b0e40b90bc860081b7c4343b9073002a700cdd550af3ea171e0f74cd8ab"
   },
   "routes/chat_cache.py": {
     "kind": "non-provider",
@@ -227,7 +227,7 @@
   "routes/intelligence.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "6bb99b0b757b5b25e90697415d1e41e7129dc7a7ca227915935afad56c7556d2"
+    "sha256": "1085b546c4eefb475af30e077ffeaebb905a4bef40af4f4ccf550f12a7e6cf4f"
   },
   "routes/intelligence_media.py": {
     "kind": "guarded",
@@ -1502,7 +1502,7 @@
   "worker/account-contract.mjs": {
     "kind": "internal",
     "reason": "Negotiates private account RPC metadata; no provider dispatch.",
-    "sha256": "d549ea11498ddc7c7f5a0c9163540df6bd17c157cf0e9b3b5f5bcada183f6617"
+    "sha256": "cfc08f4bd8a4bfb2fe7ac34c3264aee790ee24ea87e0bf0eb17bdc384bbec4ab"
   },
   "worker/admission-do.mjs": {
     "kind": "internal",
@@ -1682,7 +1682,7 @@
   "worker/intelligence-auth-d1.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "803a9a5fe34a66fa27cc4bbc843a4c5d4466f7a732e8d54045515581070db7d9"
+    "sha256": "a4b9433cad6d971e280bf8be146273a49ebed611b0fe0c8249680e265006dbac"
   },
   "worker/intelligence-d1.mjs": {
     "kind": "non-provider",
@@ -1702,7 +1702,7 @@
   "worker/key-data-guards.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "f101e5bef18548d394914d263f8e7cf4ea5827af831c990c65896a26dcb2f003"
+    "sha256": "98248fd1ee5be5aa7d99734a0d51b0a00032a57629bdac3abe76dd38631d14ba"
   },
   "worker/knowledge-edge.mjs": {
     "kind": "internal",
@@ -2052,7 +2052,7 @@
   "worker/provider-dispatch.mjs": {
     "kind": "guarded",
     "reason": "Sole Worker HTTP/SDK boundary; fresh durable policy precedes fetch or admitted callbacks.",
-    "sha256": "fe8dd519fa01b31151c2fb68275f4e92efd8103b98d12277790c60db082edfd5"
+    "sha256": "77e2ffe56e3f5bdd7fb76d6ea01478449c3111625652c96385a3fabf8c0218b9"
   },
   "worker/realtime-metering.mjs": {
     "kind": "non-provider",

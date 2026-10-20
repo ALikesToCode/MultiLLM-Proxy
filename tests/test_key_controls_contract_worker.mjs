@@ -16,6 +16,8 @@ const policies = [
   { official_only: null, forced_provider_preferences: null },
   { official_only: 1, forced_provider_preferences: null },
   { official_only: null, forced_provider_preferences: '{"data_collection":"deny"}' },
+  { official_only: 0, forced_provider_preferences: null },
+  { official_only: null, forced_provider_preferences: '{}' },
 ];
 const key = "mllm_synthetic_incident_key_long_enough";
 const digest = scryptSync(key, "syntheticsalt", 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex");
@@ -49,6 +51,18 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
         .bind(`scrypt:32768:8:1$syntheticsalt$${digest}`).run();
       const settings = collectContainerEnv({ ...config.vars, ADMIN_API_KEY: "synthetic-bootstrap-long-key",
         FLASK_SECRET_KEY: "synthetic-session-long-enough", JWT_SECRET: "synthetic-jwt-long-enough", OPENROUTER_API_KEY: "synthetic-operator" });
+      // Exercise Container authentication directly too: front-door rejection alone
+      // cannot prove that a legacy account RPC preserved the rollback fence.
+      for (const policy of policies) {
+        await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
+          .bind(policy.official_only, policy.forced_provider_preferences).run();
+        const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
+          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), A],
+        { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
+        const rows = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
+        assert.equal(rows.at(-1).status, policy === policies[0] ? 200 : 503);
+        assert.equal(rows.at(-1).dispatches, policy === policies[0] ? 1 : 0);
+      }
       for (const container of versions) for (const privateRef of versions) for (const [index, policy] of policies.entries()) {
         await t.test(`${main || "B"}/${container || "B"}/${privateRef || "B"}/policy-${index}`, async () => {
           await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
@@ -109,8 +123,8 @@ test("every expansion/enforcement runtime combination preserves NULL accounts an
           const response = await worker.fetch(new Request("https://gateway.example/v1/knowledge/native/exa_search", {
             method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ query: "synthetic" }),
           }), env, { waitUntil() {} });
-          if (index === 0) {
-            assert.equal(response.status, 200, "unrestricted Knowledge: " + await response.clone().text());
+          if (index === 0 || index === 3 && !main && !privateRef) {
+            assert.equal(response.status, 200, "admitted Knowledge: " + await response.clone().text());
             assert.equal(external, 1);
           } else {
             assert.ok(response.status >= 400, "controlled Knowledge must be enforced or refused");

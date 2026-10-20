@@ -149,3 +149,29 @@ test("import watches use the source account instead of the scheduler and refuse 
     assert.equal(calls, 0); assert.equal(checked, 1);
   }
 });
+
+
+for (const policy of [{ official_only: 0, forced_provider_preferences: null },
+  { official_only: null, forced_provider_preferences: '{}' }]) {
+  test(`every non-NULL policy requires current operator credentials and an approved origin: ${JSON.stringify(policy)}`, async () => {
+    const env = { INTELLIGENCE_DB: policyStore(policy), OPENROUTER_API_KEY: "synthetic-current" };
+    const options = { env, authority, send: () => assert.fail("Refused credential must not leave") };
+    await assert.rejects(providerFetch("openrouter", "https://unapproved.example/v1/chat", {
+      headers: { authorization: "Bearer synthetic-cached" },
+    }, options), { code: "attested_credential_unavailable", status: 503 });
+    for (const origin of ["https://unapproved.example", "https://openrouter.ai"]) {
+      await assert.rejects(providerFetch("openrouter", origin + "/api/v1/chat?key=synthetic-caller", {}, options),
+        { code: "provider_credential_not_allowed", status: 403 });
+    }
+    const send = request => {
+      assert.equal(request.headers.get("authorization"), "Bearer " + env.OPENROUTER_API_KEY);
+      return new Response("{}");
+    };
+    await providerFetch("openrouter", input(), {}, { env, authority, send });
+    env.OPENROUTER_API_KEY = "synthetic-changed-binding";
+    await providerFetch("openrouter", input(), {}, { env, authority, send });
+    delete env.OPENROUTER_API_KEY;
+    await assert.rejects(providerFetch("openrouter", input(), {}, options),
+      { code: "attested_credential_unavailable", status: 503 });
+  });
+}

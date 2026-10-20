@@ -30,7 +30,7 @@ export function providerDataClass(provider, env = {}) {
 }
 
 export function providerClassPermitted(user, provider, env = {}) {
-  return !user?.official_only || providerDataClass(provider, env) === "official";
+  return (user?.official_only !== 1 && user?.official_only !== true) || providerDataClass(provider, env) === "official";
 }
 
 export function mergePreferences(caller, forced) {
@@ -65,7 +65,7 @@ export async function guardNativeRequest(request, env, authority) {
       return { response: Response.json({ error: { code: "provider_class_not_allowed" } }, { status: 403 }) };
     }
     const forced = parsePreferences(user.forced_provider_preferences);
-    if (authority.provider !== "openrouter" || !forced || !request.body) return { request };
+    if (authority.provider !== "openrouter" || forced === null || !request.body) return { request };
     const payload = await request.clone().json();
     if (!object(payload)) return { response: Response.json({ error: { code: "invalid_request" } }, { status: 400 }) };
     payload.provider = mergePreferences(payload.provider, forced);

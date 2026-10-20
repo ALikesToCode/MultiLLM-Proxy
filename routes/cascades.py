@@ -289,7 +289,7 @@ def validate_cascade_target(app, auth, model, proxy):
     config = CascadeService.get_route(model)
     if config is None:
         raise APIError(f"Cascade not found: {model}", 404)
-    from services.key_data_guards import model_permitted
+    from services.key_data_guards import has_data_controls, model_permitted
     user = getattr(g, "authenticated_user", None) or {}
     tiers = [tier for tier in config["tiers"] if model_permitted(user, tier["model"])]
     if not tiers:
@@ -303,7 +303,7 @@ def validate_cascade_target(app, auth, model, proxy):
                 if any(model_allowed(getattr(g, "authenticated_user", {}) or {}, candidate["model"])
                        for candidate in policy["candidates"]):
                     return "cascade"
-                denied += int(bool(user.get("official_only")))
+                denied += int(has_data_controls(user))
                 continue
             if tier["model"].startswith("free:"):
                 from services.free_model_policy import FREE_MODELS

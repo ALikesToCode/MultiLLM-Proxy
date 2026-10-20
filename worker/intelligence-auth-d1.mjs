@@ -1,4 +1,4 @@
-import { KEY_CONTROLS, expansionFence } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled, expansionFence } from "./key-controls-capability.mjs";
 import { dataPolicy } from "./dispatch-policy.mjs";
 import { logFailure } from "./log.mjs";
 
@@ -81,7 +81,9 @@ export async function handleIntelligenceAuthRequest(request, env) {
       const principal = await lookupIntegrationPrincipal(db, body.keyPrefix);
       if (principal && !principal.revokedAt) {
         const policy = await db.prepare("SELECT official_only, forced_provider_preferences FROM intelligence_principals WHERE id = ? AND revoked_at IS NULL").bind(principal.id).first();
-        if (!policy || policy.official_only === 1 || policy.forced_provider_preferences !== null) throw Error("key_controls_require_upgrade");
+        if (!policy) throw Error("key_data_controls_unavailable");
+        dataPolicy(policy);
+        if (controlled(policy)) throw Error("key_controls_require_upgrade");
       }
       return reply({version: 1, principal});
     }

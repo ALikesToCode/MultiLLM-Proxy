@@ -1,5 +1,5 @@
 import { legacyBindingControls } from "./legacy-binding-policy.mjs";
-import { KEY_CONTROLS } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled } from "./key-controls-capability.mjs";
 /** Sole provider network boundary. Deferred work carries identity, never cached policy. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { currentDataControls, legacyDataControls, mergePreferences, parsePreferences, providerClassPermitted } from "./key-data-guards.mjs";
@@ -71,7 +71,7 @@ function apiOrigin(provider, url, env, options) {
 }
 
 function credentials(provider, request, env, policy, options) {
-  if (!policy.official_only && policy.forced_provider_preferences === null || provider === "cloudflare") return request;
+  if (!controlled(policy) || provider === "cloudflare") return request;
   const url = new URL(request.url);
   if ([...url.searchParams.keys()].some(name => name.toLowerCase() === "key")) {
     throw new DispatchError("provider_credential_not_allowed", 403);

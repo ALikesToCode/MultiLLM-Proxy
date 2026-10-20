@@ -1,4 +1,5 @@
 /** Negotiate additive account metadata before crossing a strict Container decoder. */
+import { controlled } from "./key-controls-capability.mjs";
 import { verifyDataPolicy } from "./dispatch-policy.mjs";
 
 export const ACCOUNT_POLICY_VERSION = 1;
@@ -11,9 +12,7 @@ export function accountPolicyVersion(body) {
   return ACCOUNT_POLICY_VERSION;
 }
 
-export function hasAccountPolicy(row) {
-  return Boolean(row?.official_only) || row?.forced_provider_preferences != null;
-}
+export const hasAccountPolicy = controlled;
 
 export function accountReply(row, version) {
   if (!row || version === ACCOUNT_POLICY_VERSION) return row;
