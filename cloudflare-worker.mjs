@@ -1,3 +1,4 @@
+import { BUILD_ID } from "./worker/build-id.mjs";
 import { admitContainerDelegation } from "./worker/peer-controls.mjs";
 import { dispatchFailure } from "./worker/provider-dispatch.mjs";
 import { KEY_CONTROLS } from "./worker/key-controls-capability.mjs";
@@ -2111,7 +2112,9 @@ export default {
       let response = await container.fetch(forwardedRequest);
       if (readyPath && response.ok) {
         const health = await response.clone().json();
-        response = jsonResponse({ ...health, main_key_controls: KEY_CONTROLS }, { headers: response.headers });
+        const releaseHeaders = new Headers(response.headers);
+        releaseHeaders.set("X-MultiLLM-Worker-Build", BUILD_ID);
+        response = jsonResponse({ ...health, main_key_controls: KEY_CONTROLS }, { headers: releaseHeaders });
       }
       if (requestUrl.pathname === "/v1/metrics/prometheus") {
         response = await withNativeMetrics(response, env);

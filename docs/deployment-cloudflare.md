@@ -383,14 +383,12 @@ the code, and nothing ships unless ci passed.
 3. Add *Containers Edit* to the API token, and run the `deploy` workflow once from the
    **Actions** tab to deploy the current head of `main`.
 
-**(b) Workers Builds keeps deploying the main Worker.** Leave `DEPLOY_MAIN_WORKER` unset
-(the default) or `false`, and keep the Workers Builds deploy command as
-`npx wrangler deploy`; do not change it to `npm run deploy`, which would apply the
-migrations and deploy the Knowledge Worker a second time. Actions applies migrations and
-deploys the Knowledge Worker after ci passes. Workers Builds starts at push time, so after
-a push that adds a migration the new main Worker usually runs for a few minutes before
-its tables exist, and `/ready` answers 503 `d1_schema_missing` until they do. Code must
-tolerate a missing new table, and a push whose ci fails still ships the main Worker.
+**(b) Keeping automatic promotion is not supported for the key-controls rollout.**
+Workers Builds can publish the main Worker and Container before migrations or the
+private Worker, even when GitHub CI fails. Disconnect it or use `wrangler versions upload`
+without automatic promotion, and deploy through `scripts/deploy.sh`. The preflight's
+D1, secret-list and deployments-read permissions inside Builds have not been verified.
+See [the staged rollout and rollback procedure](key-controls-rollout.md).
 
 ## One-time setup
 
@@ -440,13 +438,19 @@ which can show no commit until the next deploy.
 
 ## Manual deploys
 
-`npm run deploy` (`scripts/deploy.sh`) runs the same order from your machine: the
-migration checks, `wrangler d1 migrations apply`, the remote check, the Knowledge
-Worker and the main Worker. From a clean checkout it tags both versions with the commit.
-Extra arguments go to the final deploy, for example
-`npm run deploy -- --containers-rollout immediate` for a one-shot rollout of a changed
-Container image. Use it only when the workflow cannot run, and never while a deploy run
-is in progress; with option (a) the next push to `main` replaces it.
+Set `D1_DATABASE` explicitly to the database in both selected Worker configurations,
+then run `npm run deploy` (`scripts/deploy.sh`). For another environment set
+`MAIN_WORKER_CONFIG`, `KNOWLEDGE_WORKER_CONFIG` and `DEPLOY_STATUS_URL` as well. The
+script checks migrations, applies them, deploys the private Worker, then the main
+Worker and Container. From a clean checkout it tags both versions with the commit.
+Extra arguments go to the final deploy. Never run it concurrently with another deploy.
+
+Each release uses a fresh build-only image identifier. The command does not finish
+successfully until application detail shows a newer Container version and image, and
+`/ready` returns matching Worker/Container artifact fingerprints. "No changes" is not
+rollout proof. See [deployment verification](key-controls-rollout.md#deployment-verification).
+Status reads also require `--database` or `D1_DATABASE`; alternate configs are selected
+with `--config` and `--knowledge-config`. No default database is queried.
 
 **Alerts.** Worker logs are sampled at 100% (`head_sampling_rate: 1`): the Worker
 writes little besides structured failure lines such as `account_storage_failed`,
@@ -471,7 +475,11 @@ With D1, more Gunicorn worker processes behave like more instances: each keeps i
 
 ## Rollback
 
-Revert the commit on `main` so the deploy workflow ships the previous code, or use `npx wrangler rollback` for an immediate rollback that lasts until the next deploy. D1 migrations are not rolled back; because they are additive, the previous code keeps working with the newer schema. Container SQLite files are ephemeral and need no rollback; restore D1 data itself with D1 Time Travel.
+Use the [Container-first rollback procedure](key-controls-rollout.md#deployment-verification)
+until A/B rollback has passed real staging. A Worker-only rollback across earlier strict
+RPC decoders can fail unrestricted requests. Keep migrations and stored restrictions;
+A refuses controlled dispatch while preserving unrestricted and management access.
+Do not clear policies or roll back D1 migrations to make a rollback appear healthy.
 
 ## Sources
 

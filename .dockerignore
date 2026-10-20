@@ -40,3 +40,5 @@ task_plan.md
 test_*.py
 test_*.sh
 tests/helpers/workbench_preview.py
+
+.release-wrangler-*

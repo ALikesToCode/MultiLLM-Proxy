@@ -2469,6 +2469,7 @@ test("worker checks application readiness through the container health endpoint"
   assert.equal(stub.getStartCalls(), 0);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
   assert.deepEqual(await response.json(), { status: "ready", database: "ok", main_key_controls: {protocol: 1, enforcement: false} });
+  assert.match(response.headers.get("X-MultiLLM-Worker-Build"), /^[0-9a-f]{64}$/);
 });
 
 test("worker relies on container.fetch for startup and readiness", async () => {

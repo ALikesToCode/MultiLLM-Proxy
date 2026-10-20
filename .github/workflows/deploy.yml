@@ -142,13 +142,26 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy --config wrangler.knowledge.jsonc --tag "$SHA" --message "$DEPLOY_MESSAGE"
+      - name: Capture Container rollout baseline
+        if: vars.DEPLOY_MAIN_WORKER == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/container_rollout.mjs --prepare --state "$RUNNER_TEMP/container-before.json" --output .release-wrangler-actions.jsonc
       - name: Deploy main Worker and Container
         id: main
         if: vars.DEPLOY_MAIN_WORKER == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy --tag "$SHA" --message "$DEPLOY_MESSAGE"
+        run: pnpm exec wrangler deploy --config .release-wrangler-actions.jsonc --tag "$SHA" --message "$DEPLOY_MESSAGE"
+      - name: Verify actual Container rollout
+        if: vars.DEPLOY_MAIN_WORKER == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_STATUS_URL: ${{ vars.DEPLOY_STATUS_URL }}
+        run: node scripts/container_rollout.mjs --verify --state "$RUNNER_TEMP/container-before.json"
       - name: Verify deployment
         id: verify
         env:
