@@ -3372,6 +3372,8 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
+        from services.key_data_guards import guard_request
+        data = guard_request(api_provider, data)
         headers = (
             with_opencode_request_session(headers, data)
             if api_provider == "opencode"

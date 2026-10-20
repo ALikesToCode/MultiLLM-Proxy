@@ -20,11 +20,11 @@ USER_FIELDS = (
     "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
     # Per-key controls (migration 0007); NULL means no budget, every model, no expiry, any address.
     "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode",
-    "shadow_eval_rate",
+    "shadow_eval_rate", "official_only", "forced_provider_preferences",
 )
 _REQUIRED_TEXT = ("username", "api_key_hash", "api_key_prefix", "scopes", "created_at")
 _OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-                  "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")
+                  "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "forced_provider_preferences")
 _OPTIONAL_NUMBER = ("daily_budget_usd", "monthly_budget_usd", "shadow_eval_rate")
 PAGE_SIZE = 200
 READ_OPERATIONS = frozenset({"list", "get", "by_prefix"})
@@ -79,7 +79,7 @@ def _call(operation, **values):
 def _row(value):
     if isinstance(value, dict):
         # A Worker released before migrations 0011 and 0013 returns rows without these columns.
-        value = {"secret_scan_mode": None, "shadow_eval_rate": None, **value}  # nosec B105 - column defaults
+        value = {"secret_scan_mode": None, "shadow_eval_rate": None, "official_only": None, "forced_provider_preferences": None, **value}  # nosec B105 - column defaults
     if (
         not isinstance(value, dict)
         or set(value) != set(USER_FIELDS)
@@ -87,6 +87,7 @@ def _row(value):
         or any(value[name] is not None and not isinstance(value[name], str) for name in _OPTIONAL_TEXT)
         or any(value[name] is not None and (isinstance(value[name], bool) or not isinstance(value[name], (int, float)))
                for name in _OPTIONAL_NUMBER)
+        or (value["official_only"] is not None and (type(value["official_only"]) is not int or value["official_only"] not in (0, 1)))
         or type(value["is_admin"]) is not int
         or value["is_admin"] not in (0, 1)
     ):

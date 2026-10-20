@@ -45,7 +45,7 @@ function fixture(overrides = {}) {
       : { lease: { lease_id: "a".repeat(32), expires_at: Math.min(Date.now() + 29000, body.deadline_ms) } }) });
   } }; } };
   env.INTELLIGENCE_DB = { prepare(sql) { return { sql, values: [], bind(...values) { this.values = values; return this; },
-    async all() { return { results: [] }; } }; }, async batch(statements) {
+    async all() { return { results: [] }; }, async first() { return null; } }; }, async batch(statements) {
     rows.push(...JSON.parse(statements[1].values[0])); return [{ meta: { changes: 1 } }];
   } };
   return { env, operations, rows, ctx: { waitUntil(promise) { pending.push(promise); } },
@@ -141,7 +141,7 @@ test("native revision installers are strict and the injectable clock bounds fres
   let now = 100, offline = false;
   const f = fixture({ CONFIG_REVISION_SYNC_ENABLED: "true" });
   const db = f.env.INTELLIGENCE_DB;
-  db.prepare = sql => ({ sql, bind() { return this; }, async all() {
+  db.prepare = sql => ({ sql, bind() { return this; }, async first() { if (offline) throw Error("offline"); return null; }, async all() {
     if (offline) throw new Error("offline");
     return { results: [] };
   } });

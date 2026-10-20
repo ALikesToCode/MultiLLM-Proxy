@@ -20,7 +20,7 @@ function fixture() {
   const rows = [], pending = [];
   const env = { NATIVE_EDGE_METRICS_ENABLED: "true", ADMIN_API_KEY: "synthetic-admin", ADMIN_USERNAME: "test-owner",
     CODEX_EASY_API_KEY: "synthetic-upstream", INTELLIGENCE_DB: {
-      prepare(sql) { return { bind(...values) { return { sql, values }; } }; },
+      prepare(sql) { return { bind(...values) { return { sql, values, first: async () => null }; } }; },
       async batch(statements) { rows.push(...JSON.parse(statements[1].values[0])); return [{ meta: { changes: 1 } }]; },
     } };
   return { env, rows, ctx: { waitUntil(p) { pending.push(p); } }, async flush() { await Promise.all(pending); } };

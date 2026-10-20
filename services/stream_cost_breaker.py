@@ -78,7 +78,7 @@ def validated_control(payload) -> dict:
     return {CAP_FIELD: validate_cap(payload["max_stream_cost_usd"])} if enabled() and "max_stream_cost_usd" in payload else {}
 
 def sql_select(query: str) -> str:
-    return query.replace("shadow_eval_rate\n", "shadow_eval_rate, max_stream_cost_microusd\n") if enabled() else query
+    return query.replace("forced_provider_preferences\n", "forced_provider_preferences, max_stream_cost_microusd\n") if enabled() else query
 
 def ensure_sql_cap(connection) -> None:
     if enabled() and CAP_FIELD not in {row["name"] for row in connection.execute("PRAGMA table_info(users)")}:

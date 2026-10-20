@@ -46,7 +46,7 @@ test("disabled native streaming and nonstream bodies, headers and account reads 
   for (const streaming of [false, true]) {
     const upstream = streaming ? source([delta("ok"), "data: [DONE]\n\n"]).response : complete("ok");
     const expected = await upstream.clone().text(), headers = [...upstream.headers];
-    const res = await nativeGenerationFetch(request({ stream: streaming }), { INTELLIGENCE_DB: { prepare() { assert.fail("storage"); } } }, {}, auth,
+    const res = await nativeGenerationFetch(request({ stream: streaming }), { INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("storage"); } } }, {}, auth,
       async req => { assert.deepEqual(await req.json(), { ...payload, stream: streaming }); return upstream; });
     assert.equal(await res.text(), expected); assert.deepEqual([...res.headers], headers);
   }
@@ -64,7 +64,7 @@ test("latency rejection runs before admission, cache, reservation, canary and di
   const store = new ObservationWindow(); store.record("codex-easy:m", { ttft_ms: 500, tokens_per_second: 1, now });
   const env = { ...slo(), ...cost, ...canary("block"), USAGE_RESERVATIONS_ENABLED: "true", ADMISSION_ENABLED: "true",
     GENERATION_CACHE_SHARED_ENABLED: "true", GENERATION_CACHE_BACKEND: "d1-r2", SEMANTIC_CACHE_ENABLED: "true",
-    INTELLIGENCE_DB: { prepare() { assert.fail("storage before rejection"); } },
+    INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("storage before rejection"); } },
     ADMISSION_COORDINATOR: { getByName() { assert.fail("admission before rejection"); } } };
   const response = await nativeGenerationFetch(request(), env, {}, { ...auth, observations: store, now }, () => assert.fail("upstream"));
   assert.equal(response.status, 503); assert.equal((await response.json()).error.code, "latency_slo_predicted_miss");
@@ -92,6 +92,7 @@ test("capped native streams reject missing pricing before upstream", async () =>
 test("a capped oversized streaming payload cannot bypass preflight inspection", async () => {
   const req = request({ stream: true, messages: [{ role: "user", content: "x".repeat(65536) }] });
   const response = await nativeGenerationFetch(req, { ...cost, INTELLIGENCE_DB: { prepare(sql) {
+    if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } };
     assert.match(sql, /SELECT max_stream_cost_microusd/);
     return { bind() { return this; }, first() { return { max_stream_cost_microusd: 10 }; } };
   } } }, {}, auth, () => assert.fail("upstream before bounded capped preflight"));
@@ -129,7 +130,7 @@ for (const mode of ["log", "block"]) test("native canary " + mode + " scans befo
   try {
     const response = await nativeGenerationFetch(request({ temperature: 0 }, { "X-MultiLLM-Cache": "on" }), {
       ...canary(mode), GENERATION_CACHE_SHARED_ENABLED: "true", GENERATION_CACHE_BACKEND: "d1-r2", SEMANTIC_CACHE_ENABLED: "true",
-      INTELLIGENCE_DB: { prepare() { assert.fail("cache storage"); } } }, {}, auth, async req => {
+      INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("cache storage"); } } }, {}, auth, async req => {
         const body = await req.json(); marker = body.messages[0].content.match(/marker: ([a-f0-9]{32})/)[1];
         return complete("before " + marker + " after");
       }, events(seen));
@@ -245,7 +246,7 @@ function sqliteDatabase(sql, observe = () => {}) {
 
 test("combined policies meter before settlement and retain a hold when the cost stop wins", async t => {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
-  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0020_usage_reservations.sql"])
+  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0041_key_data_guards.sql", "0020_usage_reservations.sql"])
     sql.exec(await readFile(new URL("../intelligence-migrations/" + file, import.meta.url), "utf8"));
   const order = [], seen = [], store = new ObservationWindow();
   store.record("codex-easy:m", { ttft_ms: 1, tokens_per_second: 1000, now });

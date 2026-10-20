@@ -271,6 +271,9 @@ def begin() -> Optional[Response]:
         return None
     payload = _payload()
     models, provider = _requested_models(kind, payload)
+    from services.key_data_guards import model_permitted
+    if any(not model_permitted(user, model) for model in models) or (provider and not model_permitted(user, provider + ":*")):
+        return _error(403, "provider_class_not_allowed", "This API key cannot use this provider data class.")
     for model in models:
         if not key_controls.model_allowed(user, model):
             return _error(403, "model_not_allowed",

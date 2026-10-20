@@ -13,6 +13,8 @@ const MIGRATION = "0019_generation_cache.sql";
 function database() {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync(new URL(`../intelligence-migrations/${MIGRATION}`, import.meta.url), "utf8"));
+  for (const file of ["0003_control_users.sql", "0041_key_data_guards.sql"])
+    db.exec(readFileSync(new URL(`../intelligence-migrations/${file}`, import.meta.url), "utf8"));
   const execute = (sql, args) => {
     const numbered = /\?[1-9]/.test(sql);
     const statement = db.prepare(sql.replace(/\?(\d+)/g, (_, number) => `$v${number}`));

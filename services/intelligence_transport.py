@@ -395,7 +395,9 @@ class IntelligenceTransport:
         if content_type:
             headers["Content-Type"] = content_type
 
-        dispatch_data = protect_body(upstream.data if data is None else data, headers, provider=provider)
+        from services.key_data_guards import guard_request
+        guarded_data = guard_request(provider, upstream.data if data is None else data)
+        dispatch_data = protect_body(guarded_data, headers, provider=provider)
 
         scope = selection_context(provider, model, config=self.config)
         from services.generation_deadline import bounded_timeout, current_deadline

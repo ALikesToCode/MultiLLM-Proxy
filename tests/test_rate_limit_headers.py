@@ -194,7 +194,8 @@ def test_usage_registered_route_default_and_bounded_snapshot(monkeypatch):
     monkeypatch.setattr(usage, "usage_history", lambda *args, **kwargs: {})
     monkeypatch.setattr(usage.BudgetService, "status", lambda _: {})
     monkeypatch.setattr(usage.key_controls, "public", lambda _: {
-        "allowed_models": None, "allowed_ips": None, "expires_at": None})
+        "allowed_models": None, "allowed_ips": None, "expires_at": None,
+        "official_only": None, "forced_provider_preferences": None})
     @app.before_request
     def authenticate():
         g.authenticated_user = USER
