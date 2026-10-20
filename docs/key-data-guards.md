@@ -38,6 +38,12 @@ Stored samples recheck their source key before replay and before every candidate
 or judge dispatch, including three-arm comparisons. Controlled, inactive, missing
 or unverifiable source accounts are skipped; existing samples expire normally.
 
+Restricted Gemini requests reject caller credential overrides in query parameters,
+provider headers or a separate Authorization header. Only the operator's current
+`GEMINI_API_KEY` binding is covered by `GEMINI_DATA_TIER=paid`; a missing binding
+fails closed, without a cached or legacy-alias fallback. The same restriction
+applies to automatic fallback and background dispatch.
+
 ## Provider classes
 
 `providers/data-classes.json` is shared by Flask and the Worker. Registry adapters

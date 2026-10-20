@@ -96,6 +96,8 @@ def require_provider(provider, user=None):
     if not model_permitted(user, provider + ":*"):
         raise APIError("This API key cannot use this provider data class", 403,
                        {"error": "provider_class_not_allowed"})
+    from services.gemini_credentials import reject_caller_credentials
+    reject_caller_credentials(provider)
 
 
 def merge_preferences(caller, forced):

@@ -397,6 +397,9 @@ class IntelligenceTransport:
 
         from services.key_data_guards import guard_request
         guarded_data = guard_request(provider, upstream.data if data is None else data)
+        from services.gemini_credentials import prepare_credentials, restricted
+        if restricted(provider):
+            url, headers, _ = prepare_credentials(url, headers, {}, provider, token, self.auth)
         dispatch_data = protect_body(guarded_data, headers, provider=provider)
 
         scope = selection_context(provider, model, config=self.config)

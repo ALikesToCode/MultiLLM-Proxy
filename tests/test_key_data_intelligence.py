@@ -38,3 +38,29 @@ class KeyDataIntelligenceTest(IntelligenceApiTestCase):
             response = self.post()
         assert response.status_code == 200, response.json
         assert json.loads(send.call_args.kwargs["data"])["provider"] == {"data_collection": "deny"}
+
+    def test_managed_submission_pins_the_attested_credential_before_background_dispatch(self):
+        self.app.config["GEMINI_DATA_TIER"] = "paid"
+        self.controlled_key(official_only=True)
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-test-model")]))
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "AIza-attested-synthetic"}), \
+                patch.object(self.app_module.AuthService, "get_api_key", return_value="AIza-attested-synthetic"), \
+                self.requests(return_value=upstream(completion())) as send:
+            response = self.post()
+        assert response.status_code == 200, response.json
+        assert send.call_count == 1
+        headers = send.call_args.kwargs["headers"]
+        assert headers["x-goog-api-key"] == "AIza-attested-synthetic"
+        assert not any(name.lower() == "authorization" for name in headers)
+
+    def test_managed_submission_refuses_a_missing_attested_binding(self):
+        import os
+        self.app.config["GEMINI_DATA_TIER"] = "paid"
+        self.controlled_key(official_only=True)
+        IntelligenceStore.seed(policy(candidates=[candidate("gemini:gemini-test-model")]))
+        with patch.dict("os.environ"):
+            os.environ.pop("GEMINI_API_KEY", None)
+            with self.requests() as send:
+                response = self.post()
+        assert response.status_code == 503, response.json
+        send.assert_not_called()
