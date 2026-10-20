@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 import { localMigrations, remoteAppliedMigrations } from "./verify_d1_migrations.mjs";
 
 const ROOT = new URL("../", import.meta.url);
+const MAIN_CONFIG = process.env.MAIN_WORKER_CONFIG || "wrangler.jsonc";
+const KNOWLEDGE_CONFIG = process.env.KNOWLEDGE_WORKER_CONFIG || "wrangler.knowledge.jsonc";
 const REQUIRED_SECRETS = ["ADMIN_API_KEY", "FLASK_SECRET_KEY", "JWT_SECRET"];
 const REQUIRED_COLUMNS = ["official_only", "forced_provider_preferences", "max_stream_cost_microusd"];
 class PreflightError extends Error {}
@@ -37,7 +39,7 @@ export function checkPrerequisites({ main, knowledge, run, migrations = localMig
   const results = JSON.parse(run(["d1", "execute", database, "--remote", "--json", "--command", "PRAGMA table_info(control_users)"]));
   const columns = results.flatMap(item => item.results ?? []).map(item => item.name);
   requireThat(REQUIRED_COLUMNS.every(name => columns.includes(name)), "Account policy columns are missing from D1");
-  const secrets = JSON.parse(run(["secret", "list", "--config", "wrangler.jsonc"]));
+  const secrets = JSON.parse(run(["secret", "list", "--config", MAIN_CONFIG]));
   requireThat(REQUIRED_SECRETS.every(name => main.vars?.[name] || secrets.some(item => item.name === name)),
     "Main Worker needs ADMIN_API_KEY, FLASK_SECRET_KEY and JWT_SECRET bindings");
 }
@@ -56,17 +58,17 @@ export function checkRelease(options) {
   checkPrerequisites(options);
   const { commit, run } = options;
   requireThat(/^[0-9a-f]{40}$/.test(commit), "Release needs a full commit identity");
-  const deployment = JSON.parse(run(["deployments", "status", "--json", "--config", "wrangler.knowledge.jsonc"]));
+  const deployment = JSON.parse(run(["deployments", "status", "--json", "--config", KNOWLEDGE_CONFIG]));
   requireThat(deployment.versions?.length === 1 && deployment.versions[0].percentage === 100,
     "Private Worker must have one fully active version");
-  const version = JSON.parse(run(["versions", "view", deployment.versions[0].version_id, "--json", "--config", "wrangler.knowledge.jsonc"]));
+  const version = JSON.parse(run(["versions", "view", deployment.versions[0].version_id, "--json", "--config", KNOWLEDGE_CONFIG]));
   const capability = (options.sourceCapability ?? sourceCapability)(version.annotations?.["workers/tag"]);
   requireThat(capability?.protocol >= 1, "Deploy and verify the expansion private Worker before the main Worker");
 }
 
 function main(args) {
-  const mainConfig = JSON.parse(readFileSync(new URL("wrangler.jsonc", ROOT)));
-  const knowledge = JSON.parse(readFileSync(new URL("wrangler.knowledge.jsonc", ROOT)));
+  const mainConfig = JSON.parse(readFileSync(new URL(MAIN_CONFIG, ROOT)));
+  const knowledge = JSON.parse(readFileSync(new URL(KNOWLEDGE_CONFIG, ROOT)));
   try {
     checkConfig(mainConfig, knowledge);
     if (args[0] === "--check" || process.env.WRANGLER_COMMAND === "dev") {
@@ -78,7 +80,7 @@ function main(args) {
     const commit = git(["rev-parse", "HEAD"]);
     requireThat(!git(["status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude)worker/build-id.mjs"]),
       "Deploy from a clean committed checkout");
-    const run = args => execFileSync("npx", ["--no-install", "wrangler", ...args], {
+    const run = args => execFileSync("npx", ["--no-install", "wrangler", ...args, ...(args[0] === "d1" ? ["--config", MAIN_CONFIG] : [])], {
       cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000,
       env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
     });
