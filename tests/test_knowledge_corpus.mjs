@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "./helpers/policy_test.mjs";
 import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { KnowledgeCorpus } from "../worker/knowledge/corpus.mjs";
+import { providerBinding } from "./helpers/provider_binding.mjs";
 
 const text = "# Flask 3.1\n\nRequest limits support café and 東京.\n";
 const digest = value => createHash("sha256").update(value).digest("hex");
@@ -32,7 +33,7 @@ function fixture() {
       return bytes ? { size: bytes.byteLength, body: new Response(bytes).body } : null;
     },
   };
-  const index = {
+  const index = providerBinding({
     async search(request) {
       searches.push(request);
       return { chunks: [{ text, score: 0.8, item: { key: artifact().index_key } }] };
@@ -57,7 +58,7 @@ function fixture() {
         };
       },
     },
-  };
+  });
   return {
     corpus: new KnowledgeCorpus({ KNOWLEDGE_SNAPSHOTS: bucket, KNOWLEDGE_INDEX: index }),
     objects, uploads, searches, lists, bucket, index,
@@ -138,14 +139,14 @@ test("AI binding search preserves chunk identity and scores without calling inst
   const f = fixture();
   const calls = [];
   const corpus = new KnowledgeCorpus({ KNOWLEDGE_INDEX: f.index, KNOWLEDGE_SEARCH_INSTANCE: "knowledge-test",
-    KNOWLEDGE_SEARCH_AI: { autorag(name) {
+    KNOWLEDGE_SEARCH_AI: providerBinding({ autorag(name) {
       assert.equal(name, "knowledge-test");
       return { async search(query) {
         calls.push(query);
         return { data: [{ filename: artifact().index_key, score: 0.8,
           content: [{ type: "text", text, score: 0.9 }, { type: "text", text: "東京" }] }] };
       } };
-    } },
+    } }),
   });
   assert.deepEqual(await corpus.search({ query: "request limits", product: "flask" }), [
     { text, index_key: artifact().index_key, score: 0.9 },
@@ -163,11 +164,11 @@ test("AI binding failures never fall back or retry and malformed responses fail 
   let calls = 0;
   let response;
   const corpus = new KnowledgeCorpus({ KNOWLEDGE_INDEX: f.index, KNOWLEDGE_SEARCH_INSTANCE: "knowledge-test",
-    KNOWLEDGE_SEARCH_AI: { autorag() { return { async search() {
+    KNOWLEDGE_SEARCH_AI: providerBinding({ autorag() { return { async search() {
       calls += 1;
       if (response instanceof Error) throw response;
       return response;
-    } }; } },
+    } }; } }),
   });
   response = new Error("Invalid ctx.props: missing accountId or accountTag");
   await assert.rejects(corpus.search({ query: "limits" }), /missing accountId/);

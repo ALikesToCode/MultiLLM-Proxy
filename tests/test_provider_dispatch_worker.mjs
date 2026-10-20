@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { providerBinding } from "./helpers/provider_binding.mjs";
 import test from "node:test";
 import { providerFetch, providerOperation, withDispatchPrincipal } from "../worker/provider-dispatch.mjs";
 import { verifyDataPolicy } from "../worker/dispatch-policy.mjs";
@@ -76,7 +77,7 @@ test("Gemini never uses cached or query credentials for a restricted principal",
 
 test("private inference bindings refuse missing identity and unavailable current authority before SDK calls", async () => {
   let calls = 0;
-  const env = { AI: { run() { calls++; assert.fail("SDK dispatch"); } } };
+  const env = { AI: providerBinding({ run() { calls++; assert.fail("SDK dispatch"); } }) };
   for (const headers of [{}, { "X-MultiLLM-Dispatch-Principal": '{"version":0,"username":"synthetic-reader"}' },
     { "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"synthetic-reader"}' }]) {
     const result = await handleAiOutbound(new Request("http://ai.internal/v1/embeddings", { method: "POST", headers: { "content-type": "application/json", ...headers },
@@ -115,9 +116,9 @@ test("index polling rereads current controls before every SDK call", async () =>
   let controls = { official_only: null, forced_provider_preferences: null }, calls = 0;
   const env = { INTELLIGENCE_DB: { prepare(query) {
     return { bind() { return this; }, async first() { return controls; } };
-  } }, KNOWLEDGE_INDEX: { search() { assert.fail("Unexpected search"); }, items: { get() { return { async info() {
+  } }, KNOWLEDGE_INDEX: providerBinding({ search() { assert.fail("Unexpected search"); }, items: { get() { return { async info() {
     calls++; return { id: "synthetic-item", key: "revisions/synthetic.txt", status: "completed" };
-  } }; } } } };
+  } }; } } }) };
   const corpus = new KnowledgeCorpus(env);
   const artifact = { snapshot_key: "snapshots/synthetic.txt", index_key: "revisions/synthetic.txt",
     content_hash: "a".repeat(64), byte_length: 1 };

@@ -2,11 +2,51 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import net from "node:net";
 import http from "node:http";
+import { readFile } from "node:fs/promises";
 import { networkAdmitted } from "../worker/dispatch-network.mjs";
 import { providerFetch, providerOperation } from "../worker/provider-dispatch.mjs";
 import { policyStore, dispatchEnv } from "./helpers/dispatch_fixture.mjs";
+import { providerBinding } from "./helpers/provider_binding.mjs";
 
 const authority = { authenticated: true, keyId: "synthetic" };
+
+test("SDK fixtures guard every method, nested handle and later replacement by default", async () => {
+  let calls = 0;
+  const binding = providerBinding({ run() { calls++; }, items: { get() { return { info() { calls++; } }; } } });
+  assert.throws(() => binding.run(), /outside provider chokepoint/);
+  assert.throws(() => binding.items.get("synthetic"), /outside provider chokepoint/);
+  let handle;
+  await providerOperation("cloudflare", () => { binding.run(); handle = binding.items.get("synthetic"); handle.info(); },
+    { env: dispatchEnv(), authority });
+  assert.equal(calls, 2);
+  assert.throws(() => handle.info(), /outside provider chokepoint/);
+  binding.run = () => { calls++; };
+  assert.throws(() => binding.run(), /outside provider chokepoint/);
+  assert.equal(calls, 2);
+});
+
+test("removing AI admission wrappers in memory fails before either SDK dispatch", async () => {
+  const url = new URL("../worker/ai-outbound.mjs", import.meta.url);
+  const source = await readFile(url, "utf8");
+  let mutations = 0;
+  const mutated = source.replace(/providerOperation\("cloudflare", \(\) => (env\.AI\.run\([^\n]+\))\)/g,
+    (_, call) => { mutations++; return call; })
+    .replace(/from (["'])(\.[^"']+)\1/g, (_, quote, path) => `from ${JSON.stringify(new URL(path, url).href)}`);
+  assert.equal(mutations, 2, "mutate both shared AI and speech dispatches");
+  const { handleAiOutbound } = await import(`data:text/javascript,${encodeURIComponent(mutated)}`);
+  for (const [path, body] of [["embeddings", { model: "@cf/baai/bge-m3", input: "synthetic" }],
+    ["audio/speech", { model: "@cf/deepgram/aura-2-en", input: "synthetic" }]]) {
+    let calls = 0;
+    const env = { INTELLIGENCE_DB: policyStore(), AI: providerBinding({ run() { calls++; return {}; } }) };
+    const response = await handleAiOutbound(new Request(`http://ai.internal/v1/${path}`, {
+      method: "POST", headers: { "content-type": "application/json",
+        "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"synthetic"}' }, body: JSON.stringify(body),
+    }), env);
+    assert.equal(response.status, 502, "an unadmitted SDK call cannot return success");
+    assert.equal(calls, 0, "the provider double must reject before running its implementation");
+    assert.equal(networkAdmitted(), false);
+  }
+});
 
 test("an unlisted axios-style adapter cannot bypass the global fetch guard", async t => {
   const previous = globalThis.fetch;

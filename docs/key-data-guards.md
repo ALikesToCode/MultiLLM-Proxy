@@ -108,10 +108,12 @@ roleplay refuse forced preferences because their full transports cannot enforce
 them. Missing accounts, missing fields, malformed envelopes and store outages
 refuse dispatch. The static outbound inventory pins every runtime source module,
 independently of HTTP client spelling. Suite-wide runtime guards require an active
-network capability at Python socket connection APIs and Worker fetch/socket calls,
-even when tests replace fetch. Admission issues a capability only for the transport
+network capability at Python's `socket.connect` audit event and Worker fetch/socket
+calls, even when clients use the extension socket or tests replace fetch. Provider
+SDK and index binding doubles use the shared `providerBinding` fixture, which checks
+every method call, nested handle and replacement method. Admission issues a capability only for the transport
 operation and revokes it on completion or failure. Mutation tests cover urllib3,
-fetch-based adapters, Node HTTP and raw sockets outside those boundaries.
+fetch-based adapters, Node HTTP, raw extension sockets and omitted SDK admission wrappers.
 Private persistence, storage management, authentication, telemetry, public capability
 metadata and webhook delivery are separate control traffic. Their tested network
 scopes are destination-bound; local D1 fixtures register only their own disposable

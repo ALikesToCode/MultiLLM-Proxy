@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { providerBinding } from "./helpers/provider_binding.mjs";
 import test from "./helpers/policy_test.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { build } from "esbuild";
@@ -320,7 +321,7 @@ test("embedding or memo backend errors degrade to ordinary retrieval", async t =
 test("Workers AI binding receives bge-m3 request and storage uses waitUntil", async t => {
   const f = await setup(t);
   let called;
-  f.env.KNOWLEDGE_SEARCH_AI = { run: async (...args) => { called = args; return { data: [[0.5, 1, -1]] }; } };
+  f.env.KNOWLEDGE_SEARCH_AI = providerBinding({ run: async (...args) => { called = args; return { data: [[0.5, 1, -1]] }; } });
   const tasks = [];
   await f.run(f.query, { embed: undefined, waitUntil: promise => tasks.push(promise) });
   await Promise.all(tasks);

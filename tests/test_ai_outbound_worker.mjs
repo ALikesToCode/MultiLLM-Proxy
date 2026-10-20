@@ -1,17 +1,18 @@
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { providerBinding } from "./helpers/provider_binding.mjs";
 
 import { handleAiOutbound, imageInput } from "../worker/ai-outbound.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 
 function ai(result) {
   const calls = [];
-  return { calls, async run(model, input, options) {
+  return providerBinding({ calls, async run(model, input, options) {
     calls.push({ model, input, options });
     if (result instanceof Error) throw result;
     return typeof result === "function" ? result(model, input) : result;
-  } };
+  } });
 }
 
 const post = (path, body, env) => handleAiOutbound(new Request(`http://ai.internal${path}`, {
