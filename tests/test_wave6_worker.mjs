@@ -246,7 +246,7 @@ function sqliteDatabase(sql, observe = () => {}) {
 
 test("combined policies meter before settlement and retain a hold when the cost stop wins", async t => {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
-  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0041_key_data_guards.sql", "0020_usage_reservations.sql"])
+  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0041_key_data_guards.sql", "0042_usage_token_details.sql", "0020_usage_reservations.sql"])
     sql.exec(await readFile(new URL("../intelligence-migrations/" + file, import.meta.url), "utf8"));
   const order = [], seen = [], store = new ObservationWindow();
   store.record("codex-easy:m", { ttft_ms: 1, tokens_per_second: 1000, now });

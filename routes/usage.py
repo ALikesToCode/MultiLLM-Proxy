@@ -34,7 +34,7 @@ def _range(days: int) -> tuple[str, str]:
 
 
 def _combined(rows: list) -> dict:
-    totals = {name: 0 for name in usage_store.TOTAL_COLUMNS[:7]}
+    totals = {name: 0 for name in usage_store.SUMMARY_COLUMNS}
     buckets = [0] * len(usage_store.BUCKET_COLUMNS)
     for row in rows:
         for name in totals:

@@ -48,7 +48,7 @@ function fixture(t, flags = {}) {
   for (const migration of ["0003_control_users.sql", "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql",
     "0017_control_revisions.sql", "0019_generation_cache.sql", "0020_usage_reservations.sql", "0023_idempotency.sql",
     "0024_context_pages.sql", "0026_semantic_cache.sql", "0028_responses_state.sql", "0033_tenant_hierarchy.sql", "0034_tenant_governance.sql",
-    "0035_saml_federation.sql", "0036_scim_provisioning.sql", "0037_credits_ledger.sql", "0038_payment_billing.sql", "0041_key_data_guards.sql"])
+    "0035_saml_federation.sql", "0036_scim_provisioning.sql", "0037_credits_ledger.sql", "0038_payment_billing.sql", "0041_key_data_guards.sql", "0042_usage_token_details.sql"])
     sql.exec(readFileSync(new URL(`../intelligence-migrations/${migration}`, import.meta.url), "utf8"));
   const operations = [];
   let failBatch = false;

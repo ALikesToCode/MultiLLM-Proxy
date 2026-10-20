@@ -121,7 +121,7 @@ test("semantic maintenance uses at most three bounded pages and is off by defaul
 
 function durableFixture(t) {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
-  for (const name of ["0003_control_users", "0005_auto_routes", "0007_usage_ledger", "0041_key_data_guards", "0019_generation_cache",
+  for (const name of ["0003_control_users", "0005_auto_routes", "0007_usage_ledger", "0041_key_data_guards", "0042_usage_token_details", "0019_generation_cache",
     "0020_usage_reservations", "0024_context_pages", "0025_canary_traffic", "0026_semantic_cache"]) {
     sql.exec(readFileSync(new URL(`../intelligence-migrations/${name}.sql`, import.meta.url), "utf8"));
   }

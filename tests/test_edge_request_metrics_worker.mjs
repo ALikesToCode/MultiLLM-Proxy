@@ -77,7 +77,7 @@ test("parser carry stays at most 64 KiB and recovers after oversized lines", () 
   const parser = createUsageObserver(true);
   parser.feed(encoder.encode('data: ' + 'x'.repeat(200000))); assert.ok(parser.carryBytes <= 65536);
   parser.feed(encoder.encode('\n\ndata: {"usage":{"input_tokens":0,"output_tokens":2}}\n\ndata: [DONE]\n\n'));
-  assert.deepEqual(parser.finish().usage, { input_tokens: 0, output_tokens: 2 });
+  assert.deepEqual(parser.finish().usage, { input_tokens: 0, output_tokens: 2, cached_input_tokens: null, reasoning_tokens: null });
 });
 
 test("partial usage, missing usage, stream error and cancellation remain unknown", async () => {
@@ -207,7 +207,7 @@ test("explicit estimate collaborator retains measured zero and marks estimated c
 test("multiline UTF-8 SSE and large JSON keep bounds and original bytes", async () => {
   const parser = createUsageObserver(true), raw = 'data: {"usage":\r\ndata: {"input_tokens":0,"output_tokens":0}}\r\n\r\ndata: [DONE]\r\n\r\n';
   const bytes = encoder.encode(raw); for (const byte of bytes) { parser.feed(new Uint8Array([byte])); assert.ok(parser.carryBytes <= 65536); }
-  assert.deepEqual(parser.finish().usage, { input_tokens: 0, output_tokens: 0 });
+  assert.deepEqual(parser.finish().usage, { input_tokens: 0, output_tokens: 0, cached_input_tokens: null, reasoning_tokens: null });
   const events = [], big = JSON.stringify({ output: "漢".repeat(40000), usage: { input_tokens: 2, output_tokens: 3 } });
   const response = await observeNativeResponse(new Response(big), { provider: "linkapi" }, { finalize: event => events.push(event) });
   assert.equal(await response.text(), big); assert.equal(events[0].usage_basis, "unknown"); assert.equal(events[0].cost_usd, null);
@@ -223,13 +223,13 @@ test("all finalizers run once even if a collaborator fails", async () => {
 test("native ledger statements preserve nullable usage and batch idempotency in SQLite", async () => {
   const statements = [];
   const env = { INTELLIGENCE_DB: {
-    prepare(sql) { return { bind(...values) { return { sql, values }; } }; },
+    prepare(sql) { return { bind(...values) { return { sql, values, first: async () => null }; } }; },
     async batch(batch) { statements.push(...batch); return [{ meta: { changes: 1 } }]; },
   } };
   const event = { provider: "codex-easy", model: "test-model", principal: "edge:trusted", endpoint: "/codex-easy/v1/chat/completions",
     status: 520, duration_ms: 9, input_tokens: 0, output_tokens: null, cost_usd: null, cost_basis: null, requestId: crypto.randomUUID() };
   await recordNativeUsage(env, event); await recordNativeUsage(env, event);
-  const schema = (await Promise.all(["0003_control_users.sql", "0007_usage_ledger.sql"].map(name =>
+  const schema = (await Promise.all(["0003_control_users.sql", "0007_usage_ledger.sql", "0042_usage_token_details.sql"].map(name =>
     readFile(new URL(`../intelligence-migrations/${name}`, import.meta.url), "utf8")))).join("\n");
   const code = `import json,sqlite3,sys
 payload=json.loads(sys.argv[1])
