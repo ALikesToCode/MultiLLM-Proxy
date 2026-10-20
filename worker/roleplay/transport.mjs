@@ -1,3 +1,4 @@
+import { providerFetch, dispatchFailure, DispatchError } from "../provider-dispatch.mjs";
 import { UpstreamCancellation, readBoundedUpstreamBytes } from "../upstream-cancellation.mjs";
 import { firewallFetch, isSecretScanBlock } from "../secret-firewall.mjs";
 import { piiFetch, isPIIFailure } from "../pii-rehydration.mjs";
@@ -581,21 +582,19 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
     };
     cancellation.handoff();
     const piiOptions = { route: "/v1/roleplay/chat/completions", keyScope: settings.piiKeyScope ?? "", onDecision: settings.onPIIDecision };
-    const submit = checked => piiFetch(checked, env, piiOptions, async transformed =>
-      useOpenCodeContainer ? containerNamespace.getByName("primary").fetch(transformed)
-        : fetch(transformed.url, { ...requestInit, headers: transformed.headers, body: await transformed.text() }));
+    const authority = { authenticated: true, keyId: env.ADMIN_USERNAME || "admin" };
+    const submit = checked => piiFetch(checked, env, piiOptions, transformed => providerFetch(candidate.provider, transformed, {}, {
+      env, authority, unsupportedPreferences: true,
+      send: async permitted => useOpenCodeContainer ? containerNamespace.getByName("primary").fetch(permitted) : fetch(permitted.url, { ...requestInit, headers: permitted.headers, body: await permitted.text() }),
+    }).catch(error => { if (!(error instanceof DispatchError)) throw error; return dispatchFailure(error); }));
     const response = useOpenCodeContainer && !resolvePIIPolicy(env, piiOptions)
-      ? await containerNamespace.getByName("primary").fetch(
-          new Request(
-            "https://roleplay.internal/opencode/v1/chat/completions",
-            requestInit,
-          ),
-        )
+      ? await providerFetch(candidate.provider, new Request("https://roleplay.internal/opencode/v1/chat/completions", requestInit), {}, {
+          env, authority, unsupportedPreferences: true, send: checked => containerNamespace.getByName("primary").fetch(checked),
+        }).catch(error => { if (!(error instanceof DispatchError)) throw error; return dispatchFailure(error); })
       : await firewallFetch(new Request(useOpenCodeContainer ? "https://roleplay.internal/opencode/v1/chat/completions" : candidate.endpoint, requestInit), env, {
-          route: "/v1/roleplay/chat/completions", provider: candidate.provider,
-          onDecision: settings.onSecretScan,
-          principal: { id: env.ADMIN_USERNAME || "admin" },
-        }, submit);
+      route: "/v1/roleplay/chat/completions", provider: candidate.provider,
+      onDecision: settings.onSecretScan, principal: { id: authority.keyId },
+    }, submit);
     cancellation.headersReceived();
     const ownedResponse = isSecretScanBlock(response) || isPIIFailure(response)
       ? response : cancellation.wrapResponse(response);

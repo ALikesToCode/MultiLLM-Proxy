@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 
 import { dispatchNative, NATIVE_OPERATIONS, nativeUnits } from "../worker/knowledge/native.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";

@@ -1,11 +1,12 @@
+import { policyFixtureEnv, initializePolicyAccount } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { dispatchKnowledge, maintainKnowledge, scheduleSource } from "../worker/knowledge/service.mjs";
 import { KnowledgeAuthority, RECONCILE_BATCH } from "../worker/knowledge/authority.mjs";
 import { createArtifact } from "../worker/knowledge/evidence.mjs";
-import { handleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
+import { handleKnowledgeOutbound as rawhandleKnowledgeOutbound } from "../worker/knowledge-outbound.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
 import { fixture, manager, principal } from "./knowledge_fixture.mjs";
 
@@ -300,7 +301,7 @@ test("Container outbound forwarding accepts only its fixed private target and st
     return Response.json({ version: 1, result: { ready: false } });
   } } };
   const body = JSON.stringify(envelope("status"));
-  const options = { method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer synthetic" }, body };
+  const options = { method: "POST", headers: { "content-type": "application/json", "authorization": "Bearer synthetic", "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: manager.id }) }, body };
   const result = await handleKnowledgeOutbound(new Request("http://knowledge.internal/v1/dispatch", options), env);
   assert.equal(result.status, 200);
   assert.equal(requests.length, 1);
@@ -322,11 +323,12 @@ test("Container outbound forwarding accepts only its fixed private target and st
 
 test("bundled private Worker serves disabled setup through the real Durable Object binding", async t => {
   const bundle = await build({ entryPoints: ["worker/knowledge/index.mjs"], bundle: true, write: false,
-    format: "esm", platform: "neutral", external: ["cloudflare:workers"] });
-  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28", script: bundle.outputFiles[0].text,
-    durableObjects: { KNOWLEDGE_AUTHORITY: { className: "KnowledgeCatalogue", useSQLite: true } } }));
+    format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"] });
+  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28", compatibilityFlags: ["nodejs_compat"], script: bundle.outputFiles[0].text,
+    d1Databases: ["INTELLIGENCE_DB"], durableObjects: { KNOWLEDGE_AUTHORITY: { className: "KnowledgeCatalogue", useSQLite: true } } }));
   t.after(() => mf.dispose());
-  const options = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envelope("status")) };
+  await initializePolicyAccount(mf, manager.id);
+  const options = { method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: manager.id }) }, body: JSON.stringify(envelope("status")) };
   const result = await mf.dispatchFetch("http://knowledge.internal/v1/dispatch", options);
   assert.equal(result.status, 200);
   assert.equal(result.headers.get("cache-control"), "no-store");
@@ -336,3 +338,5 @@ test("bundled private Worker serves disabled setup through the real Durable Obje
   assert.equal(payload.result.ready, false);
   assert.equal((await mf.dispatchFetch("https://public.example/v1/dispatch", options)).status, 404);
 });
+
+function handleKnowledgeOutbound(request, env, ...args) { return rawhandleKnowledgeOutbound(request, policyFixtureEnv(env), ...args); }

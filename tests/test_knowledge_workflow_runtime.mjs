@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { setTimeout } from "node:timers/promises";
 import { build } from "esbuild";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 test("native Workflow accepts ingestion step contracts and publishes once", async t => {
   const bundle = await build({ stdin: { resolveDir: process.cwd(), contents: `
+    import { withDispatchPrincipal } from "./worker/provider-dispatch.mjs";
+    import { policyStore } from "./tests/helpers/dispatch_fixture.mjs";
     import worker, { KnowledgeCatalogue } from "./worker/knowledge/index.mjs";
     import { WorkflowEntrypoint } from "cloudflare:workers";
     import { KnowledgeCorpus } from "./worker/knowledge/corpus.mjs";
     import { runIngestion } from "./worker/knowledge/ingestion.mjs";
     export { KnowledgeCatalogue };
-    export default worker;
+    export default { fetch(request, env, ctx) { return worker.fetch(request, { ...env, INTELLIGENCE_DB: policyStore() }, ctx); } };
     export class TestIngestion extends WorkflowEntrypoint {
       async run(event, step) {
         const snapshots = new KnowledgeCorpus(this.env);
@@ -26,12 +28,12 @@ test("native Workflow accepts ingestion step contracts and publishes once", asyn
           },
           async verifySearchable() { return true; },
         };
-        return runIngestion(this.env, step, event.payload.job_id, { corpus });
+        return withDispatchPrincipal({ ...this.env, INTELLIGENCE_DB: policyStore() }, event.payload.dispatch_principal, () => runIngestion(this.env, step, event.payload.job_id, { corpus }));
       }
     }
-  ` }, bundle: true, write: false, format: "esm", platform: "neutral", external: ["cloudflare:workers"] });
+  ` }, bundle: true, write: false, format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"] });
   let acquisitions = 0;
-  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, script: bundle.outputFiles[0].text,
+  const mf = new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], script: bundle.outputFiles[0].text,
     compatibilityDate: "2026-07-28", bindings: { FIRECRAWL_API_KEY: "synthetic-key" },
     durableObjects: { KNOWLEDGE_AUTHORITY: { className: "KnowledgeCatalogue", useSQLite: true } },
     workflows: { KNOWLEDGE_INGESTION: { name: "test-ingestion", className: "TestIngestion" } },
@@ -46,7 +48,7 @@ test("native Workflow accepts ingestion step contracts and publishes once", asyn
   t.after(() => mf.dispose());
   async function dispatch(operation, payload = {}) {
     const response = await mf.dispatchFetch("http://knowledge.internal/v1/dispatch", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"fixture"}' },
       body: JSON.stringify({ version: 1, operation, principal: { id: "fixture", scopes: ["knowledge:manage"] }, payload }),
     });
     const body = await response.json();

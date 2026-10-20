@@ -31,6 +31,11 @@ FAILURE_STATUSES = [408, 500, 502, 503, 504]
 SUCCESS_STATUSES = [200, 201, 204, 206, 299]
 
 
+
+from tests.dispatch_fixture import verified_transport_principal  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("verified_transport_principal")
+
 @pytest.fixture
 def check():
     return TestCase()

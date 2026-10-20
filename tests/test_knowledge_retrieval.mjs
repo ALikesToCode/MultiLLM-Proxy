@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { retrieveKnowledge } from "../worker/knowledge/retrieval.mjs";
 import { retrieve } from "../worker/knowledge/providers/index.mjs";

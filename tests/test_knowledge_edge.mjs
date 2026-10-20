@@ -1,9 +1,10 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 
 import { generateIntegrationCredential, hashIntegrationKey } from "../scripts/intelligence_operator.mjs";
-import { handleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest, isKnowledgeEdgePath } from "../worker/knowledge-edge.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const ORIGIN = "https://gateway.example";
@@ -48,7 +49,7 @@ function environment({ result = { status: "ok" }, status = 200, overrides = {} }
     ADMIN_API_KEY: ADMIN_KEY,
     ADMIN_USERNAME: " operator ",
     AUTH_STORAGE_BACKEND: "d1",
-    INTELLIGENCE_DB: database(records),
+    INTELLIGENCE_DB: policyFixtureEnv({ INTELLIGENCE_DB: database(records) }).INTELLIGENCE_DB,
     KNOWLEDGE_SERVICE: {
       async fetch(url, init) {
         assert.equal(url, "http://knowledge.internal/v1/dispatch");
@@ -271,7 +272,7 @@ test("dashboard accounts stored in D1 are verified at the edge with their Knowle
     return { key, row: { username, api_key_hash: await hashIntegrationKey(key, "saltsaltsalt1234"), api_key_prefix: `mllm_${key.slice(0, 8)}`,
       scopes, is_admin: 0, created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
       created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-      allowed_models: null, allowed_ips: null, expires_at: null, ...changes } };
+      allowed_models: null, allowed_ips: null, expires_at: null, official_only: null, forced_provider_preferences: null, ...changes } };
   };
   const reader = await account("reader", "knowledge:read");
   const chat = await account("chatter", "chat,models");
@@ -526,3 +527,5 @@ for (const path of ["/v1/knowledge/handoffs?limit=1&limit=2", "/v1/knowledge/han
     assert.equal(response.status, 400); assert.equal(dispatched.length, 0);
   });
 }
+
+function handleKnowledgeEdgeRequest(request, env, ...args) { return rawhandleKnowledgeEdgeRequest(request, policyFixtureEnv(env), ...args); }

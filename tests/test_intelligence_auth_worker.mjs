@@ -1,7 +1,7 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
-import {convertV4MiniflareOptions,Miniflare} from "miniflare";
+import {convertV4MiniflareOptions,Miniflare} from "./helpers/local_miniflare.mjs";
 import {handleIntelligenceAuthRequest} from "../worker/intelligence-auth-d1.mjs";
 
 const hash = "scrypt:32768:8:1$salt123456789012$" + "a".repeat(128);
@@ -22,6 +22,8 @@ test("D1 credentials survive new callers, rotate atomically and retain revocatio
     assert.equal((await call({operation:"rotate",principalId:"integration:omni",expectedVersion:1,keyPrefix:"mllm_intelligence_"+"e".repeat(16),keyHash:hash,scopes:["admin"]})).status,400);
     assert.equal((await call(provision)).status,409);
     const lookup = async keyPrefix => (await (await call({operation:"lookup",keyPrefix})).json()).principal;
+    const added = await readFile(new URL("../intelligence-migrations/0043_integration_data_policy.sql", import.meta.url), "utf8");
+    for (const statement of added.split(";").filter(x=>x.trim())) await db.prepare(statement).run();
     assert.equal((await lookup(prefix)).id,"integration:omni");
     const next = "mllm_intelligence_" + "b".repeat(16);
     const rotate = {operation:"rotate",principalId:"integration:omni",expectedVersion:1,keyPrefix:next,keyHash:hash};

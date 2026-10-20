@@ -77,8 +77,16 @@ def _call(operation, **values):
 
 
 def _row(value):
+    policy = None
     if isinstance(value, dict):
         # A Worker released before migrations 0011 and 0013 returns rows without these columns.
+        from services.dispatch_policy import verify
+        if value.get("data_policy") is not None:
+            policy = verify(value["data_policy"])
+        if "official_only" in value or "forced_provider_preferences" in value:
+            from services.key_data_guards import stored_controls
+            policy = {"version": 1, **stored_controls(value)}
+        value = {name: item for name, item in value.items() if name in USER_FIELDS}
         value = {"secret_scan_mode": None, "shadow_eval_rate": None, **value}  # nosec B105 - column defaults
     if (
         not isinstance(value, dict)
@@ -91,7 +99,7 @@ def _row(value):
         or value["is_admin"] not in (0, 1)
     ):
         raise unavailable()
-    return value
+    return {**value, **({"data_policy": policy} if policy is not None else {})}
 
 
 def _rows(value, limit=PAGE_SIZE):

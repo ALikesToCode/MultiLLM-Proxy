@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerWithUnrestrictedControls as loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const worker = (await loadWorkerModule()).default;
 const OPENCODE_CHAT_URL =

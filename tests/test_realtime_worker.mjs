@@ -1,3 +1,4 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
@@ -46,6 +47,7 @@ async function fixture(t) {
       return { success: true, results: [], meta: { changes: Number(stmt.run(...values).changes) } }; } }; },
     async batch(statements) { sql.exec("BEGIN"); try { const results = statements.map(stmt => stmt.execute()); sql.exec("COMMIT"); return results; }
       catch (error) { sql.exec("ROLLBACK"); throw error; } } };
+  sql.exec("INSERT INTO control_users (username, api_key_hash, api_key_prefix, scopes, is_admin, created_at) VALUES ('admin', 'synthetic-hash', 'synthetic', 'admin,chat,audio', 1, '2026-10-20T00:00:00Z')");
   const server = new Socket(), client = new Socket(), upstream = new Socket(), timers = clock(), pending = [], leases = [];
   const env = { ...enabled, INTELLIGENCE_DB: db, ADMISSION_COORDINATOR: { getByName() { return { async fetch(req) {
     const value = await req.json(); leases.push(value);
@@ -66,7 +68,7 @@ const done = (id = "r1") => JSON.stringify({ type: "response.done", response: { 
 
 test("disabled, empty and malformed flags preserve registered Container bytes and headers", async () => {
   for (const flag of [undefined, "", "false", "garbage"]) {
-    let calls = 0; const env = { REALTIME_ENABLED: flag, MULTILLM_PROXY_CONTAINER: { getByName() { return {
+    let calls = 0; const env = { INTELLIGENCE_DB: policyStore(), REALTIME_ENABLED: flag, MULTILLM_PROXY_CONTAINER: { getByName() { return {
       async fetch(req) { calls++; assert.equal(req.headers.get("upgrade"), "websocket");
         return new Response("unchanged 雪", { status: 418, headers: { "x-original": "yes" } }); } }; } } };
     const response = await worker.fetch(request(), env, {});
@@ -83,8 +85,9 @@ test("invalid mappings disable once without logging values", () => {
   } } finally { console.warn = old; }
   assert.equal(messages.length, 1); assert.ok(!messages.join().includes("password"));
 });
-test("registered enabled errors never wake Container", async () => {
-  const env = { ...enabled, MULTILLM_PROXY_CONTAINER: { getByName() { throw Error("Container woke"); } } };
+test("registered enabled errors never wake Container", async t => {
+  const f = await fixture(t);
+  const env = { ...f.env, MULTILLM_PROXY_CONTAINER: { getByName() { throw Error("Container woke"); } } };
   for (const [req, expected] of [[request({ upgrade: "" }), 426], [request({ authorization: "" }), 401],
     [new Request("https://gateway.example/v1/realtime?model=openai:unmapped", { headers: { upgrade: "websocket", authorization: "Bearer synthetic-gateway" } }), 403]]) {
     const response = await worker.fetch(req, env, {}); assert.equal(response.status, expected); assert.ok((await response.json()).error.code);
@@ -256,5 +259,71 @@ test("missing lease, storage failure and budget exhaustion never dial", async t 
     const response = await handleRealtimeRequest(request(), env, f.ctx, f.options);
     assert.ok([429, 503].includes(response.status)); assert.equal(f.calls(), 0);
     assert.ok(!JSON.stringify(await response.json()).includes("private storage details"));
+  }
+});
+
+async function controlledAccount(t, selected = "linkapi:realtime-test") {
+  const f = await fixture(t), key = "synthetic-controlled-key", salt = "syntheticsalt";
+  const hash = `scrypt:32768:8:1$${salt}$${scryptSync(key, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex")}`;
+  f.env.AUTH_STORAGE_BACKEND = "d1";
+  f.env.REALTIME_PROVIDERS_JSON = JSON.stringify({ [selected]: { url: "wss://approved.example/v1/realtime?model=realtime-test" } });
+  f.env.REALTIME_PRICING_JSON = JSON.stringify({ [selected]: prices });
+  f.env.LINKAPI_KEY = f.env.OPENROUTER_API_KEY = "synthetic-provider";
+  f.sql.prepare(`INSERT INTO control_users(username,api_key_hash,api_key_prefix,scopes,is_admin,created_at)
+    VALUES (?,?,?,?,0,?)`).run("controlled", hash, `mllm_${key.slice(0, 8)}`, "chat,audio", new Date().toISOString());
+  const socket = (token = key) => new Request(`https://gateway.example/v1/realtime?model=${selected}`, {
+    headers: { upgrade: "websocket", authorization: `Bearer ${token}` } });
+  const ticket = () => new Request("https://gateway.example/v1/realtime/client_secrets", {
+    method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: selected }) });
+  return { ...f, socket, ticket };
+}
+
+test("registered Realtime sockets and ticket issuance enforce provider classes", async t => {
+  const f = await controlledAccount(t);
+  f.sql.prepare("UPDATE control_users SET official_only=1 WHERE username='controlled'").run();
+  const original = globalThis.fetch; let dials = 0;
+  globalThis.fetch = async () => { dials++; assert.fail("Restricted Realtime must not dial upstream"); };
+  try {
+    for (const request of [f.socket(), f.ticket()]) {
+      const response = await worker.fetch(request, f.env, f.ctx);
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).error.code, "key_data_controls_unavailable");
+    }
+    assert.equal(dials, 0);
+    assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM realtime_tickets").get().n, 0);
+  } finally { globalThis.fetch = original; }
+});
+
+for (const selected of ["openrouter:realtime-test", "openai:realtime-test"]) {
+  test(`registered Realtime refuses forced preferences for ${selected.split(":")[0]}`, async t => {
+    const f = await controlledAccount(t, selected);
+    f.sql.prepare("UPDATE control_users SET forced_provider_preferences=? WHERE username='controlled'")
+      .run('{"data_collection":"deny"}');
+    for (const request of [f.socket(), f.ticket()]) {
+      const response = await worker.fetch(request, f.env, f.ctx);
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).error.code, "key_data_controls_unavailable");
+    }
+    assert.equal(f.calls(), 0);
+  });
+}
+
+test("ticket consumption rechecks changed data controls before consumption or dispatch", async t => {
+  const f = await controlledAccount(t);
+  const issued = await worker.fetch(f.ticket(), f.env, f.ctx);
+  assert.equal(issued.status, 200);
+  const { value } = await issued.json();
+  for (const [official, preferences, code] of [[1, null, "provider_class_not_allowed"],
+    [0, '{"data_collection":"deny"}', "forced_provider_preferences_not_supported"],
+    [0, "invalid", "realtime_auth_unavailable"]]) {
+    f.sql.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='controlled'")
+      .run(official, preferences);
+    const response = await worker.fetch(f.socket(value), f.env, f.ctx);
+    assert.equal(response.status, 503);
+    assert.ok(["key_data_controls_unavailable", "realtime_auth_unavailable"].includes((await response.json()).error.code));
+    assert.equal(f.sql.prepare("SELECT consumed_at FROM realtime_tickets").get().consumed_at, null);
+    assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM realtime_sessions").get().n, 0);
+    assert.equal(f.calls(), 0);
   }
 });

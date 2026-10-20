@@ -1,3 +1,4 @@
+import { providerFetch } from "./provider-dispatch.mjs";
 /** Provider dispatch policy. Audit failures never change the upstream request. */
 import { redactPayload, scanText } from "./secret-scan.mjs";
 
@@ -124,8 +125,9 @@ function multipart(bytes, contentType) {
   }];
 }
 
-export async function firewallFetch(request, env, options = {}, fetchImpl = fetch) {
-  if (!request.body || secretScanMode(env, options.principal) === "off") return fetchImpl(request);
+export async function firewallFetch(request, env, options = {}, fetchImpl) {
+  const send = fetchImpl ?? (checked => providerFetch(options.provider, checked, {}, { env, authority: options }));
+  if (!request.body || secretScanMode(env, options.principal) === "off") return send(request);
   let protectedRequest = request, decision;
   try {
     const bytes = await boundedBody(request);
@@ -159,7 +161,7 @@ export async function firewallFetch(request, env, options = {}, fetchImpl = fetc
     const reason = error?.message;
     console.warn(reason === "scan_timeout" || reason === "scan_body_limit" ? reason : "secret_scan_body_unavailable");
   }
-  const upstream = await fetchImpl(protectedRequest);
+  const upstream = await send(protectedRequest);
   if (!decision?.header || !upstream.ok) return upstream;
   const response = new Response(upstream.body, upstream);
   response.headers.set(SECRET_SCAN_HEADER, decision.header);

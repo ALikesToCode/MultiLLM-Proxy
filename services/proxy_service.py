@@ -193,8 +193,9 @@ class ProxyService:
         }
         with requests.Session() as session:
             session.cookies.set_policy(_RejectAllCookiesPolicy())
-            response = session.get(
-                f"{base_url.rstrip('/')}/v1/models",
+            from services.provider_dispatch import provider_http
+            response = provider_http("nanogpt", "GET",
+                f"{base_url.rstrip('/')}/v1/models", transport=session.request,
                 headers=headers,
                 params={"detailed": "false"},
                 timeout=(5, max(1, timeout_seconds)),
@@ -1134,7 +1135,8 @@ class ProxyService:
         headers: Dict[str, str],
         params: Dict[str, Any],
         data: Optional[bytes],
-        timeout: Tuple[int, int]
+        timeout: Tuple[int, int],
+        api_provider: str = "unknown",
     ) -> requests.Response:
         """
         Make a single request with a given timeout (not widely used in code below).
@@ -1156,7 +1158,8 @@ class ProxyService:
             from services.admission_request import bounded_generation_timeout
             timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
-            response = session.request(
+            from services.provider_dispatch import provider_http
+            response = provider_http(api_provider, transport=session.request,
                 method=method,
                 url=url,
                 headers=headers,
@@ -1244,7 +1247,8 @@ class ProxyService:
             from services.admission_request import bounded_generation_timeout
             timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
-            response = session.request(
+            from services.provider_dispatch import provider_http
+            response = provider_http(api_provider, transport=session.request,
                 method=method,
                 url=url,
                 headers=headers,
@@ -2531,94 +2535,9 @@ class ProxyService:
             )
             request_data.pop("webSearchSpec", None)
 
-            # Extract API key from URL parameters and rebuild the URL without it
-            api_key = None
-            
-            # Check if key is in params
-            if params and 'key' in params:
-                api_key = params.pop('key')
-                if isinstance(api_key, (list, tuple)):
-                    api_key = api_key[0] if api_key else None
-                logger.info(f"Found API key in URL parameters for {api_provider}")
-            
-            # If no key in params, check if it's in the URL
-            else:
-                parsed_url = urlsplit(url)
-                query_pairs = parse_qsl(parsed_url.query, keep_blank_values=True)
-                filtered_query_pairs = []
-                for key, value in query_pairs:
-                    if key == 'key' and api_key is None:
-                        api_key = value
-                        logger.info(f"Found API key in URL for {api_provider}")
-                    else:
-                        filtered_query_pairs.append((key, value))
+            from services.gemini_credentials import prepare_credentials
+            url, headers, params = prepare_credentials(url, headers, params, api_provider, auth_token, AuthService)
 
-                if api_key is not None:
-                    url = urlunsplit(
-                        (
-                            parsed_url.scheme,
-                            parsed_url.netloc,
-                            parsed_url.path,
-                            urlencode(filtered_query_pairs),
-                            parsed_url.fragment,
-                        )
-                    )
-            
-            # If still no API key, use the auth token passed from make_request
-            # But first check if it's the admin API key - if so, use the Gemini key from env instead
-            if not api_key and auth_token:
-                admin_api_key = os.environ.get('ADMIN_API_KEY')
-                if auth_token == admin_api_key:
-                    # Using admin key, look up the actual provider key instead
-                    logger.info(f"Admin API key detected - using {api_provider} API key from env instead")
-                    api_key = AuthService.get_api_key(api_provider)
-                    if not api_key:
-                        # Try alternative keys
-                        if api_provider == 'gemma':
-                            api_key = AuthService.get_api_key('gemini')
-                        elif api_provider == 'gemini':
-                            api_key = AuthService.get_api_key('gemma')
-                else:
-                    # Not the admin key, might be a direct Gemini key
-                    api_key = auth_token
-                    logger.info(f"Using API key from Authorization header for {api_provider}")
-            
-            # If still no API key, get from auth service
-            if not api_key:
-                # First try with the exact api_provider
-                api_key = AuthService.get_api_key(api_provider)
-                
-                # If using 'gemma' as provider but no gemma key found, try with 'gemini' as they share the same key
-                if not api_key and api_provider == 'gemma':
-                    api_key = AuthService.get_api_key('gemini')
-                    logger.info("Using Gemini API key for Gemma model")
-                
-                # If using 'gemini' as provider but no gemini key found, try with 'gemma' as a fallback
-                elif not api_key and api_provider == 'gemini':
-                    api_key = AuthService.get_api_key('gemma')
-                    logger.info("Using Gemma API key for Gemini model")
-                
-                if not api_key:
-                    raise APIError(f"No API key found for {api_provider}. Please set {api_provider.upper()}_API_KEY in your .env file.", status_code=401)
-                
-                logger.info(f"Using API key from AuthService for {api_provider}")
-            
-            # Validate API key format - Gemini keys should start with "AIza"
-            if not api_key.startswith("AIza"):
-                logger.warning(f"API key for {api_provider} doesn't match expected format (should start with 'AIza')")
-                # Try to find a valid key from the environment
-                env_key = os.environ.get(f'{api_provider.upper()}_API_KEY')
-                if env_key and env_key.startswith("AIza"):
-                    logger.info(f"Found valid {api_provider} API key format in environment, using it instead")
-                    api_key = env_key
-            
-            headers["x-goog-api-key"] = api_key
-            
-            # Remove the Authorization header as Gemini doesn't use it
-            if 'Authorization' in headers:
-                headers.pop('Authorization')
-                logger.info("Removed Authorization header for Gemini API request")
-            
             # Extract model if it's in the URL path for direct model invocation
             # Format like /v1beta/models/gemini-1.5-pro:generateContent or /models/gemini-1.5-flash:generateContent
             model = None
@@ -3372,6 +3291,11 @@ class ProxyService:
         """
         Make a request with retries and error handling
         """
+        from services.key_data_guards import guard_request
+        data = guard_request(api_provider, data)
+        from services.gemini_credentials import prepare_credentials, restricted
+        if restricted(api_provider):
+            url, headers, params = prepare_credentials(url, headers, params, api_provider, None, AuthService)
         headers = (
             with_opencode_request_session(headers, data)
             if api_provider == "opencode"

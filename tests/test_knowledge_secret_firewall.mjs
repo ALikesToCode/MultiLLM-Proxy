@@ -1,7 +1,8 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { readFileSync } from "node:fs";
-import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 const TOKEN = "AK" + "IA" + "AB12CD34EF56GH78";
 for (const path of ["/v1/knowledge/context", "/mcp"]) for (const mode of ["observe", "redact", "block", "off"]) test(`Knowledge ${path} forces block except ${mode}`, async () => {
@@ -32,3 +33,5 @@ test("Knowledge audit binding reuses the gateway database", () => {
   assert.equal(binding.database_name, "multillm-intelligence");
   assert.equal(binding.database_id, /"database_id":\s*"([^"]+)"/.exec(gateway)[1]);
 });
+
+function handleKnowledgeEdgeRequest(request, env, ...args) { return rawhandleKnowledgeEdgeRequest(request, policyFixtureEnv(env), ...args); }

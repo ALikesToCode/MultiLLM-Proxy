@@ -1,3 +1,6 @@
+import { admitContainerDelegation } from "./worker/peer-controls.mjs";
+import { dispatchFailure } from "./worker/provider-dispatch.mjs";
+import { KEY_CONTROLS } from "./worker/key-controls-capability.mjs";
 import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics, nativeCacheHeader, nativeGenerationSetup, generationErrorResponse, forwardedGenerationHeaders, runScheduledMaintenance, scheduledMaintenanceEnabled, handleRoleplayContextPageRequest, handleRealtimeRequest } from "./worker/gateway-extensions.mjs";
 import { batchesEnabled, runScheduledBatches } from "./worker/batch-jobs.mjs";
 import { tickNativeRevisionSync } from "./worker/native-config-sync.mjs";
@@ -282,7 +285,7 @@ function jsonResponse(body, init = {}) {
 
 function buildFallbackHealthResponse() {
   return jsonResponse({
-    status: "healthy",
+    status: "healthy", key_controls: KEY_CONTROLS,
     mode: "worker-fallback",
   });
 }
@@ -2079,6 +2082,10 @@ export default {
 
     try {
       const container = getContainer(env.MULTILLM_PROXY_CONTAINER, "primary");
+      if ((apiPath || isKnowledgeEdgePath(requestUrl.pathname)) && !readyPath) {
+        try { await admitContainerDelegation(request, env, container); }
+        catch (error) { return applyCorsHeaders(request, dispatchFailure(error), env); }
+      }
       const bodyAllowed = request.method !== "GET" && request.method !== "HEAD";
       const headers = forwardedGenerationHeaders(request, env);
       // Client copies of the Access identity headers never reach the Container.
@@ -2102,6 +2109,10 @@ export default {
         ...(bodyAllowed && request.body ? { duplex: "half" } : {}),
       });
       let response = await container.fetch(forwardedRequest);
+      if (readyPath && response.ok) {
+        const health = await response.clone().json();
+        response = jsonResponse({ ...health, main_key_controls: KEY_CONTROLS }, { headers: response.headers });
+      }
       if (requestUrl.pathname === "/v1/metrics/prometheus") {
         response = await withNativeMetrics(response, env);
       }

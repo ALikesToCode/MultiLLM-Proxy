@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { fixture, seedProductSitePages } from "./knowledge_fixture.mjs";
 import { PAGE_LIMIT } from "../worker/knowledge/product-sites.mjs";
 import { lruKey, pageKey } from "../worker/knowledge/product-site-identities.mjs";

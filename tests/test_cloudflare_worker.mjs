@@ -1,3 +1,4 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -5,7 +6,10 @@ import test from "node:test";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const workerModule = await loadWorkerModule();
-const worker = workerModule.default;
+const worker = { ...workerModule.default, fetch(request, env, ctx) {
+  return workerModule.default.fetch(request, new URL(request.url).pathname === "/ready" ? env
+    : { INTELLIGENCE_DB: policyStore(), ...env }, ctx);
+} };
 const { MultiLLMProxyContainer } = workerModule;
 
 function makeEnv(fetchImpl, envOverrides = {}) {
@@ -2435,6 +2439,7 @@ test("worker answers /health directly without touching the container", async () 
   assert.equal(stub.getCalls(), 0);
   assert.deepEqual(await response.json(), {
     status: "healthy",
+    key_controls: {protocol: 1, enforcement: false},
     mode: "worker-fallback",
   });
 });
@@ -2446,7 +2451,7 @@ test("worker checks application readiness through the container health endpoint"
     assert.equal(forwardedUrl.pathname, "/healthz");
     assert.equal(request.method, "GET");
     assert.equal(request.redirect, "manual");
-    return new Response(JSON.stringify({ status: "ready", database: "ok" }), {
+    return new Response(JSON.stringify({ status: "ready", database: "ok", main_key_controls: {protocol: 1, enforcement: false} }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -2463,7 +2468,7 @@ test("worker checks application readiness through the container health endpoint"
   assert.equal(stub.getCalls(), 1);
   assert.equal(stub.getStartCalls(), 0);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
-  assert.deepEqual(await response.json(), { status: "ready", database: "ok" });
+  assert.deepEqual(await response.json(), { status: "ready", database: "ok", main_key_controls: {protocol: 1, enforcement: false} });
 });
 
 test("worker relies on container.fetch for startup and readiness", async () => {

@@ -153,6 +153,8 @@ class AuthService:
             "expires_at": "TEXT",
             "secret_scan_mode": "TEXT",  # nosec B105 - a column type, not a password
             "shadow_eval_rate": "DOUBLE PRECISION",
+            "official_only": "INTEGER",
+            "forced_provider_preferences": "TEXT",
         }
         for column_name, column_definition in required_columns.items():
             if column_name not in columns:
@@ -193,7 +195,9 @@ class AuthService:
                 allowed_ips TEXT,
                 expires_at TEXT,
                 secret_scan_mode TEXT,
-                shadow_eval_rate DOUBLE PRECISION
+                shadow_eval_rate DOUBLE PRECISION,
+                official_only INTEGER,
+                forced_provider_preferences TEXT
             )
             """
         )
@@ -279,7 +283,9 @@ class AuthService:
 
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
+        from services.dispatch_policy import envelope
         return {
+            "data_policy": dict(row).get("data_policy") or envelope({"official_only": None, "forced_provider_preferences": None, **dict(row)}),
             "username": row["username"],
             "api_key_hash": row["api_key_hash"],
             "api_key_prefix": row["api_key_prefix"],
@@ -293,9 +299,7 @@ class AuthService:
             "rotated_at": deserialize_datetime(row["rotated_at"]),
             "revoked_at": deserialize_datetime(row["revoked_at"]),
             **stream_cost_breaker.storage_control(row),
-            **key_controls.from_storage(
-                {name: key_controls.row_value(row, name) for name in key_controls.CONTROL_FIELDS}
-            ),
+            **key_controls.from_storage(row),
         }
 
     @classmethod
@@ -311,7 +315,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
                         FROM users
                         ORDER BY username
                         """)
@@ -336,7 +340,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
                         FROM users
                         WHERE username = ?
                         """),
@@ -366,7 +370,7 @@ class AuthService:
                             username, api_key_hash, api_key_prefix, scopes, is_admin,
                             created_at, last_login, last_used_at, last_used_ip,
                             created_by, rotated_at, revoked_at, daily_budget_usd,
-                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
+                            monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
                         FROM users
                         WHERE api_key_prefix = ? AND revoked_at IS NULL
                         ORDER BY username
@@ -438,9 +442,9 @@ class AuthService:
                         username, api_key_hash, api_key_prefix, scopes, is_admin,
                         created_at, last_login, last_used_at, last_used_ip,
                         created_by, rotated_at, revoked_at, daily_budget_usd,
-                        monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate
+                        monthly_budget_usd, allowed_models, allowed_ips, expires_at, secret_scan_mode, shadow_eval_rate, official_only, forced_provider_preferences
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(username) DO UPDATE SET
                         api_key_hash = excluded.api_key_hash,
                         api_key_prefix = excluded.api_key_prefix,
@@ -475,6 +479,7 @@ class AuthService:
                         serialize_datetime(rotated_at),
                         serialize_datetime(revoked_at),
                         *(stored_controls[name] for name in key_controls.CONTROL_FIELDS),
+                        None, None,
                     ),
                 )
                 stream_cost_breaker.persist_sql_cap(connection, username, stored_controls)

@@ -119,11 +119,13 @@ jobs:
         run: git diff --exit-code -- static/css/style.css
       - name: Frontend build contracts
         run: node --test tests/test_frontend_build.mjs
+      # Bundle-only checks cannot attest remote deployment prerequisites. The
+      # enforcement revision adds release admission before a real upload.
       - name: Validate Knowledge Worker bundle
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --config wrangler.knowledge.jsonc --dry-run --outdir /tmp/knowledge-worker
+        run: node scripts/check_worker_bundle.mjs --config wrangler.knowledge.jsonc --outdir /tmp/knowledge-worker
       - name: Validate main Worker bundle
         env:
           WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --dry-run --containers-rollout=none --outdir /tmp/main-worker
+        run: node scripts/check_worker_bundle.mjs --config wrangler.jsonc --outdir /tmp/main-worker

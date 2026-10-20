@@ -1,3 +1,4 @@
+import { currentDataControls } from "./key-data-guards.mjs";
 /**
  * Knowledge MCP and REST at the edge for credentials the Worker can verify itself:
  * the bootstrap ADMIN_API_KEY, durable D1 integration keys and, when accounts live in
@@ -197,7 +198,7 @@ async function accountPrincipal(env, key, clientAddress) {
  * Returns {principal}, {denied: true} for a key that is definitively invalid, or null
  * when the Container must decide (unverifiable key types, storage or data faults).
  */
-async function resolvePrincipal(request, env) {
+export async function resolvePrincipal(request, env) {
   const key = requestKey(request.headers);
   if (!key) return null;
   if (env.ADMIN_API_KEY && sameSecret(key, env.ADMIN_API_KEY)) {
@@ -283,6 +284,7 @@ async function dispatch(env, operation, principal, payload, signal) {
   if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
+  await currentDataControls(env, { keyId: principal.id });
   const deadline = AbortSignal.timeout(DEADLINE_MS);
   let response;
   let result;

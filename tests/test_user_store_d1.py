@@ -8,6 +8,7 @@ import pytest
 
 from error_handlers import APIError
 from services import user_store
+from services.dispatch_policy import envelope
 from services.auth_service import AuthService
 from services.intelligence_d1_store import PrivateIntelligenceError
 
@@ -35,7 +36,7 @@ class FakeUsersDomain:
                                             if row["api_key_prefix"] == payload["prefix"] and row["revoked_at"] is None]}
         if operation == "upsert":
             assert set(payload["user"]) == set(user_store.USER_FIELDS)
-            self.rows[payload["user"]["username"]] = dict(payload["user"])
+            self.rows[payload["user"]["username"]] = {**payload["user"], "data_policy": envelope({"official_only": None, "forced_provider_preferences": None, **payload["user"]})}
             return {"version": 1, "stored": True}
         if operation == "delete":
             return {"version": 1, "deleted": self.rows.pop(payload["username"], None) is not None}

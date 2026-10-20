@@ -1,3 +1,4 @@
+import { policyFixtureEnv, policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import test from "node:test";
@@ -45,7 +46,8 @@ export function memoryBucket() {
 }
 
 const metadata = value => Buffer.from(JSON.stringify(value)).toString("base64url");
-const outbound = (path, init, env) => handleMediaOutbound(new Request(`http://media.internal${path}`, init), env);
+const outbound = (path, init, env) => handleMediaOutbound(new Request(`http://media.internal${path}`, { ...init,
+  headers: { ...init?.headers, "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"admin"}' } }), policyFixtureEnv(env));
 
 async function signedLink(secret, id, expires) {
   return `https://gateway.example/v1/media/files/${id}?expires=${expires}&signature=${
@@ -160,7 +162,7 @@ test("the Worker answers signed links itself and forwards unsigned ones to the C
   const worker = (await loadWorkerModule()).default;
   const forwarded = [];
   const container = { getByName: () => ({ fetch: async req => { forwarded.push(new URL(req.url).pathname); return Response.json({ ok: true }); } }) };
-  const env = { MEDIA_BUCKET: memoryBucket(), FLASK_SECRET_KEY: "flask-secret", MULTILLM_PROXY_CONTAINER: container };
+  const env = { INTELLIGENCE_DB: policyStore(), MEDIA_BUCKET: memoryBucket(), FLASK_SECRET_KEY: "flask-secret", MULTILLM_PROXY_CONTAINER: container };
   await env.MEDIA_BUCKET.put(`media/${FILE}`, new Uint8Array([9]), { httpMetadata: { contentType: "image/png" }, customMetadata: { owner: "a", kind: "image" } });
   const link = await signedLink("flask-secret", FILE, Math.floor(Date.now() / 1000) + 600);
   const served = await worker.fetch(new Request(link), env);

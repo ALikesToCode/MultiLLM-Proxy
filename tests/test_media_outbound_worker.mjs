@@ -1,10 +1,11 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 
 import { fetchPublic, handleMediaOutbound, publicHttpsUrl } from "../worker/media-outbound.mjs";
 
 const fetchImage = body => handleMediaOutbound(new Request("http://media.internal/v1/fetch", {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), {});
+  method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"fixture-reader"}' }, body: JSON.stringify(body) }), { INTELLIGENCE_DB: policyStore() });
 
 async function withFetch(handler, run) {
   const original = globalThis.fetch;

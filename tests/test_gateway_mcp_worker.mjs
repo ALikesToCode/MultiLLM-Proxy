@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { isApiRequestPath } from "../worker/api-paths.mjs";
 import { isKnowledgeEdgePath } from "../worker/knowledge-edge.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerWithUnrestrictedControls as loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const worker = (await loadWorkerModule()).default;
 const ADMIN_KEY = "synthetic-gateway-mcp-admin";

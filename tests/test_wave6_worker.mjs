@@ -1,14 +1,23 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { nativeGenerationFetch, withForwardedCorrelation } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, withForwardedCorrelation } from "../worker/gateway-extensions.mjs";
 import { ObservationWindow } from "../worker/latency-slo.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { handleReservationsRequest } from "../worker/reservations-d1.mjs";
 import { activeUsersByPrefix } from "../worker/control-users-d1.mjs";
 import { renderNativeMetrics } from "../worker/request-telemetry.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const route = "/codex-easy/v1/chat/completions", now = Date.now();
 const auth = { authenticated: true, route, provider: "codex-easy", keyId: "admin", principal: { id: "admin" } };
@@ -46,7 +55,7 @@ test("disabled native streaming and nonstream bodies, headers and account reads 
   for (const streaming of [false, true]) {
     const upstream = streaming ? source([delta("ok"), "data: [DONE]\n\n"]).response : complete("ok");
     const expected = await upstream.clone().text(), headers = [...upstream.headers];
-    const res = await nativeGenerationFetch(request({ stream: streaming }), { INTELLIGENCE_DB: { prepare() { assert.fail("storage"); } } }, {}, auth,
+    const res = await nativeGenerationFetch(request({ stream: streaming }), { INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("storage"); } } }, {}, auth,
       async req => { assert.deepEqual(await req.json(), { ...payload, stream: streaming }); return upstream; });
     assert.equal(await res.text(), expected); assert.deepEqual([...res.headers], headers);
   }
@@ -64,7 +73,7 @@ test("latency rejection runs before admission, cache, reservation, canary and di
   const store = new ObservationWindow(); store.record("codex-easy:m", { ttft_ms: 500, tokens_per_second: 1, now });
   const env = { ...slo(), ...cost, ...canary("block"), USAGE_RESERVATIONS_ENABLED: "true", ADMISSION_ENABLED: "true",
     GENERATION_CACHE_SHARED_ENABLED: "true", GENERATION_CACHE_BACKEND: "d1-r2", SEMANTIC_CACHE_ENABLED: "true",
-    INTELLIGENCE_DB: { prepare() { assert.fail("storage before rejection"); } },
+    INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("storage before rejection"); } },
     ADMISSION_COORDINATOR: { getByName() { assert.fail("admission before rejection"); } } };
   const response = await nativeGenerationFetch(request(), env, {}, { ...auth, observations: store, now }, () => assert.fail("upstream"));
   assert.equal(response.status, 503); assert.equal((await response.json()).error.code, "latency_slo_predicted_miss");
@@ -92,6 +101,7 @@ test("capped native streams reject missing pricing before upstream", async () =>
 test("a capped oversized streaming payload cannot bypass preflight inspection", async () => {
   const req = request({ stream: true, messages: [{ role: "user", content: "x".repeat(65536) }] });
   const response = await nativeGenerationFetch(req, { ...cost, INTELLIGENCE_DB: { prepare(sql) {
+    if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } };
     assert.match(sql, /SELECT max_stream_cost_microusd/);
     return { bind() { return this; }, first() { return { max_stream_cost_microusd: 10 }; } };
   } } }, {}, auth, () => assert.fail("upstream before bounded capped preflight"));
@@ -110,7 +120,8 @@ test("stream cost stop delivers one error and one cancel and retains ambiguous a
 
 test("cost policy leaves nonstream malformed payloads alone and classifies stopped metrics before counting", async () => {
   const malformed = new Request("https://provider.invalid/v1/chat/completions", { method: "POST", body: "fixture-invalid" });
-  const passthrough = await nativeGenerationFetch(malformed, cost, {}, auth, async req => {
+  const passthrough = await nativeGenerationFetch(malformed, cost, {}, { ...auth,
+    principal: { ...auth.principal, max_stream_cost_microusd: null } }, async req => {
     assert.equal(await req.text(), "fixture-invalid"); return complete("ok");
   });
   assert.equal(passthrough.status, 200); await passthrough.text();
@@ -129,7 +140,7 @@ for (const mode of ["log", "block"]) test("native canary " + mode + " scans befo
   try {
     const response = await nativeGenerationFetch(request({ temperature: 0 }, { "X-MultiLLM-Cache": "on" }), {
       ...canary(mode), GENERATION_CACHE_SHARED_ENABLED: "true", GENERATION_CACHE_BACKEND: "d1-r2", SEMANTIC_CACHE_ENABLED: "true",
-      INTELLIGENCE_DB: { prepare() { assert.fail("cache storage"); } } }, {}, auth, async req => {
+      INTELLIGENCE_DB: { prepare(sql) { if (sql.startsWith("SELECT official_only")) return { bind() { return { first: async () => null }; } }; assert.fail("cache storage"); } } }, {}, auth, async req => {
         const body = await req.json(); marker = body.messages[0].content.match(/marker: ([a-f0-9]{32})/)[1];
         return complete("before " + marker + " after");
       }, events(seen));
@@ -245,7 +256,7 @@ function sqliteDatabase(sql, observe = () => {}) {
 
 test("combined policies meter before settlement and retain a hold when the cost stop wins", async t => {
   const sql = new DatabaseSync(":memory:"); t.after(() => sql.close());
-  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0020_usage_reservations.sql"])
+  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0041_key_data_guards.sql", "0042_usage_token_details.sql", "0020_usage_reservations.sql"])
     sql.exec(await readFile(new URL("../intelligence-migrations/" + file, import.meta.url), "utf8"));
   const order = [], seen = [], store = new ObservationWindow();
   store.record("codex-easy:m", { ttft_ms: 1, tokens_per_second: 1000, now });

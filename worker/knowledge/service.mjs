@@ -1,3 +1,4 @@
+import { withDispatchPrincipal } from "../provider-dispatch.mjs";
 import { authorize, fail, fields, parseQuery, publicUrl, validId } from "./contracts.mjs";
 import { getAuthority } from "./authority-client.mjs";
 import { KnowledgeCorpus } from "./corpus.mjs";
@@ -101,7 +102,7 @@ async function artifactResult(env, authority, id, corpus) {
   return { artifact, text };
 }
 
-export async function dispatchKnowledge(env, envelope, options = {}) {
+async function runKnowledge(env, envelope, options = {}) {
   fields(envelope, ["version", "operation", "principal", "payload", "secret_scan_mode", "secret_scan_checked", "retention_policy"], ["version", "operation", "principal", "payload"]);
   if (envelope.version !== 1 || !OPERATIONS.has(envelope.operation)) fail("unknown_operation", "Unknown Knowledge operation.", 404);
   const { operation, principal, payload } = envelope;
@@ -165,7 +166,10 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
   for (const artifact of await authority.call("artifacts.expired")) {
     try {
       const claimed = await authority.call("artifact.expiration_claim", { id: artifact.id, expires_at: artifact.expires_at });
-      await corpus.removeArtifact(claimed);
+      // Fixed storage cleanup uses the current durable operator account; ingestion
+      // and reconciliation Workflows continue to carry the original source account.
+      await withDispatchPrincipal(env, { legacyBinding: true },
+        () => corpus.removeArtifact(claimed));
       await authority.call("artifact.expire", { id: artifact.id, expires_at: artifact.expires_at });
     } catch (error) {
       // The claimed revision stays unreadable until a later run removes it.
@@ -179,4 +183,8 @@ export async function maintainKnowledge(env, { authority = getAuthority(env), co
     await scheduleSource(env, authority, job.source_id, undefined, job.artifact_id ?? undefined)
       .catch(error => logFailure("knowledge_reconcile_not_scheduled", error, { job_id: job.id }));
   }
+}
+
+export async function dispatchKnowledge(env, envelope, options = {}) {
+  return withDispatchPrincipal(env, { authenticated: true, keyId: envelope?.principal?.id }, () => runKnowledge(env, envelope, options));
 }

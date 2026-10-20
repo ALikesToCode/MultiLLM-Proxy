@@ -1,3 +1,4 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -5,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { handleUsageLedgerRequest, recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { BUCKET_FIELDS } from "../worker/usage-buckets-d1.mjs";
-import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { HandoffStore } from "../worker/knowledge/handoff-store.mjs";
 import { fixture, request as knowledgeQuery } from "./knowledge_fixture.mjs";
@@ -319,3 +320,5 @@ test("public key and route zero prevent durable roleplay recovery and memory rea
     assert.equal(entry.storage.operations.put, 0);
   }
 });
+
+function handleKnowledgeEdgeRequest(request, env, ...args) { return rawhandleKnowledgeEdgeRequest(request, policyFixtureEnv(env), ...args); }

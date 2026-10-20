@@ -187,7 +187,7 @@ def test_strict_d1_rows_missing_schema_and_off_wire(monkeypatch):
     row["max_stream_cost_microusd"]=4
     assert breaker.get_user("reader")["max_stream_cost_microusd"]==4
     row["unknown"]=None
-    with pytest.raises(APIError): breaker.get_user("reader")
+    assert breaker.get_user("reader")["max_stream_cost_microusd"] == 4  # Additive protocol metadata is ignored.
     row.pop("unknown"); row.pop("max_stream_cost_microusd")
     monkeypatch.setenv("STREAM_COST_BREAKER_ENABLED","false")
     captured=[]

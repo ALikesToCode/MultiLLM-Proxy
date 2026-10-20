@@ -3,7 +3,7 @@ import { lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { handleIntelligenceAuthRequest } from "../worker/intelligence-auth-d1.mjs";
 import {
   generateIntegrationCredential, hashIntegrationKey, openRemoteDatabase, runOperator,
@@ -37,7 +37,7 @@ async function database(t) {
   const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: "export default {fetch(){return new Response('ok')}}", d1Databases: ["INTELLIGENCE_DB"] }));
   t.after(() => mf.dispose());
   const db = await mf.getD1Database("INTELLIGENCE_DB");
-  for (const name of ["0001_intelligence.sql", "0002_integration_principals.sql"]) {
+  for (const name of ["0001_intelligence.sql", "0002_integration_principals.sql", "0043_integration_data_policy.sql"]) {
     const migration = await readFile(new URL(`../intelligence-migrations/${name}`, import.meta.url), "utf8");
     for (const sql of migration.split(";").map((part) => part.trim()).filter(Boolean)) await db.prepare(sql).run();
   }
