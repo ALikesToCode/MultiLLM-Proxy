@@ -13,7 +13,7 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 import { controlNetwork } from "../worker/dispatch-network.mjs";
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 
-const EXPAND = "085399e";
+const EXPAND = "00705d9";
 const { handleControlUsersRequest, providerFetch, providerOperation, legacyBindingControls } = await runtimeModule(`
 export {handleControlUsersRequest} from './worker/control-users-d1.mjs';
 export {providerFetch,providerOperation} from './worker/provider-dispatch.mjs';
