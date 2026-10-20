@@ -25,6 +25,8 @@ class FakeUsersDomain:
         self.calls.append(operation)
         if self.down:
             raise PrivateIntelligenceError(503, "storage_unavailable")
+        if operation == "capabilities":
+            return {"version": 1, "key_controls": {"protocol": 1, "enforcement": False}}
         if operation == "list":
             names = sorted(name for name in self.rows if payload["after"] is None or name > payload["after"])
             return {"version": 1, "users": [dict(self.rows[name]) for name in names[:payload["limit"]]]}
@@ -194,7 +196,7 @@ def test_refused_reads_and_all_writes_are_sent_once(d1):
             user_store.get_user("agent")
         with pytest.raises(APIError):
             user_store.upsert_user(d1.rows["agent"])
-    assert d1.calls == ["get", "upsert"]
+    assert d1.calls == ["capabilities", "capabilities", "get", "upsert"]
 
 
 def test_account_lookups_get_a_longer_transport_budget(monkeypatch):
@@ -277,3 +279,42 @@ def test_account_reads_have_their_own_transport_slots(monkeypatch):
     assert store.request_private_intelligence({"operation": "policy"}) == {"version": 1, "policy": None}, \
         "exhausted account slots leave the store's slots free"
     assert store.transport_stats()["users"]["slot_exhausted"] == before + 1
+
+
+def test_policy_extensions_are_sent_only_after_a_readable_capability(monkeypatch):
+    calls = []
+
+    def peer(payload, *, endpoint):
+        calls.append(dict(payload))
+        if payload["operation"] == "capabilities":
+            return {"key_controls": {"protocol": 1, "enforcement": False}}
+        return {"user": None}
+
+    monkeypatch.setattr(user_store, "request_private_intelligence", peer)
+    assert user_store.get_user("synthetic") is None
+    assert calls == [{"operation": "capabilities"}, {"operation": "get", "username": "synthetic", "data_policy_version": 1}]
+    calls.clear()
+
+    def old_peer(payload, *, endpoint):
+        calls.append(dict(payload))
+        if payload["operation"] == "capabilities":
+            raise PrivateIntelligenceError(400, "invalid_request")
+        return {"user": None}
+
+    monkeypatch.setattr(user_store, "request_private_intelligence", old_peer)
+    assert user_store.get_user("synthetic") is None
+    assert calls == [{"operation": "capabilities"}, {"operation": "get", "username": "synthetic"}]
+
+
+@pytest.mark.parametrize("capability", [None, {}, {"protocol": 0}, {"protocol": True}])
+def test_malformed_capability_never_downgrades_to_an_unverified_row(monkeypatch, capability):
+    calls = []
+
+    def peer(payload, *, endpoint):
+        calls.append(payload)
+        return {"key_controls": capability}
+
+    monkeypatch.setattr(user_store, "request_private_intelligence", peer)
+    with pytest.raises(APIError):
+        user_store.get_user("synthetic")
+    assert calls == [{"operation": "capabilities"}]

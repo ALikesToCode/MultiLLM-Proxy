@@ -110,3 +110,6 @@ errors in the compatibility matrix does not claim zero infrastructure disconnect
 
 See [Container deployment semantics](https://developers.cloudflare.com/containers/guides/deploy/)
 and [rollout controls](https://developers.cloudflare.com/containers/configuration/rollouts/).
+
+
+Account reads negotiate the additive row protocol only after a successful capability probe. Old Containers receive the original account fields on list and username reads, including when a controlled neighbour exists, so dashboard cache reloads and sign-in remain available. Legacy prefix authentication refuses controlled rows. Provider forwarding and private outbound admission remain separate from management projection; an old Container cannot use a projected row to dispatch for a controlled account. A Containers request the full policy from compatible peers and retain their dormant refusal fence. A failed or malformed capability probe never downgrades to a legacy row; only the old peer's explicit unsupported-operation response permits that fallback.

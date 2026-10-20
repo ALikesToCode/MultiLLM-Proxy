@@ -70,6 +70,10 @@ def transport(self, method, url, **kwargs):
         from services.dispatch_network import network_admitted
         if revision != "544bf49ba3b3d03d185ec5b5a71b2b1877dda786":
             assert network_admitted()
+        if os.environ.get("ACCOUNT_DRIVER_OUTBOUND_ADMISSION") == "true":
+            admitted = original(self, "GET", base + "/probe-provider")
+            if admitted.status_code != 200:
+                return admitted
         payload = kwargs.get("json") or json.loads(kwargs.get("data") or "{}")
         if "messages" in payload:
             seen.append(payload)

@@ -3,7 +3,7 @@
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
 import { dataPolicy } from "./dispatch-policy.mjs";
-import { KEY_CONTROLS } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, expansionFence } from "./key-controls-capability.mjs";
 import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
@@ -224,7 +224,6 @@ export async function handleControlUsersRequest(request, env) {
   if (body.operation === "capabilities") return reply({ version: 1, key_controls: KEY_CONTROLS });
   const accountReply = user => {
     if (!user || policyVersion === 1) return user;
-    if (user.official_only !== null || user.forced_provider_preferences !== null) return user;
     return Object.fromEntries(Object.entries(user).filter(([name]) => !["official_only", "forced_provider_preferences", "data_policy"].includes(name)));
   };
   try {
@@ -251,7 +250,9 @@ export async function handleControlUsersRequest(request, env) {
       }
       case "by_prefix": {
         if (!fields(body, ["version", "operation", "prefix"]) || !text(body.prefix, 64)) break;
-        return reply({ version: 1, users: (await activeUsersByPrefix(db, body.prefix, env)).map(user => accountReply(user, policyVersion)) });
+        const users = await activeUsersByPrefix(db, body.prefix, env);
+        if (policyVersion !== 1) users.forEach(expansionFence);
+        return reply({ version: 1, users: users.map(accountReply) });
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"])) break;

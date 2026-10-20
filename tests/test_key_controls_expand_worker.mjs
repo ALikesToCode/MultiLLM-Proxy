@@ -36,8 +36,15 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
   const digest = scryptSync("mllm_synthetic_incident_key_long_enough", "synthetic-salt", 64,
     { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex");
   for (const revision of [OLD, ""]) {
-    const script = await runtimeBundle(`import {handleIntelligenceOutbound} from './worker/intelligence-outbound.mjs';
-      export default {fetch(request,env){return handleIntelligenceOutbound(new Request('http://intelligence.internal'+new URL(request.url).pathname,request),env)}}`, revision, "neutral");
+    const admission = revision ? "" : `import {providerFetch} from './worker/provider-dispatch.mjs';`;
+    const script = await runtimeBundle(`${admission} import {handleIntelligenceOutbound} from './worker/intelligence-outbound.mjs';
+      export default {async fetch(request,env){
+        ${revision ? "" : `if(new URL(request.url).pathname==='/probe-provider') {
+          try { return await providerFetch('openrouter','https://openrouter.ai/api/v1/chat/completions',{},
+            {env,authority:{legacyBinding:true},send:()=>Response.json({ok:true})}); }
+          catch { return Response.json({error:'key_controls_require_upgrade'},{status:503}); }
+        }`}
+        return handleIntelligenceOutbound(new Request('http://intelligence.internal'+new URL(request.url).pathname,request),env)}}`, revision, "neutral");
     const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script, compatibilityFlags: ["nodejs_compat"],
       d1Databases: ["INTELLIGENCE_DB"], bindings: config.vars }));
     try {
@@ -50,10 +57,11 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
         FLASK_SECRET_KEY: "synthetic-session-long-enough", JWT_SECRET: "synthetic-jwt-long-enough", OPENROUTER_API_KEY: "synthetic-operator" });
       for (const container of [OLD, ""]) await t.test(`${revision || "expand"} RPC / ${container || "expand"} Container`, async () => {
         const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
-          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), container],
+          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), container,
+          JSON.stringify([["/v1/models", "get"], ["/v1/chat/completions", "post"], ["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"]])],
         { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
         const rows = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
-        assert.deepEqual(rows.map(row => row.status), [200, 200]);
+        assert.deepEqual(rows.map(row => row.status), [200, 200, 302, 302, 200]);
       });
       if (!revision) {
         // A future controlled row must never poison login or a full management cache reload.
@@ -67,6 +75,22 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
         assert.ok(results.slice(0, 3).every(row => row.dispatches === 0));
         assert.equal(results.at(-1).dispatches, 1);
         assert.equal((await db.prepare("SELECT official_only FROM control_users WHERE username='synthetic'").first()).official_only, 1);
+        // Use the actual strict decoder and auth/cache paths from the pre-expansion Container.
+        // A legacy management projection must not turn cached restricted identities into dispatch authority.
+        for (const policy of states) {
+          await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
+            .bind(policy.official_only, policy.forced_provider_preferences).run();
+          const { stdout: oldManagement } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
+            (await mf.ready).href.replace(/\/$/, ""), JSON.stringify({ ...settings, ACCOUNT_DRIVER_OUTBOUND_ADMISSION: "true" }), OLD,
+            JSON.stringify([["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"], ["/v1/chat/completions", "post"]])],
+          { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
+          const oldRows = oldManagement.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
+          assert.deepEqual(oldRows.slice(0, 3).map(row => row.status), [302, 302, 200]);
+          assert.equal(oldRows.at(-1).status, policy === states[0] ? 200 : 503);
+          assert.equal(oldRows.at(-1).dispatches, policy === states[0] ? 1 : 0);
+          const current = await db.prepare("SELECT official_only,forced_provider_preferences FROM control_users WHERE username='synthetic'").first();
+          assert.deepEqual(current, policy);
+        }
         for (const policy of states.slice(1)) {
           await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
             .bind(policy.official_only, policy.forced_provider_preferences).run();

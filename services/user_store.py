@@ -52,16 +52,33 @@ def _transient(error):
     return not isinstance(error, PrivateIntelligenceError) or error.status >= 500
 
 
+def _policy_protocol():
+    """Send policy extensions only after the peer advertises their decoder."""
+    try:
+        capability = request_private_intelligence({"operation": "capabilities"}, endpoint="users").get("key_controls")
+    except PrivateIntelligenceError as error:
+        if error.status in (400, 404):
+            return {}  # Old peers reject this operation, without seeing an extended row request.
+        raise unavailable() from None
+    except Exception:
+        raise unavailable() from None
+    if (not isinstance(capability, dict) or type(capability.get("protocol")) is not int
+            or capability["protocol"] not in (1, 2)):
+        raise unavailable()
+    return {"data_policy_version": 1}
+
+
 def _call(operation, **values):
     """One private call; reads are retried once after a transient failure.
 
     Reads are idempotent, so a single retry absorbs a slow first call after the
     Container or D1 was idle. Writes are sent once.
     """
+    protocol = _policy_protocol() if operation in READ_OPERATIONS else {}
     attempts = 2 if operation in READ_OPERATIONS else 1
     for attempt in range(1, attempts + 1):
         try:
-            return request_private_intelligence({"operation": operation, **values}, endpoint="users")
+            return request_private_intelligence({"operation": operation, **values, **protocol}, endpoint="users")
         except Exception as error:
             cause = (f"{error.status} {error.code}" if isinstance(error, PrivateIntelligenceError)
                      else getattr(error, "code", None) or type(error).__name__)
