@@ -1,7 +1,16 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, keyId: authority?.principal?.id ?? "admin", ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
-import { nativeGenerationFetch } from "../worker/gateway-extensions.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch } from "../worker/gateway-extensions.mjs";
 import { principalHash, admissionModelGroup } from "../worker/admission-do.mjs";
 import { nativeRevisionConsumer } from "../worker/native-config-sync.mjs";
 
@@ -48,7 +57,7 @@ function fixture(overrides = {}) {
     async all() { return { results: [] }; }, async first() { return null; } }; }, async batch(statements) {
     rows.push(...JSON.parse(statements[1].values[0])); return [{ meta: { changes: 1 } }];
   } };
-  return { env, operations, rows, ctx: { waitUntil(promise) { pending.push(promise); } },
+  return { env: policyFixtureEnv(env), operations, rows, ctx: { waitUntil(promise) { pending.push(promise); } },
     async flush() { await Promise.all(pending); } };
 }
 async function upstream(fetcher, run) {
@@ -141,7 +150,8 @@ test("native revision installers are strict and the injectable clock bounds fres
   let now = 100, offline = false;
   const f = fixture({ CONFIG_REVISION_SYNC_ENABLED: "true" });
   const db = f.env.INTELLIGENCE_DB;
-  db.prepare = sql => ({ sql, bind() { return this; }, async first() { if (offline) throw Error("offline"); return null; }, async all() {
+  db.prepare = sql => ({ sql, bind() { return this; }, async first() { if (offline) throw Error("offline"); return sql.startsWith("SELECT official_only")
+    ? { official_only: null, forced_provider_preferences: null } : null; }, async all() {
     if (offline) throw new Error("offline");
     return { results: [] };
   } });

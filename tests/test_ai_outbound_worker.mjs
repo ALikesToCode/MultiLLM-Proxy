@@ -1,3 +1,4 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -14,7 +15,7 @@ function ai(result) {
 }
 
 const post = (path, body, env) => handleAiOutbound(new Request(`http://ai.internal${path}`, {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), env);
+  method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": '{"version":1,"username":"fixture-reader"}' }, body: JSON.stringify(body) }), { INTELLIGENCE_DB: policyStore(), ...env });
 
 test("third-party GPT Image models run through AI Gateway with OpenAI parameters", async () => {
   const env = { AI: ai({ result: { image: "https://images.example/out.png" } }), AI_GATEWAY_ID: "media" };
@@ -30,7 +31,7 @@ test("third-party GPT Image models run through AI Gateway with OpenAI parameters
 
 test("an image URL is downloaded when the caller asks for base64", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async url => { assert.equal(url, "https://images.example/out.png"); return new Response(new Uint8Array([1, 2, 3])); };
+  globalThis.fetch = async url => { assert.equal(url instanceof Request ? url.url : url, "https://images.example/out.png"); return new Response(new Uint8Array([1, 2, 3])); };
   try {
     const env = { AI: ai({ image: "https://images.example/out.png" }) };
     const body = await (await post("/v1/images/generations", { model: "openai/gpt-image-2", prompt: "x" }, env)).json();

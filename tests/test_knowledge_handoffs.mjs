@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
@@ -169,9 +169,9 @@ test("real SQLite handoff Durable Objects isolate principals and survive restart
   const bundled = await build({ stdin: { resolveDir: process.cwd(), contents: `
     export { KnowledgeHandoffs } from "./worker/knowledge/index.mjs";
     export default { fetch(request, env) { return env.HANDOFFS.get(env.HANDOFFS.idFromName(new URL(request.url).searchParams.get("principal"))).fetch(request); } };
-  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers"], write: false });
+  ` }, bundle: true, format: "esm", platform: "neutral", external: ["cloudflare:workers", "node:*"], write: false });
   const directory = await mkdtemp(join(tmpdir(), "knowledge-handoffs-"));
-  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityDate: "2026-07-28",
+  const create = () => new Miniflare(convertV4MiniflareOptions({ cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], compatibilityDate: "2026-07-28",
     script: bundled.outputFiles[0].text, resourcePersistencePath: directory, durableObjects: { HANDOFFS: { className: "KnowledgeHandoffs", useSQLite: true } } }));
   let mf = create();
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });

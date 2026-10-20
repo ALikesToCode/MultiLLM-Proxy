@@ -1,3 +1,6 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, keyId: authority?.principal?.id ?? "admin", ...authority }, ...rest);
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -5,7 +8,7 @@ import { spawn } from "node:child_process";
 import { recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { createGatewayLifecycle } from "../worker/gateway-lifecycle.mjs";
 import { createUsageObserver, observeNativeResponse, renderNativeMetrics } from "../worker/request-telemetry.mjs";
-import { nativeGenerationFetch, withForwardedCorrelation, withNativeMetrics } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, withForwardedCorrelation, withNativeMetrics } from "../worker/gateway-extensions.mjs";
 
 // Keep the shared loader untouched; register the owned import in this test's copy.
 const helperUrl = new URL("./helpers/load_cloudflare_worker.mjs", import.meta.url);
@@ -13,7 +16,8 @@ const helper = (await readFile(helperUrl, "utf8"))
   .replaceAll("import.meta.url", JSON.stringify(helperUrl.href))
   .replace("const patchedSource = source", `const patchedSource = source.replace('from "./worker/gateway-extensions.mjs";', 'from "${new URL("../worker/gateway-extensions.mjs", import.meta.url)}";')`);
 const registeredHelperUrl = `data:text/javascript;base64,${Buffer.from(helper).toString("base64")}`;
-const worker = (await (await import(registeredHelperUrl)).loadWorkerModule()).default;
+const rawWorker = (await (await import(registeredHelperUrl)).loadWorkerModule()).default;
+const worker = { ...rawWorker, fetch: (request, env, ctx) => rawWorker.fetch(request, policyFixtureEnv(env), ctx) };
 const encoder = new TextEncoder();
 const chunks = values => new ReadableStream({ start(c) { for (const value of values) c.enqueue(encoder.encode(value)); c.close(); } });
 function fixture() {

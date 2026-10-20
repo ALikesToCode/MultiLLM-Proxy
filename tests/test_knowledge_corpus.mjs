@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { KnowledgeCorpus } from "../worker/knowledge/corpus.mjs";
 
@@ -84,7 +84,7 @@ test("snapshots are immutable, hash checked and readable across corpus instances
 
 test("the real local R2 binding honors immutable snapshot preconditions", async t => {
   const runtime = new Miniflare(convertV4MiniflareOptions({
-    cf: false, modules: true, script: "export default { fetch() { return new Response('ok'); } };",
+    cf: false, modules: true, compatibilityFlags: ["nodejs_compat"], script: "export default { fetch() { return new Response('ok'); } };",
     r2Buckets: { KNOWLEDGE_SNAPSHOTS: "knowledge-snapshot-test" },
   }));
   t.after(() => runtime.dispose());

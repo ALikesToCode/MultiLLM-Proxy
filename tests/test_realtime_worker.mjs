@@ -46,6 +46,7 @@ async function fixture(t) {
       return { success: true, results: [], meta: { changes: Number(stmt.run(...values).changes) } }; } }; },
     async batch(statements) { sql.exec("BEGIN"); try { const results = statements.map(stmt => stmt.execute()); sql.exec("COMMIT"); return results; }
       catch (error) { sql.exec("ROLLBACK"); throw error; } } };
+  sql.exec("INSERT INTO control_users (username, api_key_hash, api_key_prefix, scopes, is_admin, created_at) VALUES ('admin', 'synthetic-hash', 'synthetic', 'admin,chat,audio', 1, '2026-10-20T00:00:00Z')");
   const server = new Socket(), client = new Socket(), upstream = new Socket(), timers = clock(), pending = [], leases = [];
   const env = { ...enabled, INTELLIGENCE_DB: db, ADMISSION_COORDINATOR: { getByName() { return { async fetch(req) {
     const value = await req.json(); leases.push(value);
@@ -83,8 +84,9 @@ test("invalid mappings disable once without logging values", () => {
   } } finally { console.warn = old; }
   assert.equal(messages.length, 1); assert.ok(!messages.join().includes("password"));
 });
-test("registered enabled errors never wake Container", async () => {
-  const env = { ...enabled, MULTILLM_PROXY_CONTAINER: { getByName() { throw Error("Container woke"); } } };
+test("registered enabled errors never wake Container", async t => {
+  const f = await fixture(t);
+  const env = { ...f.env, MULTILLM_PROXY_CONTAINER: { getByName() { throw Error("Container woke"); } } };
   for (const [req, expected] of [[request({ upgrade: "" }), 426], [request({ authorization: "" }), 401],
     [new Request("https://gateway.example/v1/realtime?model=openai:unmapped", { headers: { upgrade: "websocket", authorization: "Bearer synthetic-gateway" } }), 403]]) {
     const response = await worker.fetch(req, env, {}); assert.equal(response.status, expected); assert.ok((await response.json()).error.code);

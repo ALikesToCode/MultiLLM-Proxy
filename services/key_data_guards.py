@@ -44,8 +44,8 @@ def stored_controls(row):
     def value(name):
         try:
             return row[name]
-        except (KeyError, IndexError):
-            return None
+        except (KeyError, IndexError, TypeError):
+            raise APIError("Stored key data controls are incomplete", 503) from None
     official = value("official_only")
     if official is not None and (type(official) not in (bool, int) or official not in (0, 1)):
         raise APIError("Stored key data controls are invalid", 503)

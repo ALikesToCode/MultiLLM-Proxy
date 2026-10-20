@@ -28,7 +28,7 @@ export const account = (changes = {}) => ({ username: "alice", api_key_hash: "sy
   scopes: "chat,models", is_admin: 0, created_at: "2026-10-09T00:00:00+00:00", last_login: null,
   last_used_at: null, last_used_ip: null, created_by: null, rotated_at: null, revoked_at: null,
   daily_budget_usd: null, monthly_budget_usd: null, allowed_models: null, allowed_ips: null,
-  expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, ...changes });
+  expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, official_only: null, forced_provider_preferences: null, ...changes });
 
 const usersRequest = body => new Request("http://intelligence.internal/v1/users", {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }),

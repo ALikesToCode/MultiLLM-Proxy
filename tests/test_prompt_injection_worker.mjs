@@ -1,3 +1,4 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
@@ -86,7 +87,7 @@ function fixture(mode, extra = {}) {
     async put(key, value) { if (typeof key === "object") for (const [k, v] of Object.entries(key)) rows.set(k, v);
       else rows.set(key, structuredClone(value)); }, async delete(key) { rows.delete(key); },
     async setAlarm() {} };
-  const env = { ADMIN_API_KEY: "synthetic-admin", OPENCODE_GO_API_KEY: "synthetic-provider",
+  const env = { INTELLIGENCE_DB: policyStore(), ADMIN_API_KEY: "synthetic-admin", OPENCODE_GO_API_KEY: "synthetic-provider",
     SECRET_SCAN_DEFAULT: "off", PROMPT_INJECTION_MODE: mode, PROMPT_INJECTION_THRESHOLD: "3",
     ROLEPLAY_COMPACT_TRIGGER_TOKENS: "0", ...extra };
   env.ROLEPLAY_SESSION = { getByName(id) {

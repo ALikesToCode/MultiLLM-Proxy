@@ -72,7 +72,8 @@ class Exchange:
         self.response = None
         self._response_lock = threading.Lock()
         self.max_bytes = max_bytes
-        self.send, self.record = send, record
+        from services.provider_dispatch import capture_dispatch
+        self.send, self.record = capture_dispatch(send), record
         self.record_response = record_response
         if not _TRANSPORT_SLOTS.acquire(blocking=False):
             raise GatewayError(

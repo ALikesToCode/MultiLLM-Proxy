@@ -193,8 +193,9 @@ class ProxyService:
         }
         with requests.Session() as session:
             session.cookies.set_policy(_RejectAllCookiesPolicy())
-            response = session.get(
-                f"{base_url.rstrip('/')}/v1/models",
+            from services.provider_dispatch import provider_http
+            response = provider_http("nanogpt", "GET",
+                f"{base_url.rstrip('/')}/v1/models", transport=session.request,
                 headers=headers,
                 params={"detailed": "false"},
                 timeout=(5, max(1, timeout_seconds)),
@@ -1134,7 +1135,8 @@ class ProxyService:
         headers: Dict[str, str],
         params: Dict[str, Any],
         data: Optional[bytes],
-        timeout: Tuple[int, int]
+        timeout: Tuple[int, int],
+        api_provider: str = "unknown",
     ) -> requests.Response:
         """
         Make a single request with a given timeout (not widely used in code below).
@@ -1156,7 +1158,8 @@ class ProxyService:
             from services.admission_request import bounded_generation_timeout
             timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
-            response = session.request(
+            from services.provider_dispatch import provider_http
+            response = provider_http(api_provider, transport=session.request,
                 method=method,
                 url=url,
                 headers=headers,
@@ -1244,7 +1247,8 @@ class ProxyService:
             from services.admission_request import bounded_generation_timeout
             timeout = bounded_timeout(bounded_generation_timeout(timeout))
 
-            response = session.request(
+            from services.provider_dispatch import provider_http
+            response = provider_http(api_provider, transport=session.request,
                 method=method,
                 url=url,
                 headers=headers,

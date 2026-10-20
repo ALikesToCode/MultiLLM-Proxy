@@ -1,3 +1,12 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -7,7 +16,7 @@ import { createCreditsLifecycle, CreditsAdmissionError } from "../worker/credits
 import { appendCredit, readCredits, contextOwner } from "../worker/credits-d1.mjs";
 import { handleTenantGovernanceRequest } from "../worker/tenant-governance-d1.mjs";
 import { handleReservationsRequest } from "../worker/reservations-d1.mjs";
-import { nativeGenerationFetch, nativeGenerationSetup } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, nativeGenerationSetup } from "../worker/gateway-extensions.mjs";
 import { exactCacheIdentity } from "../worker/exact-generation-cache.mjs";
 import { semanticPartition } from "../worker/semantic-generation-cache.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
@@ -18,7 +27,7 @@ import { recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { tenantStorageKey } from "../worker/tenants-d1.mjs";
 import { retentionRequestId } from "../worker/retention-policy.mjs";
 import { USER_FIELDS } from "../worker/control-users-d1.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 import { handleManagedStateRequest } from "../worker/managed-state-dispatch.mjs";
 
 const request = path => new Request(`http://intelligence.internal${path}`, {

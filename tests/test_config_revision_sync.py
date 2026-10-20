@@ -328,6 +328,8 @@ def account_states(changes=None):
     row.update(username="alice", api_key_hash=generate_password_hash("synthetic-revision-key"),
                api_key_prefix="mllm_syntheti", scopes="chat,models", is_admin=0,
                created_at="2026-10-09T00:00:00+00:00")
+    from services.dispatch_policy import envelope
+    row["data_policy"] = envelope(row)
     return [{"users": [row], "revisions": {"key_controls": 1, "model_grants": 1}},
             {"users": [{**row, **(changes or {"revoked_at": "2026-10-09T01:00:00+00:00"})}],
              "revisions": {"key_controls": 2, "model_grants": 2}}]

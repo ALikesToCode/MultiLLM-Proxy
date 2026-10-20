@@ -2,6 +2,7 @@
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
+import { dataPolicy } from "./dispatch-policy.mjs";
 import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
@@ -43,7 +44,9 @@ export function validUser(user) {
     if (!validStreamCap(user[STREAM_CAP_FIELD])) return false;
     user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== STREAM_CAP_FIELD));
   }
-  if (user) user = { official_only: null, forced_provider_preferences: null, ...user };
+  if (user && Object.hasOwn(user, "data_policy")) {
+    user = Object.fromEntries(Object.entries(user).filter(([name]) => name !== "data_policy"));
+  }
   if (user && !Object.hasOwn(user, "shadow_eval_rate")) user = { ...user, shadow_eval_rate: null };
   if (user && !Object.hasOwn(user, "secret_scan_mode")) user = { ...user, secret_scan_mode: null };
   return user !== null && typeof user === "object" && !Array.isArray(user) && fields(user, USER_FIELDS)
@@ -143,11 +146,16 @@ async function read(query) {
 
 /** Run an account query with every column, or with the pre-0007 columns and no controls. */
 async function readUsers(query, env = {}) {
-  if (streamCostEnabled(env)) return read(() => query(streamUserFields(env).join(", ")));
+  const stamp = row => row && { ...row, data_policy: dataPolicy(row) };
+  if (streamCostEnabled(env) || revisionSyncSettings(env).enabled) {
+    const rows = await read(() => query(streamUserFields(env).join(", ")));
+    return Array.isArray(rows) ? rows.map(stamp) : stamp(rows);
+  }
   for (const end of [USER_FIELDS.length, USER_FIELDS.length - 1, USER_FIELDS.length - 2, USER_FIELDS.length - 3, USER_FIELDS.length - 4, 12]) {
     try {
       const rows = await read(() => query(USER_FIELDS.slice(0, end).join(", ")));
-      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row };
+      const defaults = row => row && { ...Object.fromEntries(USER_FIELDS.slice(end).map(name => [name, null])), ...row,
+        data_policy: end === USER_FIELDS.length ? dataPolicy(row) : null };
       return Array.isArray(rows) ? rows.map(defaults) : defaults(rows);
     } catch (error) {
       if (!missingColumn(error) || end === 12) throw error;
@@ -223,7 +231,7 @@ export async function handleControlUsersRequest(request, env) {
           ? db.prepare(`SELECT ${columns} FROM control_users ORDER BY username LIMIT ?`).bind(body.limit)
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
         ).all()).results;
-        const users = revisionSyncSettings(env).enabled ? await read(() => query(streamUserFields(env).join(", "))) : await readUsers(query, env);
+        const users = await readUsers(query, env);
         return reply({ version: 1, users });
       }
       case "get": {

@@ -79,7 +79,12 @@ def _call(operation, **values):
 def _row(value):
     if isinstance(value, dict):
         # A Worker released before migrations 0011 and 0013 returns rows without these columns.
-        value = {"secret_scan_mode": None, "shadow_eval_rate": None, "official_only": None, "forced_provider_preferences": None, **value}  # nosec B105 - column defaults
+        from services.dispatch_policy import envelope, verify
+        policy = verify(value.get("data_policy"))
+        value = {name: item for name, item in value.items() if name != "data_policy"}
+        if envelope(value) != policy:
+            raise unavailable()
+        value = {"secret_scan_mode": None, "shadow_eval_rate": None, **value}  # nosec B105 - column defaults
     if (
         not isinstance(value, dict)
         or set(value) != set(USER_FIELDS)

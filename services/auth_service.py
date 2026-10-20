@@ -283,7 +283,9 @@ class AuthService:
 
     @classmethod
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
+        from services.dispatch_policy import envelope
         return {
+            "data_policy": envelope(row),
             "username": row["username"],
             "api_key_hash": row["api_key_hash"],
             "api_key_prefix": row["api_key_prefix"],
@@ -921,6 +923,7 @@ class AuthService:
             "rotated_at": serialize_datetime(user["rotated_at"]),
             "revoked_at": serialize_datetime(user["revoked_at"]),
             **key_controls.public(user),
+            "data_policy": user.get("data_policy"),
         }
 
     @staticmethod

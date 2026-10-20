@@ -301,9 +301,11 @@ _security_copies: dict[Any, dict[str, dict[str, Any]]] = {}
 
 def _security_user(auth, row):
     """Reject malformed authority records before permissive legacy decoding."""
+    if not isinstance(row, dict) or not set(user_store.USER_FIELDS).issubset(row):
+        raise ValueError("Incomplete security account")
+    row = stream_cost_breaker.d1_row(row)
     if not isinstance(row, dict) or set(row) != set(user_store.USER_FIELDS) | ({stream_cost_breaker.CAP_FIELD} if stream_cost_breaker.enabled() else set()):
         raise ValueError("Incomplete security account")
-    stream_cost_breaker.d1_row(row)
     if normalized_username(row["username"]) != row["username"]:
         raise ValueError("Invalid security account identity")
     if not row["api_key_hash"] or not row["api_key_prefix"] or not re.fullmatch(r"[A-Za-z0-9:_.,-]{0,512}", row["scopes"]):

@@ -132,7 +132,7 @@ def test_sqlite_accounts_keep_controls_through_rotation_and_backups(tmp_path, mo
 
 def test_stored_values_are_read_defensively():
     row = {"daily_budget_usd": 2, "monthly_budget_usd": "9", "allowed_models": "", "allowed_ips": "10.0.0.0/8",
-           "expires_at": None}
+           "expires_at": None, "official_only": None, "forced_provider_preferences": None}
     assert key_controls.from_storage(row) == {"daily_budget_usd": 2.0, "monthly_budget_usd": None,
                                               "allowed_models": None, "allowed_ips": "10.0.0.0/8", "expires_at": None, "secret_scan_mode": None, "shadow_eval_rate": None, "official_only": None, "forced_provider_preferences": None}
     assert key_controls.public(row)["allowed_ips"] == ["10.0.0.0/8"]

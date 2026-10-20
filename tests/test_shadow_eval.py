@@ -31,7 +31,7 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setenv("MODEL_REGISTRY_DB_PATH", str(tmp_path / "eval.sqlite3"))
     monkeypatch.delenv("SHADOW_EVAL_JUDGE_MODEL", raising=False)
     monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username",
-                        lambda username: {"username": username} if username == "sampled-user" else None)
+                        lambda username: {"username": username, "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}} if username == "sampled-user" else None)
     return Store
 
 
@@ -96,8 +96,8 @@ def test_key_rate_validation(rate):
 def test_key_rate_storage_and_default():
     assert key_controls.validate({})["shadow_eval_rate"] is None
     assert key_controls.validate({"shadow_eval_rate": "0.1"})["shadow_eval_rate"] == 0.1
-    assert key_controls.public(key_controls.from_storage({"shadow_eval_rate": 0.1}))["shadow_eval_rate"] == 0.1
-    assert key_controls.from_storage({"shadow_eval_rate": 1})["shadow_eval_rate"] is None
+    assert key_controls.public(key_controls.from_storage({"shadow_eval_rate": 0.1, "official_only": None, "forced_provider_preferences": None}))["shadow_eval_rate"] == 0.1
+    assert key_controls.from_storage({"shadow_eval_rate": 1, "official_only": None, "forced_provider_preferences": None})["shadow_eval_rate"] is None
 
 
 def test_store_ttl_cap_and_on_demand_text(store):

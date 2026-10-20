@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 from flask import Flask, Response, g
 
+from services.dispatch_policy import envelope
 from services.shadow_eval_contract import default_config, encoded, make_sample
 from services.shadow_eval_data_policy import source_allows_replay
 from services.shadow_eval_runner import evaluate, run
@@ -53,7 +54,8 @@ def test_legacy_samples_from_controlled_keys_skip_candidate_and_judges(store, co
 @pytest.mark.parametrize("controls", CONTROLS)
 @pytest.mark.parametrize("change_after", [0, 1, 2])
 def test_source_policy_rechecked_before_candidate_and_each_judge(controls, change_after, monkeypatch):
-    current = {"username": "sampled-user", **(controls if change_after == 0 else {})}
+    current = {"username": "sampled-user", "official_only": None, "forced_provider_preferences": None, **(controls if change_after == 0 else {})}
+    current["data_policy"] = envelope(current)
     monkeypatch.setattr("services.auth_service.AuthService._load_user_by_username", lambda _: current.copy())
     monkeypatch.setattr("services.shadow_eval_runner.accounted_dispatch", lambda payload, dispatch, **_: dispatch(payload))
     calls = []
@@ -62,6 +64,7 @@ def test_source_policy_rechecked_before_candidate_and_each_judge(controls, chang
         calls.append(payload["model"])
         if len(calls) == change_after:
             current.update(controls)
+            current["data_policy"] = envelope(current)
         if len(calls) > 1:
             return response(encoded({"winner": "A", "confidence": 0.9, "reasons": ["Synthetic"]}))
         return response("Candidate synthetic")

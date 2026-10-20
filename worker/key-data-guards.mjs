@@ -14,8 +14,10 @@ export function parsePreferences(value) {
 
 export function validDataControls(user) {
   try {
+    if (!user || !Object.hasOwn(user, "official_only") || !Object.hasOwn(user, "forced_provider_preferences")
+      || user.official_only === undefined || user.forced_provider_preferences === undefined) return false;
     parsePreferences(user.forced_provider_preferences);
-    return user.official_only == null || [0, 1].includes(user.official_only);
+    return user.official_only === null || [0, 1].includes(user.official_only);
   } catch { return false; }
 }
 
@@ -41,24 +43,20 @@ export function mergePreferences(caller, forced) {
 
 /** Read current administrator controls without accepting policy from client headers. */
 export async function currentDataControls(env, authority) {
-  let user = authority.principal ?? {};
-  const id = authority.keyId;
-  if (env.INTELLIGENCE_DB && id) {
-    const stored = await env.INTELLIGENCE_DB.prepare(
-      "SELECT official_only, forced_provider_preferences FROM control_users WHERE username = ? AND revoked_at IS NULL")
-      .bind(id).first();
-    if (stored) {
-      if (!Object.hasOwn(stored, "official_only") || !Object.hasOwn(stored, "forced_provider_preferences")) throw new TypeError();
-      user = stored;
-    }
-  }
-  if (!validDataControls(user)) throw new TypeError();
+  const id = authority.keyId ?? authority.principal?.owner ?? authority.principal?.id;
+  if (!env.INTELLIGENCE_DB || !id) throw new TypeError("Unverifiable authority");
+  const user = id.startsWith("integration:")
+    ? await env.INTELLIGENCE_DB.prepare("SELECT official_only, forced_provider_preferences FROM intelligence_principals WHERE id = ? AND revoked_at IS NULL").bind(id).first()
+    : await env.INTELLIGENCE_DB.prepare(
+    "SELECT official_only, forced_provider_preferences FROM control_users WHERE username = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)")
+    .bind(id, new Date().toISOString()).first();
+  if (!validDataControls(user)) throw new TypeError("Unverifiable controls");
   return user;
 }
 
 /** Resolve controls from trusted authority or durable accounts, never client headers. */
 export async function guardNativeRequest(request, env, authority) {
-  if (authority.authenticated !== true) return { request };
+  if (authority.authenticated !== true) return { response: Response.json({ error: { code: "key_data_controls_unavailable" } }, { status: 503 }) };
   try {
     const user = await currentDataControls(env, authority);
     if (!providerClassPermitted(user, authority.provider, env)) {

@@ -1,15 +1,26 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { nativeGenerationFetch, nativeCacheHeader } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, nativeCacheHeader } from "../worker/gateway-extensions.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { runScheduledMaintenance, scheduledMaintenanceEnabled } from "../worker/scheduled-maintenance.mjs";
 import { ObservabilityExporter, setObservabilityExporter } from "../worker/observability-export.mjs";
 import { guardHash } from "../worker/semantic-generation-cache.mjs";
 import { prepareCanary } from "../worker/canary-assignment.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
-import { makeRoleplayEnv, roleplayRequest, handleRoleplayEdgeRequest, withGlobalFetch, completionResponse } from "./helpers/roleplay_fixture.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { makeRoleplayEnv as rawMakeRoleplayEnv, roleplayRequest, handleRoleplayEdgeRequest, withGlobalFetch, completionResponse } from "./helpers/roleplay_fixture.mjs";
+
+const makeRoleplayEnv = overrides => rawMakeRoleplayEnv(policyFixtureEnv(overrides));
 
 const route = "/codex-easy/v1/chat/completions";
 const authority = { route, provider: "codex-easy", principal: { id: "admin", keyHash: "a".repeat(64) } };
@@ -87,8 +98,10 @@ test("observability alone flushes content-free native observations through waitU
   const waits = [], exported = [], env = { OBSERVABILITY_EXPORTERS_JSON: JSON.stringify([{ type: "langfuse", endpoint: "https://collector.invalid/ingest",
     allowed_origins: ["https://collector.invalid"], credential_env: "FIXTURE_EXPORT_CREDENTIAL" }]), FIXTURE_EXPORT_CREDENTIAL: "synthetic" };
   const exporter = new ObservabilityExporter(env, { transport: async (_url, options) => { exported.push(options.body); return new Response(null, { status: 200 }); } });
-  setObservabilityExporter(env, exporter);
-  const res = await nativeGenerationFetch(request(), env, { waitUntil: promise => waits.push(promise) }, authority, response);
+  const guardedEnv = policyFixtureEnv(env);
+  setObservabilityExporter(guardedEnv, exporter);
+  const res = await rawNativeGenerationFetch(request(), guardedEnv, { waitUntil: promise => waits.push(promise) },
+    { authenticated: true, ...authority }, response);
   assert.equal(await res.text(), complete); await Promise.all(waits);
   assert.equal(exported.length, 1); assert.doesNotMatch(exported[0], /Explain caching|fixture|placeholder/);
   assert.equal(exporter.status().accepted, 1);

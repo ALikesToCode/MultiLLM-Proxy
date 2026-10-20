@@ -1,14 +1,23 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, ...authority }, ...rest);
+async function loadWorkerModule(...args) {
+  const module = await rawLoadWorkerModule(...args);
+  return { ...module, default: { ...module.default, fetch(request, env, ctx) {
+    return module.default.fetch(request, policyFixtureEnv(env), ctx);
+  } } };
+}
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { nativeGenerationFetch, withForwardedCorrelation } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch, withForwardedCorrelation } from "../worker/gateway-extensions.mjs";
 import { ObservationWindow } from "../worker/latency-slo.mjs";
 import { handleIntelligenceOutbound } from "../worker/intelligence-outbound.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { handleReservationsRequest } from "../worker/reservations-d1.mjs";
 import { activeUsersByPrefix } from "../worker/control-users-d1.mjs";
 import { renderNativeMetrics } from "../worker/request-telemetry.mjs";
-import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
+import { loadWorkerModule as rawLoadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
 const route = "/codex-easy/v1/chat/completions", now = Date.now();
 const auth = { authenticated: true, route, provider: "codex-easy", keyId: "admin", principal: { id: "admin" } };
@@ -111,7 +120,8 @@ test("stream cost stop delivers one error and one cancel and retains ambiguous a
 
 test("cost policy leaves nonstream malformed payloads alone and classifies stopped metrics before counting", async () => {
   const malformed = new Request("https://provider.invalid/v1/chat/completions", { method: "POST", body: "fixture-invalid" });
-  const passthrough = await nativeGenerationFetch(malformed, cost, {}, auth, async req => {
+  const passthrough = await nativeGenerationFetch(malformed, cost, {}, { ...auth,
+    principal: { ...auth.principal, max_stream_cost_microusd: null } }, async req => {
     assert.equal(await req.text(), "fixture-invalid"); return complete("ok");
   });
   assert.equal(passthrough.status, 200); await passthrough.text();

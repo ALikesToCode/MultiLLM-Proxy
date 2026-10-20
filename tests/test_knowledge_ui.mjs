@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test from "./helpers/policy_test.mjs";
 import { api, queryPayload, sourcePayload } from "../static/js/knowledge/api.mjs";
 import { policyPayload, renderPolicy } from "../static/js/knowledge/policy.mjs";
 import { safeUrl, renderEvidence, renderSources, renderJobs, renderReadiness } from "../static/js/knowledge/render.mjs";

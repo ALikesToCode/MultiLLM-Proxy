@@ -1,3 +1,4 @@
+import { providerFetch } from "./provider-dispatch.mjs";
 /** Native gateway authentication, ticket admission and approved Realtime dispatch. */
 import { currentDataControls, parsePreferences, providerClassPermitted } from "./key-data-guards.mjs";
 import { Buffer } from "node:buffer";
@@ -251,8 +252,10 @@ async function openSession(request, env, ctx, settings, options) {
     if (request.signal.aborted || controller.signal.aborted) throw new RealtimeError("realtime_canceled", 499);
     const url = new URL(settings.providers.get(model)); url.protocol = "https:";
     handedOff = true;
-    const response = await (options.dial ?? fetch)(url.href, { method: "GET", headers: upstreamHeaders(request, key),
-      redirect: "manual", signal: controller.signal });
+    const response = await providerFetch(provider, url.href, { method: "GET", headers: upstreamHeaders(request, key),
+      signal: controller.signal }, { env, authority: { authenticated: true, keyId: principal.owner }, realtime: true,
+        send: checked => (options.dial ?? fetch)(checked.url, { method: checked.method, headers: checked.headers,
+          redirect: checked.redirect, signal: checked.signal }) });
     socket = response.webSocket;
     if (response.status !== 101 || !socket) { void response.body?.cancel?.().catch(() => {}); throw new RealtimeError("realtime_upstream_error", 502); }
     if (request.signal.aborted || controller.signal.aborted) throw new RealtimeError("realtime_canceled", 499);

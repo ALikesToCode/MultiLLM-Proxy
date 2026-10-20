@@ -1,0 +1,567 @@
+{
+  "cloudflare-worker.mjs": {
+    "kind": "internal",
+    "reason": "Registered Container forwarding; provider I/O reenters guarded Flask or Worker adapters.",
+    "sha256": "b140cee4640aebfb2c2f6380ee04eeedda866632df7d370f2b0c2bf691911a1c"
+  },
+  "config.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "98e753d318ac39e0d6e3b1c5c9feb561faee62b97515055b5c05859bd3c6953f"
+  },
+  "providers/aihubmix.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "a061e555cab9b86da52910ee53d8bfe229a91f517f3617aaaa680a17be279b56"
+  },
+  "providers/image_relays.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "ffc5bf871bd44660aacd4b202ade999f99d15bbe5cccb206e0642964b6b96155"
+  },
+  "providers/local_inference.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "d87cb7b407afba0ac15caa8b5dd290134b650fcaffd623cfa9a2e9136ccb30f9"
+  },
+  "proxy.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "d111384804103ded22cbb014ec1341185d7394721724461a2a3f9a75b9bf392d"
+  },
+  "route_helpers.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "d0c3c361f9a98d015a82fe1a9a9069de3534911f409b022cb9a9dca50108c60b"
+  },
+  "routes/core.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "00e9c4d4373e9950a35a8debb96e714488f7c3ed42bd4d1f0f402d634fbd62f0"
+  },
+  "routes/dashboard_chat.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "e4074f254cf32d43ee7de2ebd93f0c590454b246a23d558998c334ce7d28901f"
+  },
+  "routes/free_response.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "34df91bc3650bb09fbce76589e5d2dacc2c3165fa75ba6bd9d9f7245eb466263"
+  },
+  "routes/free_routes.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "14a413e5b92e94315833fe0fc06ab7fad2fd92568c788d74565b2ac1d607aaba"
+  },
+  "routes/gateway_mcp.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "24d514965b61712a9e027860bd2a2d7aa6f4ba5a5929ba0a9f73a005707192f7"
+  },
+  "routes/intelligence_media.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "40072ff1b7b45b9216a85cc17625206a7255f329693fa8f581b744a700974090"
+  },
+  "routes/knowledge.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "3bc186b4f812dc93c17756f4be0160c9d98d816956ade81f5bfb11161739fcfb"
+  },
+  "routes/knowledge_onboarding.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "5adf66ce4d4d733ef8ec551b2b92d0493164381c5537a3eab679b3e3c24f55b6"
+  },
+  "routes/media_audio.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "ac1e69377343bdc41f19d66b756213571e6430bd28274146e9e25c2d60a11170"
+  },
+  "routes/media_edits.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "30ed0f0f18529df52f06f1fcee0a2186f75c9376915d0759a6b036df46455149"
+  },
+  "routes/media_narration.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "ddef74e625989431fd9ddea741cb8315bc8b96db82e011d338c79b13668a8879"
+  },
+  "routes/provider_credentials.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "7ed444a62db36f68a4bffa9f4e74c762212114989c8a00efc9fbb0c2f059d1a4"
+  },
+  "routes/proxy.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "265e183e46865675ea3963f49546f650b3d0a04f98742f2dec63c7da862868a7"
+  },
+  "routes/unified.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "bcc073d8fc97c65c2b00b1d7b069284ddfcd1834ab610c640e0d1644a439415a"
+  },
+  "services/admission_leases.py": {
+    "kind": "internal",
+    "reason": "Private admission lease RPC.",
+    "sha256": "b6f26de1c81f38615f585b55d3585d2aa12ad74452b1677266af3a99979852ae"
+  },
+  "services/auth_service.py": {
+    "kind": "non-provider",
+    "reason": "OAuth credential refresh authenticates the operator; provider generation is separately admitted.",
+    "sha256": "4b05ae698b86c28a9f1c07f1e4c447b00ae75c7c8ad7e6273984a1929d110150"
+  },
+  "services/auto_route_service.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "8837d1dd009fc9bb8c16da383caa370cf3f89933cff9ec46b592448709bdb8d1"
+  },
+  "services/cache_policy.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "8d905ec9f2da11ed397f08aed091091057adbab9082f8668354c7eef91c47fab"
+  },
+  "services/capability_probes.py": {
+    "kind": "non-provider",
+    "reason": "Standalone diagnostic client calls the authenticated gateway; it cannot dispatch directly to a provider.",
+    "sha256": "da5c7c9e93413dfbd26b63c3871e79a0d35f5cf046e5a0b10ef9395578ead3b0"
+  },
+  "services/cloudflare_ai.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "1d7a76d1da81202063b624e8d6058c0191b6c7f7155b0d7db26f8e016eecaedd"
+  },
+  "services/config_revision_sync.py": {
+    "kind": "internal",
+    "reason": "Private durable configuration reads, never a provider transport.",
+    "sha256": "489a9573ba8c5c6de36af1b7d2fb53a687caf91b909584a9fc944f266c44c4c0"
+  },
+  "services/credential_context.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "d305faa4f30c9400f243639e0d775169c9f3adc4bef93669c517cedb6a331bdc"
+  },
+  "services/free_model_policy.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "0d0e2b03a2c68076b936e76e45498c2ff6365711019da0c6103722c8e89dc587"
+  },
+  "services/gateway_alerts.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "48dff8d277ed73105cdf912138e4dad6bb9fb750ad0b21e1b4ca5c8653344559"
+  },
+  "services/gateway_batches.py": {
+    "kind": "internal",
+    "reason": "Private batch persistence RPC; managed execution reenters guarded Container.",
+    "sha256": "7fbccd11aa42b4864b32a745377fd067ea281aab0ff2711e7934c4f2e37ba854"
+  },
+  "services/gemini_audio.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "cb701602a93793381683c4d73cf3cf8073e7962f7380ddc0ab5a14116720e4ac"
+  },
+  "services/gemini_credentials.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "f8458ed0a5d9c02741d8b02fe16ab3c43d7d17bcc126f0e3abfced046f84f038"
+  },
+  "services/idempotency_store.py": {
+    "kind": "internal",
+    "reason": "Private idempotency persistence RPC.",
+    "sha256": "8c88d77785a9d3180c83e564aff9feec540cd959b856bcbda17078b4cf809c41"
+  },
+  "services/image_quality.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "49f210a603bcd4b63160b3a6128e0b1a91cd9e9649da982dddeed55d48ac5714"
+  },
+  "services/intelligence_d1_store.py": {
+    "kind": "internal",
+    "reason": "Private durable account and policy authority RPC; required before admission.",
+    "sha256": "f6964a63f5cb996322ffedca041c9fac8a4b6cdeec2f96a69206fb930551b9e8"
+  },
+  "services/knowledge_client.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "915e9f2a8ae157ad0d87b08073f6198a70f3b00df778d00bc9d06fd943a7bf8c"
+  },
+  "services/managed_dispatch.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "3c9967511d53066f740053ae04c8cfc123fdc44f77ca52e96fb68e40aedffb7e"
+  },
+  "services/managed_turn.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "c619b5fd489667332193b797375f43eae84700cef42dd779b88bacac8f6c7f55"
+  },
+  "services/media_catalog.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "f0f12c531156ffc99becb9d607eb0efb18473e1ae58e0562f38333aa85b064f4"
+  },
+  "services/media_jobs.py": {
+    "kind": "internal",
+    "reason": "Private job persistence and scheduling RPC; execution reenters guarded Container.",
+    "sha256": "b47be5492e36a219cd743b5dfb8c9467e172c678be588600495d5e1ab5118f13"
+  },
+  "services/media_storage.py": {
+    "kind": "guarded",
+    "reason": "External downloads/imports use provider_http; remaining methods manage private R2 objects.",
+    "sha256": "a8a38dae79baaccf29d9ac29b8df40648cf96e2e4ba000c2e4ddcf2190485c7d"
+  },
+  "services/media_urls.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "27deaeb534d23e3622377742318173ead0b9f1a883a4c00f3a6be44cbddd8b78"
+  },
+  "services/moderation_input.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "79d9e46bb2085859845153a084cbb912c2665222d2d1f78e2b5118dc0cc474de"
+  },
+  "services/native_token_count.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "46cd0e4dff7d3d123fe710c1cc00dcdf39a57a56ce1008446c94c8f4975282ac"
+  },
+  "services/observability_adapters.py": {
+    "kind": "non-provider",
+    "reason": "Explicit observability sink, not a provider generation transport.",
+    "sha256": "1bbeb8bb3c74a42e996dc6c57c489203451c0b73f7f8ef31c2ffbf53981e5676"
+  },
+  "services/output_schema_validation.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "03eb2a5a4887153c11001fbb107928031097470f6ee62a2704429a5ff2bae94c"
+  },
+  "services/payment_billing.py": {
+    "kind": "non-provider",
+    "reason": "Payment checkout control API, not inference.",
+    "sha256": "b8ed7c0d67fb2d1d0341fbc56cef18e03c92098ad9abd83b2b53a5322f8c5da8"
+  },
+  "services/prompt_templates.py": {
+    "kind": "internal",
+    "reason": "Private prompt-template persistence RPC.",
+    "sha256": "9e785abea29bb7abb88162f146d5eafa9d02fe57b23dd8bf1ece71a957f26bd9"
+  },
+  "services/provider_authenticity.py": {
+    "kind": "non-provider",
+    "reason": "Standalone operator diagnostic client, never called by the generation runtime; the target gateway authenticates its caller.",
+    "sha256": "28422fd44abbbd29cfd0a0fe10900945db87caff4b2022b7731592598444e389"
+  },
+  "services/provider_capability_discovery.py": {
+    "kind": "non-provider",
+    "reason": "Fixed public catalog metadata GET without account headers or user content.",
+    "sha256": "da1ab5cf7982f600d22afdc125dfdddd92e6b1f943a927ff14e84f825aad385c"
+  },
+  "services/provider_dispatch.py": {
+    "kind": "guarded",
+    "reason": "Sole Flask provider HTTP boundary; fresh durable policy precedes requests.request or injected session.",
+    "sha256": "2eddb06a2a247984b931ee58f3a05339b4167fd752ab79f492ba84fc0708f65b"
+  },
+  "services/proxy_documentation_service.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "66bb86aed9afbe5ad5ad4ae0cdf409a858804ae98a4fa0f0db261b7da269b413"
+  },
+  "services/proxy_service.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "e4241056d6a511a101367ec27d46e6147ffd62f86a4feb91f6a133954f5ca505"
+  },
+  "services/rate_limit_service.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "cc2fa4360ea9227e383ca90871cd352083ca00366058b3e998007ea8b4f10193"
+  },
+  "services/reasoning_policy.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "9ba417687b433147fe16b97238d94398d60bb782119536414aecc992fe108eec"
+  },
+  "services/release_status.py": {
+    "kind": "non-provider",
+    "reason": "Operator release and health metadata, not generation.",
+    "sha256": "1ec73290f38b8896c0bbf179be435d5e55256cb257b97ea3bdf751e063db6ac8"
+  },
+  "services/responses_state.py": {
+    "kind": "internal",
+    "reason": "Private Responses state persistence RPC.",
+    "sha256": "5f247c4f39f97bdf54eba1e91a4090a4d147d0a0501074be6f697b78a001895e"
+  },
+  "services/saml_federation.py": {
+    "kind": "non-provider",
+    "reason": "SAML metadata and URL handling, not provider dispatch.",
+    "sha256": "5a7c15c202c8b85173cab71392e36f977a77acccbe6a11b38e33ad643d6b10c8"
+  },
+  "services/secret_firewall.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "9ac96591c2fdaa4fb5e880f4a7aab5fa6b9d7604c299bcfba6b5d0de1d5bfbf1"
+  },
+  "services/semantic_generation_cache.py": {
+    "kind": "internal",
+    "reason": "Private semantic-cache persistence; embeddings use guarded ProxyService.",
+    "sha256": "4f1d3bfb79533399a8210b84f9f6411840f36a8073f65aae9f2e06f6f8125d5c"
+  },
+  "services/shared_generation_cache.py": {
+    "kind": "internal",
+    "reason": "Private cache persistence RPC.",
+    "sha256": "58ab29b11f7783626ae5b37438fe60f888b2bab03b1dbf771db7fab2fc24052c"
+  },
+  "services/stream_preflight.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "f5afb2b2150c8048e45d9d008042fdf9d1ddd7bc33117681508d0768d067011a"
+  },
+  "services/telemetry_export.py": {
+    "kind": "non-provider",
+    "reason": "Explicit telemetry sink, not a provider generation transport.",
+    "sha256": "067ad335e70e0816145142f4c38b85139ec49f0599b3077b8515685572d5b4e0"
+  },
+  "services/upstream_errors.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "69acb80ee747e3ecd87c596c2a581de624915ac119d3f0ab6cffe217547a0ca9"
+  },
+  "services/upstream_transport.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "c27e7589a1efbc44b8bdd546199f087c4ec08c852e811156c6be149f0fa0690c"
+  },
+  "services/video_generation.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "08e56ceebdbe6b8097fd03b7c1714ad6ef20d03f991d2ab024bf49b4aef7d45e"
+  },
+  "services/workbench_gateway.py": {
+    "kind": "internal",
+    "reason": "Management RPC to the registered Worker; generation reenters guarded transport.",
+    "sha256": "3b6b3a64aab462fe93bf1952de3c456124bbf4ec73d598c073881d191ac0373d"
+  },
+  "worker/access-sso.mjs": {
+    "kind": "non-provider",
+    "reason": "Authentication certificate discovery, not generation.",
+    "sha256": "591dd7561ac841b9bca38abacaad592c9ba0606de656f1cd27b3ab261b7da27d"
+  },
+  "worker/admission-do.mjs": {
+    "kind": "internal",
+    "reason": "Private durable admission RPC.",
+    "sha256": "e87b485c50391562216055760a6d5102c038d7d00da6ac6bfb894b473c4fe1a9"
+  },
+  "worker/ai-outbound.mjs": {
+    "kind": "guarded",
+    "reason": "Inference SDK calls use providerOperation; external result downloads use providerFetch.",
+    "sha256": "b9bfbce10ceac9e665c270e4a42a54a06aecd709e35d5cde7594cd257668961f"
+  },
+  "worker/batch-jobs.mjs": {
+    "kind": "internal",
+    "reason": "Private Container batch dispatch; generation reenters guarded Flask transport.",
+    "sha256": "20feb9a3ea43d46c7b862709989007eaebb143f8ed4561dfc35a053bf441aca4"
+  },
+  "worker/container-env.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "56f07b1a9d2f6451be990e16038e30d55afbee1dbf5a5e5ea82b30235558d790"
+  },
+  "worker/context-pages-d1.mjs": {
+    "kind": "internal",
+    "reason": "Private durable context-page RPC.",
+    "sha256": "6ccd924a75e5f0cace2a4e6d02b180a08c57e88ec955beb3508f1467dba9f082"
+  },
+  "worker/gateway-extensions.mjs": {
+    "kind": "guarded",
+    "reason": "Wraps the native fetch delegate with providerFetch before middleware, embeddings, retries or fallback.",
+    "sha256": "51c1e1d303e3113b03f9ec872e40135c08d2a3ccb150eda12079bfad03c5cadf"
+  },
+  "worker/generation-deadline.mjs": {
+    "kind": "guarded",
+    "reason": "Deadline wrapper calls the admitted native transport delegate.",
+    "sha256": "03b7cbadf4c479c16e619f4a5bd0c8b18f33481b76d4580bb273401368fea8e8"
+  },
+  "worker/health-schedule.mjs": {
+    "kind": "non-provider",
+    "reason": "Private Container health/readiness checks, no provider generation.",
+    "sha256": "05f0b9921e73ca05fcb5a670494794d2270aab2d1ef975a786ff0ced9b3c99fb"
+  },
+  "worker/knowledge-edge.mjs": {
+    "kind": "internal",
+    "reason": "Private Knowledge binding; projects authenticated identity for provider admission.",
+    "sha256": "353927c3ccaa8189ccbee873807067a130e052e44edd3e6a49c96d7361c05764"
+  },
+  "worker/knowledge-outbound.mjs": {
+    "kind": "internal",
+    "reason": "Private Knowledge binding; requires versioned identity for provider admission.",
+    "sha256": "feea69b5b1313c937e423f94dfe2dc32ce1dc6e14596a9fa021f90c3684c4c41"
+  },
+  "worker/knowledge/alexandria/service.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "9abf7ac28c4dce81e98b393b06b3d0b58cb3ad87e53c6eec81ed812b53d333e3"
+  },
+  "worker/knowledge/authority-client.mjs": {
+    "kind": "internal",
+    "reason": "Private catalogue persistence RPC.",
+    "sha256": "d6a1734c1d3e1b6c016db1699dd82b571e9fa8d0113733c22dfdf833a89cb411"
+  },
+  "worker/knowledge/corpus.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "0a1a3fd8ee3d75a5e2e4cd46693de1d746c6f32e4efa3776896a62e8544bef91"
+  },
+  "worker/knowledge/handoffs.mjs": {
+    "kind": "internal",
+    "reason": "Private handoff persistence RPC.",
+    "sha256": "6a5aa961c7e36a989808d52a922efa983971d0e7fdb8025ea4a14580b0e6641a"
+  },
+  "worker/knowledge/index.mjs": {
+    "kind": "internal",
+    "reason": "Private durable handlers and Workflow entry points bind identity before provider operations.",
+    "sha256": "a11fc343b7787904958b12608e5c622e79bf8ce3963e34a481b656c384f6b052"
+  },
+  "worker/knowledge/ingestion.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "966d0f64669bc6e2544b0c09a969c2ec16975916007f35f87c7eaea3ac08ba9c"
+  },
+  "worker/knowledge/memos.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "f604ea74e3720db6b4d20a47588a15470ba790b3ccaaffa3509499947c8c9e8a"
+  },
+  "worker/knowledge/native.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "3ae2923e3f94544dfef4da4c21c7c9d101f4aff2ae3cb042a17d138eeb3244a1"
+  },
+  "worker/knowledge/providers/index.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "8bc1f67a0a75c6c3765a03b873dbe5dc768dd5e93388d265937153a89b55d3ee"
+  },
+  "worker/knowledge/providers/transport.mjs": {
+    "kind": "guarded",
+    "reason": "Every provider HTTP call uses providerFetch immediately before its fetch delegate.",
+    "sha256": "be7f26bfc29523a999ae0fe3f33ee6d9083d5f044ff109b2ede4b7337bb9cc9e"
+  },
+  "worker/knowledge/retrieval.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "aac6df5801182e564d13ed25aae79a202d25a4e430a069f87894fc2c166ba5a1"
+  },
+  "worker/knowledge/service.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "3bb4d263841fa2f3edeaa2f00898b1ba5b5cdd4a955e68443f3f7858eb52d0e7"
+  },
+  "worker/knowledge/skills-import.mjs": {
+    "kind": "guarded",
+    "reason": "Every marketplace/source read uses providerFetch immediately before fetch.",
+    "sha256": "45ecea27eb4bbcc83d459519d6a28579de55acc3e7b9d3cfbb883c6c63c2aefe"
+  },
+  "worker/knowledge/skills-market.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "c6f6cd1fa18d0caac5415cdf5ae1cdb672fde175285e1f8c8b933ea6c0e8f94a"
+  },
+  "worker/knowledge/skills-store.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "4ae9c433aeff9afe2e9b42c001b7b908254ad510fef3924893c11ef1be237186"
+  },
+  "worker/knowledge/skills.mjs": {
+    "kind": "internal",
+    "reason": "Private skills RPC propagates identity; marketplace HTTP uses guarded provider transport.",
+    "sha256": "0d1ec24d0bd5766c70b77548f72084b48ad70894db575eaee98672a61e3b1de4"
+  },
+  "worker/media-jobs.mjs": {
+    "kind": "non-provider",
+    "reason": "Private job execution callbacks and configured webhook delivery, not provider HTTP.",
+    "sha256": "3356956867ed1f3c58fdc4b125aabefc4419d0639422ab347509a8d763e1fa8b"
+  },
+  "worker/media-outbound.mjs": {
+    "kind": "guarded",
+    "reason": "External assets use providerFetch; remaining operations manage private R2 objects.",
+    "sha256": "afa2dbf2607b778c5b736bec68193ac7f902cc8f34f1340a2391b35c36ea23e6"
+  },
+  "worker/media-workflow.mjs": {
+    "kind": "internal",
+    "reason": "Private Container job dispatch; generation reenters guarded Flask transport.",
+    "sha256": "32029d79c9b304b80ed9606a4680fa3517f8d4c856614e396ee70716f88afc30"
+  },
+  "worker/observability-export.mjs": {
+    "kind": "non-provider",
+    "reason": "Explicit observability export, no provider generation.",
+    "sha256": "3c3ac74a0d718362a8fcdef1c7d1f6b0a171efe866796e950c80a2b83f063133"
+  },
+  "worker/opencode/reasoning-policy.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "ae655230b797ec9589a5172b05249f9cece612e09e539cb0542c1839583cf034"
+  },
+  "worker/pii-rehydration.mjs": {
+    "kind": "guarded",
+    "reason": "Payload transformation wrapper calls the admitted native or roleplay transport delegate.",
+    "sha256": "919be3b88a68aeaddaba22c63c6e20e19d658964f3cb338dabea6eada0d702ed"
+  },
+  "worker/provider-dispatch.mjs": {
+    "kind": "guarded",
+    "reason": "Sole Worker HTTP/SDK boundary; fresh durable policy precedes fetch or admitted callbacks.",
+    "sha256": "980a669bee91225963581842eba645ad304b104a8692fb72b9ae15f1363e7e81"
+  },
+  "worker/realtime.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "78f30da2e56ec8c552322fd6db11ba3d6d9f7c454cda8771e1db2c76c566e63b"
+  },
+  "worker/roleplay/credential-health.mjs": {
+    "kind": "guarded",
+    "reason": "Provider credential probes use providerFetch with current durable administrator controls.",
+    "sha256": "6bb21614ba698b8bb55edef2d1ebb475d7645ac1dbbf5a1269e2c7b6ca3745ca"
+  },
+  "worker/roleplay/edge.mjs": {
+    "kind": "internal",
+    "reason": "Private session RPC; all generation enters guarded roleplay transport.",
+    "sha256": "3819cc2b142597537500e10a3426015688124cc2d02291069bd9a4efabc80a33"
+  },
+  "worker/roleplay/endpoint.mjs": {
+    "kind": "internal",
+    "reason": "Private session handler; generation and compaction use guarded transport.",
+    "sha256": "9e460b4d4cd420c7692406a7ba03248b73413c830be54423fdb57fe208a6d3cb"
+  },
+  "worker/roleplay/operator-edge.mjs": {
+    "kind": "internal",
+    "reason": "Private roleplay management/session RPC; generation enters guarded transport.",
+    "sha256": "24d1de1b071f8be482873ae11d3f2ce0d4eb4bfe2ff564691305e7521e718e7a"
+  },
+  "worker/roleplay/transport.mjs": {
+    "kind": "guarded",
+    "reason": "Every candidate, compaction and fallback uses providerFetch, including Container egress.",
+    "sha256": "fb1f50e58dd75196d6920a542df1c262e811a1c4e86d701d21366aa1d1540eb3"
+  },
+  "worker/scheduled-maintenance.mjs": {
+    "kind": "non-provider",
+    "reason": "Explicit maintenance webhook delivery, no provider generation.",
+    "sha256": "5f3e752776c5426984e3667bfd7818037ed3420e07ec6fc6b5caa06ab947d3a8"
+  },
+  "worker/secret-firewall.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "bd79e15c3b2d4f29916c4c2c5601284f953ff142cad80198a5155985b2560203"
+  },
+  "worker/semantic-generation-cache.mjs": {
+    "kind": "guarded",
+    "reason": "Embedding delegate is the native providerFetch wrapper, including the embedding provider authority.",
+    "sha256": "ba3f547d794cb9b323c6927ca65e3b45e816e73a215e97218ab023584ca68a90"
+  },
+  "worker/upstream-cancellation.mjs": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "44c67fd5404a2ed8acc3d74f4ccf35f1944e9bddacb44fd7177a5d829d4aef04"
+  }
+}

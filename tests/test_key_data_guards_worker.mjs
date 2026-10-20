@@ -1,3 +1,5 @@
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
+import { dataPolicy } from "../worker/dispatch-policy.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
@@ -10,7 +12,7 @@ const request = (provider = "openrouter", preferences = { data_collection: "allo
   method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ model: "example/model", provider: preferences, messages: [{ role: "user", content: "example" }] }),
 });
-const authority = (provider, principal) => ({ authenticated: true, provider, principal, keyId: principal.id,
+const authority = (provider, principal) => ({ authenticated: true, provider, principal, keyId: principal.id ?? "example",
   route: `/${provider}/v1/chat/completions` });
 
 async function database(t) {
@@ -39,13 +41,13 @@ test("provider classes and explicit tier choices exclude unverified endpoints", 
 
 test("native direct requests refuse before calling any upstream", async () => {
   for (const provider of ["opencode", "nanogpt", "gemini", "ce-gpt-pro", "free"]) {
-    const response = await nativeGenerationFetch(request(provider), {}, {},
+    const response = await nativeGenerationFetch(request(provider), { INTELLIGENCE_DB: policyStore({ official_only: 1, forced_provider_preferences: null }) }, {},
       authority(provider, { official_only: 1 }), () => assert.fail("Must not dispatch"));
     assert.equal(response.status, 403);
     assert.equal((await response.json()).error.code, "provider_class_not_allowed");
   }
   let calls = 0;
-  const response = await nativeGenerationFetch(request("openai"), {}, {},
+  const response = await nativeGenerationFetch(request("openai"), { INTELLIGENCE_DB: policyStore({ official_only: 1, forced_provider_preferences: null }), OPENAI_API_KEY: "synthetic-operator" }, {},
     authority("openai", { official_only: 1 }), async () => { calls++; return new Response("{}"); });
   assert.equal(response.status, 200);
   assert.equal(calls, 1);
@@ -53,7 +55,7 @@ test("native direct requests refuse before calling any upstream", async () => {
 
 test("forced preferences override caller allow and preserve caller deny", async () => {
   const principal = { forced_provider_preferences: '{"data_collection":"deny","max_price":{"prompt":1}}' };
-  const guarded = await guardNativeRequest(request("openrouter", { data_collection: "allow", sort: "price", max_price: { completion: 2 } }), {}, authority("openrouter", principal));
+  const guarded = await guardNativeRequest(request("openrouter", { data_collection: "allow", sort: "price", max_price: { completion: 2 } }), { INTELLIGENCE_DB: policyStore({ official_only: null, forced_provider_preferences: principal.forced_provider_preferences }) }, authority("openrouter", principal));
   assert.deepEqual((await guarded.request.json()).provider,
     { data_collection: "deny", sort: "price", max_price: { completion: 2, prompt: 1 } });
   assert.deepEqual(mergePreferences({ data_collection: "deny" }, { data_collection: "allow" }), { data_collection: "deny" });
@@ -73,7 +75,7 @@ test("durable key controls round-trip and native dispatch reads them", async t =
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }),
   }), env);
   assert.equal((await call({ operation: "upsert", user })).status, 200);
-  assert.deepEqual((await (await call({ operation: "get", username: user.username })).json()).user, user);
+  assert.deepEqual((await (await call({ operation: "get", username: user.username })).json()).user, { ...user, data_policy: dataPolicy(user) });
   const denied = await guardNativeRequest(request("opencode"), env, authority("opencode", { id: user.username }));
   assert.equal(denied.response.status, 403);
   const guarded = await guardNativeRequest(request(), env, authority("openrouter", { id: user.username }));

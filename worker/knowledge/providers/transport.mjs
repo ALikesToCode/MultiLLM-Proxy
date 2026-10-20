@@ -1,3 +1,4 @@
+import { DispatchError, providerFetch, transportOptions } from "../../provider-dispatch.mjs";
 import { invalidResponse, ProviderError, upstreamError } from "./errors.mjs";
 import { withProviderKey } from "./keys.mjs";
 
@@ -69,7 +70,7 @@ export async function fetchBounded(provider, url, options, { fetchImpl = fetch, 
   try {
     if (controller.signal.aborted) throw new Error("aborted");
     // Workers supports manual redirects; the non-2xx check rejects them before any follow-up.
-    const response = await fetchImpl(url, { ...options, redirect: "manual", signal: controller.signal });
+    const response = await providerFetch(provider, url, { ...options, signal: controller.signal }, { send: async checked => fetchImpl(checked.url, await transportOptions(checked, options)) });
     if (response.status < 200 || response.status >= 300) {
       let body = null;
       if ([402, 429].includes(response.status) || (provider === "alexandria" && response.status === 403)) {
@@ -83,7 +84,7 @@ export async function fetchBounded(provider, url, options, { fetchImpl = fetch, 
     const text = await readBounded(response, provider, maxResponseBytes);
     return parseResponse(text, response.headers.get("content-type") || "", provider, acceptText);
   } catch (error) {
-    if (error instanceof ProviderError) throw error;
+    if (error instanceof ProviderError || error instanceof DispatchError) throw error;
     if (controller.signal.aborted) {
       throw new ProviderError(provider, "provider_timeout", "The knowledge provider request was cancelled or timed out.", 504);
     }

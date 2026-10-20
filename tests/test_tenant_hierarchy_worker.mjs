@@ -1,3 +1,6 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const nativeGenerationFetch = (request, env, ctx, authority, ...rest) => rawNativeGenerationFetch(
+  request, policyFixtureEnv(env), ctx, { authenticated: true, keyId: authority?.principal?.id ?? "admin", ...authority }, ...rest);
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -8,7 +11,7 @@ import { handleRealtimeRequest } from "../worker/realtime.mjs";
 import { activeUsersByPrefix, USER_FIELDS } from "../worker/control-users-d1.mjs";
 import { handleTenantRequest, organisationsEnabled, resolveAccountTenant, tenantNamespace } from "../worker/tenants-d1.mjs";
 import { handleManagedStateRequest } from "../worker/managed-state-dispatch.mjs";
-import { nativeGenerationFetch } from "../worker/gateway-extensions.mjs";
+import { nativeGenerationFetch as rawNativeGenerationFetch } from "../worker/gateway-extensions.mjs";
 
 test("disabled tenant domain and resolver touch no storage", async () => {
   const db = { prepare() { throw Error("No storage"); } };
@@ -189,12 +192,12 @@ test("native requests ignore headers and body scope and resolve before dispatch"
 });
 
 test("prefix lookup leaves tenant resolution to the verified principal", async () => {
-  const row = { username: "alice" };
+  const row = { username: "alice", official_only: null, forced_provider_preferences: null };
   const db = { prepare(sql) {
     assert.ok(sql.includes("api_key_prefix=?"));
     return { bind() { return this; }, async all() { return { results: [row] }; } };
   } };
-  assert.deepEqual(await activeUsersByPrefix(db, "fixture", { ORGANISATIONS_ENABLED: "true" }), [row]);
+  assert.deepEqual(await activeUsersByPrefix(db, "fixture", { ORGANISATIONS_ENABLED: "true" }), [{ ...row, data_policy: { version: 1, official_only: null, forced_provider_preferences: null } }]);
   assert.equal(Object.hasOwn(row, "tenant_context"), false);
 });
 
@@ -223,10 +226,10 @@ function authFixture() {
       async first() { return sql.includes("intelligence_credentials") ? integrationRow : null; },
       async run() { calls.writes++; return { meta: { changes: 1 } }; } };
   } };
-  const env = { ...f.env, INTELLIGENCE_DB: db, AUTH_STORAGE_BACKEND: "d1", ADMIN_API_KEY: "synthetic-bootstrap",
+  const env = policyFixtureEnv({ ...f.env, INTELLIGENCE_DB: db, AUTH_STORAGE_BACKEND: "d1", ADMIN_API_KEY: "synthetic-bootstrap",
     ADMIN_USERNAME: "operator", JWT_SECRET: "synthetic-signing", REALTIME_ENABLED: "true",
     REALTIME_PROVIDERS_JSON: '{"openai:realtime-test":{"url":"wss://approved.example/realtime"}}',
-    KNOWLEDGE_SERVICE: { async fetch() { calls.dispatches++; return Response.json({ version: 1, result: { status: "ok" } }); } } };
+    KNOWLEDGE_SERVICE: { async fetch() { calls.dispatches++; return Response.json({ version: 1, result: { status: "ok" } }); } } });
   return { ...f, env, calls };
 }
 const knowledgeRequest = (key, mcp = false) => new Request(mcp ? "https://gateway.example/mcp" : "https://gateway.example/v1/knowledge/artifacts/synthetic",

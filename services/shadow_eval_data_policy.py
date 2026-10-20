@@ -10,8 +10,10 @@ def source_allows_replay(sample):
 
     try:
         user = AuthService._load_user_by_username(sample["key_id"])
+        from services.dispatch_policy import verify
+        policy = verify(user.get("data_policy") if user else None)
         return bool(user and not user.get("revoked_at") and not expired(user)
-                    and not has_data_controls(user))
+                    and not has_data_controls(policy))
     except Exception:
         # Missing, malformed or unavailable authority cannot authorize content replay.
         return False
@@ -22,5 +24,7 @@ def guarded_dispatch(sample, dispatch):
         if not source_allows_replay(sample):
             raise APIError("Source key does not permit shadow replay", 403,
                            {"error": "shadow_source_not_allowed"})
-        return dispatch(payload)
+        from services.provider_dispatch import dispatch_as
+        with dispatch_as({"username": sample["key_id"]}):
+            return dispatch(payload)
     return guarded

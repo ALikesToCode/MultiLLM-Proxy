@@ -72,8 +72,38 @@ Review operator-supplied endpoints and credentials before admitting traffic.
 
 ## Migration and usage
 
-Apply `0041_key_data_guards.sql` and `0042_usage_token_details.sql` before
-rolling out this version. New columns hold
+Apply `0041_key_data_guards.sql`, `0042_usage_token_details.sql` and
+`0043_integration_data_policy.sql` through the tracked migration runner first.
+Deploy the matching Worker (including the private Knowledge Worker) next, then
+the Container. Enable controls only after both runtimes enforce them. Do not
+roll back to a runtime that lacks enforcement while restricted keys are enabled.
+Repeat the tracked migration command rather than replaying bare ALTER statements.
+An old Worker response, missing column or unsupported policy envelope makes the
+new Container refuse generation; it never supplies unrestricted defaults.
+
+The version-1 `data_policy` envelope requires `version`, `official_only` and
+`forced_provider_preferences`, with explicit nulls for unrestricted values.
+Bootstrap administrative recovery remains available for management, but cannot
+authorise provider dispatch without a current durable account and verified policy.
+
+`services/provider_dispatch.py` and `worker/provider-dispatch.mjs` are the outbound
+provider boundaries. HTTP adapters and SDK/binding operations reread the account
+at every dispatch, including retries, fallbacks, video polls, background work,
+Realtime, roleplay and Knowledge/MCP. Deferred work carries only identity; it does
+not carry a policy snapshot. Stored Knowledge sources and ingestion jobs retain
+their source account identity across scheduling, retries and reconciliation.
+Imported-skill watches also retain the importing account; legacy imports without
+that identity refuse upstream checks until explicitly imported again.
+Restricted requests replace cached credentials with
+the current attested operator binding, and reject caller Gemini credentials.
+Forced routing preferences merge at the final JSON submission. Realtime and
+roleplay refuse forced preferences because their full transports cannot enforce
+them. Missing accounts, missing fields, malformed envelopes and store outages
+refuse dispatch. The outbound inventory test pins reviewed transport modules and
+rejects new call sites; private persistence, storage management, authentication,
+telemetry, public capability metadata and webhook delivery are classified separately.
+
+New columns hold
 the two controls and provider-reported `cached_input_tokens` / `reasoning_tokens`.
 Existing keys remain unrestricted and existing event details remain null; daily
 totals start at zero. Flask adds the same columns to its SQLite or PostgreSQL
