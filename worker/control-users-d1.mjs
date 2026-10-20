@@ -246,6 +246,7 @@ export async function handleControlUsersRequest(request, env) {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
         const user = await readUsers(columns => db.prepare(`SELECT ${columns} FROM control_users WHERE username=?`)
           .bind(body.username).first(), env);
+        if (policyVersion !== 1 && user) expansionFence(user);
         return reply({ version: 1, user: accountReply(user ?? null, policyVersion) });
       }
       case "by_prefix": {
