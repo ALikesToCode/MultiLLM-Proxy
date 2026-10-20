@@ -1,3 +1,4 @@
+import { bindingPrincipal, withDispatchPrincipal, providerFetch, dispatchFailure, DispatchError } from "./provider-dispatch.mjs";
 /**
  * Media I/O for the Container, reachable only through its private outbound handler
  * (`http://media.internal`). The Worker fetches caller-supplied image URLs, so a URL can
@@ -77,8 +78,7 @@ export async function boundedBytes(response, maxBytes) {
 export async function fetchPublic(value, { accept = "image/*", fetcher = fetch } = {}) {
   let url = publicHttpsUrl(value);
   for (let hop = 0; url && hop <= MAX_REDIRECTS; hop += 1) {
-    const response = await fetcher(url.href, { redirect: "manual", headers: { accept },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const response = await providerFetch("media", url.href, { headers: { accept }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }, { publicAsset: true, send: checked => fetcher(checked.url, { headers: checked.headers, redirect: checked.redirect, signal: checked.signal }) });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers.get("location");
     await response.body?.cancel();
@@ -227,7 +227,7 @@ async function fileOperation(request, env, id, suffix) {
   return mediaFailure("not_found", "Unknown media operation.", 404);
 }
 
-export async function handleMediaOutbound(request, env) {
+async function runMediaOutbound(request, env) {
   const url = new URL(request.url);
   if (url.origin !== ORIGIN || url.search || url.hash || url.username || url.password) {
     return mediaFailure("not_found", "Unknown media operation.", 404);
@@ -238,7 +238,18 @@ export async function handleMediaOutbound(request, env) {
     if (file) return await fileOperation(request, env, file[1], file[2]);
     return mediaFailure("not_found", "Unknown media operation.", 404);
   } catch (error) {
+    if (error instanceof DispatchError) return dispatchFailure(error);
     logFailure("media_outbound_failed", error, { operation: url.pathname.split("/")[2] ?? "unknown" });
     return mediaFailure("media_unavailable", "The media operation failed.", 502);
   }
+}
+
+export async function handleMediaOutbound(request, env) {
+  if (new URL(request.url).search || new URL(request.url).origin !== ORIGIN) return new Response("Not found", { status: 404 });
+  if (request.method !== "POST" && new URL(request.url).pathname === "/v1/fetch") return new Response("Not found", { status: 404 });
+  // R2 management is independent of provider dispatch. Only external I/O needs an identity.
+  const path = new URL(request.url).pathname;
+  if (path !== "/v1/fetch" && !path.endsWith("/import")) return runMediaOutbound(request, env);
+  try { return await withDispatchPrincipal(env, bindingPrincipal(request), () => runMediaOutbound(request, env)); }
+  catch (error) { return dispatchFailure(error); }
 }

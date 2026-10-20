@@ -1,8 +1,10 @@
+import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+const attemptRoleplayCandidates = (...args) => { args[3] = policyFixtureEnv(args[3]); return rawAttemptRoleplayCandidates(...args); };
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { UpstreamCancellation } from "../worker/upstream-cancellation.mjs";
-import { attemptRoleplayCandidates, readBoundedBytes } from "../worker/roleplay/transport.mjs";
+import { attemptRoleplayCandidates as rawAttemptRoleplayCandidates, readBoundedBytes } from "../worker/roleplay/transport.mjs";
 
 async function withGlobalFetch(fetchImpl, callback) {
   const previous = globalThis.fetch;

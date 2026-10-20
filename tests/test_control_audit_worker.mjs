@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
@@ -10,7 +10,7 @@ const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "chat,models", is_admin: 0,
   created_at: "2026-09-26T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
   created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-  allowed_models: null, allowed_ips: null, expires_at: null, ...changes,
+  allowed_models: null, allowed_ips: null, expires_at: null, official_only: null, forced_provider_preferences: null, ...changes,
 });
 const event = (action, outcome, actor, target, detail) => ({ operation: "audit_record", action, outcome, actor, target, detail });
 const list = (changes = {}) => ({ operation: "audit_list", actor: null, target: null, action: null,

@@ -25,7 +25,7 @@ function account(n = 1, changes = {}) {
 function database(t, migrated = true) {
   const sql = new DatabaseSync(":memory:");
   t.after(() => sql.close());
-  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0017_control_revisions.sql"])
+  for (const file of ["0003_control_users.sql", "0007_usage_ledger.sql", "0011_secret_firewall.sql", "0013_shadow_eval.sql", "0017_control_revisions.sql", "0041_key_data_guards.sql"])
     sql.exec(schema(file));
   sql.exec("CREATE TABLE retained_usage (username TEXT, amount INTEGER); INSERT INTO retained_usage VALUES ('user-1', 7)");
   sql.exec("CREATE TABLE fake_teams (org TEXT, id TEXT, name TEXT, active INTEGER, PRIMARY KEY(org,id))");

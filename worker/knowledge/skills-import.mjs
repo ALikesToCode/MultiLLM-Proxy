@@ -1,3 +1,4 @@
+import { providerFetch, transportOptions, withDispatchPrincipal } from "../provider-dispatch.mjs";
 import { fail, fields, integer } from "./contracts.mjs";
 import { digest } from "./evidence.mjs";
 import { CLAWHUB, clawhubFile, directory, frontmatter, REF, repository, REVIEW_PATTERNS, reviewFlags } from "./skills-market.mjs";
@@ -62,7 +63,7 @@ async function get(url, headers, options, maxBytes) {
   const timer = setTimeout(cancel, options.importTimeoutMs ?? TIMEOUT_MS);
   try {
     let response;
-    try { response = await (options.fetch ?? fetch)(url, { headers, redirect: "manual", signal: controller.signal }); }
+    try { response = await providerFetch("skills", url, { headers, signal: controller.signal }, { send: async checked => (options.fetch ?? fetch)(checked.url, await transportOptions(checked, { headers })) }); }
     catch { fail(controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable", "The skill source could not be reached.", controller.signal.aborted ? 504 : 502); }
     if (!response.ok) {
       await response.body?.cancel();
@@ -338,7 +339,7 @@ export async function checkImports(env, store, options = {}, { force = false, li
   const due = await store.call("imports.due", { limit, force });
   for (const item of due) {
     let result;
-    try { result = await checkOne(env, item, options); }
+    try { result = await withDispatchPrincipal(env, item.origin?.dispatch_principal, () => checkOne(env, item, options)); }
     catch (error) { result = { status: "error", error: error?.code ?? "upstream_unavailable" }; }
     await store.call("imports.checked", { skill_id: item.skill_id, pin: pinOf(item.origin), result });
   }

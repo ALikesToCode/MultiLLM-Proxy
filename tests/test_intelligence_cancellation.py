@@ -9,6 +9,7 @@ import pytest
 from werkzeug.serving import make_server
 
 from services.control_plane_backup import capture
+from services.dispatch_network import control_network
 from services.intelligence_cancellation import CallerCancellation
 from tests.intelligence_fixtures import IntelligenceApiTestCase, upstream
 
@@ -65,7 +66,7 @@ class IntelligenceDisconnectTests(IntelligenceApiTestCase):
         rows = []
         try:
             with self.requests(side_effect=blocked_provider) as send:
-                with socket.create_connection(
+                with control_network(f"http://127.0.0.1:{server.server_port}"), socket.create_connection(
                     ("127.0.0.1", server.server_port)
                 ) as client:
                     client.sendall(wire)

@@ -72,7 +72,8 @@ class Exchange:
         self.response = None
         self._response_lock = threading.Lock()
         self.max_bytes = max_bytes
-        self.send, self.record = send, record
+        from services.provider_dispatch import capture_dispatch
+        self.send, self.record = capture_dispatch(send), record
         self.record_response = record_response
         if not _TRANSPORT_SLOTS.acquire(blocking=False):
             raise GatewayError(
@@ -395,7 +396,12 @@ class IntelligenceTransport:
         if content_type:
             headers["Content-Type"] = content_type
 
-        dispatch_data = protect_body(upstream.data if data is None else data, headers, provider=provider)
+        from services.key_data_guards import guard_request
+        guarded_data = guard_request(provider, upstream.data if data is None else data)
+        from services.gemini_credentials import prepare_credentials, restricted
+        if restricted(provider):
+            url, headers, _ = prepare_credentials(url, headers, {}, provider, token, self.auth)
+        dispatch_data = protect_body(guarded_data, headers, provider=provider)
 
         scope = selection_context(provider, model, config=self.config)
         from services.generation_deadline import bounded_timeout, current_deadline

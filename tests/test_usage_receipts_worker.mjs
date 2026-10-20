@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 import { canonicalBytes, appendReceipt, verifyChain, handleUsageReceiptRequest, handleUsageReceiptStoreRequest } from "../worker/usage-receipts.mjs";
 import { handleManagedStateRequest } from "../worker/managed-state-dispatch.mjs";
 import { handleUsageLedgerRequest } from "../worker/usage-ledger-d1.mjs";
@@ -145,7 +145,7 @@ test("private dispatcher flag, target, missing table and size bounds precede sto
 test("ledger flush records once, default rows and responses stay unchanged, missing key preserves usage", async t => {
   const { env, sql } = database(t);
   sql.exec("CREATE TABLE control_users (id TEXT PRIMARY KEY)");
-  for (const migration of ["0007_usage_ledger.sql", "0016_usage_buckets.sql"]) {
+  for (const migration of ["0007_usage_ledger.sql", "0016_usage_buckets.sql", "0042_usage_token_details.sql"]) {
     sql.exec(readFileSync(new URL(`../intelligence-migrations/${migration}`, import.meta.url), "utf8"));
   }
   const row = { at: "2026-10-09T00:00:00Z", principal: "alice", key_prefix: null, kind: "chat", endpoint: "/v1/chat/completions",

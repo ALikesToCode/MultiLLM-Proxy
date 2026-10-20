@@ -288,7 +288,7 @@ async function dispatch(env, operation, principal, payload, signal) {
   let result;
   try {
     response = await env.KNOWLEDGE_SERVICE.fetch("http://knowledge.internal/v1/dispatch", {
-      method: "POST", headers: { "content-type": "application/json" }, body,
+      method: "POST", headers: { "content-type": "application/json", "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: principal.id }) }, body,
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     });
     result = await response.json();

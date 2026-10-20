@@ -1,6 +1,7 @@
+import { dataPolicy } from "../worker/dispatch-policy.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertV4MiniflareOptions, Miniflare } from "miniflare";
+import { convertV4MiniflareOptions, Miniflare } from "./helpers/local_miniflare.mjs";
 
 import { handleControlUsersRequest, keyControlsPermit } from "../worker/control-users-d1.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
@@ -12,7 +13,7 @@ const user = (username, changes = {}) => ({
   username, api_key_hash: hash, api_key_prefix: "mllm_abcdefgh", scopes: "knowledge:read", is_admin: 0,
   created_at: "2026-09-24T00:00:00+00:00", last_login: null, last_used_at: null, last_used_ip: null,
   created_by: "admin", rotated_at: null, revoked_at: null, daily_budget_usd: null, monthly_budget_usd: null,
-  allowed_models: null, allowed_ips: null, expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, ...changes,
+  allowed_models: null, allowed_ips: null, expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, official_only: null, forced_provider_preferences: null, ...changes,
 });
 
 async function database(options) {
@@ -39,7 +40,7 @@ test("accounts persist, page, match active prefixes and record usage in D1", asy
     assert.deepEqual((await call({ operation: "list", after: "bob", limit: 2 })).body.users.map(item => item.username), ["carol"]);
     const active = (await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users;
     assert.deepEqual(active.map(item => item.username), ["alice", "carol"], "revoked accounts never authenticate");
-    assert.deepEqual(Object.keys(active[0]).sort(), Object.keys(user("x")).sort());
+    assert.deepEqual(Object.keys(active[0]).sort(), [...Object.keys(user("x")), "data_policy"].sort());
     assert.equal((await call({ operation: "touch", username: "alice", last_used_at: "2026-09-24T02:00:00+00:00", last_used_ip: "203.0.113.9" })).body.updated, true);
     assert.equal((await call({ operation: "get", username: "alice" })).body.user.last_used_ip, "203.0.113.9");
     assert.equal((await call({ operation: "delete", username: "carol" })).body.deleted, true);
@@ -153,7 +154,7 @@ test("per-key budgets, allowlists, expiry and address ranges persist and are val
     const limited = user("limited", { daily_budget_usd: 5, monthly_budget_usd: 50.5, allowed_models: "auto:*,free:*,openai:gpt-4.1",
       allowed_ips: "203.0.113.0/24,2001:db8::/32", expires_at: "2026-12-31T00:00:00+00:00" });
     assert.equal((await call({ operation: "upsert", user: limited })).status, 200);
-    assert.deepEqual((await call({ operation: "get", username: "limited" })).body.user, limited);
+    assert.deepEqual((await call({ operation: "get", username: "limited" })).body.user, { ...limited, data_policy: dataPolicy(limited) });
     assert.equal((await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users[0].allowed_models,
       "auto:*,free:*,openai:gpt-4.1");
     for (const changes of [{ daily_budget_usd: -1 }, { daily_budget_usd: "5" }, { monthly_budget_usd: 2e9 },
@@ -166,13 +167,13 @@ test("per-key budgets, allowlists, expiry and address ranges persist and are val
   } finally { await mf.dispose(); }
 });
 
-test("accounts keep working when code is deployed before the key-control migration", async () => {
-  const { mf, call } = await database({ skip: ["0007_usage_ledger.sql", "0016_usage_buckets.sql"] });
+test("management reports an unverifiable policy before the key-control migration", async () => {
+  const { mf, call } = await database({ skip: ["0007_usage_ledger.sql", "0016_usage_buckets.sql", "0042_usage_token_details.sql"] });
   try {
     assert.equal((await call({ operation: "upsert", user: user("alice") })).status, 200);
-    assert.deepEqual((await call({ operation: "get", username: "alice" })).body.user, user("alice"));
-    assert.deepEqual((await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users, [user("alice")]);
-    assert.deepEqual((await call({ operation: "list", after: null, limit: 5 })).body.users, [user("alice")]);
+    assert.deepEqual((await call({ operation: "get", username: "alice" })).body.user, { ...user("alice"), data_policy: null });
+    assert.deepEqual((await call({ operation: "by_prefix", prefix: "mllm_abcdefgh" })).body.users, [{ ...user("alice"), data_policy: null }]);
+    assert.deepEqual((await call({ operation: "list", after: null, limit: 5 })).body.users, [{ ...user("alice"), data_policy: null }]);
     const refused = await call({ operation: "upsert", user: user("alice", { daily_budget_usd: 1 }) });
     assert.equal(refused.status, 503, "controls cannot be stored before the migration");
     assert.equal((await call({ operation: "get", username: "alice" })).body.user.daily_budget_usd, null);

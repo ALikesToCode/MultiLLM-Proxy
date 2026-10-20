@@ -1,3 +1,4 @@
+import { providerOperation } from "../provider-dispatch.mjs";
 import { fail } from "./contracts.mjs";
 import { resolveRetentionPolicy, retentionAllowsContent } from "../retention-policy.mjs";
 import { digest } from "./evidence.mjs";
@@ -65,7 +66,7 @@ class MemoSession {
     usage.push(entry);
     try {
       const result = await bounded(() => options.embed ? options.embed(request.query)
-        : env.KNOWLEDGE_SEARCH_AI.run("@cf/baai/bge-m3", { text: [request.query] }), this.deadline(MEMO_TIMEOUT_MS));
+        : providerOperation("cloudflare", () => env.KNOWLEDGE_SEARCH_AI.run("@cf/baai/bge-m3", { text: [request.query] })), this.deadline(MEMO_TIMEOUT_MS));
       const vector = Array.isArray(result) ? result : result?.data?.[0];
       const quantized = quantizeEmbedding(vector);
       if (quantized) entry.outcome = "completed";

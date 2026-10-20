@@ -42,7 +42,9 @@ def post(path: str, payload: dict, timeout) -> requests.Response | Response:
     with requests.Session() as session:
         session.trust_env = False
         try:
-            response = session.post(ORIGIN + path, json=payload, timeout=timeout, allow_redirects=False, stream=True)
+            from services.provider_dispatch import provider_http
+            response = provider_http("cloudflare", "POST", ORIGIN + path, transport=session.request,
+                                     binding=True, json=payload, timeout=timeout, stream=True)
         except requests.exceptions.ConnectionError as error:
             connect = isinstance(error, requests.exceptions.ConnectTimeout) or "NewConnectionError" in repr(error)
             return _transport_failure("connect" if connect else "interrupted")

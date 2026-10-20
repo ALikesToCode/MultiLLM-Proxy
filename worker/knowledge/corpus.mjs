@@ -1,3 +1,4 @@
+import { providerOperation } from "../provider-dispatch.mjs";
 const MAX_SNAPSHOT_BYTES = 256 * 1024;
 const MAX_INDEX_RESULTS = 20;
 const INDEX_PAGE_SIZE = 50;
@@ -91,7 +92,7 @@ function itemInfo(value, key) {
 
 async function readIndex(callback) {
   for (let attempt = 0; ; attempt += 1) {
-    try { return await callback(); }
+    try { return await providerOperation("cloudflare", callback); }
     catch (error) {
       // The binding intermittently rejects its own account context before a metadata read.
       // Uploads, deletions and billable search requests never use this retry path.
@@ -184,13 +185,13 @@ export class KnowledgeCorpus {
     if (typeof request.product === "string" && request.product
       && encoder.encode(request.product).byteLength <= 64) retrieval.filters = { product: request.product };
     const response = this.searchAI ? await this.searchWithAI(request, retrieval.filters)
-      : await this.requireIndex().search({
+      : await providerOperation("cloudflare", () => this.requireIndex().search({
       query: request.query,
       ai_search_options: {
         retrieval, query_rewrite: { enabled: false }, reranking: { enabled: false },
         cache: { enabled: false },
       },
-    });
+    }));
     if (!response || !Array.isArray(response.chunks) || response.chunks.length > MAX_INDEX_RESULTS) {
       throw invalid("invalid_index_response");
     }
@@ -211,23 +212,23 @@ export class KnowledgeCorpus {
     }
     // Select one transport before dispatch. Never retry a billable query through
     // another binding when the first request has an unknown outcome.
-    const response = await this.searchAI.autorag(this.searchInstance).search({
+    const response = await providerOperation("cloudflare", () => this.searchAI.autorag(this.searchInstance).search({
       query: request.query, rewrite_query: false, max_num_results: MAX_INDEX_RESULTS,
       reranking: { enabled: false },
       ...(filters ? { filters: { type: "eq", key: "product", value: filters.product } } : {}),
-    });
+    }));
     return legacySearchChunks(response);
   }
 
   async uploadRevision(artifact, text) {
     await checkedBytes(artifact, text);
-    const result = await this.requireIndex().items.upload(artifact.index_key, text, {
+    const result = await providerOperation("cloudflare", () => this.requireIndex().items.upload(artifact.index_key, text, {
       metadata: {
         artifact_id: artifact.id, content_hash: artifact.content_hash,
         product: artifact.product, version_kind: artifact.version.kind,
         version: artifact.version.version ?? "unknown",
       },
-    });
+    }));
     return itemReference(result, artifact.index_key);
   }
 
@@ -286,7 +287,7 @@ export class KnowledgeCorpus {
     if (artifact.item_id || this.index?.items) {
       const item = await this.reconcileRevision(artifact);
       if (item && artifact.item_id && item.id !== artifact.item_id) throw invalid("invalid_artifact_removal");
-      if (item) await this.requireIndex().items.delete(item.id);
+      if (item) await providerOperation("cloudflare", () => this.requireIndex().items.delete(item.id));
     }
     await this.requireBucket().delete(artifact.snapshot_key);
   }

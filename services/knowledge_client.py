@@ -132,7 +132,8 @@ def _submit(body, stopped, deadline, results):
             session.mount("http://", HTTPAdapter(max_retries=0))
             if stopped.is_set():
                 return
-            with session.post(ENDPOINT, data=body,
+            from services.provider_dispatch import provider_http
+            with provider_http("knowledge", "POST", ENDPOINT, transport=session.request, binding=True, data=body,
                               headers={"Content-Type": "application/json", "Accept": "application/json",
                                        "Accept-Encoding": "identity"},
                               timeout=(3, DEADLINE_SECONDS), allow_redirects=False, stream=True) as response:
@@ -173,7 +174,9 @@ def dispatch(operation, user, payload=None):
     stopped = threading.Event()
     results = queue.Queue(maxsize=1)
     deadline = time.monotonic() + DEADLINE_SECONDS
-    thread = threading.Thread(target=_submit, args=(body, stopped, deadline, results),
+    from services.provider_dispatch import capture_dispatch
+    thread = threading.Thread(target=capture_dispatch(_submit, reference={"username": user.get("username") or user.get("id"),
+                                "api_key_prefix": user.get("api_key_prefix")}), args=(body, stopped, deadline, results),
                               daemon=True, name="knowledge-request")
     try:
         thread.start()
