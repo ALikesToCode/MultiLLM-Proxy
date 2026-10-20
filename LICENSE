@@ -1,23 +1,34 @@
-MultiLLM Proxy Licence (personal use only)
+MultiLLM Proxy Licence (personal use only), version 2
 
 Copyright (c) 2024-2026 Abhyudaya Baiju Tharakan (https://github.com/ALikesToCode). All rights reserved.
 
-1. Personal use. If you are an individual, you may download, run, study and modify this software for your own personal, non-commercial use, and not on behalf of anyone else.
+1. Grant. Subject to these terms, the copyright holder grants you a worldwide, non-exclusive, royalty-free, non-transferable and non-sublicensable licence, for the full term of copyright, to download, run, study and modify this software for personal use.
 
-2. Everything else needs written approval. Any other use needs the copyright holder's prior written approval. This includes:
+2. Personal use. "Personal use" means use by you as an individual, for your own non-commercial purposes, and not for anyone else.
+   It includes:
+   - learning, study, hobby projects and personal experiments, including when the skills you gain also help you in your job;
+   - a student using it for their own learning or their own coursework, on their own device or account, where it is not run by, for or on behalf of the institution.
+   It does not include:
+   - use in the course of employment, contracting, consulting or freelance work, or for a client, including building or testing something for a client;
+   - use to provide anything to other people, whether paid or free;
+   - use from which you or anyone else receives payment or another commercial advantage.
+
+3. Everything else needs written approval. Any other use needs the copyright holder's prior written approval. This includes:
    - any use by, for or on behalf of an organisation of any kind, such as a company, partnership, government body or department, school, college, university, charity, non-profit or research institution;
    - any commercial use;
-   - offering the software, or what it does, as a service to others;
-   - distributing the software or a modified version of it.
+   - offering the software, or what it does, as a service to others, including hosted or API access;
+   - distributing the software or a modified version of it, in source or compiled form, or hosting copies of it anywhere other than a fork on GitHub.
 
-3. Notices. Every copy must keep this licence and the copyright notice.
+4. Notices. Every copy you make must keep this licence and the copyright notice.
 
-4. Earlier versions. Versions published before this licence was added were released under the MIT licence and stay under it. This licence applies to this version and every later version.
+5. Earlier versions. Versions of this software up to and including commit 81eb9c71358429d2f559b6124f91ddbf310a3b4f (15 October 2026) were published under the MIT licence. Those versions stay under the MIT licence, and its notice for them is kept in LICENSE-MIT. This licence applies to commit 3a757587fa502b8ba2bd6c4da5728be6e1fb2aaa (20 October 2026) and to every later version.
 
-5. GitHub. Nothing here limits the rights that GitHub's Terms of Service give users to view and fork this repository on GitHub.
+6. GitHub. GitHub's Terms of Service let users view this public repository and fork it on GitHub. This licence does not limit that. It is the only exception: a fork on GitHub gives no right to run, use or distribute the software beyond section 2, or to host copies anywhere else.
 
-6. Ending. If you break these terms, your permission under them ends automatically.
+7. Contributions. If you send a contribution, such as a pull request or patch, you confirm that you have the right to send it, and you grant the copyright holder a perpetual, worldwide, non-exclusive, royalty-free, irrevocable licence to use, copy, modify, sublicense and relicense it under any terms, including this licence and commercial licences.
 
-7. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+8. Ending. If you break these terms, your licence ends automatically. The copyright holder may restore it in writing.
 
-8. Asking for approval. Ask through https://github.com/ALikesToCode.
+9. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+10. Asking for approval. Ask through https://github.com/ALikesToCode. An approval counts only if it is in writing from the copyright holder and says who may use the software, for what, whether hosting or distribution is allowed, for how long, any fee, and how it ends.
