@@ -2439,7 +2439,7 @@ test("worker answers /health directly without touching the container", async () 
   assert.equal(stub.getCalls(), 0);
   assert.deepEqual(await response.json(), {
     status: "healthy",
-    key_controls: {protocol: 1, enforcement: false},
+    key_controls: {protocol: 2, enforcement: true},
     mode: "worker-fallback",
   });
 });
@@ -2451,7 +2451,7 @@ test("worker checks application readiness through the container health endpoint"
     assert.equal(forwardedUrl.pathname, "/healthz");
     assert.equal(request.method, "GET");
     assert.equal(request.redirect, "manual");
-    return new Response(JSON.stringify({ status: "ready", database: "ok", main_key_controls: {protocol: 1, enforcement: false} }), {
+    return new Response(JSON.stringify({ status: "ready", database: "ok", main_key_controls: {protocol: 2, enforcement: true} }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -2468,7 +2468,7 @@ test("worker checks application readiness through the container health endpoint"
   assert.equal(stub.getCalls(), 1);
   assert.equal(stub.getStartCalls(), 0);
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
-  assert.deepEqual(await response.json(), { status: "ready", database: "ok", main_key_controls: {protocol: 1, enforcement: false} });
+  assert.deepEqual(await response.json(), { status: "ready", database: "ok", main_key_controls: {protocol: 2, enforcement: true} });
   assert.match(response.headers.get("X-MultiLLM-Worker-Build"), /^[0-9a-f]{64}$/);
 });
 

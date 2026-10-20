@@ -18,10 +18,10 @@ from flask import current_app, has_app_context
 from werkzeug.security import check_password_hash
 
 from error_handlers import APIError
-from services import user_store, stream_cost_breaker
+from services import user_store, stream_cost_breaker, key_data_guards
 from services.auth_primitives import build_api_key_prefix, normalized_username
 
-CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate")
+CONTROL_FIELDS = ("daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "shadow_eval_rate", "official_only", "forced_provider_preferences")
 MAX_BUDGET_USD = 1_000_000_000
 MAX_PATTERNS = 64
 MAX_RANGES = 64
@@ -148,6 +148,7 @@ def validate(payload: Mapping[str, Any]) -> dict[str, Any]:
         "secret_scan_mode": mode,
         "shadow_eval_rate": rate,
         **stream_cost_breaker.validated_control(payload),
+        **key_data_guards.validate_controls(payload),
     }
 
 
@@ -164,6 +165,7 @@ def from_storage(row: Mapping[str, Any]) -> dict[str, Any]:
     rate = row.get("shadow_eval_rate") if hasattr(row, "get") else row_value(row, "shadow_eval_rate")
     if type(rate) in (int, float) and 0 <= rate <= 0.2:
         controls["shadow_eval_rate"] = float(rate)
+    controls.update(key_data_guards.stored_controls(row))
     controls.update(stream_cost_breaker.storage_control(row))
     return controls
 
@@ -187,6 +189,8 @@ def public(controls: Mapping[str, Any]) -> dict[str, Any]:
         "secret_scan_mode": controls.get("secret_scan_mode"),
         "shadow_eval_rate": controls.get("shadow_eval_rate"),
         **stream_cost_breaker.public_control(controls),
+        "official_only": bool(controls.get("official_only")),
+        "forced_provider_preferences": key_data_guards.preferences(controls.get("forced_provider_preferences")),
     }
 
 
@@ -210,6 +214,8 @@ def _glob(pattern: str) -> re.Pattern:
 
 def model_allowed(user: Mapping[str, Any], model: Any) -> bool:
     """Whether a model ID matches the key's allowlist; ``*`` matches any characters."""
+    if not key_data_guards.model_permitted(user, model):
+        return False
     patterns = model_patterns(user)
     if patterns is None:
         allowed = True
@@ -224,6 +230,8 @@ def model_allowed(user: Mapping[str, Any], model: Any) -> bool:
 
 def provider_allowed(user: Mapping[str, Any], provider: str) -> bool:
     """Whether a request that names no model may reach a provider namespace."""
+    if not key_data_guards.model_permitted(user, provider + ":*"):
+        return False
     patterns = model_patterns(user)
     if patterns is None:
         allowed = True
@@ -293,9 +301,11 @@ _security_copies: dict[Any, dict[str, dict[str, Any]]] = {}
 
 def _security_user(auth, row):
     """Reject malformed authority records before permissive legacy decoding."""
+    if not isinstance(row, dict) or not set(user_store.USER_FIELDS).issubset(row):
+        raise ValueError("Incomplete security account")
+    row = stream_cost_breaker.d1_row(row)
     if not isinstance(row, dict) or set(row) != set(user_store.USER_FIELDS) | ({stream_cost_breaker.CAP_FIELD} if stream_cost_breaker.enabled() else set()):
         raise ValueError("Incomplete security account")
-    stream_cost_breaker.d1_row(row)
     if normalized_username(row["username"]) != row["username"]:
         raise ValueError("Invalid security account identity")
     if not row["api_key_hash"] or not row["api_key_prefix"] or not re.fullmatch(r"[A-Za-z0-9:_.,-]{0,512}", row["scopes"]):
@@ -308,7 +318,11 @@ def _security_user(auth, row):
     models = row["allowed_models"]
     if models is not None and (not models or not all(MODEL_PATTERN.fullmatch(item) for item in models.split(","))):
         raise ValueError("Invalid security model grants")
-    controls = validate({name: row[name] for name in CONTROL_FIELDS})
+    payload = {name: row[name] for name in CONTROL_FIELDS}
+    if payload["official_only"] is not None:
+        payload["official_only"] = bool(payload["official_only"])
+    payload["forced_provider_preferences"] = key_data_guards.preferences(payload["forced_provider_preferences"])
+    controls = validate(payload)
     if any(row[name] is not None and controls[name] is None for name in CONTROL_FIELDS):
         raise ValueError("Invalid security account controls")
     return auth._row_to_user(row)

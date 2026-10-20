@@ -1,5 +1,5 @@
 import { legacyBindingControls } from "./legacy-binding-policy.mjs";
-import { KEY_CONTROLS } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled } from "./key-controls-capability.mjs";
 /** Sole provider network boundary. Deferred work carries identity, never cached policy. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { currentDataControls, legacyDataControls, mergePreferences, parsePreferences, providerClassPermitted } from "./key-data-guards.mjs";
@@ -23,14 +23,14 @@ export function bindingPrincipal(request, legacyId) {
     const value = JSON.parse(request.headers.get("X-MultiLLM-Dispatch-Principal"));
     if (value.version !== 1 || typeof value.username !== "string" || !value.username
       || Object.keys(value).sort().join() !== "username,version") throw Error();
-    return { authenticated: true, keyId: value.username };
+    return { authenticated: true, keyId: value.username, senderCapability: request.headers.get("X-MultiLLM-Key-Controls") };
   } catch { throw new DispatchError("key_data_controls_unavailable"); }
 }
 
 async function admission(provider, options) {
   const state = options.env ? options : dispatchContext();
   try {
-    if (!KEY_CONTROLS.enforcement && state?.env && (!state.authority || state.authority.legacyBinding)) {
+    if (state?.env && (!state.authority || state.authority.legacyBinding)) {
       return { ...state, policy: await (state.authority?.legacyBinding ? legacyBindingControls(state.env) : legacyDataControls(state.env)) };
     }
     if (!state?.authority || state.authority.authenticated !== true) throw Error();
@@ -71,7 +71,7 @@ function apiOrigin(provider, url, env, options) {
 }
 
 function credentials(provider, request, env, policy, options) {
-  if (!policy.official_only && policy.forced_provider_preferences === null || provider === "cloudflare") return request;
+  if (!controlled(policy) || provider === "cloudflare") return request;
   const url = new URL(request.url);
   if ([...url.searchParams.keys()].some(name => name.toLowerCase() === "key")) {
     throw new DispatchError("provider_credential_not_allowed", 403);
@@ -108,7 +108,7 @@ export async function providerFetch(provider, input, init = {}, options = {}) {
     const headers = new Headers(request.headers); headers.delete("content-length");
     request = new Request(request, { headers, body: JSON.stringify(payload) });
   }
-  const headers = new Headers(request.headers); headers.delete("x-multillm-dispatch-principal");
+  const headers = new Headers(request.headers); headers.delete("x-multillm-dispatch-principal"); headers.delete("x-multillm-key-controls");
   request = new Request(request, { headers, redirect: "manual" });
   return admittedNetwork(() => (options.send ?? fetch)(request));
 }

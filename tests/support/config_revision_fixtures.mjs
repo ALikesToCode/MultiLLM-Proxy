@@ -31,7 +31,7 @@ export const account = (changes = {}) => ({ username: "alice", api_key_hash: "sy
   expires_at: null, secret_scan_mode: null, shadow_eval_rate: null, official_only: null, forced_provider_preferences: null, ...changes });
 
 const usersRequest = body => new Request("http://intelligence.internal/v1/users", {
-  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, ...body }),
+  method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ version: 1, data_policy_version: 1, ...body }),
 });
 
 export async function usersCall(env, body) {

@@ -30,7 +30,7 @@ def loaded_account(policy):
                is_admin=0, created_at="2026-10-01T00:00:00Z", shadow_eval_rate=0.2,
                **policy, data_policy=envelope(policy))
     user = AuthService._row_to_user(_row(raw))
-    assert "official_only" not in user and "forced_provider_preferences" not in user
+    assert user["data_policy"] == envelope(policy)
     return user
 
 

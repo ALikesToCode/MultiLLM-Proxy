@@ -126,7 +126,7 @@ jobs:
       - name: Check release configuration
         run: node scripts/key_data_preflight.mjs --check
       # Bundle-only checks cannot attest remote deployment prerequisites. The
-      # normal Wrangler build enforces those before a real upload.
+      # normal Wrangler build command enforces those before a real upload.
       - name: Validate Knowledge Worker bundle
         env:
           WRANGLER_SEND_METRICS: "false"

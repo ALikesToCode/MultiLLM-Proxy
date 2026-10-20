@@ -308,11 +308,12 @@ python -m pytest -q
 npm run test:worker
 npm run test:integration
 npm run cf:migrations:check
-npx wrangler deploy --dry-run
+node scripts/key_data_preflight.mjs --check
+node scripts/check_worker_bundle.mjs --config wrangler.jsonc --outdir /tmp/main-worker
 ```
 
 Pushing to `main` deploys; see [How deploys work](#how-deploys-work). Never deploy
-with a bare `wrangler deploy`, which skips the migrations.
+with a bare `wrangler deploy`: its preflight verifies prerequisites but does not apply migrations.
 
 ## How deploys work
 
@@ -332,7 +333,10 @@ A push to `main` runs the `ci` workflow. When it passes, the `deploy` workflow
    first because the main Worker binds it (`KNOWLEDGE_SERVICE`) and may call what the
    new version adds. The main Worker and its Container go last, and only when the
    repository variable `DEPLOY_MAIN_WORKER` is `true` (see [Workers Builds](#workers-builds)).
-   Each version is tagged with the full commit SHA, and its message links to the run.
+   Before upload, the main build verifies the migrated account schema, required bindings
+   and secret names, and the private Worker's tagged expansion capability. Main activation uses
+   `--containers-rollout=none` first, followed by the Container rollout. Each version
+   is tagged with the full commit SHA, and its message links to the run.
 4. **Verify.** `scripts/deploy_status.mjs --verify` retries for up to ten minutes
    until no migration is pending, `GET /ready` answers 200 (every D1 table exists and
    the Container is healthy), the Knowledge Worker's live version carries the commit,
@@ -349,8 +353,9 @@ SHA.
 
 ## Migrations
 
-Migrations are applied before the code that uses them, and with Workers Builds the new
-code can briefly run before them, so the schema must work for the old and the new code:
+Migrations are applied before the code that uses them. The main build refuses upload
+until they are recorded and the required account columns exist. The schema must
+still support old and new code during rollout:
 
 - Make only additive changes: new tables, new nullable or defaulted columns, new
   indexes, using `IF NOT EXISTS`. Add each new table to `REQUIRED_D1_TABLES` in
@@ -442,7 +447,8 @@ Set `D1_DATABASE` explicitly to the database in both selected Worker configurati
 then run `npm run deploy` (`scripts/deploy.sh`). For another environment set
 `MAIN_WORKER_CONFIG`, `KNOWLEDGE_WORKER_CONFIG` and `DEPLOY_STATUS_URL` as well. The
 script checks migrations, applies them, deploys the private Worker, then the main
-Worker and Container. From a clean checkout it tags both versions with the commit.
+Worker with Container rollout disabled, then the Container. Preflight runs before
+each main upload. From a clean checkout it tags both versions with the commit.
 Extra arguments go to the final deploy. Never run it concurrently with another deploy.
 
 Each release uses a fresh build-only image identifier. The command does not finish

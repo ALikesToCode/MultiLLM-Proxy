@@ -135,7 +135,7 @@
                             <td role="cell" data-label="Actions">
                                 <div class="table-actions">
                                     <button class="button button--secondary button--sm" type="button" data-controls-user="{{ user.username }}"
-                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at, "secret_scan_mode": user.secret_scan_mode, "shadow_eval_rate": user.shadow_eval_rate} | tojson }}'
+                                        data-controls='{{ {"daily_budget_usd": user.daily_budget_usd, "monthly_budget_usd": user.monthly_budget_usd, "allowed_models": user.allowed_models, "allowed_ips": user.allowed_ips, "expires_at": user.expires_at, "secret_scan_mode": user.secret_scan_mode, "shadow_eval_rate": user.shadow_eval_rate, "official_only": user.official_only, "forced_provider_preferences": user.forced_provider_preferences} | tojson }}'
                                         aria-label="Limits for {{ user.username }}">Limits</button>
                                     <button class="button button--secondary button--sm" type="button" data-rotate-user="{{ user.username }}" aria-label="Rotate key for {{ user.username }}">Rotate key</button>
                                     <button class="button button--danger button--sm" type="button" data-delete-user="{{ user.username }}" aria-label="Delete {{ user.username }}"
@@ -170,6 +170,11 @@
                     <input id="key-monthly-budget" name="monthly_budget_usd" class="field" type="number" min="0" step="0.01" inputmode="decimal">
                 </label>
             </div>
+            <label><input id="key-official-only" name="official_only" type="checkbox"> Official providers only</label>
+            <p class="field-hint">Exclude subscription, reseller and free providers, including routed candidates.</p>
+            <label class="form-field" for="key-forced-preferences">Forced provider preferences (JSON object)
+                <textarea id="key-forced-preferences" name="forced_provider_preferences" class="field-textarea" rows="3" spellcheck="false" placeholder='{"data_collection":"deny"}'></textarea>
+            </label>
             <label class="form-field" for="key-allowed-models">Allowed models
                 <textarea id="key-allowed-models" name="allowed_models" class="field-textarea" rows="3" spellcheck="false" aria-describedby="key-allowed-models-hint"></textarea>
             </label>
@@ -216,5 +221,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/users.js', v='2') }}"></script>
-<script src="{{ url_for('static', filename='js/key-controls.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/key-controls.js', v='2') }}"></script>
 {% endblock %}

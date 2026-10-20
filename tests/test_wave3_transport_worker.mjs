@@ -1,4 +1,4 @@
-import { policyFixtureEnv } from "./helpers/dispatch_fixture.mjs";
+import { policyStore } from "./helpers/dispatch_fixture.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { handleUsageLedgerRequest, recordNativeUsage } from "../worker/usage-ledger-d1.mjs";
 import { BUCKET_FIELDS } from "../worker/usage-buckets-d1.mjs";
-import { handleKnowledgeEdgeRequest as rawhandleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
+import { handleKnowledgeEdgeRequest } from "../worker/knowledge-edge.mjs";
 import { dispatchKnowledge } from "../worker/knowledge/service.mjs";
 import { HandoffStore } from "../worker/knowledge/handoff-store.mjs";
 import { fixture, request as knowledgeQuery } from "./knowledge_fixture.mjs";
@@ -17,7 +17,7 @@ const clock = Date.parse("2026-10-09T00:00:00Z");
 const enabled = { CONTENT_RETENTION_ENABLED: "true" };
 const base = { at: new Date(clock).toISOString(), principal: "reader", key_prefix: null, kind: "chat",
   endpoint: "/v1/chat/completions", requested_model: "openai:fixture", selected_model: "openai:fixture",
-  status: 200, latency_ms: 300, input_tokens: 100, output_tokens: 10, cost_usd: 0.001, cost_basis: "usage", request_id: null };
+  status: 200, latency_ms: 300, input_tokens: 100, output_tokens: 10, cost_usd: 0.001, cost_basis: "usage", request_id: null, cached_input_tokens: null, reasoning_tokens: null };
 const buckets = { ordinary_input_tokens: 40, cache_read_input_tokens: 60, cache_write_input_tokens: 0,
   ordinary_input_cost_microusd: 80, cache_read_input_cost_microusd: 30, cache_write_input_cost_microusd: 0,
   output_cost_microusd: 80, bucket_basis: "measured", bucket_source: "openai" };
@@ -34,6 +34,7 @@ async function ledger(t, migrated = true) {
   t.after(() => sqlite.close());
   const migration = await readFile(new URL("../intelligence-migrations/0007_usage_ledger.sql", import.meta.url), "utf8");
   sqlite.exec(migration.slice(migration.indexOf("CREATE TABLE IF NOT EXISTS usage_events")));
+  sqlite.exec(await readFile(new URL("../intelligence-migrations/0042_usage_token_details.sql", import.meta.url), "utf8"));
   const extend = async () => sqlite.exec(await readFile(new URL("../intelligence-migrations/0016_usage_buckets.sql", import.meta.url), "utf8"));
   if (migrated) await extend();
   const statements = [];
@@ -174,7 +175,7 @@ function knowledgeRequest(path, payload, headers = {}) {
 }
 function knowledgeCapture(flags = {}) {
   const captured = [];
-  return { captured, env: { ADMIN_API_KEY: "knowledge-fixture", ADMIN_USERNAME: "owner", ...flags,
+  return { captured, env: { ADMIN_API_KEY: "knowledge-fixture", ADMIN_USERNAME: "owner", INTELLIGENCE_DB: policyStore(), ...flags,
     KNOWLEDGE_SERVICE: { async fetch(_url, init) {
       captured.push(init.body);
       return Response.json({ version: 1, result: { status: "fixture" } });
@@ -283,7 +284,7 @@ test("handoff Durable Object wrapper passes the trusted snapshot and clock to th
 test("captured edge policy survives service configuration changes and forbids caller-selected payload identity", async () => {
   const f = await fixture();
   await f.published();
-  const edgeEnv = { ...enabled, ADMIN_API_KEY: "knowledge-fixture", ADMIN_USERNAME: "owner",
+  const edgeEnv = { ...enabled, ADMIN_API_KEY: "knowledge-fixture", ADMIN_USERNAME: "owner", INTELLIGENCE_DB: policyStore(),
     CONTENT_RETENTION_POLICY_JSON: '{"routes":{"/v1/knowledge/context":"zero"}}',
     KNOWLEDGE_SERVICE: { async fetch(_url, init) {
       const envelope = JSON.parse(init.body);
@@ -320,5 +321,3 @@ test("public key and route zero prevent durable roleplay recovery and memory rea
     assert.equal(entry.storage.operations.put, 0);
   }
 });
-
-function handleKnowledgeEdgeRequest(request, env, ...args) { return rawhandleKnowledgeEdgeRequest(request, policyFixtureEnv(env), ...args); }

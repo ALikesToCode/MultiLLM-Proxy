@@ -1,4 +1,4 @@
-import { expansionFence } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS, controlled, expansionFence } from "./key-controls-capability.mjs";
 import { dataPolicy } from "./dispatch-policy.mjs";
 import { logFailure } from "./log.mjs";
 
@@ -78,7 +78,14 @@ export async function handleIntelligenceAuthRequest(request, env) {
     if (body.operation === "lookup") {
       if (!fields(body, ["version", "operation", "keyPrefix"]) || !validPrefix(body.keyPrefix))
         return reply({error: "invalid_request"}, 400);
-      return reply({version: 1, principal: await lookupIntegrationPrincipal(db, body.keyPrefix)});
+      const principal = await lookupIntegrationPrincipal(db, body.keyPrefix);
+      if (principal && !principal.revokedAt) {
+        const policy = await db.prepare("SELECT official_only, forced_provider_preferences FROM intelligence_principals WHERE id = ? AND revoked_at IS NULL").bind(principal.id).first();
+        if (!policy) throw Error("key_data_controls_unavailable");
+        dataPolicy(policy);
+        if (controlled(policy)) throw Error("key_controls_require_upgrade");
+      }
+      return reply({version: 1, principal});
     }
     if (typeof body.principalId !== "string" || !idPattern.test(body.principalId)) return reply({error: "invalid_request"}, 400);
     if (body.operation === "dispatch_policy") {
@@ -86,7 +93,7 @@ export async function handleIntelligenceAuthRequest(request, env) {
       const row = await db.prepare(`SELECT p.official_only, p.forced_provider_preferences, c.key_prefix
         FROM intelligence_principals p JOIN intelligence_credentials c ON c.principal_id=p.id AND c.version=p.version
         WHERE p.id=? AND p.revoked_at IS NULL`).bind(body.principalId).first();
-      return reply({version: 1, principal: row ? { username: body.principalId, api_key_prefix: row.key_prefix,
+      return reply({version: 1, key_controls: KEY_CONTROLS, principal: row ? { username: body.principalId, api_key_prefix: row.key_prefix,
         data_policy: dataPolicy(row) } : null});
     }
     const now = new Date().toISOString();

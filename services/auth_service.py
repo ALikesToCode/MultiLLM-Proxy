@@ -285,7 +285,7 @@ class AuthService:
     def _row_to_user(cls, row: sqlite3.Row) -> Dict[str, Any]:
         from services.dispatch_policy import envelope, verify
         return {
-            "data_policy": verify(row["data_policy"]) if dict(row).get("data_policy") is not None else envelope({"official_only": None, "forced_provider_preferences": None, **dict(row)}),
+            "data_policy": verify(row["data_policy"]) if dict(row).get("data_policy") is not None else envelope(row),
             "username": row["username"],
             "api_key_hash": row["api_key_hash"],
             "api_key_prefix": row["api_key_prefix"],
@@ -299,7 +299,9 @@ class AuthService:
             "rotated_at": deserialize_datetime(row["rotated_at"]),
             "revoked_at": deserialize_datetime(row["revoked_at"]),
             **stream_cost_breaker.storage_control(row),
-            **key_controls.from_storage(row),
+            **key_controls.from_storage(
+                {name: key_controls.row_value(row, name) for name in key_controls.CONTROL_FIELDS}
+            ),
         }
 
     @classmethod
@@ -463,7 +465,9 @@ class AuthService:
                         allowed_ips = excluded.allowed_ips,
                         expires_at = excluded.expires_at,
                         secret_scan_mode = excluded.secret_scan_mode,
-                        shadow_eval_rate = excluded.shadow_eval_rate
+                        shadow_eval_rate = excluded.shadow_eval_rate,
+                        official_only = excluded.official_only,
+                        forced_provider_preferences = excluded.forced_provider_preferences
                     """,
                     (
                         username,
@@ -479,7 +483,6 @@ class AuthService:
                         serialize_datetime(rotated_at),
                         serialize_datetime(revoked_at),
                         *(stored_controls[name] for name in key_controls.CONTROL_FIELDS),
-                        None, None,
                     ),
                 )
                 stream_cost_breaker.persist_sql_cap(connection, username, stored_controls)
@@ -920,6 +923,7 @@ class AuthService:
             "rotated_at": serialize_datetime(user["rotated_at"]),
             "revoked_at": serialize_datetime(user["revoked_at"]),
             **key_controls.public(user),
+            "data_policy": user.get("data_policy"),
         }
 
     @staticmethod

@@ -1,0 +1,201 @@
+# Key data controls
+
+For an app whose requests carry personal data, set controls through the existing
+administrator-only `PUT /users/{username}/controls` endpoint or the user's Limits
+form:
+
+```json
+{
+  "official_only": true,
+  "forced_provider_preferences": {"data_collection": "deny"}
+}
+```
+
+`official_only` defaults to false. A restricted key receives HTTP 403 with
+`provider_class_not_allowed` for a direct non-official provider. Auto, intelligence
+and cascade routes filter concrete candidates before dispatch, including fallback
+and background submissions. No eligible candidate means refusal. Model allowlists
+still apply independently. Disabling a control requires an administrator; request
+headers and routing overrides cannot disable it.
+
+`forced_provider_preferences` is an optional JSON object, limited to 4 KiB. It is
+merged recursively into the `provider` object on every OpenRouter request made for
+the key, including raw passthrough and internally routed requests. Administrator
+values win; a caller's `data_collection: "deny"` stays `deny` even if the stored
+value says `allow`. Other caller preferences remain unless overridden. See
+[provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+for the supported preference fields. This control does not change another
+provider's request format.
+
+Realtime ticket issuance and socket admission re-read current key data controls.
+Restricted keys cannot open non-official models. Realtime refuses any key with
+forced preferences, including an empty object, because those preferences cannot
+be enforced throughout the socket session. Existing tickets do not bypass a
+subsequent control change.
+
+Requests from keys with either data control are excluded from shadow sampling.
+Stored samples recheck their source key before replay and before every candidate
+or judge dispatch, including three-arm comparisons. Controlled, inactive, missing
+or unverifiable source accounts are skipped; existing samples expire normally.
+
+Restricted Gemini requests reject caller credential overrides in query parameters,
+provider headers or a separate Authorization header. Only the operator's current
+`GEMINI_API_KEY` binding is covered by `GEMINI_DATA_TIER=paid`; a missing binding
+fails closed, without a cached or legacy-alias fallback. The same restriction
+applies to automatic fallback and background dispatch.
+
+## Provider classes
+
+`providers/data-classes.json` is shared by Flask and the Worker. Registry adapters
+expose `data_class`; classification follows the configured provider namespace,
+not a claim in a request or a model's name. Unknown namespaces are conservatively
+`reseller`, and unknown `ce-*` namespaces are `subscription`.
+
+| Class | Provider namespaces | Evidence and scope |
+| --- | --- | --- |
+| official | openrouter, openai, anthropic, azure | Direct API endpoints in `config.py` and `providers/registry.py`; [router API](https://openrouter.ai/docs/quickstart), [direct model API](https://platform.openai.com/docs/api-reference), [Messages API](https://platform.claude.com/docs/en/api/overview), [Azure inference](https://learn.microsoft.com/en-us/azure/ai-foundry/model-inference/how-to/use-chat-completions). |
+| official | groq, together, cerebras, xai | Direct inference service endpoints; [Groq](https://console.groq.com/docs/overview), [Together](https://docs.together.ai/docs/quickstart), [Cerebras](https://inference-docs.cerebras.ai/quickstart), [xAI](https://docs.x.ai/docs/overview). |
+| official | scaleway, sambanova, hyperbolic | Configured service APIs; [Scaleway](https://www.scaleway.com/en/docs/generative-apis/quickstart/), [SambaNova](https://docs.sambanova.ai/docs/en/get-started/quickstart), [Hyperbolic](https://docs.hyperbolic.xyz/docs/getting-started). The current Hyperbolic overview emphasizes compute; the historical inference endpoint's availability needs operator confirmation. |
+| official | googleai, cloudflare | Cloud-hosted inference endpoints; [Google Cloud](https://cloud.google.com/vertex-ai/docs/start/introduction-unified-platform), [Workers AI](https://developers.cloudflare.com/workers-ai/). |
+| official or free | gemini | Defaults to `free`. Set `GEMINI_DATA_TIER=paid` only after confirming every credential used for this namespace belongs to the paid tier. [Pricing and data-use distinctions](https://ai.google.dev/gemini-api/docs/pricing). The proxy cannot discover an account's tier. |
+| subscription | ce-gpt-plus, ce-gpt-pro, ce-grok-heavy, ce-claude-kiro, ce-claude-kiro-cheap, ce-claude-max, ce-image, codex-easy | Subscription/pool adapters in `providers/codex_everywhere.py`, `providers/image_relays.py` and the existing README. Pool provenance and current vendor terms remain unverified; these are excluded from restricted keys. |
+| subscription | opencode, cline-pass, kimi-code, mimo | Configured coding-plan endpoints, rather than ordinary pay-as-you-go endpoints: [Go](https://opencode.ai/docs/go/), [Cline Pass](https://docs.cline.bot/getting-started/clinepass), [Kimi Code membership](https://www.kimi.com/code/docs/en/kimi-code/membership), [MiMo plan distinction](https://platform.xiaomimimo.com/static/docs/price/pay-as-you-go.md). |
+| reseller | aihubmix, navyai, linkapi, nanogpt, a6api, aimlapi, ephone, gguu, gguu-grok, latix | Relay endpoints in `config.py`, `providers/image_relays.py` and the existing README. [Navy's multi-provider API](https://api.navy/docs) also uses subscription billing; the reseller tag takes precedence here. The other relays' current sourcing and data terms remain unverified. |
+| reseller | chutes, nineteen | Conservative classification of distributed inference networks: [Chutes](https://chutes.ai/docs/guides/starter-guide), [Nineteen](https://nineteen.ai/app). Whether a separately reviewed deployment should qualify as official remains an operator decision. |
+| free | free, gemma, palm | Explicit free pools and conservatively excluded legacy Google aliases; the latter's credential tier is not established by the adapters. |
+| free | ollama, vllm, lmstudio, llamacpp, sglang | Operator-configured local inference adapters in `providers/local_inference.py`. This is a conservative exclusion within the four-class vocabulary, not a claim about hosting cost or local data handling. |
+
+`FREE_ROUTE_FREE_TIER_PROVIDERS` takes precedence over the table, including the
+Gemini paid setting. A class describes the integration; it does not certify
+retention, training policy, a data-processing agreement, or a custom base URL.
+Review operator-supplied endpoints and credentials before admitting traffic.
+
+## Migration and usage
+
+Use the [expansion and enforcement rollout](key-controls-rollout.md). Apply migrations
+0041–0043, deploy expansion to all three components and verify protocol 1 everywhere.
+Then deploy enforcement independently, verify protocol 2 with enforcement on every
+component, and only then enable restrictions. Expansion peers preserve NULL-policy
+traffic and refuse controlled accounts during rollback. Repeat the tracked migration
+command rather than replaying bare ALTER statements.
+
+The version-1 `data_policy` envelope requires `version`, `official_only` and
+`forced_provider_preferences`, with explicit nulls for unrestricted values.
+Bootstrap administrative recovery remains available for management, but cannot
+authorise provider dispatch without a current durable account and verified policy.
+
+`services/provider_dispatch.py` and `worker/provider-dispatch.mjs` are the outbound
+provider boundaries. HTTP adapters and SDK/binding operations reread the account
+at every dispatch, including retries, fallbacks, video polls, background work,
+Realtime, roleplay and Knowledge/MCP. Deferred work carries only identity; it does
+not carry a policy snapshot. Stored Knowledge sources and ingestion jobs retain
+their source account identity across scheduling, retries and reconciliation.
+Imported-skill watches also retain the importing account; legacy imports without
+that identity refuse upstream checks until explicitly imported again.
+Restricted requests replace cached credentials with
+an operator credential freshly resolved for an allowlisted provider API origin,
+and reject caller Gemini credentials. Vertex refreshes the current service-account
+binding (JSON or file) or the currently selected gcloud account, without using the
+legacy process token cache. Missing, changed or malformed bindings refuse dispatch.
+Public video assets still require policy admission but never receive API credentials.
+Video relay and storage downloads follow at most five HTTPS redirects, rechecking
+current policy at each hop. An origin change permanently strips credential headers;
+unresolved redirects are errors rather than successful content.
+Forced routing preferences merge at the final JSON submission. Realtime and
+roleplay refuse forced preferences because their full transports cannot enforce
+them. Missing accounts, missing fields, malformed envelopes and store outages
+refuse dispatch. The static outbound inventory pins every runtime source module,
+independently of HTTP client spelling. Suite-wide runtime guards require an active
+network capability at Python's `socket.connect` audit event and Worker fetch/socket
+calls, even when clients use the extension socket or tests replace fetch. Provider
+SDK and index binding doubles use the shared `providerBinding` fixture, which checks
+every method call, nested handle and replacement method. Admission issues a capability only for the transport
+operation and revokes it on completion or failure. Mutation tests cover urllib3,
+fetch-based adapters, Node HTTP, raw extension sockets and omitted SDK admission wrappers.
+Private persistence, storage management, authentication, telemetry, public capability
+metadata and webhook delivery are separate control traffic. Their tested network
+scopes are destination-bound; local D1 fixtures register only their own disposable
+loopback ports. Test gateway clients likewise scope only their local server.
+
+New columns hold
+the two controls and provider-reported `cached_input_tokens` / `reasoning_tokens`.
+Existing keys remain unrestricted and existing event details remain null; daily
+totals start at zero. Flask adds the same columns to its SQLite or PostgreSQL
+ledger. Missing or malformed durable controls fail closed on dispatch.
+
+Chat Completions and Responses usage-detail objects, including final streaming
+usage, populate the counters. Native Messages cache-read and cache-creation input
+counts are included in total input, while only cache reads count as cache hits.
+Reasoning is a detail of output usage and is not added to output a second time.
+Absent details remain unknown on individual events. Recording these counters does
+not depend on the optional prompt-cache price-bucket feature. See the router's
+[usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
+
+The Usage page shows cache-hit rate and reasoning tokens per key and model.
+Cache-hit rate is reported cached input divided by all ledger input in that
+group, multiplied by 100; upstreams that omit cache details lower the observed
+rate. This is not a request-level cache-hit percentage. No webhook budget alert
+is included.
+
+## Account contract and release preflight
+
+The Container requests `data_policy_version: 1` on private account RPC operations.
+The main Worker owns `intelligence.internal/v1/users` and reads `INTELLIGENCE_DB`
+directly. This path does not use `KNOWLEDGE_SERVICE` and needs no additional
+policy-signing secret. Both `CONFIG_REVISION_SYNC_ENABLED` and
+`STREAM_COST_BREAKER_ENABLED` default off when unset, and the Container receives
+explicitly configured flag values through `collectContainerEnv`.
+
+A pre-expansion Container checks the exact account field set. Sending the three new
+policy fields to it produces `account_storage_unavailable`. Version negotiation
+therefore preserves its earlier row shape only for accounts whose current policy
+is verified and unrestricted. An expansion reader receives controlled rows and refuses their provider dispatch.
+Legacy writes preserve policy columns atomically and cannot erase a concurrent restriction. A current Container still refuses missing,
+malformed or unsupported policy envelopes; it never negotiates down to an older
+Worker's unverifiable policy.
+
+The integration test applies the real migrations through 0043, inserts an account
+with realistic metadata and defaulted policy columns, and runs `/v1/models` and
+`/v1/chat/completions` through registered Flask routes over HTTP to the main
+Worker's real account handler. Only the external provider is mocked. It also
+checks current controls, revocation and legacy reads/writes. Matching current
+runtimes succeed with both flags unset. Subsequent real staging reproduced both
+incident errors as mixed-version failures: the original new Worker with an old
+Container returned `account_storage_unavailable`, and the reverse mix returned
+`key_data_controls_unavailable`. Matched original runtimes were healthy on 45 of
+46 probes. The first re-land fixed only the forward mix; its reverse rollback
+still interrupted chat for roughly 50–55 seconds. See the expanded A/B matrix and
+[staging/rollback guidance](key-controls-rollout.md#staging-evidence-and-management-compatibility).
+
+Reading an account for login, session refresh or listing is management, not provider
+dispatch. These reads decode both expansion/enforcement policies without requiring
+main-Worker enforcement capability. A restricted row cannot disable everyone else's
+sign-in by poisoning a full account-cache reload. The Container checks the current
+main account-RPC capability only when admitting a controlled provider dispatch;
+management access never grants generation authority.
+
+The default Wrangler build runs `scripts/key_data_preflight.mjs --deploy` before
+upload. It checks the D1 binding and migration ledger, actual policy columns,
+Container binding, required secret **names**, and a fully active private Worker
+whose tagged source advertises expansion support or enforcement. Runtime delegation
+probes the actual peer readiness before controlled content; a release tag alone never
+grants enforcement authority. Missing or unreadable prerequisites stop deployment.
+It does not fetch secret values. The orchestrated deploy also runs `--prepare`
+after migrations and before updating the private Worker, so missing main bindings
+stop that update too. `--check` validates local configuration only;
+CI uses `scripts/check_worker_bundle.mjs` after that check. The wrapper removes
+the release build command only from a temporary config and always passes
+`--dry-run`; it cannot upload or attest live readiness.
+
+Disconnect automatic promotion in Workers Builds, or use `wrangler versions upload`.
+Its token permissions for the preflight remain untested. Workers Builds can deploy
+the main Worker and Container without waiting for the
+GitHub deploy workflow, which owns the private Knowledge Worker. First deploy
+expansion everywhere and verify each component's capability. Enforcement can then
+roll independently: NULL-policy traffic keeps working with expansion peers, while
+controlled traffic refuses any peer below enforcement capability. Enable restrictions
+only after all three report protocol 2 and enforcement. The manual script and workflow
+retain the migrations, private Worker, main Worker, Container sequence; the protocol
+also handles independent builds and rollback to expansion. A rollback never clears
+policy columns. Already-applied migrations stay recorded and are not replayed as bare
+ALTER statements. Test an ordinary durable key before enabling controls.

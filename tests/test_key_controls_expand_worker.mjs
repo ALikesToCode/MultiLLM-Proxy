@@ -8,11 +8,16 @@ import { OLD, runtimeBundle, runtimeModule, MemoryStorage } from "./helpers/runt
 import { Miniflare, convertV4MiniflareOptions } from "./helpers/local_miniflare.mjs";
 import { applyMigrations } from "./d1_migrations.mjs";
 import { collectContainerEnv } from "../worker/container-env.mjs";
-import { handleControlUsersRequest } from "../worker/control-users-d1.mjs";
-import { providerFetch, providerOperation } from "../worker/provider-dispatch.mjs";
+
+
 import { controlNetwork } from "../worker/dispatch-network.mjs";
 import { policyStore } from "./helpers/dispatch_fixture.mjs";
 
+const EXPAND = "b6b0e43";
+const { handleControlUsersRequest, providerFetch, providerOperation, legacyBindingControls } = await runtimeModule(`
+export {handleControlUsersRequest} from './worker/control-users-d1.mjs';
+export {providerFetch,providerOperation} from './worker/provider-dispatch.mjs';
+export {legacyBindingControls} from './worker/legacy-binding-policy.mjs';`, EXPAND);
 const run = promisify(execFile);
 const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url)));
 const states = [
@@ -35,11 +40,11 @@ test("expansion refuses future controls at every Worker provider boundary", asyn
 test("old and expansion account RPC and Container pairs keep NULL-policy routes working", async t => {
   const digest = scryptSync("mllm_synthetic_incident_key_long_enough", "synthetic-salt", 64,
     { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex");
-  for (const revision of [OLD, ""]) {
-    const admission = revision ? "" : `import {providerFetch} from './worker/provider-dispatch.mjs';`;
+  for (const revision of [OLD, EXPAND]) {
+    const admission = revision === OLD ? "" : `import {providerFetch} from './worker/provider-dispatch.mjs';`;
     const script = await runtimeBundle(`${admission} import {handleIntelligenceOutbound} from './worker/intelligence-outbound.mjs';
       export default {async fetch(request,env){
-        ${revision ? "" : `if(new URL(request.url).pathname==='/probe-provider') {
+        ${revision === OLD ? "" : `if(new URL(request.url).pathname==='/probe-provider') {
           try { return await providerFetch('openrouter','https://openrouter.ai/api/v1/chat/completions',{},
             {env,authority:{legacyBinding:true},send:()=>Response.json({ok:true})}); }
           catch { return Response.json({error:'key_controls_require_upgrade'},{status:503}); }
@@ -55,7 +60,7 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
         .bind(`scrypt:32768:8:1$synthetic-salt$${digest}`, "mllm_mllm_syn").run();
       const settings = collectContainerEnv({ ...config.vars, ADMIN_API_KEY: "synthetic-bootstrap-long-enough",
         FLASK_SECRET_KEY: "synthetic-session-long-enough", JWT_SECRET: "synthetic-jwt-long-enough", OPENROUTER_API_KEY: "synthetic-operator" });
-      for (const container of [OLD, ""]) await t.test(`${revision || "expand"} RPC / ${container || "expand"} Container`, async () => {
+      for (const container of [OLD, EXPAND]) await t.test(`${revision || "expand"} RPC / ${container || "expand"} Container`, async () => {
         const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
           (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), container,
           JSON.stringify([["/v1/models", "get"], ["/v1/chat/completions", "post"], ["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"]])],
@@ -63,11 +68,11 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
         const rows = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
         assert.deepEqual(rows.map(row => row.status), [200, 200, 302, 302, 200]);
       });
-      if (!revision) {
+      if (revision === EXPAND) {
         // A future controlled row must never poison login or a full management cache reload.
         await db.prepare("UPDATE control_users SET official_only=1 WHERE username='synthetic'").run();
         const { stdout: management } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
-          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), "",
+          (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), EXPAND,
           JSON.stringify([["/login", "post", "synthetic"], ["/login", "post", "admin"], ["/users", "get"], ["/v1/chat/completions", "post", "admin"]])],
         { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
         const results = management.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
@@ -95,7 +100,7 @@ test("old and expansion account RPC and Container pairs keep NULL-policy routes 
           await db.prepare("UPDATE control_users SET official_only=?,forced_provider_preferences=? WHERE username='synthetic'")
             .bind(policy.official_only, policy.forced_provider_preferences).run();
           const { stdout } = await run(process.env.PYTHON || "python3", ["-I", "tests/support/account_envelope_driver.py",
-            (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings)],
+            (await mf.ready).href.replace(/\/$/, ""), JSON.stringify(settings), EXPAND],
           { cwd: process.cwd(), env: { PATH: process.env.PATH }, timeout: 120000 });
           const rows = stdout.split("\n").filter(line => line.startsWith('{"path":')).map(JSON.parse);
           assert.equal(rows.at(-1).status, 503);
@@ -136,12 +141,12 @@ test("old and expansion Knowledge pairs keep unrestricted requests identical; ro
   const entry = `export {default,KnowledgeCatalogue} from './worker/knowledge/index.mjs';
     export {defaultPolicy} from './worker/knowledge/policy.mjs';
     export {handleKnowledgeEdgeRequest} from './worker/knowledge-edge.mjs';`;
-  const modules = new Map([[OLD, await runtimeModule(entry, OLD)], ["", await runtimeModule(entry, "")]]);
+  const modules = new Map([[OLD, await runtimeModule(entry, OLD)], [EXPAND, await runtimeModule(entry, EXPAND)]]);
   const original = globalThis.fetch;
   let dispatches = 0;
   globalThis.fetch = async () => { dispatches++; return Response.json({ results: [] }); };
   try {
-    for (const main of [OLD, ""]) for (const privateRef of [OLD, ""]) for (const policy of main === OLD && privateRef === OLD ? states.slice(0, 1) : states) {
+    for (const main of [OLD, EXPAND]) for (const privateRef of [OLD, EXPAND]) for (const policy of main === OLD && privateRef === OLD ? states.slice(0, 1) : states) {
       dispatches = 0;
       const edge = modules.get(main), knowledge = modules.get(privateRef);
       const storage = new MemoryStorage(), configuration = knowledge.defaultPolicy();
@@ -180,8 +185,7 @@ test("legacy background work runs only while every durable policy remains NULL",
 
 
 test("registered Container forwarding refuses controlled accounts before sending any body", async () => {
-  const { loadWorkerModule } = await import("./helpers/load_cloudflare_worker.mjs");
-  const worker = (await loadWorkerModule()).default;
+  const worker = (await runtimeModule("export {default} from './cloudflare-worker.mjs';", EXPAND)).default;
   for (const policy of states) for (const path of ["/v1/chat/completions", "/v1/images/generations", "/v1/videos/generations",
     "/v1/embeddings", "/v1/audio/speech", "/gemini/v1beta/models/example:generateContent", "/v1/models"]) {
     let sent = 0;
@@ -197,7 +201,6 @@ test("registered Container forwarding refuses controlled accounts before sending
 });
 
 test("a fenced expansion Container preserves a NULL private call beside other controlled accounts", async () => {
-  const { legacyBindingControls } = await import("../worker/legacy-binding-policy.mjs");
   for (const policy of states.slice(1)) {
     const database = policyStore(policy);
     for (const capability of [{ protocol: 1, enforcement: false }, { protocol: 0 }, null]) {

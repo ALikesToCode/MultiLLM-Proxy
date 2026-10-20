@@ -70,7 +70,7 @@ export async function fetchBounded(provider, url, options, { fetchImpl = fetch, 
   try {
     if (controller.signal.aborted) throw new Error("aborted");
     // Workers supports manual redirects; the non-2xx check rejects them before any follow-up.
-    const response = await providerFetch(provider, url, { ...options, redirect: "manual", signal: controller.signal }, { send: async checked => fetchImpl(checked.url, await transportOptions(checked, options)) });
+    const response = await providerFetch(provider, url, { ...options, signal: controller.signal }, { send: async checked => fetchImpl(checked.url, await transportOptions(checked, options)) });
     if (response.status < 200 || response.status >= 300) {
       let body = null;
       if ([402, 429].includes(response.status) || (provider === "alexandria" && response.status === 403)) {

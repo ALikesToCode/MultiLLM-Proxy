@@ -24,6 +24,16 @@ def reset_audit_window(monkeypatch):
 def application(monkeypatch, mode):
     from services.proxy_service import ProxyService
     from services import audit_log
+    from services.auth_service import AuthService
+    from services.dispatch_policy import envelope
+    original = AuthService._load_user_by_username
+
+    def load(username):
+        if username == "synthetic-agent":
+            return {"username": username, "data_policy": envelope({"official_only": None, "forced_provider_preferences": None})}
+        return original(username)
+
+    monkeypatch.setattr(AuthService, "_load_user_by_username", load)
     events, bodies = [], []
     monkeypatch.setenv("SECRET_SCAN_DEFAULT", mode)
     monkeypatch.setattr(audit_log, "record", lambda *args, **kw: events.append([args, kw]))

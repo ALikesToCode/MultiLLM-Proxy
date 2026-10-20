@@ -1,9 +1,10 @@
+import { accountPolicyVersion, accountReply, accountWrite } from "./account-contract.mjs";
 /**
  * Durable dashboard accounts (username, key hash and metadata) in D1, reachable only
  * through the Container's private outbound handler. Fixed statements, no client SQL.
  */
 import { dataPolicy } from "./dispatch-policy.mjs";
-import { KEY_CONTROLS, expansionFence } from "./key-controls-capability.mjs";
+import { KEY_CONTROLS } from "./key-controls-capability.mjs";
 import { validDataControls } from "./key-data-guards.mjs";
 import { STREAM_CAP_FIELD, streamCostEnabled, validStreamCap } from "./stream-cost-breaker.mjs";
 import { commitRevision, revisionSyncSettings } from "./config-revision.mjs";
@@ -219,13 +220,10 @@ export async function handleControlUsersRequest(request, env) {
     if (!body || Array.isArray(body) || typeof body !== "object" || body.version !== 1) return reply({ error: "invalid_request" }, 400);
   } catch { return reply({ error: "invalid_request" }, 400); }
   const db = env.INTELLIGENCE_DB;
-  const policyVersion = body.data_policy_version === 1 ? 1 : null;
-  delete body.data_policy_version;
+  let policyVersion;
+  try { policyVersion = accountPolicyVersion(body); }
+  catch { return reply({ error: "invalid_request" }, 400); }
   if (body.operation === "capabilities") return reply({ version: 1, key_controls: KEY_CONTROLS });
-  const accountReply = user => {
-    if (!user || policyVersion === 1) return user;
-    return Object.fromEntries(Object.entries(user).filter(([name]) => !["official_only", "forced_provider_preferences", "data_policy"].includes(name)));
-  };
   try {
     if (AUDIT_OPERATIONS.has(body.operation)) {
       const result = await handleAuditOperation(db, body);
@@ -240,24 +238,22 @@ export async function handleControlUsersRequest(request, env) {
           : db.prepare(`SELECT ${columns} FROM control_users WHERE username > ? ORDER BY username LIMIT ?`).bind(body.after, body.limit)
         ).all()).results;
         const users = await readUsers(query, env);
-        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
+        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion, { management: true })) });
       }
       case "get": {
         if (!fields(body, ["version", "operation", "username"]) || !text(body.username, 128)) break;
         const user = await readUsers(columns => db.prepare(`SELECT ${columns} FROM control_users WHERE username=?`)
           .bind(body.username).first(), env);
-        if (policyVersion !== 1 && user) expansionFence(user);
         return reply({ version: 1, user: accountReply(user ?? null, policyVersion) });
       }
       case "by_prefix": {
         if (!fields(body, ["version", "operation", "prefix"]) || !text(body.prefix, 64)) break;
         const users = await activeUsersByPrefix(db, body.prefix, env);
-        if (policyVersion !== 1) users.forEach(expansionFence);
-        return reply({ version: 1, users: users.map(accountReply) });
+        return reply({ version: 1, users: users.map(user => accountReply(user, policyVersion)) });
       }
       case "upsert": {
         if (!fields(body, ["version", "operation", "user"])) break;
-        body.user = { official_only: null, forced_provider_preferences: null, ...body.user };
+        body.user = accountWrite(body.user, policyVersion);
         if (!validUser(body.user)) break;
         if (!streamCostEnabled(env) && body.user[STREAM_CAP_FIELD] != null) return reply({ error: "invalid_request" }, 400);
         const user = { official_only: null, forced_provider_preferences: null, shadow_eval_rate: null, secret_scan_mode: null, ...body.user };

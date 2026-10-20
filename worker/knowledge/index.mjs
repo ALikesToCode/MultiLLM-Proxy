@@ -1,3 +1,4 @@
+import { requireControlledSender } from "../peer-capability.mjs";
 import { currentDataControls } from "../key-data-guards.mjs";
 import { KEY_CONTROLS } from "../key-controls-capability.mjs";
 import { bindingPrincipal, withDispatchPrincipal } from "../provider-dispatch.mjs";
@@ -87,7 +88,7 @@ export class KnowledgeSkills extends DurableObject {
       if (typeof body.principal !== "string" || !body.principal || body.principal.length > 256) fail("invalid_principal", "Invalid skills principal.", 403);
       const source = bindingPrincipal(request, body.principal);
       if (source.keyId !== body.principal) fail("invalid_principal", "The dispatch principal does not match.", 403);
-      await currentDataControls(this.env, source);
+      requireControlledSender(await currentDataControls(this.env, source), request);
       return await withDispatchPrincipal(this.env, bindingPrincipal(request, body.principal), async () => reply(await this.skills.call(body.operation, body.payload, body.principal)));
     } catch (error) { return failure("knowledge_skills_failed", error); }
   }
@@ -108,7 +109,7 @@ export default {
       if (body.operation !== "skills.sync" && new TextEncoder().encode(JSON.stringify(body)).length > 65536) fail("request_too_large", "Request is too large.", 413);
       const source = bindingPrincipal(request, body.principal?.id);
       if (source.keyId !== body.principal?.id) fail("invalid_principal", "The dispatch principal does not match.", 403);
-      await currentDataControls(env, source);
+      requireControlledSender(await currentDataControls(env, source), request);
       let decision;
       const result = await dispatchKnowledge(env, body, { signal: request.signal, waitUntil: promise => ctx.waitUntil(promise), onSecretScan: value => { decision = value; } });
       const response = reply(result);

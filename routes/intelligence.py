@@ -168,6 +168,13 @@ def dispatch_intelligence_chat(app, auth, metrics, proxy, payload):
 
         policy = {**policy, "candidates": [candidate for candidate in policy["candidates"]
                                            if judge_candidate_allowed(candidate["model"])]}
+        from services.key_data_guards import has_data_controls, model_permitted
+        user = getattr(g, "authenticated_user", None) or {}
+        if has_data_controls(user):
+            policy["candidates"] = [candidate for candidate in policy["candidates"]
+                                    if model_permitted(user, candidate["model"])]
+            if not policy["candidates"]:
+                raise GatewayError("provider_class_not_allowed", "No eligible provider data class remains.", 403)
         cascade_deadline = getattr(g, "cascade_deadline", None)
         if cascade_deadline is not None:
             from services.key_controls import model_allowed

@@ -1,5 +1,5 @@
 /** Code capability, never an operator feature flag. */
-export const KEY_CONTROLS = Object.freeze({ protocol: 1, enforcement: false });
+export const KEY_CONTROLS = Object.freeze({ protocol: 2, enforcement: true });
 export const controlled = row => row?.official_only != null || row?.forced_provider_preferences != null;
 export function expansionFence(row) {
   if (!KEY_CONTROLS.enforcement && controlled(row)) {

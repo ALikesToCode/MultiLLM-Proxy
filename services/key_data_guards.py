@@ -97,9 +97,7 @@ def allows_shadow_sampling(user):
 
 
 def model_permitted(user, model, config=None):
-    from services.key_controls_capability import expansion_fence
     policy = account_controls(user) if "data_policy" in user else user
-    expansion_fence(policy)
     if policy.get("official_only") not in (1, True):
         return True
     provider = str(model or "").split(":", 1)[0].lower()

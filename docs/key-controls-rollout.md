@@ -40,6 +40,20 @@ Rollback from enforcement to expansion leaves policy columns intact and refuses
 controlled accounts. Restore enforcement-capable components to resume those accounts;
 never clear restrictions as an automatic rollback step.
 
+Enforcement advertises `key_controls: {protocol: 2, enforcement: true}`. A controlled
+request probes the actual Container `/healthz` or private Knowledge `/ready` before
+sending its body. Missing, stale, malformed or unreadable capability refuses with 503.
+The Container independently checks the main Worker's account-RPC capability when
+admitting controlled provider dispatch. The private Worker checks both current durable controls and
+the sender's enforcement protocol. NULL-policy calls need no enforcement negotiation.
+
+Deployment preflight verifies configuration, migration ledger, policy columns, required
+secret names and a fully active private deployment whose tagged source supports
+expansion. The tagged commit must be available in the checkout; a shallow build must
+fetch that history before release. It reads no secret values. Runtime peer readiness,
+rather than the tag, governs controlled dispatch. Bundle dry runs use isolated configs
+and never stand in for release admission.
+
 ## Staging evidence and management compatibility
 
 Real staging of the earlier re-land reproduced both incident errors with mixed Worker
@@ -112,4 +126,6 @@ See [Container deployment semantics](https://developers.cloudflare.com/container
 and [rollout controls](https://developers.cloudflare.com/containers/configuration/rollouts/).
 
 
-Account reads negotiate the additive row protocol only after a successful capability probe. Old Containers receive the original account fields on list reads and NULL-policy username reads, including when a controlled neighbour exists, so dashboard cache reloads and unrestricted sign-in remain available. Legacy username and prefix authentication refuse controlled rows, since either can also feed deferred provider work. Provider forwarding and private outbound admission remain separate from management projection; an old Container cannot use a projected row to dispatch for a controlled account. A Containers request the full policy from compatible peers and retain their dormant refusal fence. A failed or malformed capability probe never downgrades to a legacy row; only the old peer's explicit unsupported-operation response permits that fallback.
+In expansion, account reads negotiate the additive row protocol only after a successful capability probe. Old Containers receive the original account fields on list reads and NULL-policy username reads, including when a controlled neighbour exists, so dashboard cache reloads and unrestricted sign-in remain available. Legacy username and prefix authentication refuse controlled rows, since either can also feed deferred provider work. Provider forwarding and private outbound admission remain separate from management projection; an old Container cannot use a projected row to dispatch for a controlled account. A Containers request the full policy from compatible peers and retain their dormant refusal fence. A failed or malformed capability probe never downgrades to a legacy row; only the old peer's explicit unsupported-operation response permits that fallback.
+
+Contract Containers announce the expanded account-row protocol directly: every supported A/B peer accepts it. Management reads validate their policy envelope without requiring enforcement capability; the current capability is checked separately before controlled provider dispatch.

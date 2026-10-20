@@ -20,11 +20,11 @@ USER_FIELDS = (
     "last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
     # Per-key controls (migration 0007); NULL means no budget, every model, no expiry, any address.
     "daily_budget_usd", "monthly_budget_usd", "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode",
-    "shadow_eval_rate",
+    "shadow_eval_rate", "official_only", "forced_provider_preferences",
 )
 _REQUIRED_TEXT = ("username", "api_key_hash", "api_key_prefix", "scopes", "created_at")
 _OPTIONAL_TEXT = ("last_login", "last_used_at", "last_used_ip", "created_by", "rotated_at", "revoked_at",
-                  "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode")
+                  "allowed_models", "allowed_ips", "expires_at", "secret_scan_mode", "forced_provider_preferences")
 _OPTIONAL_NUMBER = ("daily_budget_usd", "monthly_budget_usd", "shadow_eval_rate")
 PAGE_SIZE = 200
 READ_OPERATIONS = frozenset({"list", "get", "by_prefix"})
@@ -52,33 +52,16 @@ def _transient(error):
     return not isinstance(error, PrivateIntelligenceError) or error.status >= 500
 
 
-def _policy_protocol():
-    """Send policy extensions only after the peer advertises their decoder."""
-    try:
-        capability = request_private_intelligence({"operation": "capabilities"}, endpoint="users").get("key_controls")
-    except PrivateIntelligenceError as error:
-        if error.status in (400, 404):
-            return {}  # Old peers reject this operation, without seeing an extended row request.
-        raise unavailable() from None
-    except Exception:
-        raise unavailable() from None
-    if (not isinstance(capability, dict) or type(capability.get("protocol")) is not int
-            or capability["protocol"] not in (1, 2)):
-        raise unavailable()
-    return {"data_policy_version": 1}
-
-
 def _call(operation, **values):
     """One private call; reads are retried once after a transient failure.
 
     Reads are idempotent, so a single retry absorbs a slow first call after the
     Container or D1 was idle. Writes are sent once.
     """
-    protocol = _policy_protocol() if operation in READ_OPERATIONS else {}
     attempts = 2 if operation in READ_OPERATIONS else 1
     for attempt in range(1, attempts + 1):
         try:
-            return request_private_intelligence({"operation": operation, **values, **protocol}, endpoint="users")
+            return request_private_intelligence({"operation": operation, "data_policy_version": 1, **values}, endpoint="users")
         except Exception as error:
             cause = (f"{error.status} {error.code}" if isinstance(error, PrivateIntelligenceError)
                      else getattr(error, "code", None) or type(error).__name__)
@@ -94,16 +77,13 @@ def _call(operation, **values):
 
 
 def _row(value):
-    policy = None
     if isinstance(value, dict):
         # A Worker released before migrations 0011 and 0013 returns rows without these columns.
-        from services.dispatch_policy import verify
-        if value.get("data_policy") is not None:
-            policy = verify(value["data_policy"])
-        if "official_only" in value or "forced_provider_preferences" in value:
-            from services.key_data_guards import stored_controls
-            policy = {"version": 1, **stored_controls(value)}
+        from services.dispatch_policy import envelope, verify
+        policy = verify(value.get("data_policy"))
         value = {name: item for name, item in value.items() if name in USER_FIELDS}
+        if envelope(value) != policy:
+            raise unavailable()
         value = {"secret_scan_mode": None, "shadow_eval_rate": None, **value}  # nosec B105 - column defaults
     if (
         not isinstance(value, dict)
@@ -112,11 +92,12 @@ def _row(value):
         or any(value[name] is not None and not isinstance(value[name], str) for name in _OPTIONAL_TEXT)
         or any(value[name] is not None and (isinstance(value[name], bool) or not isinstance(value[name], (int, float)))
                for name in _OPTIONAL_NUMBER)
+        or (value["official_only"] is not None and (type(value["official_only"]) is not int or value["official_only"] not in (0, 1)))
         or type(value["is_admin"]) is not int
         or value["is_admin"] not in (0, 1)
     ):
         raise unavailable()
-    return {**value, **({"data_policy": policy} if policy is not None else {})}
+    return value
 
 
 def _rows(value, limit=PAGE_SIZE):

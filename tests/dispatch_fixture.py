@@ -12,9 +12,13 @@ def verified_transport_principal(monkeypatch):
 
     # Exercise real admission with an explicitly unrestricted stored account.
     # Policy and authentication regressions use their own stores instead.
-    monkeypatch.setattr(AuthService, "_load_user_by_username", lambda username: {
-        "username": username,
-        "data_policy": envelope({"official_only": None, "forced_provider_preferences": None}),
-    })
+    original = AuthService._load_user_by_username
+
+    def load(username):
+        if username == "synthetic-transport":
+            return {"username": username, "data_policy": envelope({"official_only": None, "forced_provider_preferences": None})}
+        return original(username)
+
+    monkeypatch.setattr(AuthService, "_load_user_by_username", load)
     with dispatch_as({"username": "synthetic-transport"}):
         yield

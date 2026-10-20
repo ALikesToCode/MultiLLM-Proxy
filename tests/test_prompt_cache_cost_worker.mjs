@@ -8,7 +8,8 @@ import { applyMigrations } from './d1_migrations.mjs';
 
 const base = {at:'2026-10-01T00:00:00.000Z', principal:'reader', key_prefix:null, kind:'chat',
  endpoint:'/v1/chat/completions', requested_model:'openai:m', selected_model:'openai:m', status:200,
- latency_ms:1, input_tokens:100, output_tokens:10, cost_usd:0.00019, cost_basis:'usage', request_id:null};
+ latency_ms:1, input_tokens:100, output_tokens:10, cost_usd:0.00019, cost_basis:'usage', request_id:null,
+ cached_input_tokens:null, reasoning_tokens:null};
 const buckets = Object.fromEntries(BUCKET_FIELDS.map(name => [name, null]));
 Object.assign(buckets, {ordinary_input_tokens:40, cache_read_input_tokens:60, cache_write_input_tokens:0,
  ordinary_input_cost_microusd:80, cache_read_input_cost_microusd:30, cache_write_input_cost_microusd:0,

@@ -23,10 +23,13 @@ from services.sqlite_store import connect, storage_path
 LATENCY_BUCKETS = (250, 500, 1000, 2000, 4000, 8000, 15000, 30000, 60000, 120000)
 BUCKET_COLUMNS = tuple(f"lat_le_{bound}" for bound in LATENCY_BUCKETS) + ("lat_gt_120000",)
 ROW_FIELDS = ("at", "principal", "key_prefix", "kind", "endpoint", "requested_model", "selected_model",
-              "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id")
+              "status", "latency_ms", "input_tokens", "output_tokens", "cost_usd", "cost_basis", "request_id", "cached_input_tokens", "reasoning_tokens")
 EVENT_COLUMNS = ("id",) + ROW_FIELDS
 TOTAL_COLUMNS = ("requests", "errors", "input_tokens", "output_tokens", "cost_usd", "priced_requests",
                  "latency_ms_total") + BUCKET_COLUMNS
+DETAIL_COLUMNS = ("cached_input_tokens", "reasoning_tokens")
+TOTAL_COLUMNS += DETAIL_COLUMNS
+SUMMARY_COLUMNS = TOTAL_COLUMNS[:7] + DETAIL_COLUMNS
 GROUPS = ("day", "model", "principal")
 MAX_PAGE = 500
 _BATCH_ID = re.compile(r"[0-9a-f]{32}\Z")
@@ -76,6 +79,7 @@ def summarize(row: dict) -> dict:
         latency_avg_ms=round(int(row.get("latency_ms_total") or 0) / requests) if requests else None,
         latency_p50_ms=percentile(buckets, 0.5),
         latency_p95_ms=percentile(buckets, 0.95),
+        cache_hit_rate=round(100 * int(row.get("cached_input_tokens") or 0) / int(row.get("input_tokens") or 1), 1),
     )
     return result
 
@@ -131,7 +135,7 @@ class D1UsageStore:
 
     def summary(self, group: str, since: str, until: str, principal: Optional[str], limit: int) -> list[dict]:
         response = self._call("summary", group=group, since=since, until=until, principal=principal, limit=limit)
-        fields = {group, *TOTAL_COLUMNS[:7], "latency_buckets"}
+        fields = {group, *SUMMARY_COLUMNS, "latency_buckets"}
         return _checked_rows(response.get("rows") if set(response) == {"version", "rows"} else None, fields)
 
     def recent(self, since: str, principal: Optional[str], before: Optional[int], limit: int) -> list[dict]:
@@ -237,8 +241,23 @@ class SqlUsageStore:
             """
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_usage_daily_principal ON usage_daily(principal, day)")
+        SqlUsageStore.ensure_details(connection)
         if prompt_cache_cost.enabled():
             SqlUsageStore.ensure_buckets(connection)
+
+    @staticmethod
+    def ensure_details(connection) -> None:
+        for table in ("usage_events", "usage_daily"):
+            if getattr(connection, "dialect", None) == "postgresql":
+                columns = {row["name"] for row in connection.execute(
+                    "SELECT column_name AS name FROM information_schema.columns "
+                    "WHERE table_schema = 'multillm' AND table_name = ?", (table,))}
+            else:
+                columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}  # nosec B608
+            for name in DETAIL_COLUMNS:
+                if name not in columns:
+                    suffix = " NOT NULL DEFAULT 0" if table == "usage_daily" else ""
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} INTEGER{suffix}")  # nosec B608
 
     def record(self, batch_id: str, rows: list[dict]) -> int:
         if not _BATCH_ID.fullmatch(batch_id):
@@ -255,6 +274,8 @@ class SqlUsageStore:
             totals[5] += int(row["cost_usd"] is not None)
             totals[6] += row["latency_ms"]
             totals[7 + latency_bucket(row["latency_ms"])] += 1
+            for name in DETAIL_COLUMNS:
+                totals[TOTAL_COLUMNS.index(name)] += row.get(name) or 0
         row_fields = ROW_FIELDS + (prompt_cache_cost.ROW_FIELDS if prompt_cache_cost.enabled() else ())
         columns = ", ".join(TOTAL_COLUMNS)
         updates = ", ".join(f"{name} = usage_daily.{name} + excluded.{name}" for name in TOTAL_COLUMNS)
@@ -264,7 +285,7 @@ class SqlUsageStore:
                 connection.executemany(
                     f"INSERT INTO usage_events (day, {', '.join(row_fields)}) "  # nosec B608
                     f"VALUES ({', '.join('?' for _ in range(len(row_fields) + 1))})",
-                    [(row["at"][:10], *(row[name] if name in ROW_FIELDS else row.get(name) for name in row_fields)) for row in rows],
+                    [(row["at"][:10], *(row.get(name) for name in row_fields)) for row in rows],
                 )
                 # Column names come only from the fixed TOTAL_COLUMNS definition.
                 connection.executemany(
@@ -311,7 +332,7 @@ class SqlUsageStore:
             f"GROUP BY {group} ORDER BY {order}, {group} LIMIT ?",
             parameters,
         )
-        return [{group: row[group], **{name: row[name] or 0 for name in TOTAL_COLUMNS[:7]},
+        return [{group: row[group], **{name: row[name] or 0 for name in SUMMARY_COLUMNS},
                  "latency_buckets": [int(row[name] or 0) for name in BUCKET_COLUMNS]} for row in rows]
 
     def recent(self, since: str, principal: Optional[str], before: Optional[int], limit: int) -> list[dict]:

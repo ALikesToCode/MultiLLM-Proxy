@@ -21,6 +21,11 @@ class OpenAICompatibleAdapter:
     chat_path: str = "v1/chat/completions"
     provider_capabilities: ProviderCapabilities = field(default_factory=ProviderCapabilities)
 
+    @property
+    def data_class(self) -> str:
+        from services.key_data_guards import provider_data_class
+        return provider_data_class(self.name)
+
     def chat_completions_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/{self.chat_path.lstrip('/')}"
 

@@ -25,6 +25,15 @@ test("D1 credentials survive new callers, rotate atomically and retain revocatio
     const added = await readFile(new URL("../intelligence-migrations/0043_integration_data_policy.sql", import.meta.url), "utf8");
     for (const statement of added.split(";").filter(x=>x.trim())) await db.prepare(statement).run();
     assert.equal((await lookup(prefix)).id,"integration:omni");
+    for (const [official, forced] of [[0, null], [null, '{}'], [1, null], [null, '{"data_collection":"deny"}']]) {
+      await db.prepare("UPDATE intelligence_principals SET official_only=?,forced_provider_preferences=? WHERE id='integration:omni'")
+        .bind(official, forced).run();
+      const denied = await call({operation:"lookup",keyPrefix:prefix});
+      assert.equal(denied.status,503);
+      assert.equal((await denied.json()).principal,undefined);
+    }
+    await db.prepare("UPDATE intelligence_principals SET official_only=NULL,forced_provider_preferences=NULL").run();
+
     const next = "mllm_intelligence_" + "b".repeat(16);
     const rotate = {operation:"rotate",principalId:"integration:omni",expectedVersion:1,keyPrefix:next,keyHash:hash};
     const races = await Promise.all([call(rotate),call(rotate)]);

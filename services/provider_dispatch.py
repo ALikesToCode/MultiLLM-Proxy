@@ -17,7 +17,6 @@ from error_handlers import APIError
 from services.provider_credentials import api_origin, operator_credential, strip_credentials, unavailable_credential
 from services.dispatch_network import admitted_network
 from services.dispatch_policy import unavailable, verify
-from services.key_controls_capability import CAPABILITY, expansion_fence
 from services.key_data_guards import has_data_controls, merge_preferences, model_permitted, preferences
 
 _reference = ContextVar("provider_principal", default=None)
@@ -51,25 +50,28 @@ def current_principal(reference=None):
             raise unavailable()
         if str(reference["username"]).startswith("integration:"):
             from services.intelligence_d1_store import request_private_intelligence
-            response = request_private_intelligence({"version": 1, "operation": "lookup",
-                "keyPrefix": reference.get("api_key_prefix")}, endpoint="auth")
-            row = response.get("principal") if isinstance(response, dict) else None
-            if not row or row.get("id") != reference["username"] or row.get("revokedAt"):
+            response = request_private_intelligence({"version": 1, "operation": "dispatch_policy",
+                "principalId": reference["username"]}, endpoint="auth")
+            if not isinstance(response, dict) or response.get("version") != 1 or not {"version", "principal"}.issubset(response):
                 raise unavailable()
-            user = {"username": row["id"], "api_key_prefix": row["keyPrefix"],
-                    "data_policy": {"version": 1, "official_only": None, "forced_provider_preferences": None}}
-
+            user = response["principal"]
+            from services.peer_capability import require_enforcement
+            if user and has_data_controls(verify(user.get("data_policy"))):
+                require_enforcement(response.get("key_controls"))
         else:
             user = AuthService._load_user_by_username(reference["username"])
-        if not user or CAPABILITY["enforcement"] and (user.get("revoked_at") or expired(user)):
+        if not user or user.get("revoked_at") or expired(user):
             raise unavailable()
         if reference.get("api_key_prefix") and reference["api_key_prefix"] != user.get("api_key_prefix"):
             raise unavailable()
         policy = verify(user.get("data_policy"))
-        expansion_fence(policy)
+        if has_data_controls(policy) and not str(reference["username"]).startswith("integration:"):
+            from services import user_store
+            if user_store.using_d1():
+                from services.peer_capability import require_enforcement
+                capability = user_store.request_private_intelligence({"operation": "capabilities"}, endpoint="users")
+                require_enforcement(capability.get("key_controls"))
         return {**user, **policy}
-    except APIError:
-        raise
     except Exception:
         raise unavailable() from None
 
@@ -123,8 +125,6 @@ def _credential(provider, user, url, options, *, public_asset=False):
 
 def prepare_dispatch(provider, url, options, *, reference=None, binding=False, public_asset=False):
     user = current_principal(reference)
-    if not CAPABILITY["enforcement"]:
-        return dict(options)
     if not binding and not model_permitted(user, provider + ":*"):
         raise APIError("This API key cannot use this provider data class", 403, {"error": "provider_class_not_allowed"})
     options = _credential(provider, user, url, dict(options), public_asset=public_asset)
@@ -139,9 +139,10 @@ def prepare_dispatch(provider, url, options, *, reference=None, binding=False, p
         body = {**body, "provider": merge_preferences(body.get("provider"), forced)}
         options = {**options, **({"json": body} if "json" in options else {"data": json.dumps(body).encode()})}
     headers = dict(options.get("headers") or {})
-    headers = {name: value for name, value in headers.items() if name.lower() not in {"content-length", "x-multillm-dispatch-principal"}}
-    if binding and CAPABILITY["enforcement"]:
+    headers = {name: value for name, value in headers.items() if name.lower() not in {"content-length", "x-multillm-dispatch-principal", "x-multillm-key-controls"}}
+    if binding:
         headers["X-MultiLLM-Dispatch-Principal"] = json.dumps({"version": 1, "username": user["username"]})
+        headers["X-MultiLLM-Key-Controls"] = "2"
     return {**options, "headers": headers}
 
 
@@ -149,7 +150,6 @@ def provider_http(provider, method, url, *, transport=None, reference=None, bind
     options = prepare_dispatch(provider, url, options, reference=reference, binding=binding, public_asset=public_asset)
     # Redirects are separate dispatches and must never forward an attested credential
     # to a provider-selected host without another admission.
-    if CAPABILITY["enforcement"]:
-        options["allow_redirects"] = False
+    options["allow_redirects"] = False
     with admitted_network():
         return (transport or requests.request)(method=method, url=url, **options)

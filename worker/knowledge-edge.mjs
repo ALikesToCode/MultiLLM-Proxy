@@ -1,3 +1,4 @@
+import { requireControlledPeer, capabilityHeader } from "./peer-capability.mjs";
 import { currentDataControls } from "./key-data-guards.mjs";
 /**
  * Knowledge MCP and REST at the edge for credentials the Worker can verify itself:
@@ -284,13 +285,15 @@ async function dispatch(env, operation, principal, payload, signal) {
   if (Buffer.byteLength(body) > (operation === "skills.sync" ? SYNC_REQUEST_BYTES : MAX_REQUEST_BYTES)) {
     throw new KnowledgeEdgeError("request_too_large", "The Knowledge request exceeds 64 KiB.", 413);
   }
-  await currentDataControls(env, { keyId: principal.id });
+  const policy = await currentDataControls(env, { keyId: principal.id });
+  await requireControlledPeer(policy, env.KNOWLEDGE_SERVICE, "http://knowledge.internal/ready");
   const deadline = AbortSignal.timeout(DEADLINE_MS);
   let response;
   let result;
   try {
     response = await env.KNOWLEDGE_SERVICE.fetch("http://knowledge.internal/v1/dispatch", {
-      method: "POST", headers: { "content-type": "application/json" }, body,
+      method: "POST", headers: { "content-type": "application/json", [capabilityHeader]: "2",
+        "X-MultiLLM-Dispatch-Principal": JSON.stringify({ version: 1, username: principal.id }) }, body,
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
     });
     result = await response.json();

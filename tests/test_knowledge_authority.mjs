@@ -265,3 +265,24 @@ test("product-site learning and overrides survive Durable Object reopen and rebu
   assert.ok(rebuilt.sites["python.org"].pinned);
   assert.deepEqual(rebuilt.blocked, overrides.blocked);
 });
+
+
+test("background refresh and reconciliation retain the source account identity", async t => {
+  const f = await fixture(t);
+  const owner = { authenticated: true, keyId: "source-key" };
+  const other = { authenticated: true, keyId: "admin" };
+  const source = (await f.call("source.create", { url: "https://flask.palletsprojects.com/en/3.1.3/api/",
+    product: "flask", version: "3.1.3", dispatch_principal: owner })).result;
+  const job = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
+  assert.deepEqual(job.dispatch_principal, owner);
+  const replay = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
+  assert.equal(replay.id, job.id);
+  assert.deepEqual(replay.dispatch_principal, owner);
+  await f.call("job.cancel", { id: job.id });
+  await f.reopen();
+  const replacement = (await f.call("job.enqueue", { source_id: source.id, dispatch_principal: other })).result;
+  assert.notEqual(replacement.id, job.id);
+  assert.deepEqual(replacement.dispatch_principal, owner);
+  const persisted = (await f.call("job.get", { id: replacement.id })).result;
+  assert.deepEqual(persisted.source.dispatch_principal, owner);
+});

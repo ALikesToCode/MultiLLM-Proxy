@@ -587,11 +587,7 @@ async function fetchCandidate(candidate, payload, env, settings, signal, key) {
       env, authority, unsupportedPreferences: true,
       send: async permitted => useOpenCodeContainer ? containerNamespace.getByName("primary").fetch(permitted) : fetch(permitted.url, { ...requestInit, headers: permitted.headers, body: await permitted.text() }),
     }).catch(error => { if (!(error instanceof DispatchError)) throw error; return dispatchFailure(error); }));
-    const response = useOpenCodeContainer && !resolvePIIPolicy(env, piiOptions)
-      ? await providerFetch(candidate.provider, new Request("https://roleplay.internal/opencode/v1/chat/completions", requestInit), {}, {
-          env, authority, unsupportedPreferences: true, send: checked => containerNamespace.getByName("primary").fetch(checked),
-        }).catch(error => { if (!(error instanceof DispatchError)) throw error; return dispatchFailure(error); })
-      : await firewallFetch(new Request(useOpenCodeContainer ? "https://roleplay.internal/opencode/v1/chat/completions" : candidate.endpoint, requestInit), env, {
+    const response = await firewallFetch(new Request(useOpenCodeContainer ? "https://roleplay.internal/opencode/v1/chat/completions" : candidate.endpoint, requestInit), env, {
       route: "/v1/roleplay/chat/completions", provider: candidate.provider,
       onDecision: settings.onSecretScan, principal: { id: authority.keyId },
     }, submit);

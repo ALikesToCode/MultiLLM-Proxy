@@ -63,7 +63,7 @@ async function get(url, headers, options, maxBytes) {
   const timer = setTimeout(cancel, options.importTimeoutMs ?? TIMEOUT_MS);
   try {
     let response;
-    try { response = await providerFetch("skills", url, { headers, redirect: "manual", signal: controller.signal }, { send: async checked => (options.fetch ?? fetch)(checked.url, await transportOptions(checked, { headers })) }); }
+    try { response = await providerFetch("skills", url, { headers, signal: controller.signal }, { send: async checked => (options.fetch ?? fetch)(checked.url, await transportOptions(checked, { headers })) }); }
     catch { fail(controller.signal.aborted ? "upstream_timeout" : "upstream_unavailable", "The skill source could not be reached.", controller.signal.aborted ? 504 : 502); }
     if (!response.ok) {
       await response.body?.cancel();
