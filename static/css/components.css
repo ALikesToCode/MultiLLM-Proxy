@@ -382,6 +382,12 @@
     background: var(--rose-700);
 }
 
+/* Bare disclosures get a 40 px target; styled ones set their own. */
+:where(.app-main) details:not(.disclosure, .endpoint-group) > summary {
+    padding-block: 0.6rem;
+    cursor: pointer;
+}
+
 /* Disclosure: a quiet expandable section for secondary detail. */
 .disclosure > summary {
     display: flex;
@@ -483,19 +489,57 @@
     animation: spin 0.75s linear infinite;
 }
 
-/* Dialog */
+/* Dialog: rises in over a darkening backdrop; closing is shorter and quieter. The base
+   reset zeroes every margin, so centring is restored here. */
 .dialog {
     width: min(100% - 2rem, 34rem);
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
     padding: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface);
     color: var(--text);
     box-shadow: var(--shadow-lg);
+    opacity: 0;
+    translate: 0 0.5rem;
+    scale: 0.98;
+    transition: opacity 150ms ease-in, translate 150ms ease-in, scale 150ms ease-in,
+        overlay 150ms allow-discrete, display 150ms allow-discrete;
+}
+
+.dialog[open] {
+    opacity: 1;
+    translate: 0;
+    scale: 1;
+    transition-duration: var(--motion);
+    transition-timing-function: var(--ease);
+}
+
+@starting-style {
+    .dialog[open] {
+        opacity: 0;
+        translate: 0 0.5rem;
+        scale: 0.98;
+    }
 }
 
 .dialog::backdrop {
-    background: rgb(7 19 31 / 62%);
+    background-color: rgb(7 19 31 / 0%);
+    transition: background-color 150ms ease-in, overlay 150ms allow-discrete, display 150ms allow-discrete;
+}
+
+.dialog[open]::backdrop {
+    background-color: rgb(7 19 31 / 62%);
+    transition-duration: var(--motion);
+}
+
+@starting-style {
+    .dialog[open]::backdrop {
+        background-color: rgb(7 19 31 / 0%);
+    }
 }
 
 .dialog__body {
@@ -516,11 +560,18 @@
     line-height: 1.55;
 }
 
+/* Stays in view at the foot of a long dialog. */
 .dialog__actions {
+    position: sticky;
+    bottom: 0;
     display: flex;
+    margin: 0 -1.5rem -1.5rem;
+    padding: 0.85rem 1.5rem 1rem;
     justify-content: flex-end;
     flex-wrap: wrap;
     gap: 0.55rem;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface);
 }
 
 /* Notifications */

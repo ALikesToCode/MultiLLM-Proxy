@@ -82,15 +82,15 @@ class ControlPlaneUiTest(unittest.TestCase):
     def test_service_worker_precaches_current_control_plane_assets(self):
         worker = self.read("static/service-worker.js")
 
-        self.assertIn("multillm-proxy-v13", worker)
+        self.assertIn("multillm-proxy-v14", worker)
         for asset in (
-            "/static/css/shell.css?v=2",
-            "/static/css/controls.css?v=1",
-            "/static/css/components.css?v=1",
+            "/static/css/shell.css?v=3",
+            "/static/css/controls.css?v=2",
+            "/static/css/components.css?v=2",
             "/static/css/content.css?v=1",
             "/static/css/public.css?v=2",
             "/static/js/app.js?v=2",
-            "/static/css/auto-routes.css?v=8",
+            "/static/css/auto-routes.css?v=9",
             "/static/css/documentation.css?v=10",
             "/static/css/operations.css?v=2",
             "/static/css/surfaces.css?v=2",

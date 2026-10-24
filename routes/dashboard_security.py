@@ -1,5 +1,7 @@
 """Dashboard single sign-on through Cloudflare Access, the audit log page and page hardening."""
 
+import base64
+import hashlib
 import logging
 from typing import Optional
 
@@ -13,12 +15,19 @@ from services.login_attempt_service import LoginAttemptService
 
 logger = logging.getLogger(__name__)
 
-# Templates load only same-origin scripts and styles and hold no inline code; JSON data
+# Chromium misses a cross-document view-transition opt-in that arrives in a stylesheet still
+# being revalidated (static files are no-cache), so base.html carries this one rule inline and the
+# policy allows exactly it by hash. The transition's animations stay in shell.css.
+VIEW_TRANSITION_STYLE = "@view-transition{navigation:auto}"
+VIEW_TRANSITION_STYLE_SOURCE = "'sha256-%s'" % base64.b64encode(
+    hashlib.sha256(VIEW_TRANSITION_STYLE.encode()).digest()).decode()
+
+# Templates load only same-origin scripts and styles and hold no other inline code; JSON data
 # blocks are not executed. Fetches, the service worker and the manifest stay same-origin.
 CONTENT_SECURITY_POLICY = "; ".join((
     "default-src 'self'",
     "script-src 'self'",
-    "style-src 'self'",
+    f"style-src 'self' {VIEW_TRANSITION_STYLE_SOURCE}",
     "img-src 'self' data: blob:",
     "font-src 'self'",
     "connect-src 'self'",
@@ -130,7 +139,7 @@ def register_dashboard_security_routes(app) -> None:
             "enabled": dashboard_sso.configured(),
             "only": dashboard_sso.sso_only(),
             "logout_url": dashboard_sso.logout_url(),
-        }}
+        }, "view_transition_style": VIEW_TRANSITION_STYLE}
 
     @app.after_request
     def dashboard_security_headers(response):

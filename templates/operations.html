@@ -4,7 +4,7 @@
 
 {% block styles %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/operations.css', v='2') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css', v='8') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auto-routes.css', v='9') }}">
 {% endblock %}
 
 {% block content %}
@@ -168,16 +168,22 @@
         <article class="panel span-12" id="cascade-panel" data-endpoint="{{ url_for('admin_cascades') }}">
             <header class="panel__header"><div><h2>Verification-gated cascades</h2>
                 <p>Try cheaper chat models first and advance when an answer fails a check. The final tier always answers.</p></div></header>
-            <div class="panel__body">
-                <label class="field-label" for="cascade-select">Saved cascade</label>
-                <select id="cascade-select" class="field-select"><option value="">New cascade</option></select>
-                <form id="cascade-form">
-                    <label class="field-label" for="cascade-config">Cascade configuration (JSON)</label>
-                    <textarea id="cascade-config" class="field-input" rows="14" spellcheck="false" aria-describedby="cascade-help" required></textarea>
-                    <p id="cascade-help" class="field-help">Use 2–4 tiers in cost order. Checks: complete, json, tools, no_refusal, agreement, judge. Agreement adds a call; judge requires a model and defaults to a minimum score of 7.</p>
-                    <button type="submit" class="button button--primary">Save cascade</button>
+            <div class="panel__body form-stack">
+                <div class="form-field">
+                    <label for="cascade-select">Saved cascade</label>
+                    <select id="cascade-select" class="field-select"><option value="">New cascade</option></select>
+                </div>
+                <form id="cascade-form" class="form-stack">
+                    <div class="form-field">
+                        <label for="cascade-config">Cascade configuration (JSON)</label>
+                        <textarea id="cascade-config" class="field-textarea field-textarea--code" rows="14" spellcheck="false" aria-describedby="cascade-help" required></textarea>
+                        <p id="cascade-help" class="field-help">Use 2–4 tiers in cost order. Checks: complete, json, tools, no_refusal, agreement, judge. Agreement adds a call; judge requires a model and defaults to a minimum score of 7.</p>
+                    </div>
+                    <div class="button-row">
+                        <button type="submit" class="button button--primary">Save cascade</button>
+                        <p id="cascade-status" class="field-help" role="status" aria-live="polite"></p>
+                    </div>
                 </form>
-                <p id="cascade-status" role="status" aria-live="polite"></p>
             </div>
         </article>
         <article class="panel span-12" id="auto-route-panel">

@@ -170,10 +170,15 @@
                     <input id="key-monthly-budget" name="monthly_budget_usd" class="field" type="number" min="0" step="0.01" inputmode="decimal">
                 </label>
             </div>
-            <label><input id="key-official-only" name="official_only" type="checkbox"> Official providers only</label>
-            <p class="field-hint">Exclude subscription, reseller and free providers, including routed candidates.</p>
+            <label class="switch-field" for="key-official-only">
+                <input id="key-official-only" name="official_only" type="checkbox">
+                <span>
+                    <strong>Official providers only</strong>
+                    <small>Exclude subscription, reseller and free providers, including routed candidates. Leave clear for no restriction.</small>
+                </span>
+            </label>
             <label class="form-field" for="key-forced-preferences">Forced provider preferences (JSON object)
-                <textarea id="key-forced-preferences" name="forced_provider_preferences" class="field-textarea" rows="3" spellcheck="false" placeholder='{"data_collection":"deny"}'></textarea>
+                <textarea id="key-forced-preferences" name="forced_provider_preferences" class="field-textarea field-textarea--code" rows="3" spellcheck="false" placeholder='{"data_collection":"deny"}'></textarea>
             </label>
             <label class="form-field" for="key-allowed-models">Allowed models
                 <textarea id="key-allowed-models" name="allowed_models" class="field-textarea" rows="3" spellcheck="false" aria-describedby="key-allowed-models-hint"></textarea>

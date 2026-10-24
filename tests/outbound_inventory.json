@@ -187,7 +187,7 @@
   "routes/dashboard_security.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "38f9c7b9262fa1275c02a7a1c95b25e3b67d8e16744f8573797514ff87be2239"
+    "sha256": "84319955ae4e486b0953aa57d65836f167cf83cfa61c49b049b0c31591feea08"
   },
   "routes/documentation.py": {
     "kind": "non-provider",

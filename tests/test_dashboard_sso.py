@@ -1,6 +1,7 @@
 """Cloudflare Access single sign-on, the audit log page and dashboard page hardening."""
 
 import base64
+import hashlib
 import importlib
 import json
 import re
@@ -387,6 +388,11 @@ def test_dashboard_pages_carry_a_strict_content_security_policy(client):
                       "frame-ancestors 'none'", "form-action 'self'"):
         assert directive in policy
     assert "unsafe-inline" not in policy
+    # The one inline style is the page-transition opt-in, allowed by its exact hash.
+    inline = "@view-transition{navigation:auto}"
+    assert f"<style>{inline}</style>" in page.get_data(as_text=True)
+    digest = base64.b64encode(hashlib.sha256(inline.encode()).digest()).decode()
+    assert f"style-src 'self' 'sha256-{digest}'" in policy
     assert page.headers["Permissions-Policy"].startswith("camera=()")
     assert page.headers["Strict-Transport-Security"] == "max-age=31536000"
     assert page.headers["X-Frame-Options"] == "DENY"

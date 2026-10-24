@@ -94,7 +94,9 @@ on the page background; `ink-400` is decorative only.
 - Color is never the only cue; live regions announce copy results and async
   status.
 - Plain-text rendering for model output and remote content.
-- Motion is limited to state feedback and respects `prefers-reduced-motion`.
+- Motion is limited to state feedback, dialog and menu entrances, and a short
+  cross-fade between pages in which the current-page underline slides to its
+  new link. All of it respects `prefers-reduced-motion`.
 
 ## Local preview
 
