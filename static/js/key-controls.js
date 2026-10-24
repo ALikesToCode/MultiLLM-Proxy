@@ -5,7 +5,8 @@
     /** The PUT /users/<name>/controls body for the dialog's field values. */
     function controlsPayload(fields) {
         return {
-            official_only: fields.official_only === "on" || fields.official_only === true,
+            // A clear box stores no restriction (null): an explicit false would still mark the key controlled.
+            official_only: fields.official_only === "on" || fields.official_only === true ? true : null,
             forced_provider_preferences: fields.forced_provider_preferences ? JSON.parse(fields.forced_provider_preferences) : null,
             secret_scan_mode: fields.secret_scan_mode || null,
             shadow_eval_rate: amount(fields.shadow_eval_rate),

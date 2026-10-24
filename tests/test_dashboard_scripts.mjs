@@ -352,8 +352,11 @@ test('usage page and key limit dialog helpers format budgets and build control p
     daily_budget_usd: '2.5', monthly_budget_usd: '', allowed_models: 'auto:*\nfree:*, openai:gpt-4.1',
     allowed_ips: ' 203.0.113.0/24 ', expires_at: '2026-12-31T23:30',
   });
-  assert.equal(JSON.stringify(payload), JSON.stringify({ official_only: false, forced_provider_preferences: null, secret_scan_mode: null, shadow_eval_rate: null, daily_budget_usd: 2.5, monthly_budget_usd: null,
+  assert.equal(JSON.stringify(payload), JSON.stringify({ official_only: null, forced_provider_preferences: null, secret_scan_mode: null, shadow_eval_rate: null, daily_budget_usd: 2.5, monthly_budget_usd: null,
     allowed_models: ['auto:*', 'free:*', 'openai:gpt-4.1'], allowed_ips: ['203.0.113.0/24'], expires_at: '2026-12-31T23:30:00Z' }));
+  const restricted = context.window.MultiLLMKeyControls.controlsPayload({ official_only: 'on', forced_provider_preferences: '{"data_collection":"deny"}' });
+  assert.equal(restricted.official_only, true);
+  assert.equal(JSON.stringify(restricted.forced_provider_preferences), '{"data_collection":"deny"}');
   for (const source of ['static/js/usage.js', 'static/js/key-controls.js']) {
     assert.doesNotMatch(readFileSync(source, 'utf8'), /innerHTML/, source);
   }
