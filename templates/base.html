@@ -15,7 +15,7 @@
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    {# Page transition opt-in; allowed by hash in the page CSP (routes/dashboard_security.py). #}
+    {# Opts in to cross-document view-transitions; the page CSP allows it by hash (routes/dashboard_security.py). #}
     {% if view_transition_style %}<style>{{ view_transition_style }}</style>{% endif %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/shell.css', v='3') }}">
