@@ -46,6 +46,7 @@ import {
 } from "./completion-result.mjs";
 import { createExtractiveCompactionDigest } from "./fallback-memory.mjs";
 import { createRoleplayContinuation } from "./continuation.mjs";
+import { preferRoleplayHandoffTargets } from "./handoff.mjs";
 import {
   buildConfiguredCandidates,
   autoRoutePreference,
@@ -99,6 +100,8 @@ export { isRoleplayPath, scopePublicRoleplaySessionId };
 import { handleRoleplayEdgeRequest as roleplayEdgeRequest } from "./edge.mjs";
 export const handleRoleplayEdgeRequest = (request, env) => withRoleplayGatewayAuthority(request, env, roleplayEdgeRequest);
 const INTERNAL_OUTPUT_MODE_HEADER = "X-MultiLLM-Roleplay-Output-Mode";
+// Turns without fallbacks also skip the handoff and the empty-reply retry.
+const WITHOUT_LEG_HANDOFFS = Object.freeze({ handoffSources: new Set(), emptyReplyFallbackEnabled: false });
 
 async function preparePromptInjection(payload, env, record = true) {
   const mode = env.PROMPT_INJECTION_MODE;
@@ -299,7 +302,7 @@ export class RoleplaySession extends DurableObject {
     }
     parsedInitial.routing = parseRoutingPolicy(payload.routing, { sessionTierEnabled: this.sessionTiers.settings.enabled });
     if (parsedInitial.routing.fallback === "none") {
-      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
+      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0, ...WITHOUT_LEG_HANDOFFS };
     }
     const { profile, parsed: parsedWithProfile } = effectiveRoleplayCharacter(
       state,
@@ -396,7 +399,7 @@ export class RoleplaySession extends DurableObject {
     tierScope.turn = tierTurn;
     if (tierTurn) {
       candidates = tierTurn.candidates;
-      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0 };
+      settings = { ...settings, refusalFallbackEnabled: false, maxAutoContinuations: 0, maxOutputContractRepairs: 0, ...WITHOUT_LEG_HANDOFFS };
     }
     if (parsed.routing.fallback === "none") candidates.splice(1);
     if (!candidates.length) {
@@ -634,6 +637,7 @@ export class RoleplaySession extends DurableObject {
     );
     generationCandidates = prepareCanaryCandidates(generationCandidates, canary, roleplayMessages, estimateTokens, settings);
     if (tierTurn) generationCandidates = tierTurn.select(generationCandidates);
+    generationCandidates = preferRoleplayHandoffTargets(generationCandidates, parsed, settings);
     if (!generationCandidates.length) {
       state = markRoleplayRequest(state, idempotencyKey, "context_too_large");
       await stateRepository.save(state);
@@ -693,6 +697,8 @@ export class RoleplaySession extends DurableObject {
       cleanup,
       promptCache,
       refusalFallbackCandidates,
+      handoffTargets,
+      laterCandidates,
     } = attempted;
     // Dispatch and continuation share the selected view. Persistence and
     // recovery above retain the original conversation independently.
@@ -716,6 +722,8 @@ export class RoleplaySession extends DurableObject {
       signal: request.signal,
       idempotencyKey,
       refusalFallbackCandidates,
+      handoffTargets,
+      laterCandidates,
     });
     protectRoleplayContinuation(continuation, canary, request.signal);
     const selectionReason = candidate.selectionReason || (parsed.routing.mode !== "provider-priority" ? parsed.routing.mode :
@@ -799,7 +807,10 @@ export class RoleplaySession extends DurableObject {
           model: candidate.model,
         },
         detectRefusal: continuation.classifyRefusal,
-        refusalFallbackEnabled: continuation.refusalFallbackEnabled,
+        refusalFallbackEnabled: continuation.holdUntilVisible,
+        detectHandoff: continuation.detectHandoff,
+        detectEmptyReply: continuation.detectEmptyReply,
+        getHandoffDraft: () => continuation.handoffDraft,
         onComplete: async (completion) => {
           completion = canaryCompletion(completion, canary);
           await preserveRecovery(this.ctx.storage, recovery, completion, trace?.id, retention);
@@ -913,7 +924,7 @@ export class RoleplaySession extends DurableObject {
         applyRoleplayRouteHeaders(
           responseHeaders,
           continuation.candidate,
-          fallbackCount + continuation.refusalFallbackCount,
+          fallbackCount + continuation.refusalFallbackCount + continuation.emptyReplyCount,
         );
         responseBytes = new TextEncoder().encode(
           JSON.stringify(completionResult.payload),

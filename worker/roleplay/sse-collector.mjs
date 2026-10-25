@@ -4,6 +4,8 @@ import {
 } from "./reasoning-output.mjs";
 
 const MAX_COLLECTED_ASSISTANT_CHARACTERS = 1_000_000;
+const MAX_TOOL_CALLS = 16;
+const MAX_TOOL_ARGUMENT_CHARACTERS = 64_000;
 
 function splitSseFrames(text, flush = false) {
   const frames = [];
@@ -147,6 +149,9 @@ export function createSseAssistantCollector({
   let truncated = false;
   let template = null;
   let completionTokens = 0;
+  // Streamed tool calls arrive as deltas keyed by index: the first carries the name, the rest
+  // append argument text.
+  const toolCalls = [];
   const reasoningNormalizer = reasoningMetadata
     ? createRoleplayReasoningFrameNormalizer(reasoningMetadata)
     : null;
@@ -165,6 +170,26 @@ export function createSseAssistantCollector({
     }
     truncated ||= content.length > remaining;
     return current + content.slice(0, remaining);
+  };
+
+  const appendToolCalls = (deltas) => {
+    if (!Array.isArray(deltas)) return;
+    for (const delta of deltas) {
+      const index = Number.isSafeInteger(delta?.index) ? delta.index : 0;
+      if (index < 0 || index >= MAX_TOOL_CALLS) continue;
+      const call = toolCalls[index] ??= {
+        id: "",
+        type: "function",
+        function: { name: "", arguments: "" },
+      };
+      if (typeof delta.id === "string" && delta.id) call.id = delta.id;
+      const name = delta.function?.name;
+      if (typeof name === "string" && name && !call.function.name) call.function.name = name;
+      const args = delta.function?.arguments;
+      if (typeof args === "string" && args) {
+        call.function.arguments = (call.function.arguments + args).slice(0, MAX_TOOL_ARGUMENT_CHARACTERS);
+      }
+    }
   };
 
   const appendContent = (content) => {
@@ -204,6 +229,7 @@ export function createSseAssistantCollector({
     }
     template = parsed.payload;
     appendContent(choice?.delta?.content);
+    appendToolCalls(choice?.delta?.tool_calls);
     refusal = appendBounded(refusal, choice?.delta?.refusal);
     const terminal =
       typeof choice.finish_reason === "string"
@@ -247,6 +273,7 @@ export function createSseAssistantCollector({
       if (parsed?.done || choice?.finish_reason ||
           [delta?.content, delta?.reasoning_content, delta?.reasoning, delta?.refusal]
             .some((value) => typeof value === "string" && value.length > 0) ||
+          (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0) ||
           (Array.isArray(delta?.reasoning_details) && delta.reasoning_details.some((detail) =>
             [typeof detail === "string" ? detail : "", detail?.text, detail?.reasoning, detail?.reasoning_content]
               .some((value) => typeof value === "string" && value.length > 0)))) {
@@ -280,6 +307,7 @@ export function createSseAssistantCollector({
         truncated,
         template,
         completionTokens,
+        toolCalls: toolCalls.filter(Boolean),
         output,
         withheld: [...withheld],
       };

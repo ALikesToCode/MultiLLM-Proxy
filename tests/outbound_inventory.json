@@ -2122,17 +2122,17 @@
   "worker/roleplay/completion-result.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "924b5dd596ac8ef89f8bd13f04bc7e1067546ed092e47435e3417b66728f1761"
+    "sha256": "af8ba094f15608f9cb6a47cc13042bb1a89de0dbeb97255a70ec0ad8628b608b"
   },
   "worker/roleplay/config.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "ea0007c314192ae4718fee801465e8678cf5ec8edd7ffd84e9a70480cc10d1ee"
+    "sha256": "df8aca19da17bf36a87b3c2c9501f7c950033490288b79a866d75f1fd323c121"
   },
   "worker/roleplay/continuation.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "0a3abcb3358db0112e4b6e22cf07695947f8bd2d4cde253de033b7f55c29e5b5"
+    "sha256": "a17e4e907349783bf740f6a240223c488bdb15504f4c44eb4d876c9aadf12fdd"
   },
   "worker/roleplay/credential-health.mjs": {
     "kind": "guarded",
@@ -2152,7 +2152,7 @@
   "worker/roleplay/endpoint.mjs": {
     "kind": "internal",
     "reason": "Private session handler; generation and compaction use guarded transport.",
-    "sha256": "9e460b4d4cd420c7692406a7ba03248b73413c830be54423fdb57fe208a6d3cb"
+    "sha256": "ec959ea02c60bd85a0457f077ee2ce180adc47a5f27ac0167d053394af5d50d7"
   },
   "worker/roleplay/fallback-memory.mjs": {
     "kind": "non-provider",
@@ -2192,7 +2192,7 @@
   "worker/roleplay/nonstream-repair.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "8d3166d81f7be6d0e6f25760a7c05866c4cd5c23eaad36300b8d7f2e3a03e196"
+    "sha256": "5fea43fd7411c2a5a78ed905333c41750e85c9a5686c0e07a314460bc6a85cf4"
   },
   "worker/roleplay/operator-edge.mjs": {
     "kind": "internal",
@@ -2277,7 +2277,7 @@
   "worker/roleplay/sse-collector.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "d609605183dd3f8f2b90f2f7402ba2f45afb797f88297d11460de31ed36e9997"
+    "sha256": "5ea6fe478d2158914122d60fb2c0152764dc17de5bfe9ce13c34392d55d2db1f"
   },
   "worker/roleplay/state-runtime.mjs": {
     "kind": "non-provider",
@@ -2292,12 +2292,12 @@
   "worker/roleplay/streaming.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "cfa1ae35acfbddf5d6f8cd362b13c24247b38df78cbca3fd0bc545924a89b372"
+    "sha256": "edfd06ed6bb1632833f73119a2c6f9d8e3d814d5793edfc81e02fdc00188734e"
   },
   "worker/roleplay/transport.mjs": {
     "kind": "guarded",
     "reason": "Every candidate, compaction and fallback uses providerFetch, including Container egress.",
-    "sha256": "fb1f50e58dd75196d6920a542df1c262e811a1c4e86d701d21366aa1d1540eb3"
+    "sha256": "28a8b0f142476e847381ecffbcd356158de4431c29fe9a9680078aa5ad6d4e70"
   },
   "worker/roleplay/turn-runtime.mjs": {
     "kind": "non-provider",
@@ -2453,5 +2453,10 @@
     "kind": "internal",
     "reason": "Content-free capability probe of the actual fenced expansion Container before legacy private dispatch.",
     "sha256": "1bc8f20ae715d46ceed6a32d90d549688d9479ee87fe25a110235d03c390059e"
+  },
+  "worker/roleplay/handoff.mjs": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "f681974644eb5340debf6d4c0b072bb8dfd5ffcad18a652611d9bdf888d595c3"
   }
 }

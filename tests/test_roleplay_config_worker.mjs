@@ -272,6 +272,25 @@ test("deployment starts roleplay on OpenCode Go, then Cline Pass, and keeps Nano
   assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, "");
 });
 
+test("deployment lets DeepSeek hand pivotal turns to GLM 5.3, at most every other turn", async () => {
+  const configUrl = new URL("../wrangler.jsonc", import.meta.url);
+  const config = JSON.parse(await readFile(configUrl, "utf8"));
+
+  // Measured 2026-10-25: with the tool offered, DeepSeek V4.1 Flash wrote all 12 ordinary turns
+  // itself and handed off 4 of 6 climax and multi-faction planning turns, each with a full draft.
+  assert.equal(config.vars?.ROLEPLAY_HANDOFF_FROM, "opencode:deepseek-v4.1-flash");
+  assert.deepEqual(config.vars?.ROLEPLAY_HANDOFF_TO.split(","), [
+    "opencode:glm-5.3",
+    "cline-pass:cline-pass/glm-5.3",
+  ]);
+  // ROLEPLAY_HANDOFF_MIN_TURNS keeps its default of 2.
+  assert.equal(config.vars?.ROLEPLAY_HANDOFF_MIN_TURNS, undefined);
+  const chain = config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(",");
+  for (const target of config.vars.ROLEPLAY_HANDOFF_TO.split(",")) {
+    assert.ok(chain.indexOf(target) > chain.indexOf(config.vars.ROLEPLAY_HANDOFF_FROM), target);
+  }
+});
+
 test("deployment routes GLM through LinkAPI before NavyAI", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));

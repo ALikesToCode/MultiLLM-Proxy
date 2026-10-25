@@ -76,6 +76,12 @@ export function roleplayCompletionDisposition({
   };
 }
 
+function diagnosticCount(diagnostics, reason) {
+  return Array.isArray(diagnostics)
+    ? diagnostics.filter((entry) => entry?.reason === reason).length
+    : 0;
+}
+
 export function logRoleplayStreamCompletion({
   candidate,
   parsed,
@@ -116,6 +122,10 @@ export function logRoleplayStreamCompletion({
       heartbeatCount: completion.heartbeatCount,
       continuationCount: completion.continuationCount,
       refusalFallbackCount: completion.refusalFallbackCount,
+      handoffCount:
+        diagnosticCount(completion.continuationDiagnostics, "handoff") || undefined,
+      emptyReplyCount:
+        diagnosticCount(completion.continuationDiagnostics, "empty_reply") || undefined,
       upstreamCallCount: completion.upstreamCallCount,
       ...contractTelemetry(
         parsed.outputContract,
@@ -147,6 +157,10 @@ export function logRoleplayNonStreamCompletion({
       finishReason: completion.finishReason || undefined,
       continuationCount: completion.continuationCount,
       refusalFallbackCount: completion.refusalFallbackCount,
+      handoffCount:
+        diagnosticCount(completion.continuationDiagnostics, "handoff") || undefined,
+      emptyReplyCount:
+        diagnosticCount(completion.continuationDiagnostics, "empty_reply") || undefined,
       upstreamCallCount: completion.upstreamCallCount,
       queueMs: Math.round(timings.queueMs ?? 0),
       stateLoadMs: Math.round(timings.stateLoadMs ?? 0),

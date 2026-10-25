@@ -454,6 +454,14 @@ function parseIntelligenceChain(value) {
   return chain;
 }
 
+// ROLEPLAY_HANDOFF_FROM and ROLEPLAY_HANDOFF_TO name chain entries the same way; unset means none.
+function parseHandoffEntries(value) {
+  if (typeof value !== "string" || !value.trim()) return new Set();
+  return new Set(
+    parseIntelligenceChain(value).map(({ provider, model }) => `${provider}:${model}`),
+  );
+}
+
 export function intelligenceModelFamily(model) {
   const normalized = String(model ?? "").toLowerCase();
   if (/(?:^|\/)glm[-_]?[0-9]/.test(normalized)) return "glm";
@@ -735,6 +743,13 @@ export function getRoleplaySettings(env) {
       env.ROLEPLAY_PROVIDER_LIMITS,
     ),
     intelligenceChain: parseIntelligenceChain(env.ROLEPLAY_INTELLIGENCE_MODELS),
+    handoffSources: parseHandoffEntries(env.ROLEPLAY_HANDOFF_FROM),
+    handoffTargets: parseHandoffEntries(env.ROLEPLAY_HANDOFF_TO),
+    handoffMinTurns: boundedInteger(env.ROLEPLAY_HANDOFF_MIN_TURNS, 2, 0, 1_000),
+    emptyReplyFallbackEnabled: booleanSetting(
+      env.ROLEPLAY_EMPTY_REPLY_FALLBACK_ENABLED,
+      true,
+    ),
     autoRoute:
       String(env.ROLEPLAY_AUTO_ROUTE ?? "").trim().toLowerCase() === "intelligence"
         ? "intelligence"
