@@ -4,6 +4,7 @@ import {
   rankQualityEligible,
 } from "./routing-policy.mjs";
 import { clientContextHeaders, withClientDefaults, withOpencodeSession } from "../client-headers.mjs";
+import { runtimeFeatureValue } from "../runtime-feature-flags.mjs";
 import {
   parseRoleplayProviderLimits,
   resolveRoleplayCandidateLimits,
@@ -743,8 +744,8 @@ export function getRoleplaySettings(env) {
       env.ROLEPLAY_PROVIDER_LIMITS,
     ),
     intelligenceChain: parseIntelligenceChain(env.ROLEPLAY_INTELLIGENCE_MODELS),
-    handoffSources: parseHandoffEntries(env.ROLEPLAY_HANDOFF_FROM),
-    handoffTargets: parseHandoffEntries(env.ROLEPLAY_HANDOFF_TO),
+    handoffSources: parseHandoffEntries(runtimeFeatureValue(env, "ROLEPLAY_HANDOFF_FROM")),
+    handoffTargets: parseHandoffEntries(runtimeFeatureValue(env, "ROLEPLAY_HANDOFF_TO")),
     handoffMinTurns: boundedInteger(env.ROLEPLAY_HANDOFF_MIN_TURNS, 2, 0, 1_000),
     emptyReplyFallbackEnabled: booleanSetting(
       env.ROLEPLAY_EMPTY_REPLY_FALLBACK_ENABLED,

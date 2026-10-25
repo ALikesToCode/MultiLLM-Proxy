@@ -252,6 +252,7 @@ export async function roleplayModuleUrl() {
   const configDataUrl = dataModuleUrl(
     configSource
       .replace('from "../client-headers.mjs";', `from "${new URL("../../worker/client-headers.mjs", import.meta.url)}";`)
+      .replace('from "../runtime-feature-flags.mjs";', `from "${new URL("../../worker/runtime-feature-flags.mjs", import.meta.url)}";`)
       .replace('from "./routing-policy.mjs";', `from "${new URL("../../worker/roleplay/routing-policy.mjs", import.meta.url)}";`)
       .replace(
         'from "./capacity.mjs";',

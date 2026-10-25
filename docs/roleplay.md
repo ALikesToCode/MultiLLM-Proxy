@@ -184,9 +184,10 @@ configured key. Leave the variable unset for the adaptive behaviour above.
 
 `ROLEPLAY_HANDOFF_FROM` names chain entries that may pass a turn on, and
 `ROLEPLAY_HANDOFF_TO` the entries that take it; both use the
-`ROLEPLAY_INTELLIGENCE_MODELS` format and are unset by default. Production lets
-DeepSeek V4.1 Flash on OpenCode Go hand off to GLM-5.3 on OpenCode Go, then on
-ClinePass. A source request carries one internal function, `multillm_hand_off_turn`,
+`ROLEPLAY_INTELLIGENCE_MODELS` format and are unset by default. Production sets
+both inside `RUNTIME_FEATURE_FLAGS`; a separate var of the same name takes
+precedence. Production lets DeepSeek V4.1 Flash on OpenCode Go hand off to
+GLM-5.3 on OpenCode Go, then on ClinePass. A source request carries one internal function, `multillm_hand_off_turn`,
 whose arguments are a reason (`deeper_reasoning` or `stronger_prose`), short notes
 and an optional draft. When the source calls it instead of writing, the Worker
 discards that attempt (its frames are held until visible text appears, so nothing
