@@ -11,7 +11,7 @@ const { MultiLLMProxyContainer } = await loadWorkerModule();
 
 test("deployment groups feature settings while preserving Container flags and secrets", () => {
   assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 7);
-  assert.equal(Object.keys(config.vars).length, 65);
+  assert.equal(Object.keys(config.vars).length, 67);
   const source = { ...config.vars, ANTHROPIC_API_KEY: "synthetic-provider-secret" };
   const container = new MultiLLMProxyContainer({}, source);
   assert.equal(container.envVars.MODEL_COOLDOWN_ENABLED, "true");

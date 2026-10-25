@@ -8,6 +8,7 @@ import {
   createRoleplayRefusalStreamGate,
   ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE,
 } from "./refusal-fallback.mjs";
+import { createRoleplayHandoffFrameFilter } from "./handoff.mjs";
 
 const SSE_ENCODER = new TextEncoder();
 const HEARTBEAT_COMMENT = SSE_ENCODER.encode(
@@ -88,6 +89,9 @@ export function createObservedStream({
   reasoningMetadata = null,
   detectRefusal = null,
   refusalFallbackEnabled = false,
+  detectHandoff = null,
+  detectEmptyReply = null,
+  getHandoffDraft = null,
 }) {
   let resolveCompletion;
   const completion = new Promise((resolve) => {
@@ -126,6 +130,7 @@ export function createObservedStream({
   const refusalGate = createRoleplayRefusalStreamGate(
     refusalFallbackEnabled,
   );
+  let handoffFilter = createRoleplayHandoffFrameFilter();
   let settled = false;
   let released = false;
   let pendingRead = null;
@@ -169,6 +174,7 @@ export function createObservedStream({
     currentReasoningMetadata =
       next.reasoningMetadata ?? currentReasoningMetadata;
     collector = newCollector();
+    handoffFilter = createRoleplayHandoffFrameFilter();
     refusalGate.reset(Boolean(next.refusalFallbackEnabled));
     released = false;
     pendingRead = null;
@@ -353,10 +359,8 @@ export function createObservedStream({
                   })
                 : { refused: false, reason: "" };
               const semanticRefusal = refusal.refused === true;
-              const completedOutputFrames = [
-                ...refusalGate.consume(collected.output),
-                ...refusalGate.complete(semanticRefusal),
-              ];
+              collected.output = handoffFilter.filter(collected.output);
+              collected.withheld = handoffFilter.filter(collected.withheld);
               const outputLimited = collected.finishReason === "length";
               const assistantAddition =
                 activeContinuationReason === "output_contract"
@@ -399,10 +403,42 @@ export function createObservedStream({
                 candidateClientContent =
                   cleanOutput(candidateClientContent).content;
               }
+              const handoff =
+                !semanticRefusal &&
+                !candidateAssistant.trim() &&
+                typeof detectHandoff === "function"
+                  ? detectHandoff(collected.toolCalls)
+                  : null;
+              const emptyReply =
+                !semanticRefusal &&
+                !handoff &&
+                typeof detectEmptyReply === "function" &&
+                detectEmptyReply({
+                  assistant: candidateAssistant,
+                  finishReason: collected.finishReason,
+                  toolCalls: collected.toolCalls,
+                  terminated: collected.terminated,
+                  reason: decision.reason,
+                });
               if (semanticRefusal) {
                 decision = {
                   reason: "semantic_refusal",
                   limit: 1,
+                  contractAnalysis: null,
+                  cleaned: { content: assistant },
+                };
+              } else if (handoff) {
+                decision = {
+                  reason: "handoff",
+                  limit: 1,
+                  contractAnalysis: null,
+                  cleaned: { content: assistant },
+                  handoff,
+                };
+              } else if (emptyReply) {
+                decision = {
+                  reason: "empty_reply",
+                  limit: 2,
                   contractAnalysis: null,
                   cleaned: { content: assistant },
                 };
@@ -425,6 +461,13 @@ export function createObservedStream({
                       : 1,
                 };
               }
+
+              const completedOutputFrames = [
+                ...refusalGate.consume(collected.output),
+                ...refusalGate.complete(
+                  semanticRefusal || Boolean(handoff) || emptyReply,
+                ),
+              ];
 
               let accepted = true;
               if (activeContinuationReason === "output_contract") {
@@ -451,7 +494,9 @@ export function createObservedStream({
               const discardForFreshRetry =
                 decision.reason === "empty_eof" ||
                 decision.reason === "empty_story" ||
-                decision.reason === "semantic_refusal";
+                decision.reason === "semantic_refusal" ||
+                decision.reason === "handoff" ||
+                decision.reason === "empty_reply";
               if (discardForFreshRetry) {
                 continuationDiagnostics.push({
                   reason: decision.reason,
@@ -459,10 +504,14 @@ export function createObservedStream({
                     decision.reason === "semantic_refusal"
                       ? refusal.reason
                       : undefined,
+                  handoffReason: decision.handoff?.reason,
+                  draftCharacters: decision.handoff
+                    ? decision.handoff.draft.length
+                    : undefined,
                   charactersDiscarded: collected.clientContent.length,
                   accepted: false,
                 });
-                if (decision.reason === "empty_eof") {
+                if (decision.reason === "empty_eof" || decision.reason === "empty_reply") {
                   // Reasoning frames may already be visible downstream. Flush
                   // the leg's normalizer output so its <think> envelope closes
                   // before a retry starts, while still discarding it from the
@@ -528,6 +577,7 @@ export function createObservedStream({
                     continuationCount: continuationCount + 1,
                     reason: incompleteReason,
                     contractAnalysis: decision.contractAnalysis,
+                    handoff: decision.handoff ?? null,
                   }),
                 ).then(
                   (next) => {
@@ -580,9 +630,29 @@ export function createObservedStream({
                 continue;
               }
             }
+            // When no handoff target wrote any visible text, the source's own draft is the reply.
+            const handoffDraft =
+              incompleteReason === "handoff"
+                ? decision.handoff?.draft ?? ""
+                : !assistant.trim() && typeof getHandoffDraft === "function"
+                  ? getHandoffDraft() || ""
+                  : "";
             const refusalFallbackFailed =
-              incompleteReason === "semantic_refusal";
-            if (refusalFallbackFailed) {
+              !handoffDraft &&
+              (incompleteReason === "semantic_refusal" ||
+                incompleteReason === "empty_reply" ||
+                incompleteReason === "handoff");
+            if (handoffDraft) {
+              assistant = handoffDraft;
+              enqueueFrames(
+                controller,
+                bufferedCompletionFrames(
+                  template ?? collected.template,
+                  handoffDraft,
+                  "stop",
+                ),
+              );
+            } else if (refusalFallbackFailed) {
               enqueueFrames(
                 controller,
                 bufferedCompletionFrames(
@@ -609,12 +679,16 @@ export function createObservedStream({
             void settle({
               success:
                 collected.terminated &&
-                !incompleteReason &&
+                (!incompleteReason || Boolean(handoffDraft)) &&
                 !refusalFallbackFailed,
               assistant,
-              finishReason: collected.finishReason,
-              reason: refusalFallbackFailed
-                ? "refusal_fallback_failed"
+              finishReason: handoffDraft ? "stop" : collected.finishReason,
+              reason: handoffDraft
+                ? "handoff_draft"
+                : refusalFallbackFailed
+                ? incompleteReason === "semantic_refusal"
+                  ? "refusal_fallback_failed"
+                  : `${incompleteReason}_failed`
                 : incompleteReason
                   ? incompleteReason
                   : collected.terminated
@@ -632,7 +706,7 @@ export function createObservedStream({
             firstByteAt = now;
           }
           const decoded = decoder.decode(value, { stream: true });
-          const frames = collector.consume(decoded);
+          const frames = handoffFilter.filter(collector.consume(decoded));
           if (!frames.length) {
             continue;
           }

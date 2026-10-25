@@ -7,6 +7,7 @@ function dataModuleUrl(source) {
   source = source.replaceAll('from "./worker/provider-dispatch.mjs"', `from "${new URL("../../worker/provider-dispatch.mjs", import.meta.url)}"`);
   source = source.replaceAll('from "./worker/key-controls-capability.mjs"', `from "${new URL("../../worker/key-controls-capability.mjs", import.meta.url)}"`);
   source = source.replaceAll('from "../provider-dispatch.mjs"', `from "${new URL("../../worker/provider-dispatch.mjs", import.meta.url)}"`);
+  source = source.replaceAll('from "./handoff.mjs"', `from "${new URL("../../worker/roleplay/handoff.mjs", import.meta.url)}"`);
   return `data:text/javascript;base64,${Buffer.from(source, "utf8").toString("base64")}`;
 }
 

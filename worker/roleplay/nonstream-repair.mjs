@@ -4,6 +4,7 @@ import {
 } from "./memory.mjs";
 import { normalizeRoleplayCompletionPayload } from "./reasoning-output.mjs";
 import { ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE } from "./refusal-fallback.mjs";
+import { withoutRoleplayHandoffToolCalls } from "./handoff.mjs";
 import {
   MAX_RESPONSE_BYTES,
   logRoleplayError,
@@ -54,7 +55,7 @@ function completionPayload(payload, content, finishReason) {
     ? { ...choices[0] }
     : { index: 0 };
   const message = first.message && typeof first.message === "object"
-    ? { ...first.message }
+    ? withoutRoleplayHandoffToolCalls({ ...first.message })
     : { role: "assistant" };
   delete message.refusal;
   message.content = content;
@@ -62,6 +63,11 @@ function completionPayload(payload, content, finishReason) {
   first.finish_reason = finishReason || "stop";
   choices[0] = first;
   return { ...payload, choices };
+}
+
+function completionToolCalls(payload) {
+  const calls = payload?.choices?.[0]?.message?.tool_calls;
+  return Array.isArray(calls) ? calls : [];
 }
 
 function completionRefusal(payload) {
@@ -115,6 +121,50 @@ export async function repairNonStreamingCompletion({
   let terminalReason = "";
   let contractAnalysis = null;
   let refusalFallbackFailed = false;
+  let handoffDraftUsed = false;
+
+  // Starts the turn over on other candidates; null when none returned a readable completion.
+  const openFreshLeg = async (reason, handoff = null) => {
+    const attempted = await continuation.openResponse({
+      assistant,
+      continuationCount: continuationCount + 1,
+      reason,
+      contractAnalysis: null,
+      handoff,
+    });
+    const payload = attempted
+      ? await readContinuationPayload(attempted, signal)
+      : null;
+    if (!payload) return null;
+    metadata = {
+      provider: continuation.candidate.provider,
+      model: continuation.candidate.model,
+    };
+    return { payload, leg: normalizedLeg(payload, metadata) };
+  };
+  const acceptFreshLeg = (next, reason) => {
+    basePayload = next.leg.payload;
+    assistant = next.leg.assistant;
+    clientContent = next.leg.clientContent;
+    finishReason = next.leg.finishReason;
+    continuationCount += 1;
+    continuationsByReason[reason] = (continuationsByReason[reason] ?? 0) + 1;
+  };
+  const failTurn = (reason) => {
+    assistant = "";
+    clientContent = ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE;
+    finishReason = "stop";
+    terminalReason = reason;
+    refusalFallbackFailed = true;
+  };
+  const usableLeg = (next) =>
+    next &&
+    next.leg.assistant.trim() &&
+    !continuation.classifyRefusal({
+      assistant: next.leg.assistant,
+      refusal: completionRefusal(next.payload),
+      finishReason: next.leg.finishReason,
+    }).refused;
 
   const refusal = continuation.classifyRefusal({
     assistant,
@@ -166,6 +216,56 @@ export async function repairNonStreamingCompletion({
       clientContent = ROLEPLAY_REFUSAL_FALLBACK_FAILURE_MESSAGE;
       finishReason = "stop";
       terminalReason = "refusal_fallback_failed";
+    }
+  } else {
+    const handoff = assistant.trim()
+      ? null
+      : continuation.detectHandoff(completionToolCalls(initialPayload));
+    if (handoff) {
+      continuationDiagnostics.push({
+        reason: "handoff",
+        handoffReason: handoff.reason,
+        draftCharacters: handoff.draft.length,
+        charactersDiscarded: clientContent.length,
+        accepted: false,
+      });
+      const next = await openFreshLeg("handoff", handoff);
+      if (usableLeg(next)) {
+        acceptFreshLeg(next, "handoff");
+      } else if (handoff.draft) {
+        // No target wrote the turn, so the source's own draft is the reply.
+        assistant = handoff.draft;
+        clientContent = handoff.draft;
+        finishReason = "stop";
+        handoffDraftUsed = true;
+      } else {
+        failTurn("handoff_failed");
+      }
+    } else {
+      let toolCalls = completionToolCalls(initialPayload);
+      let retried = false;
+      while (
+        (continuationsByReason.empty_reply ?? 0) < 2 &&
+        continuation.detectEmptyReply({
+          assistant,
+          finishReason,
+          toolCalls,
+          terminated: true,
+          reason: continuation.assess({ assistant, finishReason }).reason,
+        })
+      ) {
+        retried = true;
+        continuationDiagnostics.push({
+          reason: "empty_reply",
+          charactersDiscarded: clientContent.length,
+          accepted: false,
+        });
+        const next = await openFreshLeg("empty_reply");
+        if (!next) break;
+        acceptFreshLeg(next, "empty_reply");
+        toolCalls = completionToolCalls(next.payload);
+      }
+      if (retried && !assistant.trim() && !toolCalls.length) failTurn("empty_reply_failed");
     }
   }
 
@@ -284,6 +384,8 @@ export async function repairNonStreamingCompletion({
   const success = !terminalReason;
   const finalFinishReason =
     terminalReason === "output_limit" ? "length" : finishReason || "stop";
+  const completionReason =
+    terminalReason || (handoffDraftUsed ? "handoff_draft" : "complete");
 
   return {
     payload: completionPayload(
@@ -294,7 +396,7 @@ export async function repairNonStreamingCompletion({
     assistant: continuation.cleanOutput(assistant).content,
     finishReason: finalFinishReason,
     success,
-    reason: terminalReason || "complete",
+    reason: completionReason,
     continuationCount,
     upstreamCallCount: continuation.upstreamCallCount,
     refusalFallbackCount: continuation.refusalFallbackCount,

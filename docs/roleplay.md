@@ -180,6 +180,47 @@ without a roleplay model) use the same chain. Turns that set `routing.mode` or
 `routing.model` keep the adaptive pool, and so does any turn whose chain has no
 configured key. Leave the variable unset for the adaptive behaviour above.
 
+### Handing pivotal turns to a stronger model
+
+`ROLEPLAY_HANDOFF_FROM` names chain entries that may pass a turn on, and
+`ROLEPLAY_HANDOFF_TO` the entries that take it; both use the
+`ROLEPLAY_INTELLIGENCE_MODELS` format and are unset by default. Production lets
+DeepSeek V4.1 Flash on OpenCode Go hand off to GLM-5.3 on OpenCode Go, then on
+ClinePass. A source request carries one internal function, `multillm_hand_off_turn`,
+whose arguments are a reason (`deeper_reasoning` or `stronger_prose`), short notes
+and an optional draft. When the source calls it instead of writing, the Worker
+discards that attempt (its frames are held until visible text appears, so nothing
+reaches the client) and the first available target writes the turn from the same
+conversation plus a private note with the source's notes and draft, at its usual
+reasoning effort (at `max`, GLM-5.3 spent a 4,096-token budget reasoning and wrote
+nothing). If no target accepts the request or writes visible text, the draft is the
+reply; without a draft the rest of the chain follows.
+A source that writes the reply and also calls the function keeps its reply, and the
+call is removed from the stream.
+
+`ROLEPLAY_HANDOFF_MIN_TURNS` (default `2`) allows at most one handoff per that many
+turns in a session. Between handoffs, and whenever no target is available, the
+source still receives the function with `tool_choice: "none"`, so its prompt prefix
+and the provider's cache of it stay the same. Callers that ask for `xhigh` or `max`
+reasoning start on the targets. Turns with `routing.fallback: "none"` or a session
+tier skip the handoff.
+
+In a test on 2026-10-25 with the function offered, DeepSeek wrote all 12 ordinary
+turns itself (scene continuation, conflict, out-of-character recall and small talk)
+and handed off 4 of 6 climax and multi-faction planning turns, each with a full
+draft of 950 to 1,600 characters. A handoff costs the source's 7 to 15 seconds
+before the target starts. Each handoff logs `roleplay_handoff`, and the completion
+log counts them in `handoffCount`.
+
+### Empty replies
+
+A reply that finishes with no visible text, only reasoning or nothing at all, is
+treated as a failure: the turn starts over on the next chain candidate, at most
+twice, and fails with a retry message if none writes anything. This also applies
+when the caller sets `max_tokens`. The image-prompt repair keeps its own retry when
+it can run. Set `ROLEPLAY_EMPTY_REPLY_FALLBACK_ENABLED=false` to pass empty replies
+through. Each retry logs `roleplay_empty_reply_fallback`.
+
 Roleplay generation uses `ROLEPLAY_DEFAULT_REASONING_EFFORT`; the deployment
 configuration sets the general default to `high`. OpenCode `glm-5.3-flash`
 defaults to `reasoning_effort: max`. Go enables reasoning through that field;
@@ -609,6 +650,10 @@ Non-secret tuning variables:
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Maximum wait for provider response headers before advancing to the next tier |
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
+| `ROLEPLAY_HANDOFF_FROM` | unset | Chain entries offered `multillm_hand_off_turn`; production uses `opencode:deepseek-v4.1-flash` |
+| `ROLEPLAY_HANDOFF_TO` | unset | Chain entries that take a handed-off turn, in chain order; production uses GLM-5.3 on OpenCode Go and ClinePass |
+| `ROLEPLAY_HANDOFF_MIN_TURNS` | `2` | At most one handoff per this many turns in a session; `0` or `1` lifts the cap |
+| `ROLEPLAY_EMPTY_REPLY_FALLBACK_ENABLED` | `true` | Start a reply with no visible text over on the next candidate, at most twice |
 | `ROLEPLAY_REFUSAL_FALLBACK_ENABLED` | `true` | Privately regenerate an exact GLM-5.3 Flash refusal trigger with the configured Uncensored Flash candidate; rejected output is neither streamed nor stored |
 | `ROLEPLAY_DEFAULT_REASONING_EFFORT` | `high` | Deliberate generation default with lower latency and hidden-token use than each provider's maximum; callers can still request `max` per turn |
 | `ROLEPLAY_STREAM_HEARTBEAT_MS` | `10000` | SSE keepalive interval during upstream silence |

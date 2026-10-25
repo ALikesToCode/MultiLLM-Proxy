@@ -23,6 +23,13 @@ import {
   injectRoleplayRefusalControl,
   roleplayRefusalFallbackCandidates,
 } from "./refusal-fallback.mjs";
+import {
+  ROLEPLAY_HANDOFF_TOOL,
+  injectRoleplayHandoffTool,
+  isRoleplayHandoffSource,
+  roleplayHandoffAllowed,
+  roleplayHandoffTargets,
+} from "./handoff.mjs";
 
 const RESPONSE_HEADER_WHITELIST = new Set([
   "cache-control",
@@ -874,11 +881,21 @@ export async function attemptRoleplayCandidates(
       };
     }
 
-    const upstreamPayload = refusalFallbackCandidates.length
+    const controlledPayload = refusalFallbackCandidates.length
       ? injectRoleplayRefusalControl(
           preparedPayload?.payload ?? preparedPayload,
         )
       : preparedPayload?.payload ?? preparedPayload;
+    const handoffTargets = roleplayHandoffTargets(candidates, candidateIndex, settings);
+    const upstreamPayload = isRoleplayHandoffSource(candidate, settings)
+      ? injectRoleplayHandoffTool(
+          controlledPayload,
+          handoffTargets.length > 0 && roleplayHandoffAllowed(nextState, settings),
+        )
+      : controlledPayload;
+    const handoffOffered =
+      upstreamPayload?.tool_choice === "auto" &&
+      upstreamPayload.tools?.[0] === ROLEPLAY_HANDOFF_TOOL;
 
     try {
       attempted = await fetchCandidateWithPaygoFallback(
@@ -922,6 +939,8 @@ export async function attemptRoleplayCandidates(
         fallbackCount,
         promptCache: preparedPayload?.promptCache,
         refusalFallbackCandidates,
+        handoffTargets: handoffOffered ? handoffTargets : [],
+        laterCandidates: candidates.slice(candidateIndex + 1),
       };
     }
 

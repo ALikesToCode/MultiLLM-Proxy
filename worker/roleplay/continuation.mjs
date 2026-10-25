@@ -14,6 +14,15 @@ import {
   recordModelRefusal,
 } from "./transport.mjs";
 import { classifyRoleplayRefusal } from "./refusal-fallback.mjs";
+import {
+  isEmptyRoleplayReply,
+  recordRoleplayHandoff,
+  roleplayHandoffCall,
+  roleplayHandoffMessages,
+} from "./handoff.mjs";
+
+// Legs that start the turn over on other candidates instead of continuing the current one.
+const FRESH_LEG_REASONS = new Set(["semantic_refusal", "handoff", "empty_reply"]);
 
 const LENGTH_CONTINUATION_INSTRUCTION = [
   "[Automatic continuation of an incomplete response]",
@@ -103,9 +112,19 @@ export function createRoleplayContinuation({
   signal,
   idempotencyKey,
   refusalFallbackCandidates = [],
+  handoffTargets = [],
+  laterCandidates = [],
 }) {
   let currentState = state;
   let currentCandidate = candidate;
+  // A handoff adds its note to the prompt of every later leg, and its draft stands in for the
+  // reply if no later leg writes one.
+  let legMessages = messages;
+  let handoffDraft = "";
+  let remainingHandoffTargets = [...handoffTargets];
+  let remainingLaterCandidates = [...laterCandidates];
+  let handoffCount = 0;
+  let emptyReplyCount = 0;
   let remainingRefusalFallbackCandidates = settings.refusalFallbackEnabled
     ? [...refusalFallbackCandidates]
     : [];
@@ -116,7 +135,10 @@ export function createRoleplayContinuation({
     (settings.maxAutoContinuations > 0 ||
       settings.maxOutputContractRepairs > 0);
   const canOpen =
-    enabled || remainingRefusalFallbackCandidates.length > 0;
+    enabled ||
+    remainingRefusalFallbackCandidates.length > 0 ||
+    remainingHandoffTargets.length > 0 ||
+    (settings.emptyReplyFallbackEnabled === true && remainingLaterCandidates.length > 0);
 
   const assess = ({ assistant, finishReason }) => {
     const cleaned = cleanRoleplayOutput(
@@ -158,38 +180,61 @@ export function createRoleplayContinuation({
     return { reason: "", limit: 0, contractAnalysis, cleaned };
   };
 
+  const freshLegCandidates = (reason, handoff) => {
+    if (reason === "semantic_refusal") return remainingRefusalFallbackCandidates;
+    if (reason === "empty_reply") {
+      return settings.emptyReplyFallbackEnabled === true ? remainingLaterCandidates : [];
+    }
+    if (!remainingHandoffTargets.length) return [];
+    // A draft can stand in for the reply if every target fails; without one the rest of the
+    // chain follows the targets.
+    return handoff?.draft
+      ? remainingHandoffTargets
+      : [
+          ...remainingHandoffTargets,
+          ...remainingLaterCandidates.filter((entry) => !remainingHandoffTargets.includes(entry)),
+        ];
+  };
+
   const openResponse = async ({
     assistant,
     continuationCount,
     reason,
     contractAnalysis,
+    handoff = null,
     signal: nextSignal = signal,
   }) => {
     const semanticRefusal = reason === "semantic_refusal";
+    const freshLeg = FRESH_LEG_REASONS.has(reason);
     const retriesFromBeginning =
       reason === "empty_eof" || reason === "empty_story";
+    const freshCandidates = freshLeg ? freshLegCandidates(reason, handoff) : [];
     if (
-      semanticRefusal
-        ? !remainingRefusalFallbackCandidates.length
+      freshLeg
+        ? !freshCandidates.length
         : !enabled || (!assistant.trim() && !retriesFromBeginning)
     ) {
       return null;
     }
-    const nextMessages = semanticRefusal
-      ? messages
+    if (reason === "handoff") {
+      legMessages = roleplayHandoffMessages(legMessages, handoff);
+      handoffDraft = handoff?.draft ?? "";
+    }
+    const nextMessages = freshLeg
+      ? legMessages
       : continuationMessages(
-          messages,
+          legMessages,
           assistant,
           reason,
           contractAnalysis,
         );
     const nextEstimatedInputTokens = estimateTokens(nextMessages);
     const nextCandidates = prepareRoleplayCandidates(
-      semanticRefusal
-        ? remainingRefusalFallbackCandidates
+      freshLeg
+        ? freshCandidates
         : [currentCandidate],
       nextEstimatedInputTokens,
-      semanticRefusal ? parsed.maxTokens : null,
+      freshLeg ? parsed.maxTokens : null,
       settings,
     );
     if (semanticRefusal) {
@@ -199,6 +244,27 @@ export function createRoleplayContinuation({
       );
       remainingRefusalFallbackCandidates = [];
       refusalFallbackCount += 1;
+    }
+    if (reason === "handoff") {
+      currentState = recordRoleplayHandoff(currentState);
+      remainingHandoffTargets = [];
+      handoffCount += 1;
+      console.log(JSON.stringify({
+        event: "roleplay_handoff",
+        provider: currentCandidate.provider,
+        model: currentCandidate.model,
+        handoffReason: handoff?.reason,
+        notesCharacters: handoff?.notes?.length ?? 0,
+        draftCharacters: handoff?.draft?.length ?? 0,
+      }));
+    }
+    if (reason === "empty_reply") {
+      emptyReplyCount += 1;
+      console.log(JSON.stringify({
+        event: "roleplay_empty_reply_fallback",
+        provider: currentCandidate.provider,
+        model: currentCandidate.model,
+      }));
     }
     if (!nextCandidates.length) {
       logRoleplayError(
@@ -281,6 +347,10 @@ export function createRoleplayContinuation({
       return null;
     }
     currentCandidate = attempted.candidate;
+    if (freshLeg) {
+      remainingLaterCandidates = attempted.laterCandidates ?? [];
+      if (reason !== "handoff") remainingHandoffTargets = attempted.handoffTargets ?? [];
+    }
     return attempted;
   };
 
@@ -299,6 +369,23 @@ export function createRoleplayContinuation({
     get refusalFallbackEnabled() {
       return remainingRefusalFallbackCandidates.length > 0;
     },
+    // The stream holds a leg's frames until it shows visible text whenever that leg may still be
+    // replaced: by a refusal fallback or by a handoff.
+    get holdUntilVisible() {
+      return (
+        remainingRefusalFallbackCandidates.length > 0 ||
+        remainingHandoffTargets.length > 0
+      );
+    },
+    get handoffCount() {
+      return handoffCount;
+    },
+    get handoffDraft() {
+      return handoffDraft;
+    },
+    get emptyReplyCount() {
+      return emptyReplyCount;
+    },
     get upstreamCallCount() {
       return upstreamCallCount;
     },
@@ -310,6 +397,18 @@ export function createRoleplayContinuation({
       return assess(input).reason;
     },
     classifyRefusal: classifyRoleplayRefusal,
+    detectHandoff(toolCalls) {
+      return remainingHandoffTargets.length > 0 ? roleplayHandoffCall(toolCalls) : null;
+    },
+    detectEmptyReply(input) {
+      // The output-contract repair already retries an image-only reply when it may run.
+      if (input?.reason === "empty_story" && enabled) return false;
+      return (
+        settings.emptyReplyFallbackEnabled === true &&
+        remainingLaterCandidates.length > 0 &&
+        isEmptyRoleplayReply(input)
+      );
+    },
     openResponse,
     async open(input) {
       const attempted = await openResponse(input);
