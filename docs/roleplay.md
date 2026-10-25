@@ -162,11 +162,18 @@ usual safe-fallback statuses advance to the next entry. Set
 `provider:model` entries to replace the list. ClinePass uses `CLINE_API_KEY`
 and Cline's `reasoning.effort` field, up to `xhigh`.
 
-Production sets it (`wrangler.jsonc`, 2026-10-05) to GLM-5.3 on ClinePass, then
-MiMo-V2.6-Pro, GLM-5.3, GLM-5.3-Flash and GLM-5.2 on NanoGPT, then GLM-5.3-Flash and
-MiMo-V2.6-Pro on ClinePass. ClinePass GLM-5.3 gave its first words in about 4 s; MiMo on
-NanoGPT took 59 s, and 152 s on an adult turn, so a turn that falls back to it is slow.
-OpenCode Go and NavyAI's free plan were refusing every request, so they are left out.
+Production sets it (`wrangler.jsonc`, 2026-10-25) to DeepSeek V4.1 Flash, GLM-5.3 and
+MiMo-V2.6-Pro on OpenCode Go, then GLM-5.3 on ClinePass, then MiMo-V2.6-Pro, GLM-5.3,
+GLM-5.3-Flash and GLM-5.2 on NanoGPT, then GLM-5.3-Flash and MiMo-V2.6-Pro on ClinePass.
+In 24 test turns on OpenCode Go (scene continuation, conflict, out-of-character recall and
+a 20k-token lorebook lookup) every model answered and kept to the card. DeepSeek V4.1 Flash
+was fastest (median 5.2 s a turn), wrote nearly as well as GLM-5.3 and used about a
+thirtieth of GLM's allowance per turn, so it leads. GLM-5.3 wrote the strongest scenes
+(8.3 s). MiMo-V2.6-Pro was slowest (13.5 s), with the shortest replies and some
+point-of-view slips. Go meters each model against its own monthly allowance. ClinePass GLM-5.3 gave its first words in about 4 s; MiMo on NanoGPT
+took 59 s, and 152 s on an adult turn, so a turn that falls back to it is slow. OpenCode Go
+refused every request on 2026-10-05; the key it used then has since expired. NavyAI's free plan was
+refusing every request, so it is left out.
 
 With `ROLEPLAY_AUTO_ROUTE=intelligence`, plain `roleplay:auto` turns (and requests
 without a roleplay model) use the same chain. Turns that set `routing.mode` or

@@ -246,13 +246,18 @@ test("deployment defaults roleplay generation to high reasoning", async () => {
   assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
-test("deployment starts roleplay on Cline Pass GLM 5.3 and keeps NanoGPT on the subscription", async () => {
+test("deployment starts roleplay on OpenCode Go, then Cline Pass, and keeps NanoGPT on the subscription", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  // Measured 2026-10-05: Cline Pass GLM 5.3 answered first in about 4 s, so it leads; MiMo on
-  // NanoGPT is the first fallback. OpenCode Go and NavyAI's free plan refused every request.
+  // Measured 2026-10-25 on OpenCode Go (24 roleplay turns, every one answered): DeepSeek V4.1 Flash
+  // was fastest (median 5.2 s) and wrote nearly as well as GLM 5.3 for about a thirtieth of its
+  // allowance, so it leads; GLM 5.3 (8.3 s, the strongest scenes) is next, then MiMo-V2.6-Pro
+  // (13.5 s, the shortest replies). Cline Pass GLM 5.3 follows them; MiMo on NanoGPT is next.
   assert.deepEqual(config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(","), [
+    "opencode:deepseek-v4.1-flash",
+    "opencode:glm-5.3",
+    "opencode:mimo-v2.6-pro",
     "cline-pass:cline-pass/glm-5.3",
     "nanogpt:xiaomi/mimo-v2.6-pro",
     "nanogpt:z-ai/glm-5.3",
