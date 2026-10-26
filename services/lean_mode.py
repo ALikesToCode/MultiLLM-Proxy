@@ -237,9 +237,9 @@ def _tool_names(messages: list) -> dict[str, str]:
     return names
 
 
-def _condense_text(text: str, *, shell: bool, max_chars: int, stages: set[str]) -> str:
+def _condense_text(text: str, *, terminal_output: bool, max_chars: int, stages: set[str]) -> str:
     result = text
-    if shell:
+    if terminal_output:
         condensed = condense_shell_output(result)
         if condensed != result:
             stages.add("condense-shell")
@@ -251,17 +251,17 @@ def _condense_text(text: str, *, shell: bool, max_chars: int, stages: set[str]) 
     return result
 
 
-def _condense_tool_result(block: dict, *, shell: bool, max_chars: int, stages: set[str]) -> dict:
+def _condense_tool_result(block: dict, *, terminal_output: bool, max_chars: int, stages: set[str]) -> dict:
     content = block.get("content")
     if isinstance(content, str):
-        condensed = _condense_text(content, shell=shell, max_chars=max_chars, stages=stages)
+        condensed = _condense_text(content, terminal_output=terminal_output, max_chars=max_chars, stages=stages)
         return block if condensed == content else {**block, "content": condensed}
     if not isinstance(content, list):
         return block
     parts = []
     for part in content:
         if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
-            condensed = _condense_text(part["text"], shell=shell, max_chars=max_chars, stages=stages)
+            condensed = _condense_text(part["text"], terminal_output=terminal_output, max_chars=max_chars, stages=stages)
             parts.append(part if condensed == part["text"] else {**part, "text": condensed})
         else:
             parts.append(part)
@@ -286,7 +286,7 @@ def _condense_tool_results(messages: Any, policy: LeanPolicy, stages: set[str]) 
                 tool_name = names.get(block.get("tool_use_id"), "").lower()
                 block = _condense_tool_result(
                     block,
-                    shell=policy.condense_shell_output and tool_name in SHELL_TOOL_NAMES,
+                    terminal_output=policy.condense_shell_output and tool_name in SHELL_TOOL_NAMES,
                     max_chars=policy.tool_result_max_chars,
                     stages=stages,
                 )
@@ -414,7 +414,8 @@ def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
         nonlocal characters, tokens, countable
         if isinstance(value, dict):
             kind = value.get("type")
-            source = value.get("source") if isinstance(value.get("source"), dict) else {}
+            raw_source = value.get("source")
+            source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
             if kind in {"image", "document"}:
                 data = source.get("data")
                 if source.get("type") in UNCOUNTABLE_SOURCES:
@@ -440,7 +441,8 @@ def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
 
     for key in ("system", "tools", "messages"):
         walk(body.get(key))
-    tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+    raw_tools = body.get("tools")
+    tools: list[Any] = raw_tools if isinstance(raw_tools, list) else []
     tokens += SERVER_TOOL_TOKENS * sum(1 for tool in tools if _is_server_tool(tool))
     return characters // 3 + tokens, countable
 

@@ -2467,6 +2467,6 @@
   "services/lean_mode.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "b300d409c616896ca34ee98aa0be2ab7e407f0db63f66781bdc7a1aab3033064"
+    "sha256": "d31473a2991bcef8ef7216819383d7cebe865ba13d653795e884a4e55ba82cc8"
   }
 }
