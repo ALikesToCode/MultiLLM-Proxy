@@ -5,6 +5,9 @@ from collections.abc import Mapping
 from typing import Any
 
 HAIKU_5_5_MODEL_ID = "claude-haiku-5-5"
+ADAPTIVE_THINKING_MODEL_IDS = frozenset(
+    {HAIKU_5_5_MODEL_ID, "claude-sonnet-5-5", "claude-opus-5-5"}
+)
 ANTHROPIC_MODEL_IDS = (HAIKU_5_5_MODEL_ID,)
 ANTHROPIC_REQUEST_HEADER_WHITELIST = {
     "anthropic-beta": "Anthropic-Beta",

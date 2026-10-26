@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from providers.anthropic import HAIKU_5_5_MODEL_ID
+from providers.anthropic import ADAPTIVE_THINKING_MODEL_IDS
 
 MIN_THINKING_BUDGET = 1024
 THINKING_BUDGETS = {
@@ -18,7 +18,8 @@ EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 def apply_thinking(body: dict, payload: Mapping[str, Any]) -> None:
-    if body.get("model") == HAIKU_5_5_MODEL_ID:
+    model = body.get("model")
+    if isinstance(model, str) and model in ADAPTIVE_THINKING_MODEL_IDS:
         _apply_adaptive_thinking(body, payload)
         return
     thinking = payload.get("thinking")
@@ -64,7 +65,7 @@ def apply_thinking(body: dict, payload: Mapping[str, Any]) -> None:
 
 
 def _apply_adaptive_thinking(body: dict, payload: Mapping[str, Any]) -> None:
-    # Haiku 5.5 rejects manual budgets and most client sampling defaults.
+    # Claude 5.5 models reject manual budgets and most client sampling defaults.
     for field in ("temperature", "top_p", "top_k"):
         body.pop(field, None)
     output_config = payload.get("output_config")
