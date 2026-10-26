@@ -155,9 +155,9 @@ def messages_sse_items(chunks: Iterable[Any]) -> Iterator[ChatItem]:
             if (
                 block.get("kind") == "tool"
                 and not block["streamed"]
-                and block.get("input")
+                and isinstance(block.get("input"), Mapping)
             ):
-                # Some compatible servers send the whole input at block start.
+                # With no argument fragments, preserve the start input, even {}.
                 yield from chunk(
                     {
                         "tool_calls": [
