@@ -302,6 +302,45 @@ def test_server_tools_are_left_out_of_the_count_with_an_allowance(lean):
     assert decision.body["tools"][-1]["name"] == "web_search"
 
 
+def test_a_refused_key_on_the_count_lets_rotation_try_the_next_key(lean):
+    body = conversation(1)
+    body["messages"][0]["content"] = "x" * 400_000
+    with patch.object(lean_mode, "count_claude_prompt_tokens", side_effect=NativeTokenCountError("refused", 401)):
+        decision = lean.prepare(body)
+    assert decision.prompt_count == "skipped"
+
+
+def test_replayed_thinking_is_counted_with_its_server_tools_unchanged(lean):
+    """count_tokens runs generation's prefix check, so dropping tools would fail it."""
+    body = conversation(1)
+    body["messages"][0]["content"] = "x" * 200_000
+    body["tools"] = [*TOOLS, {"type": "web_search_20250305", "name": "web_search"}]
+    body["messages"][1]["content"].insert(0, {"type": "thinking", "thinking": "", "signature": "sig"})
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(70_000, 70_000)) as count:
+        decision = lean.prepare(body)
+    assert count.call_args.args[0]["tools"] == decision.body["tools"]
+    assert decision.prompt_tokens == 70_000
+
+
+def test_the_advisor_tool_is_counted_not_stripped(lean):
+    body = conversation(1)
+    body["messages"][0]["content"] = "x" * 200_000
+    body["tools"] = [*TOOLS, {"type": "advisor_20260301", "name": "advisor", "model": "claude-opus-5-5"}]
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(70_000, 70_000)) as count:
+        decision = lean.prepare(body)
+    assert [tool["name"] for tool in count.call_args.args[0]["tools"]] == ["Bash", "advisor"]
+    assert decision.prompt_tokens == 70_000
+
+
+def test_a_pdf_is_always_counted(lean):
+    pdf = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "A" * 4_000}}
+    body = {"model": MODEL, "max_tokens": 64, "messages": [{"role": "user", "content": [pdf, {"type": "text", "text": "Summarize"}]}]}
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(120_000, 120_000)) as count:
+        with pytest.raises(lean_mode.LeanPromptTooLong):
+            lean.prepare(body)
+    count.assert_called_once()
+
+
 def test_schema_properties_named_cache_control_are_not_breakpoints(lean):
     body = conversation(1)
     body["tools"] = [{**TOOLS[0], "input_schema": {"type": "object", "properties": {"cache_control": {"type": "string"}}}}]

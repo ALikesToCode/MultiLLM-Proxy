@@ -56,6 +56,8 @@ MEDIA_BLOCK_TOKENS = 1_600
 REMOTE_DOCUMENT_TOKENS = 10_000
 SERVER_TOOL_TOKENS = 1_000
 UNCOUNTABLE_SOURCES = frozenset({"url", "file"})
+# A count refused for these reasons says the key is unusable, not the prompt.
+KEY_REFUSAL_STATUSES = frozenset({401, 402, 403})
 REPEATED_LINE_MIN_RUN = 4
 SHELL_TOOL_NAMES = frozenset(
     {
@@ -397,21 +399,26 @@ def _with_tool_clearing(body: dict, policy: LeanPolicy) -> tuple[dict, bool]:
 
 
 def _is_server_tool(tool: Any) -> bool:
-    return isinstance(tool, dict) and tool.get("type") not in (None, "custom")
+    """A server tool count_tokens rejects; it accepts client tools and the advisor."""
+    kind = tool.get("type") if isinstance(tool, dict) else None
+    return kind not in (None, "custom") and not str(kind).startswith("advisor_")
 
 
-def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
-    """Estimate the prompt and say whether count_tokens can count it.
+def _estimate(body: Mapping[str, Any]) -> tuple[int, bool, bool]:
+    """Estimate the prompt; say whether count_tokens can count it and whether it must.
 
     Text counts three characters per token, an image a flat size, a text
     document its characters and a base64 PDF a token per three decoded bytes.
+    A PDF's file size does not bound the text inside it, so a prompt with one
+    is always counted.
     """
     characters = 0
     tokens = 0
     countable = True
+    must_count = False
 
     def walk(value: Any) -> None:
-        nonlocal characters, tokens, countable
+        nonlocal characters, tokens, countable, must_count
         if isinstance(value, dict):
             kind = value.get("type")
             raw_source = value.get("source")
@@ -426,6 +433,7 @@ def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
                 elif source.get("type") == "content":
                     walk(source.get("content"))
                 elif isinstance(data, str):
+                    must_count = must_count or source.get("type") == "base64"
                     tokens += len(data) // 4 if source.get("type") == "base64" else len(data) // 3
                 else:
                     tokens += REMOTE_DOCUMENT_TOKENS
@@ -444,7 +452,7 @@ def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
     raw_tools = body.get("tools")
     tools: list[Any] = raw_tools if isinstance(raw_tools, list) else []
     tokens += SERVER_TOOL_TOKENS * sum(1 for tool in tools if _is_server_tool(tool))
-    return characters // 3 + tokens, countable
+    return characters // 3 + tokens, countable, must_count
 
 
 def estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
@@ -453,9 +461,19 @@ def estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
 
 
 def _count_body(body: dict) -> tuple[dict, int]:
-    """Drop the server tools count_tokens rejects; return the body and their allowance."""
+    """Drop the server tools count_tokens rejects; return the body and their allowance.
+
+    count_tokens runs the same thinking-block prefix check as generation, so a
+    body that replays thinking blocks is counted unchanged: without its server
+    tools it would fail the check, and with them count_tokens rejects it, which
+    leaves the estimate to decide.
+    """
     tools = body.get("tools")
-    if not isinstance(tools, list) or not any(_is_server_tool(tool) for tool in tools):
+    if (
+        not isinstance(tools, list)
+        or not any(_is_server_tool(tool) for tool in tools)
+        or any(block.get("type") in {"thinking", "redacted_thinking"} for block in _blocks(body.get("messages")))
+    ):
         return body, 0
     client_tools = [tool for tool in tools if not _is_server_tool(tool)]
     counted = {key: value for key, value in body.items() if key != "tools"}
@@ -503,14 +521,20 @@ def check_lean_prompt(
         return
     policy = lean_policy()
     limit = policy.prompt_token_limit
-    estimate, countable = _estimate(decision.body)
+    estimate, countable, must_count = _estimate(decision.body)
     tokens, source, after = estimate, "estimate", None
-    if limit > 0 and countable and estimate >= limit * COUNT_FROM_LIMIT_SHARE:
+    if limit > 0 and countable and (must_count or estimate >= limit * COUNT_FROM_LIMIT_SHARE):
         count_body, allowance = _count_body(decision.body)
         beta_header = merged_beta_value(_header(request_headers, "anthropic-beta"), decision.betas)
         try:
             after, before = count_claude_prompt_tokens(count_body, beta_header, base_urls, credential=credential)
         except NativeTokenCountError as error:
+            if error.status in KEY_REFUSAL_STATUSES:
+                # Send anyway: the generation request's refusal lets key rotation
+                # rest this key, and the next attempt counts with the next key.
+                logger.warning("Lean prompt count refused the key status=%s; sending to rotate", error.status)
+                g.lean_request = replace(decision, prompt_tokens=estimate, prompt_count="skipped")
+                return
             logger.warning("Lean prompt count failed status=%s; using the estimate", error.status)
         else:
             after, before = after + allowance, before + allowance

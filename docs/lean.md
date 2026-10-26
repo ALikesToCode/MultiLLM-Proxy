@@ -52,12 +52,19 @@ Lean mode never changes the model, effort, thinking settings or `max_tokens`.
 | `/lean/v1/responses` with `stream: true` | A `response.failed` event with `context_length_exceeded`, the form Codex reads. Without streaming, the Chat Completions body above. |
 
 When the prompt cannot be counted, the local estimate decides, and an estimate
-above the limit is refused: `count_tokens` rejects URL and file sources (lean
-estimates them at 1,600 tokens per image and 10,000 per document), and a count
-can fail, for example when rate-limited. Server tools such as web search are
-left out of the count and added back at 1,000 tokens each, because
-`count_tokens` rejects them. Such requests report
-`X-MultiLLM-Lean-Prompt-Count: estimate`. If compacting cannot bring a
+above the limit is refused. That happens for URL and file sources, which
+`count_tokens` rejects (lean estimates them at 1,600 tokens per image and 10,000
+per document); for a request that replays thinking blocks alongside a server tool
+such as web search, because `count_tokens` rejects server tools and dropping them
+would fail its thinking-block check; and when a count fails, for example when
+rate-limited. Such requests report `X-MultiLLM-Lean-Prompt-Count: estimate`, and
+the limit is then a safety net, not a guarantee: the estimate can be low for a
+URL document or an unusual tokenization. Without replayed thinking, server tools
+are left out of the count and added back at 1,000 tokens each. A prompt with a
+PDF is always counted, since its file size does not bound the text inside. A count
+that refuses the key itself (401, 402 or 403) does not decide: the request goes
+out so key rotation can rest that key and count again with the next one
+(`X-MultiLLM-Lean-Prompt-Count: skipped`). If compacting cannot bring a
 prompt under the limit, for example because the newest message alone is larger,
 the harness reports the error: Claude Code stops after three failed compactions.
 
@@ -69,7 +76,7 @@ the harness reports the error: Claude Code stops after three failed compactions.
 | `X-MultiLLM-Lean-Rules` | Version of the rules above |
 | `X-MultiLLM-Lean-Stages` | Stages that changed the request, for example `cache,clear-tool-uses,condense-shell` |
 | `X-MultiLLM-Lean-Prompt-Tokens` | Prompt size the limit was checked against: counted by the API near the limit, otherwise a rough local estimate |
-| `X-MultiLLM-Lean-Prompt-Count` | `provider` or `estimate` |
+| `X-MultiLLM-Lean-Prompt-Count` | `provider`, `estimate`, or `skipped` when the count refused the key |
 | `X-MultiLLM-Lean-Prompt-Tokens-After-Clearing` | Counted size after context editing, when it differs |
 | `X-MultiLLM-Lean-Condensed-Chars` | Characters removed from tool results |
 
