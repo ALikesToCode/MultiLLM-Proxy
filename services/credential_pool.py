@@ -4,16 +4,19 @@ Codex Everywhere and Claude API pools accept a base key and numbered spares (`<B
 `<BASE>_1`, `<BASE>_2`, ...). Each request uses the first key in that order that is not resting. A key
 the provider refuses (401, 402 or 403, which includes an empty balance) rests for five
 minutes and a rate-limited key (429) for one minute, so traffic moves to the next key and
-returns once the rest ends. State is process-local.
+returns once the rest ends. State is process-local, including the per-key counters that
+`slots` reports to operators by environment-variable name.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import threading
 import time
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import ClassVar
 
 from providers.codex_everywhere import CODEX_EVERYWHERE_POOLS
@@ -42,14 +45,15 @@ def is_key_rejection(status: int | None) -> bool:
 class CredentialPool:
     _lock: ClassVar[threading.Lock] = threading.Lock()
     _resting: ClassVar[dict[tuple[str, str], float]] = {}
+    _observed: ClassVar[dict[tuple[str, str], dict]] = {}
 
     @staticmethod
     def pooled(provider: str | None) -> bool:
         return provider in POOLED_KEY_ENVS
 
     @staticmethod
-    def keys(provider: str, environ: Mapping[str, str] | None = None) -> list[str]:
-        """The provider's configured keys: the base name first, then _1, _2, ... ascending."""
+    def named_keys(provider: str, environ: Mapping[str, str] | None = None) -> list[tuple[str, str]]:
+        """(environment variable, key) pairs: the base name first, then _1, _2, ... ascending."""
         base = POOLED_KEY_ENVS.get(provider)
         if base is None:
             return []
@@ -60,12 +64,57 @@ class CredentialPool:
             for name in source
             if (match := numbered.fullmatch(name))
         )
-        keys: list[str] = []
+        named: list[tuple[str, str]] = []
         for name in (base, *(name for _, name in spares)):
             key = usable_credential(source.get(name), name)
-            if key and key.strip() not in keys:
-                keys.append(key.strip())
-        return keys
+            if key and key.strip() not in {known for _, known in named}:
+                named.append((name, key.strip()))
+        return named
+
+    @staticmethod
+    def keys(provider: str, environ: Mapping[str, str] | None = None) -> list[str]:
+        """The provider's configured keys: the base name first, then _1, _2, ... ascending."""
+        return [key for _, key in CredentialPool.named_keys(provider, environ)]
+
+    @classmethod
+    def slots(cls, provider: str, *, now: float | None = None) -> list[dict]:
+        """Each configured key by environment-variable name, never its value: whether it is
+        resting, and what this process sent with it since it started."""
+        current = time.monotonic() if now is None else now
+        rows = []
+        with cls._lock:
+            for name, key in cls.named_keys(provider):
+                observed = cls._observed.get((provider, key), {})
+                rows.append({
+                    "slot": name,
+                    "active": False,
+                    "resting_seconds": math.ceil(max(0.0, cls._resting.get((provider, key), 0) - current)),
+                    "requests": observed.get("requests", 0),
+                    "errors": observed.get("errors", 0),
+                    "refusals": observed.get("refusals", 0),
+                    "last_used_at": observed.get("last_used_at"),
+                    "last_refusal": observed.get("last_refusal"),
+                    "last_refusal_at": observed.get("last_refusal_at"),
+                })
+        active = next((row for row in rows if not row["resting_seconds"]), None)
+        if active is not None:
+            active["active"] = True
+        return rows
+
+    @classmethod
+    def _observe(cls, provider: str, key: str, status: int, outcome: UpstreamOutcome | None) -> None:
+        classified = outcome or classify_upstream_outcome(status)
+        refused = classified.credential_health in {"rejected", "throttled"} or is_key_rejection(status)
+        at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        with cls._lock:
+            entry = cls._observed.setdefault((provider, key), {"requests": 0, "errors": 0, "refusals": 0})
+            entry["requests"] += 1
+            entry["errors"] += int(status >= 400)
+            entry["last_used_at"] = at
+            if refused:
+                entry["refusals"] += 1
+                entry["last_refusal"] = classified.reason if outcome is not None else f"http_{status}"
+                entry["last_refusal_at"] = at
 
     @classmethod
     def available(
@@ -198,6 +247,7 @@ class CredentialPool:
     ) -> None:
         if not key or provider not in POOLED_KEY_ENVS:
             return
+        cls._observe(provider, key, status, outcome)
         reset_schedule.record_result_observation(
             provider, key, status, model=model, quota_bucket=quota_bucket,
             outcome=outcome, retry_after_seconds=retry_after_seconds,
@@ -293,3 +343,4 @@ class CredentialPool:
     def reset(cls) -> None:
         with cls._lock:
             cls._resting = {}
+            cls._observed = {}

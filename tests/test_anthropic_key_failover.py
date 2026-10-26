@@ -156,6 +156,30 @@ def test_dispatch_rests_a_key_whose_account_ran_out_of_credit(pool, monkeypatch,
     )
 
 
+def test_provider_usage_reports_each_key_by_slot_name_only(pool):
+    from services.provider_usage_service import ProviderUsageService
+    from services.upstream_outcome import UpstreamOutcome
+    from tests.test_provider_usage_service import FakeAuthService, FakeMetricsService
+
+    pool.record("anthropic", "key-a", 200)
+    pool.record("anthropic", "key-a", 402, retry_after_seconds=3600, credential_wide_auth=True,
+                outcome=UpstreamOutcome(False, "neutral", "rejected", "anthropic_credit_exhausted"))
+    pool.record("anthropic", "key-b", 200)
+    service = ProviderUsageService(config={}, auth_service=FakeAuthService(keys={"anthropic": "key-b"}),
+                                   metrics_service=FakeMetricsService(), proxy_service=None)
+
+    entry = service.snapshot(["anthropic"])["providers"][0]
+    first, spare = entry["credential_slots"]
+    assert (first["slot"], first["active"], first["requests"], first["errors"], first["refusals"]) == (
+        "ANTHROPIC_API_KEY", False, 2, 1, 1)
+    assert first["last_refusal"] == "anthropic_credit_exhausted" and first["resting_seconds"] > 0
+    assert (spare["slot"], spare["active"], spare["requests"], spare["refusals"]) == ("ANTHROPIC_API_KEY_1", True, 1, 0)
+    assert spare["last_refusal"] is None and spare["last_used_at"]
+    serialized = json.dumps(entry)
+    assert "key-a" not in serialized and "key-b" not in serialized
+    assert "credential_slots" not in service.snapshot(["openrouter"])["providers"][0]
+
+
 class AnthropicKeyFailoverRouteTest(UnifiedApiTestCase):
     def setUp(self):
         super().setUp()
@@ -199,6 +223,11 @@ class AnthropicKeyFailoverRouteTest(UnifiedApiTestCase):
         with self.upstreams((MESSAGE, 200)):
             self.assertEqual(self.chat().status_code, 200)
         self.assertEqual(self.sent_keys, ["key-b"], "the refused key rests")
+        from services.credential_pool import CredentialPool
+
+        first, spare = CredentialPool.slots("anthropic")
+        self.assertEqual((first["refusals"], first["last_refusal"], first["active"]), (1, "anthropic_credit_exhausted", False))
+        self.assertEqual((spare["requests"], spare["active"]), (2, True))
 
     def test_unified_stream_moves_to_the_spare_when_credit_runs_out(self):
         from tests.test_protocol_routes import ANTHROPIC_STREAM, sse_upstream

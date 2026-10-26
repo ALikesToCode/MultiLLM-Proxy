@@ -652,7 +652,7 @@
   "services/credential_pool.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "d8c3ce5401d837d0341d9a5555942e36730cde29ce350354f2f008b4f47dd375"
+    "sha256": "4620e65913f7ef29aa514bc92251bc88f74f09082de9b73f1759409efec43f6d"
   },
   "services/credits_admission.py": {
     "kind": "non-provider",
@@ -1197,7 +1197,7 @@
   "services/provider_usage_service.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "86e844a9e00cd2fc3609131f527b60f853f0d868f9bcd12bfb3f9956e053fbb6"
+    "sha256": "1e514b5c0d08b4cbb444a0c73c2591505f7ca8da934c78f700edba5a0d23b1d7"
   },
   "services/proxy_documentation_service.py": {
     "kind": "guarded",

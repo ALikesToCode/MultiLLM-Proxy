@@ -155,7 +155,7 @@ class ProviderUsageService:
             status = "pending"
         stats = self.metrics_service.get_provider_stats(provider)
         cost = _mapping(provider_cost)
-        return {
+        entry = {
             "provider": provider,
             "configured": configured,
             "supports_authoritative_usage": supported,
@@ -180,6 +180,12 @@ class ProviderUsageService:
             },
             "error": None,
         }
+        from services.credential_pool import CredentialPool
+
+        if CredentialPool.pooled(provider):
+            # Process-local per-key state, named by environment variable; never key material.
+            entry["credential_slots"] = CredentialPool.slots(provider)
+        return entry
 
     def _authoritative_usage(self, provider: str) -> dict[str, Any]:
         cached = self._cached(provider)

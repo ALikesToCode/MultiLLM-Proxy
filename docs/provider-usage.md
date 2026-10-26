@@ -94,6 +94,46 @@ an account-quota API. Its console remains the authoritative source.
 NanoGPT usage lookup follows configured key preference order and advances past
 definitive credential rejections. It does not expose which key succeeded.
 
+## Credential slots
+
+Providers with a key pool (the Claude API and Codex Everywhere) add
+`credential_slots`: one entry per configured key, in selection order, named by
+its environment variable and never by its value.
+
+```json
+"credential_slots": [
+  {
+    "slot": "ANTHROPIC_API_KEY",
+    "active": false,
+    "resting_seconds": 3412,
+    "requests": 41,
+    "errors": 1,
+    "refusals": 1,
+    "last_used_at": "2026-10-26T13:05:12Z",
+    "last_refusal": "anthropic_credit_exhausted",
+    "last_refusal_at": "2026-10-26T13:05:12Z"
+  },
+  {
+    "slot": "ANTHROPIC_API_KEY_1",
+    "active": true,
+    "resting_seconds": 0,
+    "requests": 6,
+    "errors": 0,
+    "refusals": 0,
+    "last_used_at": "2026-10-26T13:09:40Z",
+    "last_refusal": null,
+    "last_refusal_at": null
+  }
+]
+```
+
+`active` marks the first key that is not resting, which new conversations use.
+`resting_seconds` covers rests that apply to every model; a rate-limit rest for a
+single model is not shown. The counters come from the Container process and
+start again at zero when it restarts, for example after a deploy. They count
+dispatches, not spend: the Claude Console's Usage and Cost pages, filtered by
+API key, are the authoritative record of each key's credit.
+
 ## Caching and timeouts
 
 Authoritative results are cached independently per provider. Local request and

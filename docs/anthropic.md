@@ -47,6 +47,9 @@ specific to one model, so it and other 400 errors return to the caller without
 trying another key. A rested key returns to service when its rest ends. If every key
 is resting, the request fails with 429 `model_cooldown`. Responses from unified
 routes carry `X-MultiLLM-Credential-Attempts` with the number of keys tried.
+`GET /admin/providers/usage` lists each key's slot name, whether it is the
+active key or resting, and its dispatch and refusal counts; see
+[provider usage](provider-usage.md#credential-slots).
 
 Keys from different Anthropic organizations do not share thinking signatures:
 a signed thinking block replays only in the organization that created it.
