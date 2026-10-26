@@ -255,6 +255,8 @@ Provider secrets are optional and should be set only when used:
 
 ```bash
 npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler secret put ANTHROPIC_API_KEY_1
 npx wrangler secret put OPENROUTER_API_KEY
 npx wrangler secret put OPENCODE_GO_API_KEY
 npx wrangler secret put CODEX_EASY_API_KEY

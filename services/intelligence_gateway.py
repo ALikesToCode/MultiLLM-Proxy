@@ -227,7 +227,9 @@ class ChatGateway:
                         self.unresolved = False
                         last_error = rejection(head)
                         # A refused key generated nothing, so the same model may run on the next key.
-                        self._key_refused = is_key_rejection(head.status_code)
+                        self._key_refused = is_key_rejection(head.status_code) or getattr(
+                            head, "credential_refused", False
+                        )
                         if self.request.explicit and not (self._key_refused and spare_keys):
                             break
                         if not self.escalations:

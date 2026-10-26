@@ -5,10 +5,12 @@ import { collectContainerEnv } from "../worker/container-env.mjs";
 import { isApiRequestPath } from "../worker/api-paths.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
-test("container receives the Anthropic secret and provider limits", async () => {
+test("container receives the Anthropic secrets, spare keys and provider limits", async () => {
   const { MultiLLMProxyContainer } = await loadWorkerModule();
   const source = {
     ANTHROPIC_API_KEY: "anthropic-test-key",
+    ANTHROPIC_API_KEY_1: "anthropic-spare-test-key",
+    ANTHROPIC_API_KEY_12: "anthropic-later-spare-test-key",
     ANTHROPIC_WORKSPACE_ID: "workspace-test",
     ANTHROPIC_RATE_LIMIT_RPM: "50",
     ANTHROPIC_MAX_PROMPT_TOKENS: "1000000",
@@ -22,6 +24,7 @@ test("container receives the Anthropic secret and provider limits", async () => 
     assert.equal(container.envVars[name], source[name]);
   }
   assert.equal(forwarded.UNRELATED_SECRET, undefined);
+  assert.equal(collectContainerEnv({ ANTHROPIC_API_KEY_SPARE: "not-a-numbered-spare" }).ANTHROPIC_API_KEY_SPARE, undefined);
 });
 
 test("Anthropic native routes use edge API handling", () => {

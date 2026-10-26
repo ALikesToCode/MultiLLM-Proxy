@@ -72,6 +72,8 @@ def provider_credential_env_names(provider: str) -> tuple[str, ...]:
         )
     if provider == "groq":
         return ("GROQ_API_KEY", "GROQ_API_KEY_1", "GROQ_API_KEY_2")
+    if provider == "anthropic":
+        return ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_1")
     if provider == "nanogpt":
         return (
             "NANOGPT_API_KEY",

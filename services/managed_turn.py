@@ -278,6 +278,7 @@ class _CanaryProviderResponse:
         self.headers = CaseInsensitiveDict(response.headers)
         self.response, self.upstream = response, upstream
         self.raw = None
+        self.multillm_credential_refusal = getattr(upstream, "multillm_credential_refusal", None)
 
     def iter_content(self, **kwargs):
         yield from self.response.response

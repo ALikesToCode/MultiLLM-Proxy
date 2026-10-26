@@ -1,7 +1,7 @@
 """Several keys for one provider: use the first that is not resting, and rest refused ones.
 
-Codex Everywhere pools accept a base key and numbered spares (`<BASE>`, `<BASE>_1`,
-`<BASE>_2`, ...). Each request uses the first key in that order that is not resting. A key
+Codex Everywhere and Claude API pools accept a base key and numbered spares (`<BASE>`,
+`<BASE>_1`, `<BASE>_2`, ...). Each request uses the first key in that order that is not resting. A key
 the provider refuses (401, 402 or 403, which includes an empty balance) rests for five
 minutes and a rate-limited key (429) for one minute, so traffic moves to the next key and
 returns once the rest ends. State is process-local.
@@ -30,6 +30,7 @@ RATE_LIMITED_STATUSES = frozenset({429})
 POOLED_KEY_ENVS = {
     **{pool.provider: pool.credential_env for pool in CODEX_EVERYWHERE_POOLS},
     "ce-image": "CODEX_EVERYWHERE_API_KEY_GPT_IMAGE",
+    "anthropic": "ANTHROPIC_API_KEY",
 }
 
 
@@ -264,21 +265,20 @@ class CredentialPool:
         usage_windows: list[Mapping] | None = None,
         now: float | None = None,
     ) -> None:
-        """Record the result for the bearer key a request carried."""
+        """Record the result for the bearer or X-Api-Key credential a request carried."""
         if provider not in POOLED_KEY_ENVS:
             return
-        authorization = next(
-            (
-                value
-                for name, value in headers.items()
-                if name.lower() == "authorization"
-            ),
-            "",
-        )
+        sent = {name.lower(): value for name, value in headers.items()}
+        authorization = sent.get("authorization", "")
         if isinstance(authorization, str) and authorization.startswith("Bearer "):
+            key = authorization[len("Bearer ") :].strip()
+        else:
+            api_key = sent.get("x-api-key")
+            key = api_key.strip() if isinstance(api_key, str) else ""
+        if key:
             cls.record(
                 provider,
-                authorization[len("Bearer ") :].strip(),
+                key,
                 status,
                 model=model,
                 quota_bucket=quota_bucket,

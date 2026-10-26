@@ -25,6 +25,13 @@ def iter_stream_content(response: requests.Response, *, pii_context=None) -> Ite
 
 
 def _stream_content(response: requests.Response) -> Iterator[bytes]:
+    if getattr(response, "_content_consumed", False) and isinstance(
+        getattr(response, "_content", None), bytes
+    ):
+        # The body was already read (an error body classified at dispatch); the socket
+        # is drained, so replay the cached bytes.
+        yield from response.iter_content(chunk_size=64 * 1024)
+        return
     raw_response = getattr(response, "raw", None)
     raw_read1 = getattr(raw_response, "read1", None)
     if callable(raw_read1):

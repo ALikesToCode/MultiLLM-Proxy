@@ -5,6 +5,7 @@ from flask import Response
 
 from error_handlers import APIError
 from services.credential_context import observation_context, selection_context
+from services.credential_pool import is_key_rejection
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from providers.nanogpt import is_nanogpt_paygo_rejection
 from routes.auto_routes import AutoRouteCandidateUnavailable
@@ -60,6 +61,19 @@ def _is_nanogpt_routing_refusal(response) -> bool:
     )
 
 
+# Providers whose unified requests move to the next configured key after a key refusal.
+ROTATING_PROVIDERS = frozenset({"nanogpt", "anthropic"})
+
+
+def _is_anthropic_key_refusal(response) -> bool:
+    """The Claude API refused the key (auth, billing, credit, spend limit or rate limit),
+    so the request generated nothing and may run on the next key. Dispatch already rested
+    the refused key, and the next selection skips it."""
+    return bool(getattr(response, "multillm_credential_refusal", None)) or is_key_rejection(
+        getattr(response, "status_code", None)
+    )
+
+
 def _record_nanogpt_token_result(
     app,
     provider: str,
@@ -96,9 +110,9 @@ def _request_with_provider_token_rotation(
     billing_refusal_is_routing: bool = False,
     *, model=None, quota_bucket=None,
 ):
-    """Send once per usable NanoGPT key after definite pre-generation failures."""
+    """Send once per usable NanoGPT or Claude API key after definite pre-generation failures."""
     attempt_limit = 1
-    if provider == "nanogpt":
+    if provider in ROTATING_PROVIDERS:
         attempt_limit = max(1, len(auth_service_cls.get_api_keys(provider)))
 
     attempted_tokens: set[str] = set()
@@ -147,7 +161,10 @@ def _request_with_provider_token_rotation(
             # Every key would refuse this suffix identically, so rotating on
             # would only surface an unrelated key's error to the caller.
             break
-        if provider != "nanogpt" or not is_nanogpt_credential_rejection(
+        if provider == "anthropic":
+            if not _is_anthropic_key_refusal(response):
+                break
+        elif provider != "nanogpt" or not is_nanogpt_credential_rejection(
             response.status_code
         ):
             break
@@ -162,6 +179,6 @@ def _add_credential_attempt_headers(
     provider: str,
     attempts: int,
 ) -> Response:
-    if provider == "nanogpt":
+    if provider in ROTATING_PROVIDERS:
         response.headers["X-MultiLLM-Credential-Attempts"] = str(attempts)
     return response

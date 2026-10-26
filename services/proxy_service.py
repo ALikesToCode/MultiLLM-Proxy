@@ -23,7 +23,11 @@ from services.retry_advice import retry_advice_settings
 from services.transport_policy import RAW_PASSTHROUGH_PROVIDERS
 from services.secret_firewall import protect_body
 from providers.cline_pass import cline_completion_payload
-from providers.anthropic import with_anthropic_headers
+from providers.anthropic import (
+    ANTHROPIC_REFUSAL_REST_SECONDS,
+    anthropic_credential_refusal,
+    with_anthropic_headers,
+)
 from services.provider_request_headers import filter_upstream_headers
 from providers.codex_everywhere import (
     CODEX_EVERYWHERE_ANTHROPIC_PROVIDERS,
@@ -3325,9 +3329,20 @@ class ProxyService:
                 )
                 from services.credential_context import dispatch_context, observation_context
                 from services.pool_reset_schedule import response_usage_observation
-                CredentialPool.record_headers(api_provider, headers, response.status_code,
-                    **(cooldown_context or dispatch_context(api_provider, data, url)),
-                    **observation_context(response), **response_usage_observation(response))
+                observation = {**observation_context(response), **response_usage_observation(response)}
+                status = response.status_code
+                if api_provider == "anthropic" and (refusal := anthropic_credential_refusal(response)):
+                    # The account, not this request, was refused: rest its key so the
+                    # rotation loops and later requests move to the next configured key.
+                    response.multillm_credential_refusal = refusal
+                    status = 402
+                    observation.update(
+                        outcome=UpstreamOutcome(False, "neutral", "rejected", f"anthropic_{refusal}"),
+                        credential_wide_auth=True,
+                        retry_after_seconds=ANTHROPIC_REFUSAL_REST_SECONDS,
+                    )
+                CredentialPool.record_headers(api_provider, headers, status,
+                    **(cooldown_context or dispatch_context(api_provider, data, url)), **observation)
                 return response
 
             # Check if this is a streaming request

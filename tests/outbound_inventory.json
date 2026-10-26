@@ -47,7 +47,7 @@
   "providers/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "28ec570d523c8326c073ad8fc0aa051719e0aaaf2e8a468efe9e1061cdd9c528"
+    "sha256": "775f4b5241684e69c80a62b23cd61a9b41de7e39e5931e2a4ea83c027e95a8fe"
   },
   "providers/base.py": {
     "kind": "non-provider",
@@ -342,12 +342,12 @@
   "routes/provider_credentials.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "7ed444a62db36f68a4bffa9f4e74c762212114989c8a00efc9fbb0c2f059d1a4"
+    "sha256": "7366df3b5e05343f762542a1e8d6e3157904298acc68399740c3b04847960d06"
   },
   "routes/proxy.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "265e183e46865675ea3963f49546f650b3d0a04f98742f2dec63c7da862868a7"
+    "sha256": "7df1a655aa4704127f0c0064b949689bfecbb917d7d650148cf08b60cbc9a09e"
   },
   "routes/public_pages.py": {
     "kind": "non-provider",
@@ -487,7 +487,7 @@
   "services/auth_primitives.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "0236bdad078e24d37db938cabe1db820094f05605f7ebd87c89597b0232143b8"
+    "sha256": "62d1d194fc94dd9bc313569975f0eeea10ca95b42af9341d198e5db8195ede06"
   },
   "services/auth_service.py": {
     "kind": "non-provider",
@@ -652,7 +652,7 @@
   "services/credential_pool.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "aa6ca6ddfb0137452cc53ecff300d13f383c39836a3005a2a56e7481d6e90771"
+    "sha256": "d8c3ce5401d837d0341d9a5555942e36730cde29ce350354f2f008b4f47dd375"
   },
   "services/credits_admission.py": {
     "kind": "non-provider",
@@ -822,7 +822,7 @@
   "services/intelligence_gateway.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "efac340e944c0444222a44a484c1abf2caf219458b4eaa5ed0f093ac143d0c91"
+    "sha256": "acaa597b2f94a9fc0cd351564bdca3405aff00fd742572a0e5a167daa0a4ae3d"
   },
   "services/intelligence_output.py": {
     "kind": "non-provider",
@@ -857,7 +857,7 @@
   "services/intelligence_transport.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "2c3e234e66159f49d9cb55fcf586f5034d6adab9a169d564ac10d66372defd66"
+    "sha256": "52453244c54b25bcba978bc345b15e9d5355f9bac703572e0692825e037f036f"
   },
   "services/judge_routing.py": {
     "kind": "non-provider",
@@ -917,7 +917,7 @@
   "services/managed_turn.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "c619b5fd489667332193b797375f43eae84700cef42dd779b88bacac8f6c7f55"
+    "sha256": "caa27eb5c748c419ba758abc3eb44c03a6ccef7bcee0cbab4b06da30a7b1ed93"
   },
   "services/mcp_contract_drift.py": {
     "kind": "non-provider",
@@ -1207,7 +1207,7 @@
   "services/proxy_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "e4241056d6a511a101367ec27d46e6147ffd62f86a4feb91f6a133954f5ca505"
+    "sha256": "3afa672d3710422437638b2cb68e17a31d7cba9213ad63b64d976978d9bce164"
   },
   "services/rate_limit_d1.py": {
     "kind": "non-provider",
@@ -1437,7 +1437,7 @@
   "services/upstream_transport.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "c27e7589a1efbc44b8bdd546199f087c4ec08c852e811156c6be149f0fa0690c"
+    "sha256": "2cbca089d5fdbe7305cc0f049e3c4a747c2d5601e63c8268da6e1ad994b6020f"
   },
   "services/usage_ledger.py": {
     "kind": "non-provider",
@@ -1572,7 +1572,7 @@
   "worker/container-env.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "56f07b1a9d2f6451be990e16038e30d55afbee1dbf5a5e5ea82b30235558d790"
+    "sha256": "f5dc040ed498889a81747ddde2bf7ea7750af3fffa3396e75e82c92438326a9a"
   },
   "worker/context-canary.mjs": {
     "kind": "non-provider",

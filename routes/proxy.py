@@ -51,8 +51,10 @@ from route_helpers import (
     stream_upstream_response,
 )
 from routes.dashboard_chat import register_dashboard_chat_routes
+from routes.provider_credentials import _is_anthropic_key_refusal
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.credential_context import dispatch_context, observation_context, proxy_selection_context
+from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from services.model_cooldown import settings as cooldown_settings
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.provider_access_policy import provider_route_scope
@@ -444,6 +446,24 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 )
             else:
                 response = send_to_url(url)
+
+            if api_provider == "anthropic":
+                # A refused Claude API key generated nothing: send once on each other key.
+                # Dispatch rested the refused key, so the next selection skips it.
+                attempted_tokens = {auth_token}
+                while _is_anthropic_key_refusal(response):
+                    try:
+                        next_token = auth_service_cls.get_api_key(api_provider, **credential_scope)
+                    except (ModelCooldownExhausted, ModelCooldownCapacity):
+                        break
+                    if not next_token or next_token in attempted_tokens:
+                        break
+                    attempted_tokens.add(next_token)
+                    response.close()
+                    headers = proxy_service_cls.prepare_headers(
+                        request.headers, api_provider, next_token, upstream_path=path,
+                    )
+                    response = send_to_url(url)
 
             if speed_routed_body is not None and is_nanogpt_paygo_rejection(
                 getattr(response, "status_code", None),

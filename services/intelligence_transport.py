@@ -53,6 +53,9 @@ def remaining(deadline, cancelled):
 class ResponseHead:
     status_code: int
     headers: dict
+    # Dispatch classified the error as an account-wide key refusal (for example an empty
+    # Claude API credit balance reported as 400), so the next key may run the same model.
+    credential_refused: bool = False
 
 
 class Exchange:
@@ -119,7 +122,8 @@ class Exchange:
                 for name in ("Content-Type", "Retry-After")
                 if name in response.headers
             }
-            self._put(("head", ResponseHead(response.status_code, headers)))
+            refused = bool(getattr(response, "multillm_credential_refusal", None))
+            self._put(("head", ResponseHead(response.status_code, headers, refused)))
             size = 0
             # Definite rejections need no error-body read, which could otherwise
             # disclose secrets or postpone a safe fallback.
