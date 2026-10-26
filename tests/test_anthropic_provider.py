@@ -1,4 +1,4 @@
-"""Direct Claude provider and Haiku 5.5 compatibility coverage."""
+"""Direct Claude provider and Claude 5.5 compatibility coverage."""
 
 import io
 import json
@@ -17,6 +17,7 @@ from tests.test_protocol_translation import parse_frames
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 MODEL = "claude-haiku-5-5"
+CLAUDE_5_5_MODELS = (MODEL, "claude-sonnet-5-5", "claude-opus-5-5")
 SELECTOR = f"anthropic:{MODEL}"
 MESSAGE = {
     "id": "msg_haiku",
@@ -42,14 +43,17 @@ def upstream(body, status=200):
     return response
 
 
-@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh", "max", "minimal"])
-def test_haiku_effort_uses_adaptive_thinking_without_sampling(effort):
+@pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
+@pytest.mark.parametrize("max_tokens", [400, 8192])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+def test_claude_5_5_effort_uses_adaptive_thinking_without_sampling(model, max_tokens, nested, effort):
     body = chat_request_to_messages(
         {
-            "model": MODEL,
+            "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
-            "reasoning_effort": effort,
-            "max_tokens": 100,
+            **({"reasoning": {"effort": effort}} if nested else {"reasoning_effort": effort}),
+            "max_tokens": max_tokens,
             "temperature": 0.7,
             "top_p": 1,
             "top_k": 40,
@@ -59,19 +63,22 @@ def test_haiku_effort_uses_adaptive_thinking_without_sampling(effort):
             },
         }
     )
-    assert body["thinking"] == {"type": "adaptive"}
+    assert body["model"] == model
+    assert body["max_tokens"] == max_tokens
+    assert body["thinking"] == {"type": "disabled" if effort == "none" else "adaptive"}
     assert body["output_config"] == {
-        "effort": "low" if effort == "minimal" else effort,
+        "effort": "low" if effort in {"none", "minimal"} else effort,
         "format": {"type": "json_schema", "schema": {"type": "object"}},
     }
     assert not {"temperature", "top_p", "top_k"} & body.keys()
 
 
+@pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
 @pytest.mark.parametrize("thinking", [None, {"type": "disabled"}])
-def test_haiku_sampling_is_removed_even_without_explicit_thinking(thinking):
+def test_claude_5_5_sampling_is_removed_even_without_explicit_thinking(model, thinking):
     body = chat_request_to_messages(
         {
-            "model": MODEL,
+            "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
             "temperature": 0.2,
             "top_p": 0.8,
@@ -83,25 +90,46 @@ def test_haiku_sampling_is_removed_even_without_explicit_thinking(thinking):
     assert body.get("thinking") == thinking
 
 
-def test_haiku_manual_budget_becomes_adaptive_and_none_disables_thinking():
+@pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
+def test_claude_5_5_manual_budget_becomes_adaptive_and_none_disables_thinking(model):
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": "Hello"}],
         "thinking": {"type": "enabled", "budget_tokens": 8000, "display": "summarized"},
         "output_config": {"effort": "medium"},
     }
     body = chat_request_to_messages(payload)
     assert body["thinking"] == {"type": "adaptive", "display": "summarized"}
+    assert body["output_config"] == {"effort": "medium"}
     assert payload["thinking"]["budget_tokens"] == 8000
     body = chat_request_to_messages({**payload, "reasoning": {"effort": "none"}})
     assert body["thinking"] == {"type": "disabled"}
     assert body["output_config"]["effort"] == "low"
 
 
-def test_older_claude_models_keep_manual_thinking_budget():
+@pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
+def test_intelligence_keeps_maximum_default_exclusive_to_haiku(model):
+    from services.intelligence_anthropic import prepare_anthropic_request
+
+    payload = {"model": model, "messages": [{"role": "user", "content": "Hello"}]}
+    body = prepare_anthropic_request(payload)
+    if model == MODEL:
+        assert body["thinking"] == {"type": "adaptive"}
+        assert body["output_config"] == {"effort": "max"}
+    else:
+        assert "thinking" not in body
+        assert "output_config" not in body
+    assert "reasoning_effort" not in payload
+    body = prepare_anthropic_request({**payload, "reasoning_effort": "medium"})
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"] == {"effort": "medium"}
+
+
+@pytest.mark.parametrize("model", ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"])
+def test_older_claude_models_keep_manual_thinking_budget(model):
     body = chat_request_to_messages(
         {
-            "model": "claude-haiku-4-5",
+            "model": model,
             "messages": [{"role": "user", "content": "Hello"}],
             "reasoning_effort": "medium",
             "max_tokens": 4096,
@@ -155,6 +183,33 @@ class AnthropicProviderTest(UnifiedApiTestCase):
             result = self.client.post(path, json=body, headers=headers or ADMIN)
             result.get_data()
         return result, send
+
+    def test_claude_5_5_chat_routes_send_adaptive_effort_at_both_token_limits(self):
+        for model in CLAUDE_5_5_MODELS:
+            for path in ("/v1/chat/completions", "/lean/v1/chat/completions"):
+                for max_tokens in (400, 8192):
+                    with self.subTest(model=model, path=path, max_tokens=max_tokens):
+                        result, send = self.post(
+                            path,
+                            {
+                                "model": f"anthropic:{model}",
+                                "messages": [{"role": "user", "content": "Hello"}],
+                                "reasoning_effort": "medium",
+                                "max_tokens": max_tokens,
+                                "temperature": 0.7,
+                                "top_p": 0.8,
+                                "top_k": 40,
+                            },
+                            response=upstream({**MESSAGE, "model": model}),
+                        )
+                        self.assertEqual(result.status_code, 200)
+                        send.assert_called_once()
+                        body = json.loads(send.call_args.kwargs["data"])
+                        self.assertEqual(body["model"], model)
+                        self.assertEqual(body["max_tokens"], max_tokens)
+                        self.assertEqual(body["thinking"], {"type": "adaptive"})
+                        self.assertEqual(body["output_config"], {"effort": "medium"})
+                        self.assertFalse({"temperature", "top_p", "top_k"} & body.keys())
 
     def test_chat_uses_saved_key_and_adaptive_thinking(self):
         result, send = self.post(

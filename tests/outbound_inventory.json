@@ -47,7 +47,7 @@
   "providers/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "775f4b5241684e69c80a62b23cd61a9b41de7e39e5931e2a4ea83c027e95a8fe"
+    "sha256": "3e389860fc6d38fa82f67dc2326261aeb4e3fa4fecca586d648189b85579a6cb"
   },
   "providers/base.py": {
     "kind": "non-provider",
@@ -1102,7 +1102,7 @@
   "services/protocol_translation/anthropic_request_policy.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "61bb336865809714a61f7af0cc620ee618ab805f441744697e8c5758d6d0e062"
+    "sha256": "6fbc8c9757cc29676d9db726045ca17de3eb51a2e9571985a1ef747acbd8f040"
   },
   "services/protocol_translation/anthropic_stream.py": {
     "kind": "non-provider",
