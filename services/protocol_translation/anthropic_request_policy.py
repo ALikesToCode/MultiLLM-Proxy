@@ -15,6 +15,16 @@ THINKING_BUDGETS = {
     "max": 32768,
 }
 EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+# How each Claude 5.5 model turns thinking off, from the API's 400s on 2026-10-26: Haiku accepts
+# "disabled", Sonnet only "between_tools", and Opus cannot turn it off, so there it stays adaptive.
+THINKING_OFF = {
+    "claude-haiku-5-5": {"type": "disabled"},
+    "claude-sonnet-5-5": {"type": "between_tools"},
+}
+
+
+def _thinking_off(model: Any) -> dict:
+    return dict(THINKING_OFF.get(model, {"type": "adaptive"}))
 
 
 def apply_thinking(body: dict, payload: Mapping[str, Any]) -> None:
@@ -81,13 +91,15 @@ def _apply_adaptive_thinking(body: dict, payload: Mapping[str, Any]) -> None:
         body["thinking"].pop("budget_tokens", None)
         if thinking["type"] == "enabled":
             body["thinking"]["type"] = "adaptive"
+        elif thinking["type"] == "disabled":
+            body["thinking"] = _thinking_off(body.get("model"))
     effort = payload.get("reasoning_effort")
     if effort is None and isinstance(payload.get("reasoning"), Mapping):
         effort = payload["reasoning"].get("effort")
     if effort not in EFFORTS:
         return
     if effort == "none":
-        body["thinking"] = {"type": "disabled"}
+        body["thinking"] = _thinking_off(body.get("model"))
         effort = "low"
     elif "thinking" not in body:
         body["thinking"] = {"type": "adaptive"}
