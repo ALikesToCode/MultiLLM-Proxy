@@ -38,7 +38,7 @@ with the raw shell output.
 | Tool result clearing | on, from 80,000 tokens | Adds `context_management` with `clear_tool_uses_20250919`: once the prompt passes the trigger, the API replaces old tool results with placeholders and keeps the 3 most recent, clearing at least 20,000 tokens at a time. The API applies it before the model reads the prompt, the harness keeps its full history, and it never invalidates thinking blocks. Skipped when the caller sends its own `context_management` or a compaction block. |
 | Shell output | on | Results of shell tools (`Bash`, `bash`, `shell`, `exec_command`, `run_shell_command` and similar) lose ANSI escapes and progress-bar redraws; runs of four or more identical lines become one line and a count, and runs of blank lines become one. Other tools' results, file reads included, keep their exact bytes, so an edit tool can still match them. |
 | Oversized results | 100,000 characters | A longer tool result keeps its first and last 50,000 characters with a marker in between. |
-| Prompt limit | 100,000 tokens | A prompt estimated near the limit is counted exactly with `count_tokens`, context editing included. Above the limit the request is refused with the error the harness treats as a full context window, so it compacts and retries instead of paying the higher price. |
+| Prompt limit | 100,000 tokens | A prompt estimated near the limit is counted exactly with `count_tokens`, which reports its size before and after context editing. Above the limit the request is refused with the error the harness treats as a full context window, so it compacts and retries instead of paying the higher price. The pricing page does not say whether the size before or after clearing picks the price, so by default the limit applies to the size before clearing; set `LEAN_PRICE_LIMIT_BASIS=cleared` once your bill shows that cleared prompts are priced by their smaller size. |
 | Concise answers | off | Adds a short instruction to the system prompt: lead with the answer, no filler, code and commands exact. Turn it on with `LEAN_STYLE=concise` or per request with `X-MultiLLM-Lean-Style: concise` (`caveman` is accepted too). |
 
 Lean mode never changes the model, effort, thinking settings or `max_tokens`.
@@ -52,7 +52,9 @@ Lean mode never changes the model, effort, thinking settings or `max_tokens`.
 | `/lean/v1/responses` with `stream: true` | A `response.failed` event with `context_length_exceeded`, the form Codex reads. Without streaming, the Chat Completions body above. |
 
 A count that fails (for example, rate-limited) lets the request through and
-reports `X-MultiLLM-Lean-Prompt-Count: estimate`.
+reports `X-MultiLLM-Lean-Prompt-Count: estimate`. If compacting cannot bring a
+prompt under the limit, for example because the newest message alone is larger,
+the harness reports the error: Claude Code stops after three failed compactions.
 
 ### Response headers
 
@@ -63,6 +65,7 @@ reports `X-MultiLLM-Lean-Prompt-Count: estimate`.
 | `X-MultiLLM-Lean-Stages` | Stages that changed the request, for example `cache,clear-tool-uses,condense-shell` |
 | `X-MultiLLM-Lean-Prompt-Tokens` | Prompt size: counted by the API near the limit, otherwise a high local estimate |
 | `X-MultiLLM-Lean-Prompt-Count` | `provider` or `estimate` |
+| `X-MultiLLM-Lean-Prompt-Tokens-After-Clearing` | Counted size after context editing, when it differs |
 | `X-MultiLLM-Lean-Condensed-Chars` | Characters removed from tool results |
 
 The API reports what it cleared in the response's `context_management` field and
@@ -130,6 +133,7 @@ caching is what makes cache reads happen at all.
 |---|---|---|
 | `LEAN_ENDPOINT_ENABLED` | `true` | `false` stops serving `/lean` |
 | `LEAN_PROMPT_TOKEN_LIMIT` | `100000` | `0` turns the refusal off |
+| `LEAN_PRICE_LIMIT_BASIS` | `original` | `cleared` applies the limit to the prompt after context editing |
 | `LEAN_CLEAR_TRIGGER_TOKENS` | `80000` | `0` turns tool result clearing off |
 | `LEAN_CLEAR_KEEP_TOOL_USES` | `3` | Recent tool uses that are never cleared |
 | `LEAN_CLEAR_AT_LEAST_TOKENS` | `20000` | Minimum cleared per edit, so a cache rewrite is worth it |

@@ -99,6 +99,10 @@ class LeanPolicy:
     condense_shell_output: bool = True
     tool_result_max_chars: int = DEFAULT_TOOL_RESULT_MAX_CHARS
     style: str = "none"
+    # Whether the price limit applies to the prompt before ("original") or after
+    # ("cleared") context editing. Anthropic's pricing page does not say which
+    # size picks the price, so the default assumes the larger one does.
+    price_limit_basis: str = "original"
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,7 @@ class LeanRequest:
     stages: tuple[str, ...] = ()
     prompt_tokens: int | None = None
     prompt_count: str = ""
+    prompt_tokens_after_clearing: int | None = None
     condensed_chars: int = 0
 
 
@@ -149,6 +154,11 @@ def lean_policy(environ: Mapping[str, str] | None = None) -> LeanPolicy:
         condense_shell_output=_env_flag(environ, "LEAN_CONDENSE_SHELL_OUTPUT", True),
         tool_result_max_chars=_env_int(environ, "LEAN_TOOL_RESULT_MAX_CHARS", DEFAULT_TOOL_RESULT_MAX_CHARS),
         style=_style(environ.get("LEAN_STYLE")) or "none",
+        price_limit_basis=(
+            "cleared"
+            if str(environ.get("LEAN_PRICE_LIMIT_BASIS", "")).strip().lower() == "cleared"
+            else "original"
+        ),
     )
 
 
@@ -417,18 +427,22 @@ def _prompt_size(
     betas: tuple[str, ...],
     request_headers: Mapping[str, Any] | None,
     base_urls: Mapping[str, str],
-    limit: int,
-) -> tuple[int, str]:
+    policy: LeanPolicy,
+) -> tuple[int, str, int | None]:
+    """Return the size the price limit applies to, how it was measured, and the
+    counted size after context editing."""
     estimate = estimate_prompt_tokens(body)
+    limit = policy.prompt_token_limit
     if limit <= 0 or estimate < limit * COUNT_FROM_LIMIT_SHARE:
-        return estimate, "estimate"
+        return estimate, "estimate", None
     beta_header = merged_beta_value(_header(request_headers, "anthropic-beta"), betas)
     try:
-        return count_claude_prompt_tokens(body, beta_header, base_urls), "provider"
+        after, before = count_claude_prompt_tokens(body, beta_header, base_urls)
     except NativeTokenCountError as error:
         # Counting is a guard, not a gate: a failed count lets the request through.
         logger.warning("Lean prompt count failed status=%s; sending uncounted", error.status)
-        return estimate, "estimate"
+        return estimate, "estimate", None
+    return (before if policy.price_limit_basis == "original" else after), "provider", after
 
 
 def prepare_lean_request(
@@ -464,7 +478,7 @@ def prepare_lean_request(
     betas = (CONTEXT_MANAGEMENT_BETA,) if clearing else ()
     if clearing:
         stages.add("clear-tool-uses")
-    tokens, source = _prompt_size(prepared, betas, request_headers, base_urls, policy.prompt_token_limit)
+    tokens, source, after_clearing = _prompt_size(prepared, betas, request_headers, base_urls, policy)
     decision = LeanRequest(
         body=prepared,
         active=True,
@@ -472,6 +486,7 @@ def prepare_lean_request(
         stages=tuple(sorted(stages)),
         prompt_tokens=tokens,
         prompt_count=source,
+        prompt_tokens_after_clearing=after_clearing,
         condensed_chars=max(0, condensed_chars),
     )
     g.lean_request = decision
@@ -492,6 +507,9 @@ def lean_response_headers(response):
         response.headers["X-MultiLLM-Lean-Stages"] = ",".join(decision.stages) or "none"
         response.headers["X-MultiLLM-Lean-Prompt-Tokens"] = str(decision.prompt_tokens)
         response.headers["X-MultiLLM-Lean-Prompt-Count"] = decision.prompt_count
+        after = decision.prompt_tokens_after_clearing
+        if after is not None and after != decision.prompt_tokens:
+            response.headers["X-MultiLLM-Lean-Prompt-Tokens-After-Clearing"] = str(after)
         if decision.condensed_chars:
             response.headers["X-MultiLLM-Lean-Condensed-Chars"] = str(decision.condensed_chars)
     return response

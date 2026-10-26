@@ -75,7 +75,7 @@ def _reject_nonfinite(value: str) -> None:
     raise ValueError("Nonfinite JSON value")
 
 
-def _read_count(response: requests.Response) -> int:
+def _read_count(response: requests.Response) -> dict:
     raw = bytearray()
     for chunk in response.iter_content(chunk_size=8192):
         if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
@@ -88,7 +88,7 @@ def _read_count(response: requests.Response) -> int:
     count = body.get("input_tokens") if isinstance(body, dict) else None
     if type(count) is not int or count < 0:
         raise NativeTokenCountError("Malformed native token count response")
-    return count
+    return body
 
 
 def count_native_tokens(
@@ -125,16 +125,16 @@ def count_native_tokens(
     incoming = {key: value for key, value in request_headers.items() if key.lower() in COUNT_HEADERS}
     body = {key: value for key, value in payload.items() if key in COUNT_FIELDS}
     body["model"] = model
-    return _post_count(provider, url, path, credential, incoming, body)
+    return _post_count(provider, url, path, credential, incoming, body)["input_tokens"]
 
 
 def count_claude_prompt_tokens(
     body: Mapping, beta_header: str, base_urls: Mapping[str, str]
-) -> int:
+) -> tuple[int, int]:
     """Count a Claude API Messages body exactly as it will be sent.
 
-    The count includes `context_management`, so it reports the prompt after
-    server-side context editing: the size the long-prompt price applies to.
+    Returns the prompt size after and before server-side context editing; they
+    are equal when the body clears nothing.
     """
     from services.auth_service import AuthService
 
@@ -144,7 +144,11 @@ def count_claude_prompt_tokens(
     url = _count_url(base_urls["anthropic"], CLAUDE_COUNT_PATH)
     incoming = {"anthropic-beta": beta_header} if beta_header else {}
     count_body = {key: value for key, value in body.items() if key in CLAUDE_COUNT_FIELDS}
-    return _post_count("anthropic", url, CLAUDE_COUNT_PATH, credential, incoming, count_body)
+    counted = _post_count("anthropic", url, CLAUDE_COUNT_PATH, credential, incoming, count_body)
+    management = counted.get("context_management")
+    original = management.get("original_input_tokens") if isinstance(management, dict) else None
+    after = counted["input_tokens"]
+    return after, original if type(original) is int and original >= after else after
 
 
 def _post_count(
@@ -154,7 +158,7 @@ def _post_count(
     credential: str,
     incoming: Mapping[str, str],
     body: dict,
-) -> int:
+) -> dict:
     from services.proxy_service import ProxyService
 
     headers = ProxyService.prepare_headers(incoming, provider, credential, upstream_path=path)

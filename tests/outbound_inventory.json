@@ -997,7 +997,7 @@
   "services/native_token_count.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "8f8f6f026a4094be7f0a18a7876483f02f47430a8c006c43a9416dbbe8d404ed"
+    "sha256": "73c3de349f04b1524c63b8d19849306213d2e2c6dd9b5c459ebc652ce7a4c402"
   },
   "services/observability_adapters.py": {
     "kind": "non-provider",
@@ -1572,7 +1572,7 @@
   "worker/container-env.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "47bf9837f223cb05e6a42facb7d37e4784cf7656631227314fefb32da8e42cdb"
+    "sha256": "44b80ae15dc92596588b2cde34c956835b9d696df28fcea3eb48479121e91d03"
   },
   "worker/context-canary.mjs": {
     "kind": "non-provider",
@@ -2467,6 +2467,6 @@
   "services/lean_mode.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "d54cd894d2c937c6ffb32c64da9f7d6648ae4ea004d6193220800ee55194231c"
+    "sha256": "4840552159fca30603f1da07cfa008abe95ad82c1243a6302e2b5f73ca95195b"
   }
 }

@@ -227,16 +227,29 @@ def test_beta_header_merge_keeps_caller_betas_once():
 def test_near_limit_prompt_is_counted_and_refused_above_the_price_limit(lean):
     body = conversation(1)
     body["messages"][0]["content"] = "x" * 200_000
-    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=100_001) as count:
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(100_001, 100_001)) as count:
         with pytest.raises(lean_mode.LeanPromptTooLong) as raised:
             lean.prepare(body, headers={"anthropic-beta": "claude-code-20250219"})
     assert str(raised.value) == "prompt is too long: 100001 tokens > 100000 maximum"
     counted_body, beta_header, _ = count.call_args.args
     assert counted_body["context_management"]["edits"][0]["type"] == "clear_tool_uses_20250919"
     assert beta_header == "claude-code-20250219,context-management-2025-06-27"
-    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=99_000):
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(99_000, 99_000)):
         decision = lean.prepare(body)
     assert (decision.prompt_tokens, decision.prompt_count) == (99_000, "provider")
+
+
+def test_price_limit_applies_before_clearing_unless_configured(lean):
+    """Which size picks Haiku's price is undocumented, so the larger one is the default."""
+    body = conversation(1)
+    body["messages"][0]["content"] = "x" * 200_000
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(60_000, 120_000)):
+        with pytest.raises(lean_mode.LeanPromptTooLong) as raised:
+            lean.prepare(body)
+        assert raised.value.tokens == 120_000
+        with patch.dict(os.environ, {"LEAN_PRICE_LIMIT_BASIS": "cleared"}):
+            decision = lean.prepare(body)
+    assert (decision.prompt_tokens, decision.prompt_tokens_after_clearing) == (60_000, 60_000)
 
 
 def test_failed_count_lets_the_request_through(lean):
@@ -256,7 +269,7 @@ def test_claude_count_sends_context_management_with_the_lean_beta():
         status_code = 200
 
         def iter_content(self, chunk_size):
-            yield b'{"input_tokens": 1234}'
+            yield b'{"input_tokens": 1234, "context_management": {"original_input_tokens": 5678}}'
 
         def close(self):
             pass
@@ -272,7 +285,7 @@ def test_claude_count_sends_context_management_with_the_lean_beta():
         count = native_token_count.count_claude_prompt_tokens(
             body, CONTEXT_MANAGEMENT_BETA, {"anthropic": "https://api.anthropic.com"}
         )
-    assert count == 1234
+    assert count == (1234, 5678)
     assert captured["url"] == "https://api.anthropic.com/v1/messages/count_tokens"
     assert captured["headers"]["X-Api-Key"] == "claude-key"
     assert captured["headers"]["Anthropic-Beta"] == CONTEXT_MANAGEMENT_BETA
@@ -360,7 +373,7 @@ class LeanRouteTest(UnifiedApiTestCase):
         self.assertEqual(result.headers["X-MultiLLM-Lean-Stages"], "cache")
 
     def oversized(self):
-        return patch.object(lean_mode, "count_claude_prompt_tokens", return_value=150_000)
+        return patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(150_000, 150_000))
 
     def large_input(self):
         return "x" * 200_000
