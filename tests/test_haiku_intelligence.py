@@ -205,6 +205,16 @@ class HaikuIntelligenceTests(IntelligenceApiTestCase):
                     )
                 ),
             ),
+            # Claude API keys form a pool, which the transport reads as a list.
+            patch.object(
+                self.app_module.AuthService,
+                "get_api_keys",
+                side_effect=(
+                    lambda provider: (
+                        [] if provider == "anthropic" else ["synthetic-provider-key"]
+                    )
+                ),
+            ),
             self.requests(return_value=upstream(completion())) as send,
         ):
             response = self.haiku_post()
