@@ -9,6 +9,7 @@ writer turns items into its protocol's SSE frames, so no stream is buffered.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -17,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Union
 
 from streaming.sse import SSEEvent, iter_sse_events
+
+logger = logging.getLogger(__name__)
 
 CHAT = "chat"
 RESPONSES = "responses"
@@ -481,7 +484,8 @@ def guarded_items(items: Iterable[ChatItem]) -> Iterator[ChatItem]:
     """End with a failure, not an exception, when an upstream event has a bad shape."""
     try:
         yield from items
-    except (TypeError, AttributeError, KeyError, IndexError, ValueError):
+    except (TypeError, AttributeError, KeyError, IndexError, ValueError) as error:
+        logger.warning("Upstream stream translation failed type=%s", type(error).__name__)
         yield StreamFailure("The upstream stream could not be translated.")
 
 

@@ -142,7 +142,9 @@ class NativeContent:
                 if not isinstance(value, str):
                     raise ValueError("Invalid Anthropic tool arguments")
                 self.arguments[index] = self.arguments.get(index, "") + value
-        elif index in self.arguments:
+        elif self.arguments.get(index):
+            # Empty fragments carry no JSON; retain the input from block start.
+            # Nonempty malformed JSON must still fail instead of losing arguments.
             self.blocks[index]["input"] = json.loads(self.arguments[index])
         self.bytes += len(json.dumps(event, ensure_ascii=False).encode())
         if self.bytes > MAX_CONTINUATION_BYTES:
