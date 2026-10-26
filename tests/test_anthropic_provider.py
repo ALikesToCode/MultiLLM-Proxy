@@ -65,12 +65,20 @@ def test_claude_5_5_effort_uses_adaptive_thinking_without_sampling(model, max_to
     )
     assert body["model"] == model
     assert body["max_tokens"] == max_tokens
-    assert body["thinking"] == {"type": "disabled" if effort == "none" else "adaptive"}
+    assert body["thinking"] == (THINKING_OFF_BY_MODEL[model] if effort == "none" else {"type": "adaptive"})
     assert body["output_config"] == {
         "effort": "low" if effort in {"none", "minimal"} else effort,
         "format": {"type": "json_schema", "schema": {"type": "object"}},
     }
     assert not {"temperature", "top_p", "top_k"} & body.keys()
+
+
+# Haiku turns thinking off with "disabled", Sonnet only with "between_tools", and Opus cannot.
+THINKING_OFF_BY_MODEL = {
+    "claude-haiku-5-5": {"type": "disabled"},
+    "claude-sonnet-5-5": {"type": "between_tools"},
+    "claude-opus-5-5": {"type": "adaptive"},
+}
 
 
 @pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
@@ -87,7 +95,7 @@ def test_claude_5_5_sampling_is_removed_even_without_explicit_thinking(model, th
     )
     assert "temperature" not in body
     assert "top_p" not in body
-    assert body.get("thinking") == thinking
+    assert body.get("thinking") == (THINKING_OFF_BY_MODEL[model] if thinking else None)
 
 
 @pytest.mark.parametrize("model", CLAUDE_5_5_MODELS)
@@ -103,7 +111,7 @@ def test_claude_5_5_manual_budget_becomes_adaptive_and_none_disables_thinking(mo
     assert body["output_config"] == {"effort": "medium"}
     assert payload["thinking"]["budget_tokens"] == 8000
     body = chat_request_to_messages({**payload, "reasoning": {"effort": "none"}})
-    assert body["thinking"] == {"type": "disabled"}
+    assert body["thinking"] == THINKING_OFF_BY_MODEL[model]
     assert body["output_config"]["effort"] == "low"
 
 
