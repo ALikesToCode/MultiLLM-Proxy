@@ -34,6 +34,16 @@ test("Anthropic native routes use edge API handling", () => {
   assert.equal(isApiRequestPath("/anthropic-other/v1/messages"), false);
 });
 
+test("lean routes use edge API handling and the container receives lean settings", () => {
+  assert.equal(isApiRequestPath("/lean/v1/messages"), true);
+  assert.equal(isApiRequestPath("/lean/v1/chat/completions"), true);
+  assert.equal(isApiRequestPath("/leaner/v1/messages"), false);
+  const forwarded = collectContainerEnv({ LEAN_STYLE: "concise", LEAN_PROMPT_TOKEN_LIMIT: "90000", LEAN_UNKNOWN: "x" });
+  assert.equal(forwarded.LEAN_STYLE, "concise");
+  assert.equal(forwarded.LEAN_PROMPT_TOKEN_LIMIT, "90000");
+  assert.equal(forwarded.LEAN_UNKNOWN, undefined);
+});
+
 test("Anthropic preflight allows Claude headers without waking the container", async () => {
   const { default: worker } = await loadWorkerModule();
   const origin = "https://chat.example";

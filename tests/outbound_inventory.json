@@ -2,7 +2,7 @@
   "app.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "38480cbcaf363f62177f1449b73b12c6c1b379dbb938e0096d6ff3eebb65921e"
+    "sha256": "ed56be46ef0772dec11bdc238e25e28ea977fc10979102c3a655a7c87fb3808c"
   },
   "cloudflare-worker.mjs": {
     "kind": "internal",
@@ -402,7 +402,7 @@
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "bcc073d8fc97c65c2b00b1d7b069284ddfcd1834ab610c640e0d1644a439415a"
+    "sha256": "38b545840293971d167268ebecd8095e638f0717fe5fc4782925602e5eaa47d6"
   },
   "routes/unified_bridge.py": {
     "kind": "non-provider",
@@ -997,7 +997,7 @@
   "services/native_token_count.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "46cd0e4dff7d3d123fe710c1cc00dcdf39a57a56ce1008446c94c8f4975282ac"
+    "sha256": "8f8f6f026a4094be7f0a18a7876483f02f47430a8c006c43a9416dbbe8d404ed"
   },
   "services/observability_adapters.py": {
     "kind": "non-provider",
@@ -1522,7 +1522,7 @@
   "worker/api-paths.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "378a091ba1b4f13ce2e75516eaa425a01c1655624970aac5bfd59627e5cf4a54"
+    "sha256": "ebf33474e9839780cb05b3fe652dc26b174f37eff5123a7a120593f80cde2c7b"
   },
   "worker/auto-routes-d1.mjs": {
     "kind": "non-provider",
@@ -1572,7 +1572,7 @@
   "worker/container-env.mjs": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "f5dc040ed498889a81747ddde2bf7ea7750af3fffa3396e75e82c92438326a9a"
+    "sha256": "47bf9837f223cb05e6a42facb7d37e4784cf7656631227314fefb32da8e42cdb"
   },
   "worker/context-canary.mjs": {
     "kind": "non-provider",
@@ -2458,5 +2458,15 @@
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
     "sha256": "f681974644eb5340debf6d4c0b072bb8dfd5ffcad18a652611d9bdf888d595c3"
+  },
+  "routes/lean.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "425514a91851a5a4a209b3abe50bff97085630cebafa606c92b43f11929f0b23"
+  },
+  "services/lean_mode.py": {
+    "kind": "guarded",
+    "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
+    "sha256": "d54cd894d2c937c6ffb32c64da9f7d6648ae4ea004d6193220800ee55194231c"
   }
 }

@@ -15,6 +15,7 @@ const API_ROUTE_PREFIXES = new Set([
   "hyperbolic",
   "intelligence",
   "kimi-code",
+  "lean",
   "linkapi",
   "mimo",
   "nanogpt",

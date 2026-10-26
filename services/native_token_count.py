@@ -16,6 +16,8 @@ from providers.registry import get_registry
 MAX_RESPONSE_BYTES = 64 * 1024
 COUNT_FIELDS = frozenset({"model", "messages", "system", "tools", "tool_choice", "thinking"})
 COUNT_HEADERS = frozenset({"anthropic-version", "anthropic-beta", "user-agent", "x-request-id"})
+CLAUDE_COUNT_PATH = "/v1/messages/count_tokens"
+CLAUDE_COUNT_FIELDS = COUNT_FIELDS | {"context_management"}
 
 
 class NativeTokenCountError(Exception):
@@ -100,7 +102,6 @@ def count_native_tokens(
     # share no credentials or model state through this adapter.
     from services.auth_service import AuthService
     from services.model_registry import ModelRegistry
-    from services.proxy_service import ProxyService
 
     model_id = payload.get("model")
     if not isinstance(model_id, str):
@@ -122,11 +123,43 @@ def count_native_tokens(
     # Proxy credentials and caller-supplied provider credentials are not part of
     # this configured count adapter's header contract.
     incoming = {key: value for key, value in request_headers.items() if key.lower() in COUNT_HEADERS}
+    body = {key: value for key, value in payload.items() if key in COUNT_FIELDS}
+    body["model"] = model
+    return _post_count(provider, url, path, credential, incoming, body)
+
+
+def count_claude_prompt_tokens(
+    body: Mapping, beta_header: str, base_urls: Mapping[str, str]
+) -> int:
+    """Count a Claude API Messages body exactly as it will be sent.
+
+    The count includes `context_management`, so it reports the prompt after
+    server-side context editing: the size the long-prompt price applies to.
+    """
+    from services.auth_service import AuthService
+
+    credential = AuthService.get_api_key("anthropic")
+    if not credential:
+        raise NativeTokenCountError("No Claude API key is configured", 503)
+    url = _count_url(base_urls["anthropic"], CLAUDE_COUNT_PATH)
+    incoming = {"anthropic-beta": beta_header} if beta_header else {}
+    count_body = {key: value for key, value in body.items() if key in CLAUDE_COUNT_FIELDS}
+    return _post_count("anthropic", url, CLAUDE_COUNT_PATH, credential, incoming, count_body)
+
+
+def _post_count(
+    provider: str,
+    url: str,
+    path: str,
+    credential: str,
+    incoming: Mapping[str, str],
+    body: dict,
+) -> int:
+    from services.proxy_service import ProxyService
+
     headers = ProxyService.prepare_headers(incoming, provider, credential, upstream_path=path)
     headers["Content-Type"] = "application/json"
     headers["Accept"] = "application/json"
-    body = {key: value for key, value in payload.items() if key in COUNT_FIELDS}
-    body["model"] = model
     session = ProxyService._get_provider_session(provider, raw_passthrough=True)
     response = None
     try:

@@ -349,6 +349,12 @@ the proxy with `ANTHROPIC_BASE_URL`. See
 [protocol translation](docs/protocol-translation.md) for the coverage and
 limits.
 
+For Claude Haiku 5.5 in a coding harness, use the `/lean` base path
+(`/lean/v1/messages`, `/lean/v1/chat/completions`, `/lean/v1/responses`). It
+turns on prompt caching, clears old tool results server-side, condenses shell
+output and keeps every prompt under the 100,000-token long-prompt price. See
+[lean endpoint](docs/lean.md).
+
 ```bash
 # OpenAI-compatible endpoint
 curl -X POST "http://localhost:1400/openai/v1/chat/completions" \

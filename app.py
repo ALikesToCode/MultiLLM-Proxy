@@ -10,6 +10,7 @@ from config import Config, DevelopmentConfig, ProductionConfig
 from env_loader import load_runtime_env
 from error_handlers import init_error_handlers
 from middleware.external_origin import TrustedExternalOriginMiddleware
+from middleware.lean_path import LeanPathMiddleware
 from route_helpers import (
     api_auth_required,
     apply_cors_headers,
@@ -30,6 +31,7 @@ from routes.free_routes import register_free_routes
 from routes.gateway_mcp import register_gateway_mcp_routes
 from routes.gateway_batches import register_gateway_batch_routes
 from routes.context_pages import register_context_page_routes
+from routes.lean import register_lean_routes
 from routes.optimized import register_optimized_routes
 from routes.proxy import register_proxy_routes
 from routes.status_page import register_status_routes
@@ -105,6 +107,8 @@ def create_app() -> Flask:
         # normalization and wins when Flask constructs public URLs.
         app.wsgi_app = TrustedExternalOriginMiddleware(app.wsgi_app)
         app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+    if os.environ.get("LEAN_ENDPOINT_ENABLED", "").strip().lower() not in {"0", "false", "no", "off"}:
+        app.wsgi_app = LeanPathMiddleware(app.wsgi_app)
     app.secret_key = runtime_secrets["FLASK_SECRET_KEY"]
     app.config["JWT_SECRET"] = runtime_secrets["JWT_SECRET"]
 
@@ -146,6 +150,7 @@ def create_app() -> Flask:
     register_intelligence_media_routes(app, csrf, AuthService, ProxyService)
     register_free_routes(app, csrf, AuthService, MetricsService, ProxyService)
     register_optimized_routes(app, csrf, AuthService, MetricsService, ProxyService)
+    register_lean_routes(app)
     register_status_routes(app, csrf, AuthService, ProxyService)
     register_core_routes(app)
     register_dashboard_security_routes(app)
