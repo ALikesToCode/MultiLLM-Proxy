@@ -68,7 +68,7 @@ from services.cascade_config import is_cascade
 from services.managed_turn import bounded_managed_timeout as bounded_timeout
 from routes.cascades import dispatch_unified_cascade, register_cascade_admin_routes, validate_cascade_target
 from services.context_optimizer import ContextOptimizationResult
-from services.lean_mode import merge_beta_header, prepare_lean_request
+from services.lean_mode import check_lean_prompt, merge_beta_header, prepare_lean_request
 from services.model_registry import ModelRegistry
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from routes.provider_credentials import (
@@ -309,15 +309,14 @@ def _send_native_request(
     """Send one body to a provider's native Responses or Messages endpoint."""
     from services.managed_turn import prepare_dispatch_kwargs
     lean = prepare_lean_request(
-        body,
-        provider=provider,
-        endpoint=endpoint,
-        request_headers=headers_source,
-        base_urls=app.config["API_BASE_URLS"],
+        body, provider=provider, endpoint=endpoint, request_headers=headers_source
     )
     raw_body = json.dumps(lean.body).encode("utf-8")
 
     def send_request(token: str):
+        check_lean_prompt(
+            lean, token, request_headers=headers_source, base_urls=app.config["API_BASE_URLS"]
+        )
         headers = proxy_service_cls.prepare_headers(
             headers_source,
             provider,

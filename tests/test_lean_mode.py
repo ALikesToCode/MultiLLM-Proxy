@@ -60,13 +60,18 @@ class LeanContext:
             from flask import request
 
             request.environ[lean_mode.LEAN_ENVIRON_KEY] = True
-            return lean_mode.prepare_lean_request(
-                body,
-                provider="anthropic",
-                endpoint="v1/messages",
+            decision = lean_mode.prepare_lean_request(
+                body, provider="anthropic", endpoint="v1/messages", request_headers=headers or {}
+            )
+            lean_mode.check_lean_prompt(
+                decision,
+                "attempt-key",
                 request_headers=headers or {},
                 base_urls={"anthropic": "https://api.anthropic.com"},
             )
+            from flask import g
+
+            return g.lean_request
 
 
 @pytest.fixture
@@ -230,13 +235,14 @@ def test_near_limit_prompt_is_counted_and_refused_above_the_price_limit(lean):
     with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(100_001, 100_001)) as count:
         with pytest.raises(lean_mode.LeanPromptTooLong) as raised:
             lean.prepare(body, headers={"anthropic-beta": "claude-code-20250219"})
-    assert str(raised.value) == "prompt is too long: 100001 tokens > 100000 maximum"
+    assert str(raised.value) == "prompt is too long: 100001 tokens > 99000 maximum"
     counted_body, beta_header, _ = count.call_args.args
+    assert count.call_args.kwargs == {"credential": "attempt-key"}
     assert counted_body["context_management"]["edits"][0]["type"] == "clear_tool_uses_20250919"
     assert beta_header == "claude-code-20250219,context-management-2025-06-27"
-    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(99_000, 99_000)):
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(98_000, 98_000)):
         decision = lean.prepare(body)
-    assert (decision.prompt_tokens, decision.prompt_count) == (99_000, "provider")
+    assert (decision.prompt_tokens, decision.prompt_count) == (98_000, "provider")
 
 
 def test_price_limit_applies_before_clearing_unless_configured(lean):
@@ -252,12 +258,57 @@ def test_price_limit_applies_before_clearing_unless_configured(lean):
     assert (decision.prompt_tokens, decision.prompt_tokens_after_clearing) == (60_000, 60_000)
 
 
-def test_failed_count_lets_the_request_through(lean):
+def test_failed_count_falls_back_to_the_estimate(lean):
     body = conversation(1)
     body["messages"][0]["content"] = "x" * 200_000
-    with patch.object(lean_mode, "count_claude_prompt_tokens", side_effect=NativeTokenCountError("down", 429)):
+    failure = NativeTokenCountError("down", 429)
+    with patch.object(lean_mode, "count_claude_prompt_tokens", side_effect=failure):
         decision = lean.prepare(body)
-    assert decision.prompt_count == "estimate"
+        assert (decision.prompt_count, decision.prompt_tokens < 99_000) == ("estimate", True)
+        body["messages"][0]["content"] = "x" * 400_000
+        with pytest.raises(lean_mode.LeanPromptTooLong):
+            lean.prepare(body)
+
+
+def test_documents_are_estimated_by_their_contents():
+    text = {"type": "document", "source": {"type": "text", "media_type": "text/plain", "data": "word " * 120_000}}
+    pdf = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "A" * 400_000}}
+    nested = {"type": "document", "source": {"type": "content", "content": [{"type": "text", "text": "abc" * 1_000}]}}
+    assert estimate_prompt_tokens({"messages": [{"role": "user", "content": [text]}]}) >= 200_000
+    assert estimate_prompt_tokens({"messages": [{"role": "user", "content": [pdf]}]}) >= 100_000
+    assert estimate_prompt_tokens({"messages": [{"role": "user", "content": [nested]}]}) >= 1_000
+
+
+def test_uncountable_sources_are_judged_by_the_estimate(lean):
+    remote = {"type": "document", "source": {"type": "url", "url": "https://example.com/spec.pdf"}}
+    body = {"model": MODEL, "max_tokens": 64, "messages": [{"role": "user", "content": [remote, {"type": "text", "text": "x" * 300_000}]}]}
+    with patch.object(lean_mode, "count_claude_prompt_tokens") as count:
+        with pytest.raises(lean_mode.LeanPromptTooLong):
+            lean.prepare(body)
+    count.assert_not_called()
+
+
+def test_server_tools_are_left_out_of_the_count_with_an_allowance(lean):
+    body = conversation(1)
+    body["messages"][0]["content"] = "x" * 200_000
+    body["tools"] = [*TOOLS, {"type": "web_search_20250305", "name": "web_search"}]
+    body["tool_choice"] = {"type": "tool", "name": "web_search"}
+    with patch.object(lean_mode, "count_claude_prompt_tokens", return_value=(70_000, 70_000)) as count:
+        decision = lean.prepare(body)
+    counted_body = count.call_args.args[0]
+    assert [tool["name"] for tool in counted_body["tools"]] == ["Bash"]
+    assert "tool_choice" not in counted_body
+    assert decision.prompt_tokens == 70_000 + lean_mode.SERVER_TOOL_TOKENS
+    assert decision.body["tools"][-1]["name"] == "web_search"
+
+
+def test_schema_properties_named_cache_control_are_not_breakpoints(lean):
+    body = conversation(1)
+    body["tools"] = [{**TOOLS[0], "input_schema": {"type": "object", "properties": {"cache_control": {"type": "string"}}}}]
+    body["messages"][1]["content"][0]["input"] = {"cache_control": "no-store"}
+    decision = lean.prepare(body)
+    assert "cache" in decision.stages
+    assert decision.body["cache_control"] == {"type": "ephemeral"}
 
 
 def test_claude_count_sends_context_management_with_the_lean_beta():
@@ -379,18 +430,20 @@ class LeanRouteTest(UnifiedApiTestCase):
         return "x" * 200_000
 
     def test_over_limit_messages_get_anthropic_prompt_too_long(self):
-        with self.oversized():
+        with self.oversized() as count:
             result, send = self.post(
                 "/lean/v1/messages",
                 {"model": SELECTOR, "max_tokens": 64, "messages": [{"role": "user", "content": self.large_input()}]},
                 headers={"X-Api-Key": "admin-test-key"},
             )
         send.assert_not_called()
+        # Counted with the key that would have sent the request.
+        self.assertEqual(count.call_args.kwargs, {"credential": "anthropic-provider-key"})
         self.assertEqual(result.status_code, 400)
         error = result.get_json()
         self.assertEqual(error["type"], "error")
         self.assertEqual(error["error"]["type"], "invalid_request_error")
-        self.assertEqual(error["error"]["message"], "prompt is too long: 150000 tokens > 100000 maximum")
+        self.assertEqual(error["error"]["message"], "prompt is too long: 150000 tokens > 99000 maximum")
         self.assertEqual(result.headers["X-MultiLLM-Lean-Prompt-Tokens"], "150000")
 
     def test_over_limit_chat_gets_context_length_exceeded(self):
@@ -403,7 +456,7 @@ class LeanRouteTest(UnifiedApiTestCase):
         self.assertEqual(result.status_code, 400)
         error = result.get_json()["error"]
         self.assertEqual(error["code"], "context_length_exceeded")
-        self.assertIn("maximum context length is 100000 tokens", error["message"])
+        self.assertIn("maximum context length is 99000 tokens", error["message"])
         self.assertIn("prompt is too long", error["message"])
 
     def test_over_limit_responses_stream_fails_like_openai(self):

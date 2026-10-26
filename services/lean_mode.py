@@ -23,7 +23,7 @@ import logging
 import os
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from flask import g, has_request_context, request
@@ -39,8 +39,9 @@ CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27"
 CLEAR_TOOL_USES = "clear_tool_uses_20250919"
 STYLE_HEADER = "X-MultiLLM-Lean-Style"
 # Haiku 5.5 bills a request whose prompt is over 100,000 tokens, cache reads and
-# writes included, at five times the price of the whole request.
-DEFAULT_PROMPT_TOKEN_LIMIT = 100_000
+# writes included, at five times the price of the whole request. The default sits
+# 1,000 tokens lower because count_tokens is itself an estimate.
+DEFAULT_PROMPT_TOKEN_LIMIT = 99_000
 DEFAULT_CLEAR_TRIGGER_TOKENS = 80_000
 DEFAULT_CLEAR_KEEP_TOOL_USES = 3
 DEFAULT_CLEAR_AT_LEAST_TOKENS = 20_000
@@ -50,6 +51,11 @@ DEFAULT_TOOL_RESULT_MAX_CHARS = 100_000
 # from 40% of the limit leaves that margin before a prompt can cross it uncounted.
 COUNT_FROM_LIMIT_SHARE = 0.4
 MEDIA_BLOCK_TOKENS = 1_600
+# count_tokens rejects URL and file sources and every server tool but the
+# advisor, so those are estimated at these sizes instead.
+REMOTE_DOCUMENT_TOKENS = 10_000
+SERVER_TOOL_TOKENS = 1_000
+UNCOUNTABLE_SOURCES = frozenset({"url", "file"})
 REPEATED_LINE_MIN_RUN = 4
 SHELL_TOOL_NAMES = frozenset(
     {
@@ -301,12 +307,23 @@ def _text_length(value: Any) -> int:
     return 0
 
 
-def _has_cache_control(value: Any) -> bool:
-    if isinstance(value, dict):
-        return "cache_control" in value or any(_has_cache_control(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_has_cache_control(item) for item in value)
-    return False
+def _has_cache_breakpoint(body: Mapping[str, Any]) -> bool:
+    """Whether the caller placed a breakpoint where the API reads one.
+
+    Only blocks count: a tool schema or a tool call's input can have an ordinary
+    property named `cache_control`.
+    """
+    if "cache_control" in body:
+        return True
+    candidates: list = []
+    for key in ("system", "tools"):
+        if isinstance(body.get(key), list):
+            candidates.extend(body[key])
+    for block in _blocks(body.get("messages")):
+        candidates.append(block)
+        if block.get("type") == "tool_result" and isinstance(block.get("content"), list):
+            candidates.extend(block["content"])
+    return any(isinstance(block, dict) and "cache_control" in block for block in candidates)
 
 
 def _with_style(body: dict) -> dict:
@@ -328,7 +345,7 @@ def _with_cache_breakpoints(body: dict, ttl: str) -> tuple[dict, bool]:
     breakpoint keeps the tools and system prompt cached when context editing
     clears an old tool result and the rest of the prefix must be written again.
     """
-    if _has_cache_control(body):
+    if _has_cache_breakpoint(body):
         return body, False
     marker = {"type": "ephemeral"} if ttl == "5m" else {"type": "ephemeral", "ttl": ttl}
     cached = {**body, "cache_control": dict(marker)}
@@ -379,17 +396,38 @@ def _with_tool_clearing(body: dict, policy: LeanPolicy) -> tuple[dict, bool]:
     return {**body, "context_management": {"edits": [edit]}}, True
 
 
-def estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
-    """A rough estimate that decides when to count exactly: three characters per
-    token, images at a flat size."""
+def _is_server_tool(tool: Any) -> bool:
+    return isinstance(tool, dict) and tool.get("type") not in (None, "custom")
+
+
+def _estimate(body: Mapping[str, Any]) -> tuple[int, bool]:
+    """Estimate the prompt and say whether count_tokens can count it.
+
+    Text counts three characters per token, an image a flat size, a text
+    document its characters and a base64 PDF a token per three decoded bytes.
+    """
     characters = 0
-    media = 0
+    tokens = 0
+    countable = True
 
     def walk(value: Any) -> None:
-        nonlocal characters, media
+        nonlocal characters, tokens, countable
         if isinstance(value, dict):
-            if value.get("type") in {"image", "document"}:
-                media += 1
+            kind = value.get("type")
+            source = value.get("source") if isinstance(value.get("source"), dict) else {}
+            if kind in {"image", "document"}:
+                data = source.get("data")
+                if source.get("type") in UNCOUNTABLE_SOURCES:
+                    countable = False
+                    tokens += MEDIA_BLOCK_TOKENS if kind == "image" else REMOTE_DOCUMENT_TOKENS
+                elif kind == "image":
+                    tokens += MEDIA_BLOCK_TOKENS
+                elif source.get("type") == "content":
+                    walk(source.get("content"))
+                elif isinstance(data, str):
+                    tokens += len(data) // 4 if source.get("type") == "base64" else len(data) // 3
+                else:
+                    tokens += REMOTE_DOCUMENT_TOKENS
                 return
             for key, item in value.items():
                 if key != "cache_control":
@@ -402,7 +440,31 @@ def estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
 
     for key in ("system", "tools", "messages"):
         walk(body.get(key))
-    return characters // 3 + media * MEDIA_BLOCK_TOKENS
+    tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+    tokens += SERVER_TOOL_TOKENS * sum(1 for tool in tools if _is_server_tool(tool))
+    return characters // 3 + tokens, countable
+
+
+def estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
+    """A rough estimate that decides when to count exactly."""
+    return _estimate(body)[0]
+
+
+def _count_body(body: dict) -> tuple[dict, int]:
+    """Drop the server tools count_tokens rejects; return the body and their allowance."""
+    tools = body.get("tools")
+    if not isinstance(tools, list) or not any(_is_server_tool(tool) for tool in tools):
+        return body, 0
+    client_tools = [tool for tool in tools if not _is_server_tool(tool)]
+    counted = {key: value for key, value in body.items() if key != "tools"}
+    if client_tools:
+        counted["tools"] = client_tools
+    choice = body.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") == "tool" and not any(
+        tool.get("name") == choice.get("name") for tool in client_tools if isinstance(tool, dict)
+    ):
+        counted.pop("tool_choice", None)
+    return counted, SERVER_TOOL_TOKENS * (len(tools) - len(client_tools))
 
 
 def merged_beta_value(existing: str, betas: Iterable[str]) -> str:
@@ -422,27 +484,40 @@ def merge_beta_header(headers: dict, betas: Iterable[str]) -> None:
     headers[name] = merged_beta_value(headers.get(name, ""), betas)
 
 
-def _prompt_size(
-    body: dict,
-    betas: tuple[str, ...],
+def check_lean_prompt(
+    decision: LeanRequest,
+    credential: str | None,
+    *,
     request_headers: Mapping[str, Any] | None,
     base_urls: Mapping[str, str],
-    policy: LeanPolicy,
-) -> tuple[int, str, int | None]:
-    """Return the size the price limit applies to, how it was measured, and the
-    counted size after context editing."""
-    estimate = estimate_prompt_tokens(body)
+) -> None:
+    """Refuse a prepared prompt that would pay the long-prompt price.
+
+    Counts with the key that will send the request: thinking blocks from another
+    account are dropped before counting, so any other key can undercount. When
+    the prompt cannot be counted, the estimate decides.
+    """
+    if not decision.active:
+        return
+    policy = lean_policy()
     limit = policy.prompt_token_limit
-    if limit <= 0 or estimate < limit * COUNT_FROM_LIMIT_SHARE:
-        return estimate, "estimate", None
-    beta_header = merged_beta_value(_header(request_headers, "anthropic-beta"), betas)
-    try:
-        after, before = count_claude_prompt_tokens(body, beta_header, base_urls)
-    except NativeTokenCountError as error:
-        # Counting is a guard, not a gate: a failed count lets the request through.
-        logger.warning("Lean prompt count failed status=%s; sending uncounted", error.status)
-        return estimate, "estimate", None
-    return (before if policy.price_limit_basis == "original" else after), "provider", after
+    estimate, countable = _estimate(decision.body)
+    tokens, source, after = estimate, "estimate", None
+    if limit > 0 and countable and estimate >= limit * COUNT_FROM_LIMIT_SHARE:
+        count_body, allowance = _count_body(decision.body)
+        beta_header = merged_beta_value(_header(request_headers, "anthropic-beta"), decision.betas)
+        try:
+            after, before = count_claude_prompt_tokens(count_body, beta_header, base_urls, credential=credential)
+        except NativeTokenCountError as error:
+            logger.warning("Lean prompt count failed status=%s; using the estimate", error.status)
+        else:
+            after, before = after + allowance, before + allowance
+            tokens, source = (before if policy.price_limit_basis == "original" else after), "provider"
+    g.lean_request = replace(
+        decision, prompt_tokens=tokens, prompt_count=source, prompt_tokens_after_clearing=after
+    )
+    if limit > 0 and tokens > limit:
+        raise LeanPromptTooLong(tokens, limit)
 
 
 def prepare_lean_request(
@@ -451,11 +526,10 @@ def prepare_lean_request(
     provider: str,
     endpoint: str,
     request_headers: Mapping[str, Any] | None,
-    base_urls: Mapping[str, str],
 ) -> LeanRequest:
     """Apply lean mode to a Claude API Messages body; other requests pass unchanged.
 
-    Raises LeanPromptTooLong when the prepared prompt would pay the long-prompt price.
+    check_lean_prompt then sizes the result against the price limit.
     """
     if not lean_requested():
         return LeanRequest(body=body)
@@ -478,20 +552,14 @@ def prepare_lean_request(
     betas = (CONTEXT_MANAGEMENT_BETA,) if clearing else ()
     if clearing:
         stages.add("clear-tool-uses")
-    tokens, source, after_clearing = _prompt_size(prepared, betas, request_headers, base_urls, policy)
     decision = LeanRequest(
         body=prepared,
         active=True,
         betas=betas,
         stages=tuple(sorted(stages)),
-        prompt_tokens=tokens,
-        prompt_count=source,
-        prompt_tokens_after_clearing=after_clearing,
         condensed_chars=max(0, condensed_chars),
     )
     g.lean_request = decision
-    if source == "provider" and tokens > policy.prompt_token_limit:
-        raise LeanPromptTooLong(tokens, policy.prompt_token_limit)
     return decision
 
 
@@ -505,8 +573,9 @@ def lean_response_headers(response):
     response.headers["X-MultiLLM-Lean-Rules"] = LEAN_RULES_VERSION
     if active:
         response.headers["X-MultiLLM-Lean-Stages"] = ",".join(decision.stages) or "none"
-        response.headers["X-MultiLLM-Lean-Prompt-Tokens"] = str(decision.prompt_tokens)
-        response.headers["X-MultiLLM-Lean-Prompt-Count"] = decision.prompt_count
+        if decision.prompt_tokens is not None:
+            response.headers["X-MultiLLM-Lean-Prompt-Tokens"] = str(decision.prompt_tokens)
+            response.headers["X-MultiLLM-Lean-Prompt-Count"] = decision.prompt_count
         after = decision.prompt_tokens_after_clearing
         if after is not None and after != decision.prompt_tokens:
             response.headers["X-MultiLLM-Lean-Prompt-Tokens-After-Clearing"] = str(after)

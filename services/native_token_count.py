@@ -129,16 +129,17 @@ def count_native_tokens(
 
 
 def count_claude_prompt_tokens(
-    body: Mapping, beta_header: str, base_urls: Mapping[str, str]
+    body: Mapping, beta_header: str, base_urls: Mapping[str, str], *, credential: str | None = None
 ) -> tuple[int, int]:
     """Count a Claude API Messages body exactly as it will be sent.
 
     Returns the prompt size after and before server-side context editing; they
-    are equal when the body clears nothing.
+    are equal when the body clears nothing. Pass the key that will send the
+    request: the API drops thinking blocks from other accounts before counting.
     """
     from services.auth_service import AuthService
 
-    credential = AuthService.get_api_key("anthropic")
+    credential = credential or AuthService.get_api_key("anthropic")
     if not credential:
         raise NativeTokenCountError("No Claude API key is configured", 503)
     url = _count_url(base_urls["anthropic"], CLAUDE_COUNT_PATH)
