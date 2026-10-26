@@ -51,7 +51,7 @@ from route_helpers import (
     stream_upstream_response,
 )
 from routes.dashboard_chat import register_dashboard_chat_routes
-from routes.provider_credentials import _is_anthropic_key_refusal
+from routes.provider_credentials import is_anthropic_key_refusal
 from services.nanogpt_key_pool import NanoGPTKeyPool, NanoGPTKeyPoolExhausted
 from services.credential_context import dispatch_context, observation_context, proxy_selection_context
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
@@ -451,7 +451,7 @@ def register_proxy_routes(app, csrf, auth_service_cls, metrics_service_cls, prox
                 # A refused Claude API key generated nothing: send once on each other key.
                 # Dispatch rested the refused key, so the next selection skips it.
                 attempted_tokens = {auth_token}
-                while _is_anthropic_key_refusal(response):
+                while is_anthropic_key_refusal(response):
                     try:
                         next_token = auth_service_cls.get_api_key(api_provider, **credential_scope)
                     except (ModelCooldownExhausted, ModelCooldownCapacity):

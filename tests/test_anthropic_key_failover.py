@@ -177,7 +177,8 @@ class AnthropicKeyFailoverRouteTest(UnifiedApiTestCase):
 
         def reply(**kwargs):
             self.sent_keys.append(kwargs["headers"].get("X-Api-Key"))
-            return upstream(*pending.pop(0))
+            item = pending.pop(0)
+            return item if isinstance(item, requests.Response) else upstream(*item)
 
         return patch.object(ProxyService, "_make_base_request", side_effect=reply)
 
@@ -198,6 +199,21 @@ class AnthropicKeyFailoverRouteTest(UnifiedApiTestCase):
         with self.upstreams((MESSAGE, 200)):
             self.assertEqual(self.chat().status_code, 200)
         self.assertEqual(self.sent_keys, ["key-b"], "the refused key rests")
+
+    def test_unified_stream_moves_to_the_spare_when_credit_runs_out(self):
+        from tests.test_protocol_routes import ANTHROPIC_STREAM, sse_upstream
+
+        with self.upstreams((CREDIT, 400), sse_upstream(ANTHROPIC_STREAM)):
+            result = self.client.post(
+                "/v1/chat/completions",
+                json={"model": SELECTOR, "messages": [{"role": "user", "content": "Hello"}], "stream": True},
+                headers=ADMIN,
+            )
+            body = result.get_data(as_text=True)
+        self.assertEqual(result.status_code, 200)
+        self.assertIn("Salut", body)
+        self.assertTrue(body.rstrip().endswith("data: [DONE]"))
+        self.assertEqual(self.sent_keys, ["key-a", "key-b"])
 
     def test_unified_request_errors_are_not_repeated_on_the_spare(self):
         invalid = error("invalid_request_error", "messages: Field required")
@@ -227,6 +243,29 @@ class AnthropicKeyFailoverRouteTest(UnifiedApiTestCase):
             self.assertEqual(result.get_json(), CREDIT)
         self.assertEqual(result.status_code, 400)
         self.assertEqual(self.sent_keys, ["key-a", "key-b"])
+
+
+class AnthropicKeyFailoverProductionFlagsTest(AnthropicKeyFailoverRouteTest):
+    """The same routes with production's scoped cooldowns, reset scheduling and cache affinity."""
+
+    def setUp(self):
+        super().setUp()
+        from services import pool_reset_schedule, prompt_cache_affinity
+
+        os.environ.update(
+            {
+                "MODEL_COOLDOWN_ENABLED": "true",
+                "POOL_RESET_SCHEDULING_ENABLED": "true",
+                "PROMPT_CACHE_AFFINITY_ENABLED": "true",
+            }
+        )
+        for module, name, value in (
+            (pool_reset_schedule, "pool_reset_schedule", pool_reset_schedule.PoolResetSchedule()),
+            (prompt_cache_affinity, "store", prompt_cache_affinity.PromptCacheAffinity()),
+        ):
+            replaced = patch.object(module, name, value)
+            replaced.start()
+            self.addCleanup(replaced.stop)
 
 
 class AnthropicKeyFailoverIntelligenceTest(IntelligenceApiTestCase):

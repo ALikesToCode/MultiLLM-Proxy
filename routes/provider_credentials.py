@@ -65,7 +65,7 @@ def _is_nanogpt_routing_refusal(response) -> bool:
 ROTATING_PROVIDERS = frozenset({"nanogpt", "anthropic"})
 
 
-def _is_anthropic_key_refusal(response) -> bool:
+def is_anthropic_key_refusal(response) -> bool:
     """The Claude API refused the key (auth, billing, credit, spend limit or rate limit),
     so the request generated nothing and may run on the next key. Dispatch already rested
     the refused key, and the next selection skips it."""
@@ -162,7 +162,7 @@ def _request_with_provider_token_rotation(
             # would only surface an unrelated key's error to the caller.
             break
         if provider == "anthropic":
-            if not _is_anthropic_key_refusal(response):
+            if not is_anthropic_key_refusal(response):
                 break
         elif provider != "nanogpt" or not is_nanogpt_credential_rejection(
             response.status_code

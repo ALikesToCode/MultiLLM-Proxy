@@ -342,12 +342,12 @@
   "routes/provider_credentials.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "7366df3b5e05343f762542a1e8d6e3157904298acc68399740c3b04847960d06"
+    "sha256": "13d312e94c56ab52be80ddd480d83077faa3b1ae89b06c8046af1c72452c43ce"
   },
   "routes/proxy.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "7df1a655aa4704127f0c0064b949689bfecbb917d7d650148cf08b60cbc9a09e"
+    "sha256": "60f84a4c5029694f6a5b8b9be3d54e03b08262b22c49c33203b12d8d04f8396f"
   },
   "routes/public_pages.py": {
     "kind": "non-provider",
