@@ -74,6 +74,20 @@ class ProviderCatalogAutoRefreshTest(UnifiedApiTestCase):
         self.assertNotIn("cline-pass:cline-cloud/kimi-k3", models)
         self.assertNotIn("cline-pass:anthropic/claude-sonnet-5.5", models)
 
+    def test_background_refresh_passes_key_control_admission(self):
+        # Patching make_request skips provider_http, which refuses a request that carries no
+        # dispatch principal. Patch the network instead so the refresh threads are admitted
+        # the way they are in production.
+        def network(session, method, url, **kwargs):
+            return self._upstream(url=url)
+
+        with patch("requests.Session.request", autospec=True, side_effect=network):
+            models = self._models()
+            self._finish_refresh()
+
+        self.assertIn("https://openrouter.ai/api/v1/models", self.requested_urls)
+        self.assertIn("live", models["openrouter:vendor/new-model-2026"]["sources"])
+
     def test_documentation_search_lists_the_refreshed_models(self):
         with self.client.session_transaction() as session:
             session["authenticated"] = True

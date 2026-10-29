@@ -1162,12 +1162,12 @@
   "services/provider_catalog_refresh.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "007a2ff0c9f7498a276c146efd8fab9feca00d16c6d9bd429936e0d8834651a2"
+    "sha256": "2d3b32daf2ce225b6e45e4aaa8722fcdcee8bb6b3b0e87148b634d3e44957b3e"
   },
   "services/provider_catalog_service.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "b1448a93e4602d1def01aecd20c3c3c9f00475e683d55d74effc56e2db495d01"
+    "sha256": "5e966417a634d9d5147142a91eadd19b8944da1de9015e7a5b5d5309bb03b3e7"
   },
   "services/provider_credentials.py": {
     "kind": "guarded",

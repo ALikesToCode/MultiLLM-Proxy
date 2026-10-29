@@ -71,8 +71,11 @@ class ProviderCatalogAutoRefresh:
             # A refresh that dies without reporting is retried, not repeated on every read.
             for target in targets.items():
                 self._next_refresh[target] = now + self._retry_seconds
+            from services.provider_dispatch import capture_dispatch
+
+            # The refresh dispatches as the account whose view or health check asked for it.
             self._thread = threading.Thread(
-                target=self._run,
+                target=capture_dispatch(self._run),
                 args=(app, targets, auth_service_cls, proxy_service_cls),
                 name="provider-catalog-refresh",
                 daemon=True,

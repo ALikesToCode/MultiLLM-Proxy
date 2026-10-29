@@ -664,11 +664,16 @@ class ProviderCatalogService:
             )
 
         if refresh_targets:
+            from services.provider_dispatch import capture_dispatch
+
+            # Worker threads do not inherit the caller's dispatch principal, and
+            # provider_http refuses a catalog request that has none.
+            fetch = capture_dispatch(cls._fetch_configured_provider)
             max_workers = min(4, len(refresh_targets))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
                     executor.submit(
-                        cls._fetch_configured_provider,
+                        fetch,
                         provider,
                         spec,
                         base_url,
