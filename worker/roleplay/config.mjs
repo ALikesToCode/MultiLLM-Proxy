@@ -94,23 +94,23 @@ const REASONING_EFFORTS = new Set([
 ]);
 const MAX_PROVIDER_MODELS_PER_FAMILY = 8;
 const MAX_INTELLIGENCE_CHAIN_ENTRIES = 32;
-// roleplay:intelligence tries these strictly in order: MiMo-V2.6-Pro on NanoGPT
-// then ClinePass, then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 on every subscription
-// or allowance provider. ROLEPLAY_INTELLIGENCE_MODELS replaces the list.
+// roleplay:intelligence tries these strictly in order: GLM-5.3, GLM-5.3-Flash and
+// GLM-5.2 on every subscription or allowance provider, then MiMo-V2.6-Pro on
+// NanoGPT and ClinePass. ROLEPLAY_INTELLIGENCE_MODELS replaces the list.
 const DEFAULT_INTELLIGENCE_CHAIN = [
-  "nanogpt:xiaomi/mimo-v2.6-pro",
-  "cline-pass:cline-pass/mimo-v2.6-pro",
-  "nanogpt:z-ai/glm-5.3-flash",
-  "cline-pass:cline-pass/glm-5.3-flash",
-  "opencode:glm-5.3-flash",
-  "navyai:glm-5.3-flash",
   "nanogpt:z-ai/glm-5.3",
   "cline-pass:cline-pass/glm-5.3",
   "opencode:glm-5.3",
   "navyai:glm-5.3",
+  "nanogpt:z-ai/glm-5.3-flash",
+  "cline-pass:cline-pass/glm-5.3-flash",
+  "opencode:glm-5.3-flash",
+  "navyai:glm-5.3-flash",
   "nanogpt:z-ai/glm-5.2",
   "opencode:glm-5.2",
   "navyai:glm-5.2",
+  "nanogpt:xiaomi/mimo-v2.6-pro",
+  "cline-pass:cline-pass/mimo-v2.6-pro",
 ];
 const DEFAULT_MODELS = {
   kimi: "kimi-k2.6",

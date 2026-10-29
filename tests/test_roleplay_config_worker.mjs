@@ -246,24 +246,24 @@ test("deployment defaults roleplay generation to high reasoning", async () => {
   assert.equal(config.vars?.ROLEPLAY_DEFAULT_REASONING_EFFORT, "high");
 });
 
-test("deployment starts roleplay on OpenCode Go, then Cline Pass, and keeps NanoGPT on the subscription", async () => {
+test("deployment starts roleplay on GLM 5.3 and keeps NanoGPT on the subscription", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  // Measured 2026-10-25 on OpenCode Go (24 roleplay turns, every one answered): DeepSeek V4.1 Flash
-  // was fastest (median 5.2 s) and wrote nearly as well as GLM 5.3 for about a thirtieth of its
-  // allowance, so it leads; GLM 5.3 (8.3 s, the strongest scenes) is next, then MiMo-V2.6-Pro
-  // (13.5 s, the shortest replies). Cline Pass GLM 5.3 follows them; MiMo on NanoGPT is next.
+  // Scored 2026-10-29 on OpenCode Go (3 multi-turn roleplays with planted card rules, 2 runs each):
+  // GLM 5.3 averaged 4.33 of 5 with no hard rule breaks, DeepSeek V4.1 Flash 3.25 (it broke a
+  // character rule and nearly confessed a secret) and MiMo-V2.6-Pro 2.83 (it wrote the user's
+  // lines). GLM 5.3 leads on every provider; DeepSeek follows it, and MiMo is last.
   assert.deepEqual(config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(","), [
-    "opencode:deepseek-v4.1-flash",
     "opencode:glm-5.3",
-    "opencode:mimo-v2.6-pro",
     "cline-pass:cline-pass/glm-5.3",
-    "nanogpt:xiaomi/mimo-v2.6-pro",
     "nanogpt:z-ai/glm-5.3",
+    "opencode:deepseek-v4.1-flash",
     "nanogpt:z-ai/glm-5.3-flash",
     "nanogpt:z-ai/glm-5.2",
     "cline-pass:cline-pass/glm-5.3-flash",
+    "opencode:mimo-v2.6-pro",
+    "nanogpt:xiaomi/mimo-v2.6-pro",
     "cline-pass:cline-pass/mimo-v2.6-pro",
   ]);
   // The subscription-only key cannot pay for :fast, so NanoGPT requests stay on the subscription.
@@ -272,31 +272,21 @@ test("deployment starts roleplay on OpenCode Go, then Cline Pass, and keeps Nano
   assert.equal(config.vars?.NANOGPT_SPEED_ROUTING, "");
 });
 
-test("deployment lets DeepSeek hand pivotal turns to GLM 5.3, at most every other turn", async () => {
+test("deployment offers no handoff now that GLM 5.3 leads", async () => {
   const configUrl = new URL("../wrangler.jsonc", import.meta.url);
   const config = JSON.parse(await readFile(configUrl, "utf8"));
 
-  // Measured 2026-10-25: with the tool offered, DeepSeek V4.1 Flash wrote all 12 ordinary turns
-  // itself and handed off 4 of 6 climax and multi-faction planning turns, each with a full draft.
-  // Grouped in RUNTIME_FEATURE_FLAGS: the Worker is at its limit of 128 text bindings.
+  // A source hands off only to targets later in the chain. DeepSeek V4.1 Flash now follows every
+  // GLM 5.3 entry, so a DeepSeek handoff could never reach one. A separate var would take
+  // precedence over RUNTIME_FEATURE_FLAGS, so neither setting may exist in either place.
   const flags = config.vars?.RUNTIME_FEATURE_FLAGS;
-  assert.equal(config.vars?.ROLEPLAY_HANDOFF_FROM, undefined);
-  assert.equal(config.vars?.ROLEPLAY_HANDOFF_TO, undefined);
-  assert.equal(flags?.ROLEPLAY_HANDOFF_FROM, "opencode:deepseek-v4.1-flash");
-  assert.deepEqual(flags?.ROLEPLAY_HANDOFF_TO.split(","), [
-    "opencode:glm-5.3",
-    "cline-pass:cline-pass/glm-5.3",
-  ]);
-  // ROLEPLAY_HANDOFF_MIN_TURNS keeps its default of 2.
-  assert.equal(config.vars?.ROLEPLAY_HANDOFF_MIN_TURNS, undefined);
-  const chain = config.vars?.ROLEPLAY_INTELLIGENCE_MODELS.split(",");
-  for (const target of flags.ROLEPLAY_HANDOFF_TO.split(",")) {
-    assert.ok(chain.indexOf(target) > chain.indexOf(flags.ROLEPLAY_HANDOFF_FROM), target);
+  for (const name of ["ROLEPLAY_HANDOFF_FROM", "ROLEPLAY_HANDOFF_TO"]) {
+    assert.equal(config.vars?.[name], undefined, name);
+    assert.equal(flags?.[name], undefined, name);
   }
   const settings = getRoleplaySettings(config.vars);
-  assert.deepEqual([...settings.handoffSources], ["opencode:deepseek-v4.1-flash"]);
-  assert.deepEqual([...settings.handoffTargets], ["opencode:glm-5.3", "cline-pass:cline-pass/glm-5.3"]);
-  assert.equal(settings.handoffMinTurns, 2);
+  assert.equal(settings.handoffSources.size, 0);
+  assert.equal(settings.handoffTargets.size, 0);
 });
 
 test("deployment routes GLM through LinkAPI before NavyAI", async () => {

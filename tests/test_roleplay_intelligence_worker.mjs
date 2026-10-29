@@ -45,32 +45,32 @@ test("roleplay:intelligence selects the fixed-order preference", () => {
   });
 
   assert.equal(parsed.modelPreference, "intelligence");
-  assert.match(ROLEPLAY_PUBLIC_MODEL_ALIASES["roleplay:intelligence"], /MiMo-V2\.6-Pro/);
+  assert.match(ROLEPLAY_PUBLIC_MODEL_ALIASES["roleplay:intelligence"], /^fixed order: GLM-5\.3,/);
 });
 
-test("the default chain is MiMo first, then GLM-5.3-Flash, 5.3 and 5.2", () => {
+test("the default chain is GLM-5.3 first, then GLM-5.3-Flash and 5.2, then MiMo", () => {
   assert.deepEqual(order(chain(KEYS)), [
-    "nanogpt:xiaomi/mimo-v2.6-pro",
-    "cline-pass:cline-pass/mimo-v2.6-pro",
-    "nanogpt:z-ai/glm-5.3-flash",
-    "cline-pass:cline-pass/glm-5.3-flash",
-    "opencode:glm-5.3-flash",
-    "navyai:glm-5.3-flash",
     "nanogpt:z-ai/glm-5.3",
     "cline-pass:cline-pass/glm-5.3",
     "opencode:glm-5.3",
     "navyai:glm-5.3",
+    "nanogpt:z-ai/glm-5.3-flash",
+    "cline-pass:cline-pass/glm-5.3-flash",
+    "opencode:glm-5.3-flash",
+    "navyai:glm-5.3-flash",
     "nanogpt:z-ai/glm-5.2",
     "opencode:glm-5.2",
     "navyai:glm-5.2",
+    "nanogpt:xiaomi/mimo-v2.6-pro",
+    "cline-pass:cline-pass/mimo-v2.6-pro",
   ]);
 });
 
 test("chain entries without a provider key are skipped", () => {
   assert.deepEqual(order(chain({ CLINE_API_KEY: "cline-key" })), [
-    "cline-pass:cline-pass/mimo-v2.6-pro",
-    "cline-pass:cline-pass/glm-5.3-flash",
     "cline-pass:cline-pass/glm-5.3",
+    "cline-pass:cline-pass/glm-5.3-flash",
+    "cline-pass:cline-pass/mimo-v2.6-pro",
   ]);
 });
 
@@ -115,14 +115,14 @@ test("a cooling chain entry moves behind the available ones", () => {
   const now = 1_000;
   const ranked = rankRoleplayCandidates(
     candidates,
-    { "nanogpt:xiaomi/mimo-v2.6-pro": { cooldownUntil: now + 60_000 } },
+    { "nanogpt:z-ai/glm-5.3": { cooldownUntil: now + 60_000 } },
     "intelligence",
     now,
   );
 
-  assert.equal(ranked[0].model, "cline-pass/mimo-v2.6-pro");
-  assert.ok(!ranked.some((candidate) => candidate.model === "xiaomi/mimo-v2.6-pro"));
-  assert.equal(ranked[0].key, "cline-pass:cline-pass/mimo-v2.6-pro");
+  assert.equal(ranked[0].model, "cline-pass/glm-5.3");
+  assert.ok(!ranked.some((candidate) => candidate.model === "z-ai/glm-5.3"));
+  assert.equal(ranked[0].key, "cline-pass:cline-pass/glm-5.3");
 });
 
 test("other roleplay aliases never use the intelligence chain", () => {
@@ -197,7 +197,7 @@ test("Cline's non-streaming envelope is unwrapped and streams pass through", asy
   assert.equal(await unwrapClineEnvelope(failure), failure);
 });
 
-test("a roleplay:intelligence turn falls back from NanoGPT MiMo to ClinePass MiMo", async () => {
+test("a roleplay:intelligence turn falls back from NanoGPT GLM-5.3 to ClinePass GLM-5.3", async () => {
   const fixture = makeRoleplayEnv({
     NANOGPT_API_KEY: "nano-key",
     CLINE_API_KEY: "cline-key",
@@ -219,7 +219,7 @@ test("a roleplay:intelligence turn falls back from NanoGPT MiMo to ClinePass MiM
         headers: { "Content-Type": "application/json" },
       });
     }
-    const completion = await completionResponse(payload.model, "MiMo answers.").json();
+    const completion = await completionResponse(payload.model, "GLM answers.").json();
     return new Response(JSON.stringify({ data: completion, success: true }), {
       headers: { "Content-Type": "application/json" },
     });
@@ -238,13 +238,13 @@ test("a roleplay:intelligence turn falls back from NanoGPT MiMo to ClinePass MiM
 
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.choices[0].message.content, "MiMo answers.");
+  assert.equal(body.choices[0].message.content, "GLM answers.");
   assert.equal(response.headers.get("X-Roleplay-Provider"), "cline-pass");
-  assert.equal(response.headers.get("X-Roleplay-Model"), "cline-pass/mimo-v2.6-pro");
+  assert.equal(response.headers.get("X-Roleplay-Model"), "cline-pass/glm-5.3");
   assert.equal(response.headers.get("X-Roleplay-Fallback-Count"), "1");
   assert.deepEqual(
     calls.map((call) => call.model),
-    ["xiaomi/mimo-v2.6-pro", "cline-pass/mimo-v2.6-pro"],
+    ["z-ai/glm-5.3", "cline-pass/glm-5.3"],
   );
   assert.equal(calls[1].url, "https://api.cline.bot/api/v1/chat/completions");
   assert.equal(calls[1].authorization, "Bearer cline-key");
@@ -297,15 +297,15 @@ async function autoTurn(env, sessionId) {
   return { response, calls };
 }
 
-test("roleplay:auto starts with MiMo when ROLEPLAY_AUTO_ROUTE=intelligence", async () => {
+test("roleplay:auto starts with GLM-5.3 when ROLEPLAY_AUTO_ROUTE=intelligence", async () => {
   const { response, calls } = await autoTurn(
     { NANOGPT_API_KEY: "nano-key", CLINE_API_KEY: "cline-key", ROLEPLAY_AUTO_ROUTE: "intelligence" },
     "session-auto-intelligence",
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(calls, ["xiaomi/mimo-v2.6-pro"]);
-  assert.equal(response.headers.get("X-Roleplay-Model"), "xiaomi/mimo-v2.6-pro");
+  assert.deepEqual(calls, ["z-ai/glm-5.3"]);
+  assert.equal(response.headers.get("X-Roleplay-Model"), "z-ai/glm-5.3");
 });
 
 test("roleplay:auto keeps the adaptive pool without the switch", async () => {
@@ -315,7 +315,7 @@ test("roleplay:auto keeps the adaptive pool without the switch", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.notEqual(calls[0], "xiaomi/mimo-v2.6-pro");
+  assert.notEqual(calls[0], "z-ai/glm-5.3");
 });
 
 test("roleplay:auto falls back to the adaptive pool when the chain has no key", async () => {
