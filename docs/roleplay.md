@@ -162,18 +162,33 @@ usual safe-fallback statuses advance to the next entry. Set
 `provider:model` entries to replace the list. ClinePass uses `CLINE_API_KEY`
 and Cline's `reasoning.effort` field, up to `xhigh`.
 
-Production sets it (`wrangler.jsonc`, 2026-10-25) to DeepSeek V4.1 Flash, GLM-5.3 and
-MiMo-V2.6-Pro on OpenCode Go, then GLM-5.3 on ClinePass, then MiMo-V2.6-Pro, GLM-5.3,
-GLM-5.3-Flash and GLM-5.2 on NanoGPT, then GLM-5.3-Flash and MiMo-V2.6-Pro on ClinePass.
-In 24 test turns on OpenCode Go (scene continuation, conflict, out-of-character recall and
-a 20k-token lorebook lookup) every model answered and kept to the card. DeepSeek V4.1 Flash
-was fastest (median 5.2 s a turn), wrote nearly as well as GLM-5.3 and used about a
-thirtieth of GLM's allowance per turn, so it leads. GLM-5.3 wrote the strongest scenes
-(8.3 s). MiMo-V2.6-Pro was slowest (13.5 s), with the shortest replies and some
-point-of-view slips. Go meters each model against its own monthly allowance. ClinePass GLM-5.3 gave its first words in about 4 s; MiMo on NanoGPT
-took 59 s, and 152 s on an adult turn, so a turn that falls back to it is slow. OpenCode Go
-refused every request on 2026-10-05; the key it used then has since expired. NavyAI's free plan was
-refusing every request, so it is left out.
+Production sets it (`wrangler.jsonc`, 2026-10-29) to GLM-5.3 on OpenCode Go, ClinePass
+and NanoGPT, then DeepSeek V4.1 Flash on OpenCode Go, then GLM-5.3-Flash and GLM-5.2 on
+NanoGPT and GLM-5.3-Flash on ClinePass, then MiMo-V2.6-Pro on OpenCode Go, NanoGPT and
+ClinePass. GLM-5.3 is the recommended model for `roleplay:auto`.
+
+The order follows a test on 2026-10-29: three multi-turn roleplays with planted card
+rules (a heist whose characters each have a fixed rule, a secret that must stay hidden
+until proof is shown, and an out-of-character time skip with a status block to update),
+two runs each on OpenCode Go, every reply read and scored out of 5. GLM-5.3 averaged 4.33
+with no hard rule breaks and took 21 to 41 s a reply. DeepSeek V4.1 Flash, which led the
+chain from 2026-10-25, averaged 3.25: it answered in 6 to 10 s but reasoned far less
+(0.7k to 3k characters against GLM-5.3's 11k to 30k), broke a character rule and came
+close to confessing the secret. GLM-5.3-Flash averaged 3.92 with three hard rule breaks,
+and MiMo-V2.6-Pro 2.83: among other faults it wrote a line for the user, so it is last.
+Kimi K3.1 Pro scored highest (4.67) but took 72 to 143 s a reply and is not in the chain.
+One reader scored two runs per scenario, so the sample is small.
+
+The cost is OpenCode Go usage. In a test on 2026-10-25 a GLM-5.3 turn used about 30
+times as much of the Go allowance as a DeepSeek V4.1 Flash turn, so leading with GLM-5.3
+reaches Go's [usage limits](opencode-go.md#subscription-and-upstream-limits) much
+sooner. When Go refuses GLM-5.3, the turn moves to GLM-5.3 on ClinePass and NanoGPT, then
+to DeepSeek V4.1 Flash. On 2026-10-29 only OpenCode Go answered: ClinePass returned 403
+`ENTITLEMENT_ERROR` for every model and NanoGPT returned 429 `model_cooldown`. Both
+statuses advance to the next entry and pause that entry for the session (5 minutes after a
+403, 1 minute after a 429). When it works, ClinePass GLM-5.3 gives its first words in about
+4 s; MiMo on NanoGPT took 59 s, and 152 s on an adult turn, so a turn that falls back to it
+is slow. NavyAI's free plan was refusing every request, so it is left out.
 
 With `ROLEPLAY_AUTO_ROUTE=intelligence`, plain `roleplay:auto` turns (and requests
 without a roleplay model) use the same chain. Turns that set `routing.mode` or
@@ -184,10 +199,12 @@ configured key. Leave the variable unset for the adaptive behaviour above.
 
 `ROLEPLAY_HANDOFF_FROM` names chain entries that may pass a turn on, and
 `ROLEPLAY_HANDOFF_TO` the entries that take it; both use the
-`ROLEPLAY_INTELLIGENCE_MODELS` format and are unset by default. Production sets
-both inside `RUNTIME_FEATURE_FLAGS`; a separate var of the same name takes
-precedence. Production lets DeepSeek V4.1 Flash on OpenCode Go hand off to
-GLM-5.3 on OpenCode Go, then on ClinePass. A source request carries one internal function, `multillm_hand_off_turn`,
+`ROLEPLAY_INTELLIGENCE_MODELS` format and are unset by default. Set them inside
+`RUNTIME_FEATURE_FLAGS`; a separate var of the same name takes precedence. A
+source hands off only to targets that come after it in the chain. Production
+let DeepSeek V4.1 Flash hand off to GLM-5.3 from 2026-10-25 to 2026-10-29, while
+DeepSeek led the chain. Now that GLM-5.3 comes first, no target follows DeepSeek,
+so production sets neither. A source request carries one internal function, `multillm_hand_off_turn`,
 whose arguments are a reason (`deeper_reasoning` or `stronger_prose`), short notes
 and an optional draft. When the source calls it instead of writing, the Worker
 discards that attempt (its frames are held until visible text appears, so nothing
@@ -651,8 +668,8 @@ Non-secret tuning variables:
 | `ROLEPLAY_UPSTREAM_HEADER_TIMEOUT_MS` | `90000` | Maximum wait for provider response headers before advancing to the next tier |
 | `ROLEPLAY_PRE_RESPONSE_FALLBACK_ENABLED` | `true` | Advance after a provider transport rejection or header timeout; client aborts never advance |
 | `ROLEPLAY_PROVIDER_ERROR_FALLBACK_ENABLED` | `true` | Advance only when a 500/502/504 JSON response explicitly identifies both its error code and type as `provider_error`; unknown 5xx responses remain fail-closed |
-| `ROLEPLAY_HANDOFF_FROM` | unset | Chain entries offered `multillm_hand_off_turn`; production uses `opencode:deepseek-v4.1-flash` |
-| `ROLEPLAY_HANDOFF_TO` | unset | Chain entries that take a handed-off turn, in chain order; production uses GLM-5.3 on OpenCode Go and ClinePass |
+| `ROLEPLAY_HANDOFF_FROM` | unset | Chain entries offered `multillm_hand_off_turn`; production sets none |
+| `ROLEPLAY_HANDOFF_TO` | unset | Chain entries after the source that take a handed-off turn, in chain order; production sets none |
 | `ROLEPLAY_HANDOFF_MIN_TURNS` | `2` | At most one handoff per this many turns in a session; `0` or `1` lifts the cap |
 | `ROLEPLAY_EMPTY_REPLY_FALLBACK_ENABLED` | `true` | Start a reply with no visible text over on the next candidate, at most twice |
 | `ROLEPLAY_REFUSAL_FALLBACK_ENABLED` | `true` | Privately regenerate an exact GLM-5.3 Flash refusal trigger with the configured Uncensored Flash candidate; rejected output is neither streamed nor stored |

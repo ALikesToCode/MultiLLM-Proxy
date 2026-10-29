@@ -10,7 +10,7 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 const { MultiLLMProxyContainer } = await loadWorkerModule();
 
 test("deployment groups feature settings while preserving Container flags and secrets", () => {
-  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 9);
+  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 7);
   // Vars and secrets share the Worker's limit of 128 text bindings, and the release has 127.
   // Put a new nonsecret setting in RUNTIME_FEATURE_FLAGS instead of raising this count.
   assert.equal(Object.keys(config.vars).length, 65);
@@ -26,7 +26,6 @@ test("deployment groups feature settings while preserving Container flags and se
   assert.equal(container.envVars.RUNTIME_FEATURE_FLAGS, undefined);
   assert.equal(usageBucketsEnabled(source), true);
   assert.equal(runtimeFeatureValue(source, "ROLEPLAY_CANDIDATE_CONTEXT_REFIT"), "window");
-  assert.equal(runtimeFeatureValue(source, "ROLEPLAY_HANDOFF_FROM"), "opencode:deepseek-v4.1-flash");
 });
 
 test("individual settings retain disabled values and precedence without mutating bindings", () => {

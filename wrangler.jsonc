@@ -110,7 +110,7 @@
 		"ROLEPLAY_PROVIDER_FAMILIES": "{\"nanogpt\":[\"glm\"],\"linkapi\":[\"kimi\"],\"navyai\":[\"glm\"]}",
 		"ROLEPLAY_PROVIDER_LIMITS": "{}",
 		"ROLEPLAY_AUTO_ROUTE": "intelligence",
-		"ROLEPLAY_INTELLIGENCE_MODELS": "opencode:deepseek-v4.1-flash,opencode:glm-5.3,opencode:mimo-v2.6-pro,cline-pass:cline-pass/glm-5.3,nanogpt:xiaomi/mimo-v2.6-pro,nanogpt:z-ai/glm-5.3,nanogpt:z-ai/glm-5.3-flash,nanogpt:z-ai/glm-5.2,cline-pass:cline-pass/glm-5.3-flash,cline-pass:cline-pass/mimo-v2.6-pro",
+		"ROLEPLAY_INTELLIGENCE_MODELS": "opencode:glm-5.3,cline-pass:cline-pass/glm-5.3,nanogpt:z-ai/glm-5.3,opencode:deepseek-v4.1-flash,nanogpt:z-ai/glm-5.3-flash,nanogpt:z-ai/glm-5.2,cline-pass:cline-pass/glm-5.3-flash,opencode:mimo-v2.6-pro,nanogpt:xiaomi/mimo-v2.6-pro,cline-pass:cline-pass/mimo-v2.6-pro",
 		"GLM_AUTO_OPTIMIZE": "true",
 		"GLM_AUTO_OPTIMIZE_TRIGGER_TOKENS": "8000",
 		"GLM_AUTO_OPTIMIZE_KEEP_RECENT_TURNS": "8",
@@ -164,8 +164,6 @@
 			"PROMPT_CACHE_AFFINITY_ENABLED": "true",
 			"PROMPT_CACHE_USAGE_BUCKETS_ENABLED": "true",
 			"ROLEPLAY_CANDIDATE_CONTEXT_REFIT": "window",
-			"ROLEPLAY_HANDOFF_FROM": "opencode:deepseek-v4.1-flash",
-			"ROLEPLAY_HANDOFF_TO": "opencode:glm-5.3,cline-pass:cline-pass/glm-5.3",
 			"UPSTREAM_RETRY_AFTER_ADVICE_ENABLED": "true",
 			"MULTILLM_STREAM_PREFLIGHT": "strict"
 		}
