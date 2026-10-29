@@ -57,7 +57,7 @@ export const ROLEPLAY_PUBLIC_MODEL_ALIASES = Object.freeze({
   "roleplay:5.3": "full GLM-5.3 only",
   "roleplay:5.2": "GLM-5.2 only",
   "roleplay:uncensored": "uncensored GLM route with GLM-5.2 Venice fallback",
-  "roleplay:intelligence": "fixed order: MiMo-V2.6-Pro (NanoGPT, ClinePass), then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 across providers",
+  "roleplay:intelligence": "fixed order: GLM-5.3, then GLM-5.3-Flash and GLM-5.2 across providers, then MiMo-V2.6-Pro (NanoGPT, ClinePass)",
 });
 
 function normalizedPreference(value) {

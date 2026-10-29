@@ -152,8 +152,8 @@ variants.
 
 `roleplay:intelligence` mirrors the `auto:intelligence` chat route. It tries a
 fixed list strictly in order across providers, without adaptive reordering:
-MiMo-V2.6-Pro on NanoGPT, then on ClinePass; then GLM-5.3-Flash, GLM-5.3 and
-GLM-5.2, each on NanoGPT, ClinePass (no GLM-5.2), OpenCode Go and NavyAI.
+GLM-5.3, GLM-5.3-Flash and GLM-5.2, each on NanoGPT, ClinePass (no GLM-5.2),
+OpenCode Go and NavyAI; then MiMo-V2.6-Pro on NanoGPT, then on ClinePass.
 Pay-as-you-go gateways (OpenRouter, LinkAPI) are not in the default list.
 Entries whose provider has no key are skipped, a cooling-down entry moves out
 of the way, and NanoGPT keys rotate within an entry before the next one. The
@@ -646,7 +646,7 @@ Non-secret tuning variables:
 | `ROLEPLAY_PROVIDER_MODELS` | `{}` | JSON provider-specific Kimi/GLM ID or ordered fallback IDs |
 | `ROLEPLAY_PROVIDER_FAMILIES` | `{}` | JSON provider-to-family allowlists; an empty list disables that provider |
 | `ROLEPLAY_AUTO_ROUTE` | `adaptive` | `intelligence` sends plain `roleplay:auto` turns through the `roleplay:intelligence` chain |
-| `ROLEPLAY_INTELLIGENCE_MODELS` | MiMo-V2.6-Pro, then GLM-5.3-Flash, GLM-5.3 and GLM-5.2 | Ordered `provider:model` list for `roleplay:intelligence`; providers `nanogpt`, `cline-pass`, `opencode`, `navyai`, `linkapi`, `openrouter` |
+| `ROLEPLAY_INTELLIGENCE_MODELS` | GLM-5.3, then GLM-5.3-Flash and GLM-5.2, then MiMo-V2.6-Pro | Ordered `provider:model` list for `roleplay:intelligence`; providers `nanogpt`, `cline-pass`, `opencode`, `navyai`, `linkapi`, `openrouter` |
 | `ROLEPLAY_PROVIDER_LIMITS` | `{}` | JSON provider/family context and output overrides |
 | `ROLEPLAY_QUALITY_LATENCY_PREMIUM_PERCENT` | `20` | Largest allowed full GLM-5.3 p95 TTFB and total-latency premium over Flash |
 | `ROLEPLAY_QUALITY_MIN_SAMPLES` | `3` | Successful samples required for both full and Flash before promotion |

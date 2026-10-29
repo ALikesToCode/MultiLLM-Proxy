@@ -2127,7 +2127,7 @@
   "worker/roleplay/config.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "5998981bc7e5e7f026da9e49ed80d8de3212023e970db84549cb9976ba37c777"
+    "sha256": "bf7bd2fa10ad817990ceeafd538424a22eccb45166e52d8b6a0a65c1a7aa608a"
   },
   "worker/roleplay/continuation.mjs": {
     "kind": "non-provider",
@@ -2187,7 +2187,7 @@
   "worker/roleplay/model-selection.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "87e782e35c4ad4ee6e5df2c0264e9cb9b8118298bc8be0f418c270385b7ee576"
+    "sha256": "403fd6d2b7d1e7e467d7f2227c8cdb4ba9dd38c86a2fe79e783666d4e372c425"
   },
   "worker/roleplay/nonstream-repair.mjs": {
     "kind": "non-provider",
