@@ -12,6 +12,14 @@ Enable with `PROMPT_CACHE_USAGE_BUCKETS_ENABLED=true` after applying `0016_usage
 {"openai:example":{"input":2,"output":8,"cache_read":0.5,"cache_write":3}}
 ```
 
+`cache_write_1h` prices the part of the cache writes made to the one-hour cache;
+without it those writes cost the `cache_write` price. Anthropic reports that part as
+`usage.cache_creation.ephemeral_1h_input_tokens`, and translated Chat Completions and
+Responses usage carries it as `cache_write_1h_tokens` beside `cache_write_tokens`
+when it is not zero. A `long_context` tier ([usage and budgets](usage-and-budgets.md#cost))
+replaces the bucket prices of a request whose prompt, cache reads and writes included,
+is over its threshold.
+
 `PROMPT_CACHE_PRICE_METADATA_JSON` defaults to `{}`. It may supply missing bucket prices
 for an explicitly priced model, using the same model keys and price names. Explicit
 prices win, including zero and invalid prices. Metadata alone cannot price a model.

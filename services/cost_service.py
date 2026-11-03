@@ -4,6 +4,8 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from typing import Any
 
+from services import price_tiers
+
 
 class CostService:
     """Estimate request exposure from operator-supplied model pricing."""
@@ -32,7 +34,7 @@ class CostService:
     def _parse_pricing_table(
         cls,
         raw_pricing: str,
-    ) -> dict[str, dict[str, Decimal]]:
+    ) -> dict[str, dict[str, Any]]:
         if not raw_pricing:
             return {}
         try:
@@ -42,7 +44,7 @@ class CostService:
         if not isinstance(payload, dict):
             return {}
 
-        pricing: dict[str, dict[str, Decimal]] = {}
+        pricing: dict[str, dict[str, Any]] = {}
         for model_id, raw_entry in payload.items():
             if not isinstance(model_id, str) or not isinstance(raw_entry, dict):
                 continue
@@ -66,15 +68,27 @@ class CostService:
             )
             if input_price is None or output_price is None or request_price is None:
                 continue
-            pricing[model_id.strip().lower()] = {
+            entry: dict[str, Any] = {
                 "input": input_price,
                 "output": output_price,
                 "request": request_price,
             }
+            # A malformed long-prompt tier leaves the model unpriced rather than
+            # charging long prompts the short-prompt price.
+            try:
+                tier = price_tiers.tier(raw_entry)
+            except price_tiers.InvalidTier:
+                continue
+            if tier is not None:
+                tier_prices = {name: cls._decimal(value) for name, value in tier[1].items()}
+                if any(price is None for price in tier_prices.values()):
+                    continue
+                entry[price_tiers.TIER_KEY] = {price_tiers.THRESHOLD_KEY: tier[0], **tier_prices}
+            pricing[model_id.strip().lower()] = entry
         return pricing
 
     @classmethod
-    def pricing_table(cls) -> dict[str, dict[str, Decimal]]:
+    def pricing_table(cls) -> dict[str, dict[str, Any]]:
         raw_pricing = os.environ.get(cls.ENV_NAME, "").strip()
         return cls._parse_pricing_table(raw_pricing)
 
@@ -83,7 +97,7 @@ class CostService:
         cls,
         model_id: str | None,
         provider: str | None = None,
-    ) -> dict[str, Decimal] | None:
+    ) -> dict[str, Any] | None:
         if not model_id:
             return None
 
@@ -105,6 +119,17 @@ class CostService:
         return None
 
     @classmethod
+    def prices_for_prompt(cls, prices: dict[str, Any], input_tokens: Any) -> dict[str, Any]:
+        """The entry's prices for a request whose prompt holds `input_tokens`: its
+        long-prompt tier's prices when the prompt is over the tier's threshold."""
+        tier = prices.get(price_tiers.TIER_KEY)
+        if tier is None or input_tokens is None:
+            return prices
+        if cls._token_count(input_tokens) <= tier[price_tiers.THRESHOLD_KEY]:
+            return prices
+        return {**prices, **{name: value for name, value in tier.items() if name != price_tiers.THRESHOLD_KEY}}
+
+    @classmethod
     def estimate(
         cls,
         model_id: str | None,
@@ -117,6 +142,7 @@ class CostService:
         prices = cls.pricing_for(model_id, provider=provider)
         if prices is None:
             return None
+        prices = cls.prices_for_prompt(prices, input_tokens)
 
         # A missing count is unknown when it contributes to the invoice. Flat-only
         # and explicitly free components do not require provider token counts.

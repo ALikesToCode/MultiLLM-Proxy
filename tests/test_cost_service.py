@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from services.cost_service import CostService
+from services.prompt_cache_cost import CacheObservation
 
 
 class CostServiceTest(unittest.TestCase):
@@ -114,6 +115,46 @@ class CostServiceTest(unittest.TestCase):
                 CostService.estimate("openai:cache-test", 1_000, 1_000)
 
         self.assertEqual(loads.call_count, 2)
+
+    def test_long_prompt_tier_prices_the_whole_request_over_its_threshold(self):
+        pricing = json.dumps({"anthropic:tiered": {
+            "input": 0.1, "output": 0.5,
+            "long_context": {"above_input_tokens": 100_000, "input": 0.5, "output": 2.5},
+        }})
+        with patch.dict(os.environ, {CostService.ENV_NAME: pricing}, clear=False):
+            at_threshold = CostService.estimate("anthropic:tiered", 100_000, 1_000)
+            over = CostService.estimate("anthropic:tiered", 100_001, 1_000)
+
+        self.assertAlmostEqual(at_threshold, 0.0105)
+        self.assertAlmostEqual(over, 0.0525005)
+
+    def test_a_tier_price_it_does_not_name_keeps_the_base_price(self):
+        pricing = json.dumps({"openai:tiered": {
+            "input": 1, "output": 2, "long_context": {"above_input_tokens": 10, "input": 3},
+        }})
+        with patch.dict(os.environ, {CostService.ENV_NAME: pricing}, clear=False):
+            self.assertAlmostEqual(CostService.estimate("openai:tiered", 1_000_000, 1_000_000), 5.0)
+
+    def test_malformed_long_prompt_tiers_leave_the_model_unpriced(self):
+        tiers = (
+            "not-an-object",
+            {"input": 0.5},
+            {"above_input_tokens": "100000", "input": 0.5},
+            {"above_input_tokens": True, "input": 0.5},
+            {"above_input_tokens": -1, "input": 0.5},
+            {"above_input_tokens": 100_000},
+            {"above_input_tokens": 100_000, "ouput": 2.5},
+            {"above_input_tokens": 100_000, "input": -1},
+        )
+        measured = CacheObservation(10, 10, "provider", ("provider",), 10, 0, 0, "openai")
+        valid = json.dumps({"openai:tiered": {"input": 1, "output": 2}})
+        with patch.dict(os.environ, {CostService.ENV_NAME: valid}, clear=False):
+            self.assertIsNotNone(CostService.price_buckets("openai:tiered", measured)["cost_usd"])
+        for tier in tiers:
+            pricing = json.dumps({"openai:tiered": {"input": 1, "output": 2, "long_context": tier}})
+            with self.subTest(tier=tier), patch.dict(os.environ, {CostService.ENV_NAME: pricing}, clear=False):
+                self.assertIsNone(CostService.estimate("openai:tiered", 10, 10))
+                self.assertIsNone(CostService.price_buckets("openai:tiered", measured)["cost_usd"])
 
 
 if __name__ == "__main__":

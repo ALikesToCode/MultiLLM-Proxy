@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 from functools import lru_cache
 from typing import Any
 
+from services import price_tiers
 from services.usage_types import StreamUsageObserver, UsageObservation
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,8 @@ class CacheObservation(UsageObservation):
     cache_read: int | None = None
     cache_write: int | None = None
     source: str = "unknown"
+    # The part of cache_write written to the one-hour cache, which costs more.
+    cache_write_1h: int | None = None
 
     @classmethod
     def from_body(cls, value: Any) -> CacheObservation | None:
@@ -92,9 +95,16 @@ class CacheObservation(UsageObservation):
         raw = count(usage.get("input_tokens")) if anthropic else count(typed.input_tokens)
         read = count(usage.get("cache_read_input_tokens")) if anthropic else count(details.get("cached_tokens"))
         write = count(usage.get("cache_creation_input_tokens")) if anthropic else count(details.get("cache_write_tokens", 0 if raw is not None or details else None))
+        if anthropic:
+            creation = usage.get("cache_creation")
+            one_hour = count(creation.get("ephemeral_1h_input_tokens")) if isinstance(creation, dict) else None
+        else:
+            one_hour = count(details.get("cache_write_1h_tokens"))
         source = "anthropic" if anthropic else "openai" if raw is not None or details else "unknown"
         total = _sum((raw, read, write)) if anthropic else raw
-        return cls(total, count(typed.output_tokens), typed.basis, typed.provenance, raw, read, write, source, cached_input_tokens=typed.cached_input_tokens, reasoning_tokens=typed.reasoning_tokens)
+        return cls(total, count(typed.output_tokens), typed.basis, typed.provenance, raw, read, write, source,
+                   cache_write_1h=one_hour, cached_input_tokens=typed.cached_input_tokens,
+                   reasoning_tokens=typed.reasoning_tokens)
 
     def merge(self, later: UsageObservation) -> CacheObservation:
         if not isinstance(later, CacheObservation):
@@ -105,12 +115,14 @@ class CacheObservation(UsageObservation):
         read = latest(self.cache_read, later.cache_read)
         # An output-only delta must not imply a new cache-write observation.
         write = latest(self.cache_write, later.cache_write) if later.source != "unknown" else self.cache_write
+        one_hour = (latest(self.cache_write_1h, later.cache_write_1h) if later.source != "unknown"
+                    else self.cache_write_1h)
         source = later.source if later.source != "unknown" else self.source
         total = _sum((raw, read, write)) if source == "anthropic" else raw
         output = latest(self.output_tokens, later.output_tokens)
         known = any(v is not None for v in (raw, read, write, output))
         return CacheObservation(total, output, "provider" if known else "unknown", ("provider",) if known else (),
-                                raw, read, write, source, cached_input_tokens=read,
+                                raw, read, write, source, cache_write_1h=one_hour, cached_input_tokens=read,
                                 reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens)
 
 
@@ -164,6 +176,21 @@ def _price(value: Any) -> Decimal | None:
     return number if number.is_finite() and 0 <= number <= MAX_MICROUSD else None
 
 
+def _one_hour_price(explicit: dict, supplement: dict, five_minute: Decimal | None) -> Decimal | None:
+    """The one-hour cache-write price; without one, one-hour writes cost the 5-minute price."""
+    for source in (explicit, supplement):
+        if "cache_write_1h" in source:
+            return _price(source["cache_write_1h"])
+    return five_minute
+
+
+def _write_cost(amount: int, one_hour: int, five_minute: Decimal | None, hour: Decimal | None) -> Decimal | None:
+    parts = ((amount - one_hour, five_minute), (one_hour, hour))
+    if any(tokens and unit is None for tokens, unit in parts):
+        return None
+    return sum((Decimal(tokens) * unit for tokens, unit in parts if tokens and unit is not None), Decimal(0))
+
+
 def price_buckets(model: str | None, usage: UsageObservation | None, *, requests: int = 1) -> dict:
     buckets = buckets_from(usage)
     result = {**buckets, **dict.fromkeys(COST_FIELDS), "cost_usd": None}
@@ -178,6 +205,16 @@ def price_buckets(model: str | None, usage: UsageObservation | None, *, requests
     explicit = _entry(table, model)
     if explicit is None:
         return result
+    try:
+        tier = price_tiers.tier(explicit)
+    except price_tiers.InvalidTier:
+        return result
+    if tier is not None and any(_price(value) is None for value in tier[1].values()):
+        return result
+    # The prompt size counts cache reads and writes; over the threshold every
+    # bucket of the request, output included, pays the tier's prices.
+    if price_tiers.applies(tier, usage.input_tokens if usage is not None else None):
+        explicit = {**explicit, **tier[1]}
     metadata = _metadata(os.environ.get("PROMPT_CACHE_PRICE_METADATA_JSON", "").strip()) or {}
     supplement = metadata.get(model, {})
     names = ("input", "cache_read", "cache_write", "output")
@@ -191,7 +228,14 @@ def price_buckets(model: str | None, usage: UsageObservation | None, *, requests
             value = explicit.get(name, explicit.get(alias, supplement.get(name)))
             unit = Decimal(0) if flat_only else _price(value)
             amount = buckets[tokens]
-            if amount == 0 or unit == 0:
+            one_hour = 0
+            if name == "cache_write" and amount and not flat_only and isinstance(usage, CacheObservation):
+                one_hour = min(usage.cache_write_1h or 0, amount)
+            if one_hour:
+                cost = _write_cost(amount, one_hour, unit, _one_hour_price(explicit, supplement, unit))
+                if cost is not None and cost > MAX_MICROUSD:
+                    cost = None
+            elif amount == 0 or unit == 0:
                 cost = Decimal(0)
             elif amount is None or unit is None:
                 cost = None
@@ -211,9 +255,12 @@ def price_buckets(model: str | None, usage: UsageObservation | None, *, requests
 
 def anthropic_to_chat(usage: dict) -> dict:
     observed = CacheObservation.from_body({"type": "message", "usage": usage}) or CacheObservation()
+    details = {"cached_tokens": observed.cache_read, "cache_write_tokens": observed.cache_write}
+    if observed.cache_write_1h:
+        details["cache_write_1h_tokens"] = observed.cache_write_1h
     return {"prompt_tokens": observed.input_tokens, "completion_tokens": observed.output_tokens,
             "total_tokens": _sum((observed.input_tokens, observed.output_tokens)),
-            "prompt_tokens_details": {"cached_tokens": observed.cache_read, "cache_write_tokens": observed.cache_write}}
+            "prompt_tokens_details": details}
 
 
 def chat_to_anthropic(usage: Any) -> dict:
