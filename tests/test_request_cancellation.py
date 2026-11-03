@@ -7,6 +7,8 @@ import requests
 from flask import Flask, Response
 
 from routes.unified_transport import send_unified_provider_request
+from services import protocol_translation
+from services.protocol_translation import CHAT, MESSAGES, RESPONSES, translate_stream
 from services.request_cancellation import CancellationContext, bind_cancellation
 from services.stream_preflight import preflight_chat_stream
 from services.upstream_transport import (
@@ -87,6 +89,63 @@ def test_completed_raw_bytes_are_unchanged():
     assert upstream.closes == 1
     assert not upstream.multillm_cancellation.outcome.ambiguous
     assert upstream.multillm_cancellation.outcome.reason == "complete"
+
+
+def sse(*events):
+    return [f"event: {name}\ndata: {data}\n\n".encode() for name, data in events]
+
+
+CLAUDE_STREAM = sse(
+    ("message_start", '{"type":"message_start","message":{"id":"msg_1","model":"m","usage":{"input_tokens":3}}}'),
+    ("content_block_start", '{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}'),
+    ("content_block_delta", '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}'),
+    ("message_delta", '{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}'),
+    ("message_stop", '{"type":"message_stop"}'),
+)
+RESPONSES_STREAM = sse(
+    ("response.output_text.delta", '{"type":"response.output_text.delta","delta":"Hi"}'),
+    ("response.completed", '{"type":"response.completed","response":{"status":"completed","output":[],'
+                           '"usage":{"input_tokens":3,"output_tokens":2}}}'),
+)
+
+
+@pytest.mark.parametrize("source,chunks", [(MESSAGES, CLAUDE_STREAM), (RESPONSES, RESPONSES_STREAM)])
+def test_translated_stream_reads_its_upstream_to_the_end(source, chunks):
+    """Returning at the terminal event must not close the upstream as a cancellation,
+    which the usage ledger would record without the stream's usage."""
+    upstream = Upstream(chunks)
+    context = bind_cancellation(upstream)
+    context.handoff()
+    body = "".join(translate_stream(iter_stream_content(upstream), source, CHAT))
+    assert '"usage"' in body and body.endswith("data: [DONE]\n\n")
+    assert upstream.reads == len(chunks)
+    assert (context.outcome.reason, context.outcome.ambiguous) == ("complete", False)
+
+
+def test_failed_translated_stream_closes_its_upstream_unread():
+    error = sse(("error", '{"type":"error","error":{"type":"overloaded_error","message":"busy"}}'))
+    upstream = Upstream([*CLAUDE_STREAM[:2], *error, *CLAUDE_STREAM[2:]])
+    context = bind_cancellation(upstream)
+    context.handoff()
+    body = translate_stream(iter_stream_content(upstream), MESSAGES, CHAT)
+    assert "busy" in "".join(body)
+    body.close()
+    upstream.close()  # The response's close hook, as in production.
+    assert upstream.reads == 3
+    assert context.outcome.ambiguous
+
+
+def test_reading_after_the_terminal_event_is_bounded(monkeypatch):
+    monkeypatch.setattr(protocol_translation, "STREAM_DRAIN_LIMIT_BYTES", 10)
+    upstream = Upstream([*CLAUDE_STREAM, b": keep-alive\n\n" * 2, b": more\n\n"])
+    context = bind_cancellation(upstream)
+    context.handoff()
+    body = translate_stream(iter_stream_content(upstream), MESSAGES, CHAT)
+    assert "".join(body).endswith("data: [DONE]\n\n")
+    body.close()
+    upstream.close()
+    assert upstream.reads == len(CLAUDE_STREAM) + 1
+    assert context.outcome.ambiguous
 
 
 @pytest.mark.parametrize("chunks", [[], [b"data: [DONE]\n\n"]])
