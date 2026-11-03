@@ -63,6 +63,12 @@ included, and a price the tier does not name keeps the base price:
 
 A malformed tier (a missing or non-integer threshold, no prices, or an unknown key)
 leaves the model unpriced rather than charging long prompts the short-prompt price.
+`wrangler.jsonc` sets the Claude API list prices, in `RUNTIME_FEATURE_FLAGS` (see
+[Cloudflare Containers](cloudflare-containers.md)), for every `anthropic:` model the
+gateway lists, from <https://platform.claude.com/docs/en/about-claude/pricing> as of
+3 November 2026. Update them there when Anthropic changes a price or adds a model;
+a model without an entry is recorded at no cost. Batch, fast-mode and US-only
+inference prices are not modelled.
 
 `cost_basis` is `usage` when the provider reported tokens and `estimate` when the
 proxy's own token estimate was used. Requests to unpriced models and failed requests

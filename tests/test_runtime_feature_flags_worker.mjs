@@ -11,7 +11,7 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 const { MultiLLMProxyContainer } = await loadWorkerModule();
 
 test("deployment groups feature settings while preserving Container flags and secrets", () => {
-  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 7);
+  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 8);
   // Vars and secrets share the Worker's limit of 128 text bindings, and the release has 127.
   // Put a new nonsecret setting in RUNTIME_FEATURE_FLAGS instead of raising this count.
   assert.equal(Object.keys(config.vars).length, 65);
@@ -23,6 +23,11 @@ test("deployment groups feature settings while preserving Container flags and se
   assert.equal(container.envVars.PROMPT_CACHE_USAGE_BUCKETS_ENABLED, "true");
   assert.equal(container.envVars.UPSTREAM_RETRY_AFTER_ADVICE_ENABLED, "true");
   assert.equal(container.envVars.MULTILLM_STREAM_PREFLIGHT, "strict");
+  const pricing = config.vars.RUNTIME_FEATURE_FLAGS.MODEL_PRICING_USD_PER_MILLION;
+  assert.ok(JSON.parse(pricing)["anthropic:claude-haiku-5-5"]);
+  assert.equal(container.envVars.MODEL_PRICING_USD_PER_MILLION, pricing);
+  assert.equal(modelPricingTable(source), pricing);
+  assert.equal(modelPricingTable({ ...source, MODEL_PRICING_USD_PER_MILLION: "{}" }), "{}");
   assert.equal(container.envVars.ANTHROPIC_API_KEY, "synthetic-provider-secret");
   assert.equal(container.envVars.RUNTIME_FEATURE_FLAGS, undefined);
   assert.equal(usageBucketsEnabled(source), true);

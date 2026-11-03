@@ -42,7 +42,7 @@ Wrangler `vars` in `wrangler.jsonc` already set:
 - `SERVER_PORT=8080`
 - `APP_NAME=MultiLLM Proxy`
 
-`RUNTIME_FEATURE_FLAGS` groups seven nonsecret settings into one JSON binding to
+`RUNTIME_FEATURE_FLAGS` groups eight nonsecret settings into one JSON binding to
 leave room for provider secrets. Worker vars and secrets share a limit of 128
 text bindings, and Cloudflare rejects an upload that exceeds it. The Container,
 usage ledger, roleplay settings and roleplay session read these grouped
