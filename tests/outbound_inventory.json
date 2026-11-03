@@ -1612,7 +1612,7 @@
   "worker/credits-admission.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "a4f5d892df430d60ae4721b9e42fbc4615f000a35fe1d7da391c5dea2c4f2d19"
+    "sha256": "36d378a42520026d787e8f94b8324da776dc33063d2b37a6cc10c81fcd03a1ac"
   },
   "worker/credits-d1.mjs": {
     "kind": "non-provider",
@@ -2077,12 +2077,12 @@
   "worker/request-telemetry.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "b8a54faaaf40fdc957a933313b1718e09e25f707d63c2dedf6963a8560a9ae0f"
+    "sha256": "4f5e3331da7104987d5870a4faee00e94c2d8771c5c19ba44942de1b53d202ed"
   },
   "worker/reservations-d1.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "ba1a1a5bc15fc58bca1c695a22fd0ec22411621e0a093d87c89406a75e410861"
+    "sha256": "a2f7e53c44e808012f79b7e28ff1d466b7f8a91fb52db4e7792c0104731e9d4f"
   },
   "worker/responses-state-d1.mjs": {
     "kind": "non-provider",
@@ -2327,7 +2327,7 @@
   "worker/runtime-feature-flags.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "40d379212efba252e64155364a4c26c359724c37c6c0458b5afe6c4824f18724"
+    "sha256": "318cbab097656f194da31ce9aa592c180cf54d1074bd846d27abefcff4eb9ffb"
   },
   "worker/saml-identity.mjs": {
     "kind": "non-provider",
@@ -2367,7 +2367,7 @@
   "worker/semantic-generation-cache.mjs": {
     "kind": "guarded",
     "reason": "Embedding delegate is the native providerFetch wrapper, including the embedding provider authority.",
-    "sha256": "ba3f547d794cb9b323c6927ca65e3b45e816e73a215e97218ab023584ca68a90"
+    "sha256": "52f821823ed270f5324961e34f12b25ace955432287b6d934c16ead9d0f4f2ef"
   },
   "worker/shadow-eval-d1.mjs": {
     "kind": "non-provider",
@@ -2392,7 +2392,7 @@
   "worker/stream-cost-breaker.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "5317e648a4dbb6fee35d45ae294ccee128d9296751ed1c941f578223d1be0640"
+    "sha256": "4499dfeaa2ac5ceaf1b37bf438515eded6c2738dca5ed9ca56bbc23b48edb07c"
   },
   "worker/tenant-governance-d1.mjs": {
     "kind": "non-provider",

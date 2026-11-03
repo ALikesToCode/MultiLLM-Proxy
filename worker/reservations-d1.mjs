@@ -4,6 +4,7 @@ import { creditsEnforcement } from "./credits-d1.mjs";
 import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 import { recordSettledUsage } from "./usage-receipts.mjs";
 import { retentionRequestId } from "./retention-policy.mjs";
+import { modelPricingTable } from "./runtime-feature-flags.mjs";
 /** Private, atomic monetary holds and injected request lifecycle. */
 const SCALE = 10_000_000_000;
 const MAX_UNITS = Number.MAX_SAFE_INTEGER;
@@ -396,7 +397,7 @@ async function nativeReservationIdentity(request, env, authority, context, force
   if (!context.cacheServed) {
     const { body, size } = await boundedReservationBody(request);
     const models = authority.eligibleModels ?? [context.model];
-    const raw = env.MODEL_PRICING_USD_PER_MILLION;
+    const raw = modelPricingTable(env);
     if (typeof raw !== "string" || raw.length > 65536) throw new ReservationError("unpriced_reservation");
     const table = JSON.parse(raw);
     const outputs = [body.max_tokens, body.max_completion_tokens, body.max_output_tokens, body.generationConfig?.maxOutputTokens].filter(n => n != null);

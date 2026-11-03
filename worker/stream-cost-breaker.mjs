@@ -1,4 +1,5 @@
 /** Opt-in stream cost enforcement for native Worker responses. */
+import { modelPricingTable } from "./runtime-feature-flags.mjs";
 const CAP = "max_stream_cost_microusd";
 export const STREAM_CAP_FIELD = CAP;
 const MAX_CAP = 1_000_000_000_000;
@@ -38,7 +39,7 @@ const zero = { n: 0n, d: 1n };
 function priceFor(env, model) {
   let table, metadata;
   try {
-    table = JSON.parse(env.MODEL_PRICING_USD_PER_MILLION || "{}");
+    table = JSON.parse(modelPricingTable(env) || "{}");
     metadata = JSON.parse(env.PROMPT_CACHE_PRICE_METADATA_JSON || "{}");
   } catch { throw failure("stream_cost_unpriced"); }
   if (!table || Array.isArray(table) || typeof table !== "object") throw failure("stream_cost_unpriced");

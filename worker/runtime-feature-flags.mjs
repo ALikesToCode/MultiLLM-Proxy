@@ -1,5 +1,6 @@
 const FEATURE_NAMES = Object.freeze([
   "MODEL_COOLDOWN_ENABLED",
+  "MODEL_PRICING_USD_PER_MILLION",
   "MULTILLM_STREAM_PREFLIGHT",
   "POOL_RESET_SCHEDULING_ENABLED",
   "PROMPT_CACHE_AFFINITY_ENABLED",
@@ -19,6 +20,11 @@ export function runtimeFeatureValue(source, name) {
     || !Object.hasOwn(flags, name)) return undefined;
   const value = flags[name];
   return typeof value === "string" || typeof value === "boolean" ? value : undefined;
+}
+
+/** The operator's price table, from its own binding or the grouped settings. */
+export function modelPricingTable(source = {}) {
+  return runtimeFeatureValue(source, "MODEL_PRICING_USD_PER_MILLION");
 }
 
 export function withRuntimeFeatureFlags(source = {}) {

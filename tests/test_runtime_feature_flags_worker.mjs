@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";
-import { runtimeFeatureValue, withRuntimeFeatureFlags } from "../worker/runtime-feature-flags.mjs";
+import { modelPricingTable, runtimeFeatureValue, withRuntimeFeatureFlags } from "../worker/runtime-feature-flags.mjs";
+import { embeddingPrice } from "../worker/semantic-generation-cache.mjs";
 import { usageBucketsEnabled } from "../worker/usage-buckets-d1.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
@@ -26,6 +27,15 @@ test("deployment groups feature settings while preserving Container flags and se
   assert.equal(container.envVars.RUNTIME_FEATURE_FLAGS, undefined);
   assert.equal(usageBucketsEnabled(source), true);
   assert.equal(runtimeFeatureValue(source, "ROLEPLAY_CANDIDATE_CONTEXT_REFIT"), "window");
+});
+
+test("a grouped price table reaches the Container and the Worker's price readers", () => {
+  const table = '{"codex-easy:embed":{"input":0.5,"output":0}}';
+  const source = { ...config.vars, RUNTIME_FEATURE_FLAGS: { MODEL_PRICING_USD_PER_MILLION: table } };
+  assert.equal(modelPricingTable(source), table);
+  assert.equal(new MultiLLMProxyContainer({}, source).envVars.MODEL_PRICING_USD_PER_MILLION, table);
+  assert.equal(embeddingPrice(source, "codex-easy:embed", 2_000_000), 1);
+  assert.equal(modelPricingTable({ ...source, MODEL_PRICING_USD_PER_MILLION: "{}" }), "{}");
 });
 
 test("individual settings retain disabled values and precedence without mutating bindings", () => {

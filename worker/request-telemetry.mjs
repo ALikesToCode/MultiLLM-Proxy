@@ -1,5 +1,6 @@
 /** Bounded, byte-preserving native response observation. No payload leaves this module. */
 import { escapeLabel, PROMETHEUS_CONTENT_TYPE } from "./prometheus.mjs";
+import { modelPricingTable } from "./runtime-feature-flags.mjs";
 
 export const PARSER_LIMIT = 64 * 1024;
 const decoder = new TextDecoder();
@@ -84,7 +85,7 @@ export function createUsageObserver(sse = false, onToken = () => {}) {
 function priceUsage(env, provider, model, usage, known) {
   if (!known || !model) return null;
   let table;
-  const raw = env.MODEL_PRICING_USD_PER_MILLION;
+  const raw = modelPricingTable(env);
   if (typeof raw !== "string" || raw.length > PARSER_LIMIT) return null;
   try { table = JSON.parse(raw); } catch { return null; }
   const name = (model.includes(":") ? model : `${provider}:${model}`).toLowerCase();

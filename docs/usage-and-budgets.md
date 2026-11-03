@@ -305,7 +305,7 @@ serving is unaffected. No OpenTelemetry package is required.
    migration keeps authenticating accounts: account reads fall back to the older columns
    with no controls, saving a key's controls fails with 503, ledger flushes fail and are
    retried, and `/ready` reports the missing usage tables.
-2. Set `MODEL_PRICING_USD_PER_MILLION` for the models budgeted keys use; the Worker
-   passes it to the Container.
+2. Set `MODEL_PRICING_USD_PER_MILLION` for the models budgeted keys use, as a var or
+   in `RUNTIME_FEATURE_FLAGS`; the Worker passes it to the Container.
 3. Optionally bind an Analytics Engine dataset as `USAGE_ANALYTICS`, and set the
    `OTEL_*` variables to export telemetry.
