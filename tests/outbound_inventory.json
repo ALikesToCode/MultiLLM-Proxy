@@ -1072,7 +1072,7 @@
   "services/prompt_cache_cost.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "eedc0fd1c7c4a9a90eb0832300f10c7eeae5768e86c2011f94fb118a59090b91"
+    "sha256": "696b0b57de3ebce1dc49db93b231d49e3f822014d42532285a0b06b04de401ce"
   },
   "services/prompt_injection_detection.py": {
     "kind": "non-provider",
@@ -1117,7 +1117,7 @@
   "services/protocol_translation/anthropic_usage.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "a519872ebbce252945524c7b0eb78901235f0b8f0dee31ce49c74e6e916f03c5"
+    "sha256": "4787051d3c0fa63d0af60dfcc33b4abbb7184548e036946744416ba030113c2a"
   },
   "services/protocol_translation/common.py": {
     "kind": "non-provider",

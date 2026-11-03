@@ -59,11 +59,23 @@ def chat_usage_to_anthropic(usage: Any) -> dict:
     if prompt_cache_cost.enabled():
         return prompt_cache_cost.chat_to_anthropic(usage)
     numbers = usage_numbers(usage)
-    return {
+    result = {
         "input_tokens": max(
             0, numbers["prompt"] - numbers["cached"] - numbers["cache_write"]
         ),
         "output_tokens": numbers["completion"],
         "cache_creation_input_tokens": numbers["cache_write"],
         "cache_read_input_tokens": numbers["cached"],
+    }
+    one_hour = min(numbers["cache_write_1h"], numbers["cache_write"])
+    if one_hour:
+        result["cache_creation"] = cache_creation(numbers["cache_write"], one_hour)
+    return result
+
+
+def cache_creation(cache_write: int, one_hour: int) -> dict:
+    """Anthropic's split of cache writes into the 5-minute and one-hour caches."""
+    return {
+        "ephemeral_5m_input_tokens": cache_write - one_hour,
+        "ephemeral_1h_input_tokens": one_hour,
     }

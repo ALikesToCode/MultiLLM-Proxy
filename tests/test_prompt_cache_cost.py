@@ -313,3 +313,17 @@ def test_streamed_one_hour_writes_survive_an_output_only_delta(monkeypatch):
     observed = observer.finish()
     assert (observed.cache_write, observed.cache_write_1h, observed.output_tokens) == (4, 3, 7)
     assert cache.price_buckets('anthropic:t', observed)['cost_usd'] == pytest.approx((1 + 1.25 + 3 * 2 + 7 * 2) / 1e6)
+
+
+@pytest.mark.parametrize('buckets', ['true', 'false'])
+def test_one_hour_writes_survive_a_round_trip_back_to_messages(monkeypatch, buckets):
+    """Tool repair turns a Messages reply into Chat Completions and back before accounting reads it."""
+    monkeypatch.setenv('PROMPT_CACHE_USAGE_BUCKETS_ENABLED', buckets)
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps(TIERED))
+    usage = {'input_tokens': 5, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 30, 'output_tokens': 2,
+             'cache_creation': {'ephemeral_5m_input_tokens': 10, 'ephemeral_1h_input_tokens': 20}}
+    returned = _chat_usage_to_anthropic(_anthropic_usage_to_chat(usage))
+    assert returned['cache_creation'] == {'ephemeral_5m_input_tokens': 10, 'ephemeral_1h_input_tokens': 20}
+    assert claude(returned)['cache_write_input_cost_microusd'] == pytest.approx(10 * 1.25 + 20 * 2)
+    five_minute_only = {**usage, 'cache_creation': {'ephemeral_5m_input_tokens': 30, 'ephemeral_1h_input_tokens': 0}}
+    assert 'cache_creation' not in _chat_usage_to_anthropic(_anthropic_usage_to_chat(five_minute_only))

@@ -266,9 +266,15 @@ def anthropic_to_chat(usage: dict) -> dict:
 def chat_to_anthropic(usage: Any) -> dict:
     observed = CacheObservation.from_body({"usage": usage})
     buckets = buckets_from(observed)
-    return {"input_tokens": buckets["ordinary_input_tokens"], "output_tokens": buckets["output_tokens"],
-            "cache_creation_input_tokens": buckets["cache_write_input_tokens"],
-            "cache_read_input_tokens": buckets["cache_read_input_tokens"]}
+    result = {"input_tokens": buckets["ordinary_input_tokens"], "output_tokens": buckets["output_tokens"],
+              "cache_creation_input_tokens": buckets["cache_write_input_tokens"],
+              "cache_read_input_tokens": buckets["cache_read_input_tokens"]}
+    write = buckets["cache_write_input_tokens"]
+    if isinstance(observed, CacheObservation) and observed.cache_write_1h and write:
+        from services.protocol_translation.anthropic_usage import cache_creation
+
+        result["cache_creation"] = cache_creation(write, min(observed.cache_write_1h, write))
+    return result
 
 
 def budget_price(models: list[str], usage: UsageObservation, requests: int) -> float | None:
