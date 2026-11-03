@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { collectContainerEnv } from "../worker/container-env.mjs";
-import { runtimeFeatureValue, withRuntimeFeatureFlags } from "../worker/runtime-feature-flags.mjs";
+import { longContextTier, modelPricingTable, pricesForPrompt, runtimeFeatureValue, withRuntimeFeatureFlags } from "../worker/runtime-feature-flags.mjs";
+import { embeddingPrice } from "../worker/semantic-generation-cache.mjs";
 import { usageBucketsEnabled } from "../worker/usage-buckets-d1.mjs";
 import { loadWorkerModule } from "./helpers/load_cloudflare_worker.mjs";
 
@@ -10,7 +11,7 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 const { MultiLLMProxyContainer } = await loadWorkerModule();
 
 test("deployment groups feature settings while preserving Container flags and secrets", () => {
-  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 7);
+  assert.equal(Object.keys(config.vars.RUNTIME_FEATURE_FLAGS).length, 8);
   // Vars and secrets share the Worker's limit of 128 text bindings, and the release has 127.
   // Put a new nonsecret setting in RUNTIME_FEATURE_FLAGS instead of raising this count.
   assert.equal(Object.keys(config.vars).length, 65);
@@ -22,10 +23,24 @@ test("deployment groups feature settings while preserving Container flags and se
   assert.equal(container.envVars.PROMPT_CACHE_USAGE_BUCKETS_ENABLED, "true");
   assert.equal(container.envVars.UPSTREAM_RETRY_AFTER_ADVICE_ENABLED, "true");
   assert.equal(container.envVars.MULTILLM_STREAM_PREFLIGHT, "strict");
+  const pricing = config.vars.RUNTIME_FEATURE_FLAGS.MODEL_PRICING_USD_PER_MILLION;
+  assert.ok(JSON.parse(pricing)["anthropic:claude-haiku-5-5"]);
+  assert.equal(container.envVars.MODEL_PRICING_USD_PER_MILLION, pricing);
+  assert.equal(modelPricingTable(source), pricing);
+  assert.equal(modelPricingTable({ ...source, MODEL_PRICING_USD_PER_MILLION: "{}" }), "{}");
   assert.equal(container.envVars.ANTHROPIC_API_KEY, "synthetic-provider-secret");
   assert.equal(container.envVars.RUNTIME_FEATURE_FLAGS, undefined);
   assert.equal(usageBucketsEnabled(source), true);
   assert.equal(runtimeFeatureValue(source, "ROLEPLAY_CANDIDATE_CONTEXT_REFIT"), "window");
+});
+
+test("a grouped price table reaches the Container and the Worker's price readers", () => {
+  const table = '{"codex-easy:embed":{"input":0.5,"output":0}}';
+  const source = { ...config.vars, RUNTIME_FEATURE_FLAGS: { MODEL_PRICING_USD_PER_MILLION: table } };
+  assert.equal(modelPricingTable(source), table);
+  assert.equal(new MultiLLMProxyContainer({}, source).envVars.MODEL_PRICING_USD_PER_MILLION, table);
+  assert.equal(embeddingPrice(source, "codex-easy:embed", 2_000_000), 1);
+  assert.equal(modelPricingTable({ ...source, MODEL_PRICING_USD_PER_MILLION: "{}" }), "{}");
 });
 
 test("individual settings retain disabled values and precedence without mutating bindings", () => {
@@ -70,4 +85,18 @@ test("boolean grouped flags and legacy individual bindings work without a group"
   const legacy = { MODEL_COOLDOWN_ENABLED: "true", MULTILLM_STREAM_PREFLIGHT: "strict" };
   assert.equal(collectContainerEnv(legacy).MODEL_COOLDOWN_ENABLED, "true");
   assert.equal(collectContainerEnv(legacy).MULTILLM_STREAM_PREFLIGHT, "strict");
+});
+
+test("a long-prompt tier replaces the prices it names once the prompt is over its threshold", () => {
+  const entry = { input: 0.1, output: 0.5, long_context: { above_input_tokens: 100000, input: 0.5, output: 2.5 } };
+  assert.equal(pricesForPrompt(entry, 100000), entry);
+  assert.deepEqual(pricesForPrompt(entry, 100001), { ...entry, input: 0.5, output: 2.5 });
+  assert.equal(pricesForPrompt({ input: 1, output: 1 }, 10 ** 9).input, 1);
+  assert.equal(embeddingPrice({ MODEL_PRICING_USD_PER_MILLION: JSON.stringify({ "codex-easy:embed": {
+    input: 0.1, output: 0, long_context: { above_input_tokens: 10, input: 1 } } }) }, "codex-easy:embed", 1_000_000), 1);
+  for (const long_context of [null, [], { input: 1 }, { above_input_tokens: "1", input: 1 }, { above_input_tokens: -1, input: 1 },
+    { above_input_tokens: 1 }, { above_input_tokens: 1, ouput: 1 }]) {
+    assert.throws(() => longContextTier({ input: 1, output: 1, long_context }), TypeError);
+    assert.equal(pricesForPrompt({ input: 1, output: 1, long_context }, 0), null);
+  }
 });

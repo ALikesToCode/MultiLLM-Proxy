@@ -42,15 +42,17 @@ Wrangler `vars` in `wrangler.jsonc` already set:
 - `SERVER_PORT=8080`
 - `APP_NAME=MultiLLM Proxy`
 
-`RUNTIME_FEATURE_FLAGS` groups seven nonsecret settings into one JSON binding to
+`RUNTIME_FEATURE_FLAGS` groups eight nonsecret settings into one JSON binding to
 leave room for provider secrets. Worker vars and secrets share a limit of 128
 text bindings, and Cloudflare rejects an upload that exceeds it. The Container,
 usage ledger, roleplay settings and roleplay session read these grouped
 settings. An individual binding with the same setting name takes precedence,
 including an explicit disabled value. Keep credentials in separate Worker
-secrets; the grouped binding accepts only the nine names listed in
+secrets; the grouped binding accepts only the ten names listed in
 `worker/runtime-feature-flags.mjs`. Add a new nonsecret setting to the group
-rather than as a separate var.
+rather than as a separate var. It can hold the model price table
+(`MODEL_PRICING_USD_PER_MILLION`); keep the group under Cloudflare's 5 KB limit
+for one variable.
 
 Public HTTP requests receive a `308` redirect to the same HTTPS URL before any
 route or container work. For Container requests, the Worker overwrites

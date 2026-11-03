@@ -47,6 +47,29 @@ tokens:
 MODEL_PRICING_USD_PER_MILLION='{"openai:*":{"input":2,"output":8},"gguu:*":{"request":0.04}}'
 ```
 
+An entry may also give `cache_read`, `cache_write` (5-minute) and `cache_write_1h`
+prices (see [prompt cache cost](prompt-cache-cost.md)) and a `long_context` tier for
+models that bill a whole request at higher prices once its prompt passes a size.
+The prompt size counts every input token, cache reads and writes included; a request
+over `above_input_tokens` pays the tier's prices for all of its tokens, output
+included, and a price the tier does not name keeps the base price:
+
+```json
+{"anthropic:claude-haiku-5-5": {"input": 0.1, "output": 0.5, "cache_read": 0.01,
+  "cache_write": 0.125, "cache_write_1h": 0.2,
+  "long_context": {"above_input_tokens": 100000, "input": 0.5, "output": 2.5,
+    "cache_read": 0.05, "cache_write": 0.625, "cache_write_1h": 1}}}
+```
+
+A malformed tier (a missing or non-integer threshold, no prices, or an unknown key)
+leaves the model unpriced rather than charging long prompts the short-prompt price.
+`wrangler.jsonc` sets the Claude API list prices, in `RUNTIME_FEATURE_FLAGS` (see
+[Cloudflare Containers](cloudflare-containers.md)), for every `anthropic:` model the
+gateway lists, from <https://platform.claude.com/docs/en/about-claude/pricing> as of
+3 November 2026. Update them there when Anthropic changes a price or adds a model;
+a model without an entry is recorded at no cost. Batch, fast-mode and US-only
+inference prices are not modelled.
+
 `cost_basis` is `usage` when the provider reported tokens and `estimate` when the
 proxy's own token estimate was used. Requests to unpriced models and failed requests
 (status 400 or above, with no usage reported) have no cost. Configured prices are
@@ -288,7 +311,7 @@ serving is unaffected. No OpenTelemetry package is required.
    migration keeps authenticating accounts: account reads fall back to the older columns
    with no controls, saving a key's controls fails with 503, ledger flushes fail and are
    retried, and `/ready` reports the missing usage tables.
-2. Set `MODEL_PRICING_USD_PER_MILLION` for the models budgeted keys use; the Worker
-   passes it to the Container.
+2. Set `MODEL_PRICING_USD_PER_MILLION` for the models budgeted keys use, as a var or
+   in `RUNTIME_FEATURE_FLAGS`; the Worker passes it to the Container.
 3. Optionally bind an Analytics Engine dataset as `USAGE_ANALYTICS`, and set the
    `OTEL_*` variables to export telemetry.

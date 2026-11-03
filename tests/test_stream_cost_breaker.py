@@ -246,3 +246,31 @@ def test_fractional_prices_do_not_create_a_rounding_fee(monkeypatch):
         "input":0.1,"cache_read":0.1,"cache_write":0.1,"output":0.1}}))
     state=breaker.prepare({"max_stream_cost_microusd":0},["openai:m"],0,"chat")
     assert state.running_microusd==0
+
+TIERED = {"anthropic:t": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.125, "cache_write_1h": 0.2,
+          "long_context": {"above_input_tokens": 100000, "input": 0.5, "output": 2.5, "cache_read": 0.05,
+                           "cache_write": 0.625, "cache_write_1h": 1}}}
+
+def claude_usage(input_tokens, output_tokens, *, write=0, one_hour=0):
+    return frame({"type": "message_start", "message": {"usage": {
+        "input_tokens": input_tokens, "cache_read_input_tokens": 0, "cache_creation_input_tokens": write,
+        "cache_creation": {"ephemeral_5m_input_tokens": write - one_hour, "ephemeral_1h_input_tokens": one_hour},
+        "output_tokens": output_tokens}}})
+
+def test_a_prompt_over_the_long_prompt_threshold_is_held_to_the_tier_price(monkeypatch):
+    monkeypatch.setenv("MODEL_PRICING_USD_PER_MILLION", json.dumps(TIERED))
+    # 100,001 input and 1,000 output tokens cost 52,500.5 microUSD at the tier price, not 10,501.
+    state = breaker.prepare({"max_stream_cost_microusd": 20_000}, ["anthropic:t"], 0, "anthropic")
+    assert not state.observe(claude_usage(100_001, 1_000))
+    assert state.exceeded and state.running_microusd == 52_501
+    under = breaker.prepare({"max_stream_cost_microusd": 20_000}, ["anthropic:t"], 0, "anthropic")
+    assert under.observe(claude_usage(100_000, 1_000)) and under.running_microusd == 10_500
+    # An unmeasured prompt bounded over the threshold is admitted only at the tier price.
+    with pytest.raises(APIError):
+        breaker.prepare({"max_stream_cost_microusd": 100_000}, ["anthropic:t"], 200_000, "anthropic")
+
+def test_one_hour_cache_writes_count_at_their_price(monkeypatch):
+    monkeypatch.setenv("MODEL_PRICING_USD_PER_MILLION", json.dumps(TIERED))
+    state = breaker.prepare({"max_stream_cost_microusd": 1_000_000}, ["anthropic:t"], 0, "anthropic")
+    assert state.observe(claude_usage(0, 0, write=10_000, one_hour=10_000))
+    assert state.running_microusd == 2_000

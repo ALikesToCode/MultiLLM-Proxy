@@ -268,3 +268,62 @@ def test_migration_adds_nullable_bucket_columns_and_keeps_existing_rows():
     assert set(cache.ROW_FIELDS) <= columns
     assert db.execute('SELECT principal, ordinary_input_tokens, bucket_basis FROM usage_events').fetchall() == [
         ('old', None, None)]
+
+
+TIERED = {'anthropic:t': {
+    'input': 1, 'output': 2, 'cache_read': 0.1, 'cache_write': 1.25, 'cache_write_1h': 2,
+    'long_context': {'above_input_tokens': 100, 'input': 5, 'output': 10, 'cache_read': 0.5,
+                     'cache_write': 6.25, 'cache_write_1h': 10}}}
+
+
+def claude(usage):
+    return cache.price_buckets('anthropic:t', cache.CacheObservation.from_body({'type': 'message', 'usage': usage}))
+
+
+def test_long_prompt_tier_reprices_every_bucket_once_the_prompt_is_over_it(monkeypatch):
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps(TIERED))
+    at_threshold = {'input_tokens': 10, 'cache_read_input_tokens': 90, 'cache_creation_input_tokens': 0,
+                    'output_tokens': 10}
+    assert claude(at_threshold)['cost_usd'] == pytest.approx((10 * 1 + 90 * 0.1 + 10 * 2) / 1e6)
+    over = {**at_threshold, 'input_tokens': 11}
+    assert claude(over)['cost_usd'] == pytest.approx((11 * 5 + 90 * 0.5 + 10 * 10) / 1e6)
+
+
+def test_one_hour_cache_writes_pay_their_own_price(monkeypatch):
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps(TIERED))
+    usage = {'input_tokens': 0, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 30, 'output_tokens': 0,
+             'cache_creation': {'ephemeral_5m_input_tokens': 10, 'ephemeral_1h_input_tokens': 20}}
+    assert claude(usage)['cache_write_input_cost_microusd'] == pytest.approx(10 * 1.25 + 20 * 2)
+    chat = _anthropic_usage_to_chat(usage)
+    assert chat['prompt_tokens_details']['cache_write_1h_tokens'] == 20
+    assert cache.price_buckets('anthropic:t', observe(chat))['cache_write_input_cost_microusd'] == pytest.approx(52.5)
+    untimed = {name: price for name, price in TIERED['anthropic:t'].items() if name != 'cache_write_1h'}
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps({'anthropic:t': untimed}))
+    assert claude(usage)['cache_write_input_cost_microusd'] == pytest.approx(30 * 1.25)
+
+
+def test_streamed_one_hour_writes_survive_an_output_only_delta(monkeypatch):
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps(TIERED))
+    observer = cache.CacheStreamObserver(65536)
+    start = {'type': 'message_start', 'message': {'usage': {
+        'input_tokens': 1, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 4, 'output_tokens': 1,
+        'cache_creation': {'ephemeral_5m_input_tokens': 1, 'ephemeral_1h_input_tokens': 3}}}}
+    delta = {'type': 'message_delta', 'usage': {'output_tokens': 7}}
+    observer.feed(f'data: {json.dumps(start)}\n\ndata: {json.dumps(delta)}\n\n'.encode())
+    observed = observer.finish()
+    assert (observed.cache_write, observed.cache_write_1h, observed.output_tokens) == (4, 3, 7)
+    assert cache.price_buckets('anthropic:t', observed)['cost_usd'] == pytest.approx((1 + 1.25 + 3 * 2 + 7 * 2) / 1e6)
+
+
+@pytest.mark.parametrize('buckets', ['true', 'false'])
+def test_one_hour_writes_survive_a_round_trip_back_to_messages(monkeypatch, buckets):
+    """Tool repair turns a Messages reply into Chat Completions and back before accounting reads it."""
+    monkeypatch.setenv('PROMPT_CACHE_USAGE_BUCKETS_ENABLED', buckets)
+    monkeypatch.setenv('MODEL_PRICING_USD_PER_MILLION', json.dumps(TIERED))
+    usage = {'input_tokens': 5, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 30, 'output_tokens': 2,
+             'cache_creation': {'ephemeral_5m_input_tokens': 10, 'ephemeral_1h_input_tokens': 20}}
+    returned = _chat_usage_to_anthropic(_anthropic_usage_to_chat(usage))
+    assert returned['cache_creation'] == {'ephemeral_5m_input_tokens': 10, 'ephemeral_1h_input_tokens': 20}
+    assert claude(returned)['cache_write_input_cost_microusd'] == pytest.approx(10 * 1.25 + 20 * 2)
+    five_minute_only = {**usage, 'cache_creation': {'ephemeral_5m_input_tokens': 30, 'ephemeral_1h_input_tokens': 0}}
+    assert 'cache_creation' not in _chat_usage_to_anthropic(_anthropic_usage_to_chat(five_minute_only))

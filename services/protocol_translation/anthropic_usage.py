@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from services.protocol_translation.common import chat_usage, usage_numbers
+from services.protocol_translation.common import chat_usage, non_negative_int, usage_numbers
 
 STOP_TO_FINISH = {
     "end_turn": "stop",
@@ -39,10 +39,17 @@ def anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
 
     cached = count("cache_read_input_tokens")
     cache_write = count("cache_creation_input_tokens")
+    creation = usage.get("cache_creation")
+    one_hour = creation.get("ephemeral_1h_input_tokens") if isinstance(creation, Mapping) else 0
+    one_hour = min(non_negative_int(one_hour), cache_write)
     # Anthropic's input_tokens excludes cache reads and writes.
     prompt = count("input_tokens") + cached + cache_write
     return chat_usage(
-        prompt, count("output_tokens"), cached=cached, cache_write=cache_write
+        prompt,
+        count("output_tokens"),
+        cached=cached,
+        cache_write=cache_write,
+        cache_write_1h=one_hour,
     )
 
 
@@ -52,11 +59,23 @@ def chat_usage_to_anthropic(usage: Any) -> dict:
     if prompt_cache_cost.enabled():
         return prompt_cache_cost.chat_to_anthropic(usage)
     numbers = usage_numbers(usage)
-    return {
+    result = {
         "input_tokens": max(
             0, numbers["prompt"] - numbers["cached"] - numbers["cache_write"]
         ),
         "output_tokens": numbers["completion"],
         "cache_creation_input_tokens": numbers["cache_write"],
         "cache_read_input_tokens": numbers["cached"],
+    }
+    one_hour = min(numbers["cache_write_1h"], numbers["cache_write"])
+    if one_hour:
+        result["cache_creation"] = cache_creation(numbers["cache_write"], one_hour)
+    return result
+
+
+def cache_creation(cache_write: int, one_hour: int) -> dict:
+    """Anthropic's split of cache writes into the 5-minute and one-hour caches."""
+    return {
+        "ephemeral_5m_input_tokens": cache_write - one_hour,
+        "ephemeral_1h_input_tokens": one_hour,
     }

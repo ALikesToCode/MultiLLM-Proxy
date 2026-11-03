@@ -1,5 +1,6 @@
 /** Bounded, byte-preserving native response observation. No payload leaves this module. */
 import { escapeLabel, PROMETHEUS_CONTENT_TYPE } from "./prometheus.mjs";
+import { modelPricingTable, pricesForPrompt } from "./runtime-feature-flags.mjs";
 
 export const PARSER_LIMIT = 64 * 1024;
 const decoder = new TextDecoder();
@@ -84,12 +85,14 @@ export function createUsageObserver(sse = false, onToken = () => {}) {
 function priceUsage(env, provider, model, usage, known) {
   if (!known || !model) return null;
   let table;
-  const raw = env.MODEL_PRICING_USD_PER_MILLION;
+  const raw = modelPricingTable(env);
   if (typeof raw !== "string" || raw.length > PARSER_LIMIT) return null;
   try { table = JSON.parse(raw); } catch { return null; }
   const name = (model.includes(":") ? model : `${provider}:${model}`).toLowerCase();
-  const price = table?.[name] ?? table?.[`${provider}:*`] ?? table?.["*"];
-  if (!price || typeof price !== "object") return null;
+  const entry = table?.[name] ?? table?.[`${provider}:*`] ?? table?.["*"];
+  if (!entry || typeof entry !== "object") return null;
+  const price = pricesForPrompt(entry, usage.input_tokens);
+  if (!price) return null;
   const flatOnly = Object.hasOwn(price, "request") && !["input", "output", "input_cost_per_million", "output_cost_per_million"].some(k => Object.hasOwn(price, k));
   const rate = value => typeof value === "number" || typeof value === "string" && value.trim()
     ? Number(value) : NaN;

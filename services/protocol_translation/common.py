@@ -166,7 +166,8 @@ def non_negative_int(value: Any) -> int:
 
 # ---------------------------------------------------------------------------
 # Usage accounting. The pivot keeps Chat Completions fields plus
-# `prompt_tokens_details.cache_write_tokens` so cache writes survive a round trip.
+# `prompt_tokens_details.cache_write_tokens` so cache writes survive a round trip,
+# and `cache_write_1h_tokens`, the part of them written to the one-hour cache.
 
 
 def chat_usage(
@@ -175,6 +176,7 @@ def chat_usage(
     *,
     cached: int = 0,
     cache_write: int = 0,
+    cache_write_1h: int = 0,
     reasoning: int = 0,
 ) -> dict:
     usage: dict[str, Any] = {
@@ -187,6 +189,8 @@ def chat_usage(
         details["cached_tokens"] = cached
     if cache_write:
         details["cache_write_tokens"] = cache_write
+    if cache_write_1h:
+        details["cache_write_1h_tokens"] = cache_write_1h
     if details:
         usage["prompt_tokens_details"] = details
     if reasoning:
@@ -205,6 +209,7 @@ def usage_numbers(usage: Any) -> dict[str, int]:
         "completion": non_negative_int(usage.get("completion_tokens")),
         "cached": non_negative_int(prompt_details.get("cached_tokens")),
         "cache_write": non_negative_int(prompt_details.get("cache_write_tokens")),
+        "cache_write_1h": non_negative_int(prompt_details.get("cache_write_1h_tokens")),
         "reasoning": non_negative_int(completion_details.get("reasoning_tokens")),
     }
 

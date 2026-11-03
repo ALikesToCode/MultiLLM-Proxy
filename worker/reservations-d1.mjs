@@ -4,6 +4,7 @@ import { creditsEnforcement } from "./credits-d1.mjs";
 import { organisationsEnabled, tenantStorageKey } from "./tenants-d1.mjs";
 import { recordSettledUsage } from "./usage-receipts.mjs";
 import { retentionRequestId } from "./retention-policy.mjs";
+import { modelPricingTable, pricesForPrompt } from "./runtime-feature-flags.mjs";
 /** Private, atomic monetary holds and injected request lifecycle. */
 const SCALE = 10_000_000_000;
 const MAX_UNITS = Number.MAX_SAFE_INTEGER;
@@ -348,8 +349,10 @@ export function createReservationLifecycle(env, { call, identity, governance, cr
 function nativePrice(table, provider, model, input, output, units) {
   if (typeof model !== "string") return null;
   const qualified = (model.includes(":") ? model : `${provider}:${model}`).toLowerCase();
-  const rate = table?.[qualified] ?? table?.[`${qualified.split(":")[0]}:*`] ?? table?.["*"];
-  if (!rate || typeof rate !== "object") return null;
+  const entry = table?.[qualified] ?? table?.[`${qualified.split(":")[0]}:*`] ?? table?.["*"];
+  if (!entry || typeof entry !== "object") return null;
+  const rate = pricesForPrompt(entry, input);
+  if (!rate) return null;
   const flat = Object.hasOwn(rate, "request") && !["input", "output", "input_cost_per_million", "output_cost_per_million"].some(k => Object.hasOwn(rate, k));
   const amount = value => (typeof value === "number" || typeof value === "string" && value.trim()) ? Number(value) : NaN;
   const rates = [flat ? 0 : amount(rate.input ?? rate.input_cost_per_million),
@@ -396,7 +399,7 @@ async function nativeReservationIdentity(request, env, authority, context, force
   if (!context.cacheServed) {
     const { body, size } = await boundedReservationBody(request);
     const models = authority.eligibleModels ?? [context.model];
-    const raw = env.MODEL_PRICING_USD_PER_MILLION;
+    const raw = modelPricingTable(env);
     if (typeof raw !== "string" || raw.length > 65536) throw new ReservationError("unpriced_reservation");
     const table = JSON.parse(raw);
     const outputs = [body.max_tokens, body.max_completion_tokens, body.max_output_tokens, body.generationConfig?.maxOutputTokens].filter(n => n != null);

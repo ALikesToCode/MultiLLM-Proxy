@@ -150,6 +150,35 @@ def translate_response(
         raise UpstreamFailure("The upstream response could not be translated") from error
 
 
+# Bytes read after the upstream's terminal event before giving up on reaching its end.
+STREAM_DRAIN_LIMIT_BYTES = 65_536
+
+
+def _read_to_end(items: Iterator[ChatItem], upstream: Iterator[Any]) -> Iterator[ChatItem]:
+    """Yield the translated items, then read the upstream to its end.
+
+    A translator returns at the provider's terminal event, such as Claude's
+    `message_stop`, while the upstream body is still open. Closing it there counts
+    as a cancelled request, which the usage ledger records without its usage, so
+    a stream that ended normally reads the little that follows (normally nothing)
+    and lets the upstream finish. A failed stream is closed, not read.
+    """
+    failed = False
+    for item in items:
+        failed = isinstance(item, StreamFailure)
+        yield item
+    if failed:
+        return
+    read = 0
+    try:
+        for chunk in upstream:
+            read += len(chunk) if isinstance(chunk, (bytes, str)) else 1
+            if read > STREAM_DRAIN_LIMIT_BYTES:
+                return
+    except Exception:  # noqa: BLE001 - the client already has every event it needs
+        return
+
+
 def translate_stream(
     chunks: Iterable[Any],
     source: str,
@@ -160,7 +189,8 @@ def translate_stream(
 ) -> Iterator[str]:
     """Translate an SSE body event by event; always ends with a terminal event."""
     _check(source, target)
-    items = guarded_items(_STREAM_TO_CHAT[source](chunks))
+    upstream = iter(chunks)
+    items = guarded_items(_read_to_end(_STREAM_TO_CHAT[source](upstream), upstream))
     return _STREAM_FROM_CHAT[target](items, model=model, request=request)
 
 

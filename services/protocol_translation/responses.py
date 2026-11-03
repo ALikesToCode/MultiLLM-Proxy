@@ -249,6 +249,7 @@ def responses_usage_to_chat(usage: Mapping[str, Any]) -> dict:
         non_negative_int(usage.get("output_tokens")),
         cached=non_negative_int(input_details.get("cached_tokens")),
         cache_write=non_negative_int(input_details.get("cache_write_tokens")),
+        cache_write_1h=non_negative_int(input_details.get("cache_write_1h_tokens")),
         reasoning=non_negative_int(output_details.get("reasoning_tokens")),
     )
 
@@ -260,6 +261,8 @@ def chat_usage_to_responses(usage: Any) -> dict | None:
     input_details: dict[str, int] = {"cached_tokens": numbers["cached"]}
     if numbers["cache_write"]:
         input_details["cache_write_tokens"] = numbers["cache_write"]
+    if numbers["cache_write_1h"]:
+        input_details["cache_write_1h_tokens"] = numbers["cache_write_1h"]
     return {
         "input_tokens": numbers["prompt"],
         "input_tokens_details": input_details,

@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import { creditsEnabled, creditsEnforcement, contextOwner, readCredits, appendCredit, registerCreditAuthority } from "./credits-d1.mjs";
 import { TenantContext, AuthorityOperation, callAuthority, registerEnterpriseAdapters } from "./enterprise-contract.mjs";
+import { modelPricingTable } from "./runtime-feature-flags.mjs";
 
 export class CreditsAdmissionError extends Error {
   constructor(code = "credits_unavailable", status = 503) { super(code); this.code = code; this.status = status; }
@@ -18,7 +19,7 @@ export function integerMicroUsd(value) {
   return Number(result);
 }
 export function nativeTariffRevision(env) {
-  const raw = env.MODEL_PRICING_USD_PER_MILLION;
+  const raw = modelPricingTable(env);
   if (typeof raw !== "string" || !raw || raw.length > 65536) return null;
   try { const table = JSON.parse(raw); if (!table || Array.isArray(table) || typeof table !== "object") return null; }
   catch { return null; }
