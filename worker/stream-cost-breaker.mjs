@@ -52,9 +52,30 @@ function priceFor(env, model) {
   const flatOnly = "request" in entry && !names.some(name => name in entry) && !("input_cost_per_million" in entry) && !("output_cost_per_million" in entry);
   const aliases = { input: "input_cost_per_million", output: "output_cost_per_million" };
   const supplement = metadata?.[model] ?? {};
-  const rates = names.map(name => decimal(flatOnly ? 0 : entry[name] ?? entry[aliases[name]] ?? supplement[name]));
-  const bound = rates.slice(0, 3).reduce((a, b) => greater(a, b) ? a : b);
-  return { model, rates, bound, flat: mul(decimal(entry.request ?? 0), 1_000_000) };
+  const prices = source => {
+    const rates = names.map(name => decimal(flatOnly ? 0 : source[name] ?? source[aliases[name]] ?? supplement[name]));
+    // One-hour cache writes cost their own price, or the 5-minute one without it.
+    const hourSource = [source, supplement].find(item => Object.hasOwn(item, "cache_write_1h"));
+    const hour = flatOnly || !hourSource ? rates[2] : decimal(hourSource.cache_write_1h);
+    const bound = [...rates.slice(0, 3), hour].reduce((a, b) => greater(a, b) ? a : b);
+    return { rates, hour, bound };
+  };
+  const tier = longContext(entry);
+  return { model, ...prices(entry), flat: mul(decimal(entry.request ?? 0), 1_000_000),
+    above: tier?.above ?? null, long: tier ? prices({ ...entry, ...tier.prices }) : null };
+}
+const TIER_PRICE_NAMES = ["input", "output", "cache_read", "cache_write", "cache_write_1h"];
+// A long_context tier prices a whole request whose prompt, cache reads and writes
+// included, is over above_input_tokens. A malformed tier is never guessed around.
+function longContext(entry) {
+  if (!Object.hasOwn(entry, "long_context")) return null;
+  const tier = entry.long_context;
+  if (!tier || typeof tier !== "object" || Array.isArray(tier)) throw failure("stream_cost_unpriced");
+  const { above_input_tokens: above, ...prices } = tier;
+  const names = Object.keys(prices);
+  if (!Number.isSafeInteger(above) || above < 0 || !names.length || names.some(name => !TIER_PRICE_NAMES.includes(name)))
+    throw failure("stream_cost_unpriced");
+  return { above, prices };
 }
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 function observation(value) {
@@ -68,6 +89,7 @@ function observation(value) {
   return {
     raw, read: count(anthropic ? usage.cache_read_input_tokens : details.cached_tokens),
     write: count(anthropic ? usage.cache_creation_input_tokens : details.cache_write_tokens ?? (raw !== null ? 0 : null)),
+    hour: count(anthropic ? usage.cache_creation?.ephemeral_1h_input_tokens : details.cache_write_1h_tokens),
     output: count(usage.completion_tokens ?? usage.output_tokens),
     source: anthropic ? "anthropic" : raw !== null || Object.keys(details).length ? "openai" : "unknown",
   };
@@ -76,6 +98,7 @@ function merge(old, next) {
   if (!old) return next;
   return { raw: next.raw ?? old.raw, read: next.read ?? old.read,
     write: next.source !== "unknown" ? next.write ?? old.write : old.write,
+    hour: next.source !== "unknown" ? next.hour ?? old.hour : old.hour,
     output: next.output ?? old.output, source: next.source === "unknown" ? old.source : next.source };
 }
 function buckets(usage) {
@@ -108,14 +131,19 @@ class StreamCostState {
   cost() {
     const amounts = buckets(this.usage), additional = this.output - this.outputAtMeasurement;
     let measured = this.usage !== null && additional === 0;
-    const costs = this.prices.map(price => {
+    const knownInput = amounts.slice(0, 3).reduce((sum, n) => sum + (n ?? 0), 0);
+    // A measured prompt picks its price tier; otherwise the larger bound does.
+    const prompt = amounts.slice(0, 3).every(n => n !== null) ? knownInput : Math.max(this.input, knownInput);
+    const hour = Math.min(this.usage?.hour ?? 0, amounts[2] ?? 0);
+    const costs = this.prices.map(base => {
+      const price = base.long && prompt > base.above ? { ...base, ...base.long } : base;
       let result = price.flat;
       if (amounts.every((amount, i) => amount !== null || price.rates[i].n === 0n)) {
-        amounts.forEach((amount, i) => { result = add(result, mul(price.rates[i], amount ?? 0)); });
+        amounts.forEach((amount, i) => { result = add(result, mul(price.rates[i], i === 2 ? (amount ?? 0) - hour : amount ?? 0)); });
+        result = add(result, mul(price.hour, hour));
         return add(result, mul(price.rates[3], additional));
       }
       measured = false;
-      const knownInput = amounts.slice(0, 3).reduce((sum, n) => sum + (n ?? 0), 0);
       result = add(result, mul(price.bound, Math.max(this.input, knownInput)));
       return add(result, mul(price.rates[3], Math.max((this.usage?.output ?? 0) + additional, this.output)));
     });

@@ -105,3 +105,29 @@ test("cancel before reading invokes cleanup and finalization once",async()=>{
   const wrapped=wrapStreamCost(upstream.stream,state,{abort(){aborts++;},onFinal(){finals++;}});
   await wrapped.cancel(); assert.equal(upstream.closes(),1);assert.equal(aborts,1);assert.equal(finals,1);
 });
+const tiered = {...env, MODEL_PRICING_USD_PER_MILLION: JSON.stringify({"anthropic:t": {input: 0.1, output: 0.5, cache_read: 0.01,
+  cache_write: 0.125, cache_write_1h: 0.2, long_context: {above_input_tokens: 100000, input: 0.5, output: 2.5,
+    cache_read: 0.05, cache_write: 0.625, cache_write_1h: 1}}})};
+const claudeUsage = (input, output, write = 0, hour = 0) => frame({type: "message_start", message: {usage: {
+  input_tokens: input, cache_read_input_tokens: 0, cache_creation_input_tokens: write,
+  cache_creation: {ephemeral_5m_input_tokens: write - hour, ephemeral_1h_input_tokens: hour}, output_tokens: output}}});
+test("a prompt over the long-prompt threshold is held to the tier price", () => {
+  const over = prepareStreamCostBreaker(tiered, {max_stream_cost_microusd: 20000}, ["anthropic:t"], 0, "anthropic");
+  assert.equal(over.observe(claudeUsage(100001, 1000)), false);
+  assert.equal(over.runningMicrousd, 52501);
+  const under = prepareStreamCostBreaker(tiered, {max_stream_cost_microusd: 20000}, ["anthropic:t"], 0, "anthropic");
+  assert.equal(under.observe(claudeUsage(100000, 1000)), true);
+  assert.equal(under.runningMicrousd, 10500);
+  assert.throws(() => prepareStreamCostBreaker(tiered, {max_stream_cost_microusd: 100000}, ["anthropic:t"], 200000, "anthropic"),
+    error => error.code === "stream_cost_cap_exceeded");
+});
+test("one-hour cache writes count at their price and malformed tiers stay unpriced", () => {
+  const state = prepareStreamCostBreaker(tiered, {max_stream_cost_microusd: 1000000}, ["anthropic:t"], 0, "anthropic");
+  assert.equal(state.observe(claudeUsage(0, 0, 10000, 10000)), true);
+  assert.equal(state.runningMicrousd, 2000);
+  for (const long_context of [{input: 1}, {above_input_tokens: "1", input: 1}, {above_input_tokens: 1}, {above_input_tokens: 1, ouput: 1}]) {
+    const malformed = {...env, MODEL_PRICING_USD_PER_MILLION: JSON.stringify({"anthropic:t": {input: 1, output: 1, long_context}})};
+    assert.throws(() => prepareStreamCostBreaker(malformed, {max_stream_cost_microusd: 1000}, ["anthropic:t"], 0, "anthropic"),
+      error => error.code === "stream_cost_unpriced");
+  }
+});

@@ -1377,7 +1377,7 @@
   "services/stream_cost_breaker.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "7b9b9155a0837671f4d159c694e558def292d3464daa77d26f0a37ad85f13894"
+    "sha256": "e6c28c56363a6f70997331a3bfae13e2a5c3c67dfea155205046fb3df814d6d9"
   },
   "services/stream_preflight.py": {
     "kind": "guarded",
@@ -2392,7 +2392,7 @@
   "worker/stream-cost-breaker.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "4499dfeaa2ac5ceaf1b37bf438515eded6c2738dca5ed9ca56bbc23b48edb07c"
+    "sha256": "a29fbdd73cb94c2ad0c2de265a9d600d1c26a5cc07fdf74e68bbe61852e495d5"
   },
   "worker/tenant-governance-d1.mjs": {
     "kind": "non-provider",

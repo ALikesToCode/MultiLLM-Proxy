@@ -5,11 +5,12 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import Any
 
 from error_handlers import APIError
+from services import price_tiers
 from services.cost_service import CostService
 from services.prompt_cache_cost import CacheObservation, buckets_from, COST_FIELDS
 
@@ -156,16 +157,35 @@ class Prices:
     output: Decimal
     flat: Decimal
     rates: tuple[Decimal, ...]
+    # The one-hour cache-write rate, and the long-prompt tier's prices with the
+    # prompt size above which they apply.
+    hour_write: Decimal | None = None
+    above: int | None = None
+    long: Prices | None = None
 
-def prices_for(model: str) -> Prices:
-    probe = CacheObservation(3, 1, "provider", ("provider",), 1, 1, 1, "anthropic")
+def _bucket_rates(model: str, prompt_tokens: int, *, one_hour: bool = False) -> tuple[Decimal, ...]:
+    """Per-token bucket prices for a request whose prompt holds prompt_tokens."""
+    probe = CacheObservation(prompt_tokens, 1, "provider", ("provider",), 1, 1, 1, "anthropic",
+                             cache_write_1h=1 if one_hour else None)
     result = CostService.price_buckets(model, probe)
     if result["cost_usd"] is None or any(result[name] is None for name in COST_FIELDS):
         raise failure("stream_cost_unpriced")
-    rates = [Decimal(str(result[name])) for name in COST_FIELDS]
+    return tuple(Decimal(str(result[name])) for name in COST_FIELDS)
+
+def _prices(model: str, prompt_tokens: int, flat: Decimal) -> Prices:
+    rates = _bucket_rates(model, prompt_tokens)
+    hour = _bucket_rates(model, prompt_tokens, one_hour=True)[2]
+    return Prices(model, max((*rates[:3], hour)), rates[3], flat, rates, hour)
+
+def prices_for(model: str) -> Prices:
     catalog = CostService.pricing_for(model) or {}
     flat = catalog.get("request", Decimal(0)) * 1_000_000
-    return Prices(model, max(rates[:3]), rates[3], flat, tuple(rates))
+    base = _prices(model, 0, flat)
+    tier = catalog.get(price_tiers.TIER_KEY)
+    if tier is None:
+        return base
+    above = tier[price_tiers.THRESHOLD_KEY]
+    return replace(base, above=above, long=_prices(model, above + 1, flat))
 
 def _strings(value) -> int:
     if isinstance(value, str):
@@ -210,13 +230,19 @@ class StreamCostState:
         counts = buckets_from(measured)
         amounts = [counts[name] for name in (
             "ordinary_input_tokens", "cache_read_input_tokens", "cache_write_input_tokens", "output_tokens")]
-        for price in self.prices:
+        known_input = sum(v for v in amounts[:3] if v is not None)
+        # A measured prompt picks its price tier; otherwise the larger bound does.
+        prompt = known_input if all(v is not None for v in amounts[:3]) else max(self.input_tokens, known_input)
+        one_hour = min(measured.cache_write_1h or 0, amounts[2] or 0) if isinstance(measured, CacheObservation) else 0
+        for base in self.prices:
+            price = base.long if base.long is not None and base.above is not None and prompt > base.above else base
             if all(amount is not None or rate == 0 for amount, rate in zip(amounts, price.rates)):
                 amount = price.flat + sum((Decimal(value or 0) * rate for value, rate in zip(amounts, price.rates)), Decimal(0))
+                if one_hour and price.hour_write is not None:
+                    amount += one_hour * (price.hour_write - price.rates[2])
                 amount += additional * price.output
             else:
                 fully_measured = False
-                known_input = sum(v for v in amounts[:3] if v is not None)
                 output = measured.output_tokens if measured is not None and measured.output_tokens is not None else 0
                 amount = price.flat + max(self.input_tokens, known_input) * price.bound_input + max(output + additional, self.output_bound) * price.output
             costs.append(amount)
