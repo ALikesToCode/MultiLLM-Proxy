@@ -9,7 +9,7 @@ import { retentionAllowsContent } from "./retention-policy.mjs";
 import { cacheServedEvent } from "./exact-generation-cache.mjs";
 import { createReservationLifecycle, nativeReservationLifecycle, handleReservationsRequest, reservationSettings } from "./reservations-d1.mjs";
 import { recordNativeUsage } from "./usage-ledger-d1.mjs";
-import { modelPricingTable } from "./runtime-feature-flags.mjs";
+import { modelPricingTable, pricesForPrompt } from "./runtime-feature-flags.mjs";
 const object = value => value && typeof value === "object" && !Array.isArray(value);
 const MODEL = /^[a-z][a-z0-9-]*:[A-Za-z0-9@][A-Za-z0-9._:/+@-]{0,255}$/;
 const VOLATILE = /\b(?:today|tomorrow|yesterday|now|current|latest|live|weather|stock|real.?time)\b/i;
@@ -76,8 +76,10 @@ export function embeddingPrice(env, model, tokens = 1024) {
   try {
     const table = JSON.parse(modelPricingTable(env) ?? "{}");
     const normalized = model.toLowerCase(), provider = normalized.split(":", 1)[0];
-    const entry = table[normalized] ?? table[`${provider}:*`] ?? table["*"];
-    if (!object(entry)) return null;
+    const found = table[normalized] ?? table[`${provider}:*`] ?? table["*"];
+    if (!object(found)) return null;
+    const entry = pricesForPrompt(found, tokens);
+    if (!entry) return null;
     const flatOnly = Object.hasOwn(entry, "request") && !["input", "output", "input_cost_per_million", "output_cost_per_million"].some(k => Object.hasOwn(entry, k));
     const input = flatOnly ? 0 : entry.input ?? entry.input_cost_per_million;
     const output = flatOnly ? 0 : entry.output ?? entry.output_cost_per_million;

@@ -1,5 +1,5 @@
 /** Opt-in stream cost enforcement for native Worker responses. */
-import { modelPricingTable } from "./runtime-feature-flags.mjs";
+import { longContextTier, modelPricingTable } from "./runtime-feature-flags.mjs";
 const CAP = "max_stream_cost_microusd";
 export const STREAM_CAP_FIELD = CAP;
 const MAX_CAP = 1_000_000_000_000;
@@ -60,22 +60,10 @@ function priceFor(env, model) {
     const bound = [...rates.slice(0, 3), hour].reduce((a, b) => greater(a, b) ? a : b);
     return { rates, hour, bound };
   };
-  const tier = longContext(entry);
+  let tier;
+  try { tier = longContextTier(entry); } catch { throw failure("stream_cost_unpriced"); }
   return { model, ...prices(entry), flat: mul(decimal(entry.request ?? 0), 1_000_000),
     above: tier?.above ?? null, long: tier ? prices({ ...entry, ...tier.prices }) : null };
-}
-const TIER_PRICE_NAMES = ["input", "output", "cache_read", "cache_write", "cache_write_1h"];
-// A long_context tier prices a whole request whose prompt, cache reads and writes
-// included, is over above_input_tokens. A malformed tier is never guessed around.
-function longContext(entry) {
-  if (!Object.hasOwn(entry, "long_context")) return null;
-  const tier = entry.long_context;
-  if (!tier || typeof tier !== "object" || Array.isArray(tier)) throw failure("stream_cost_unpriced");
-  const { above_input_tokens: above, ...prices } = tier;
-  const names = Object.keys(prices);
-  if (!Number.isSafeInteger(above) || above < 0 || !names.length || names.some(name => !TIER_PRICE_NAMES.includes(name)))
-    throw failure("stream_cost_unpriced");
-  return { above, prices };
 }
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 function observation(value) {

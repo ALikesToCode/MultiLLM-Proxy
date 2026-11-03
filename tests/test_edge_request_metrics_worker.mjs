@@ -208,6 +208,21 @@ test("explicit estimate collaborator retains measured zero and marks estimated c
   await missing.text(); assert.equal(unknown[0].outcome, "unknown"); assert.equal(unknown[0].usage_basis, "unknown");
 });
 
+test("native cost applies a long-prompt tier and leaves a malformed tier unpriced", async () => {
+  const priced = async (entry, input) => {
+    const events = [];
+    const response = await observeNativeResponse(new Response(JSON.stringify({ usage: { input_tokens: input, output_tokens: 1000 } })),
+      { provider: "linkapi", model: "tiered" }, { env: { MODEL_PRICING_USD_PER_MILLION: JSON.stringify({ "linkapi:tiered": entry }) },
+        finalize: event => events.push(event) });
+    await response.text();
+    return events[0].cost_usd;
+  };
+  const tiered = { input: 0.1, output: 0.5, long_context: { above_input_tokens: 100000, input: 0.5, output: 2.5 } };
+  assert.ok(Math.abs(await priced(tiered, 100000) - 0.0105) < 1e-12);
+  assert.ok(Math.abs(await priced(tiered, 100001) - 0.0525005) < 1e-12);
+  assert.equal(await priced({ ...tiered, long_context: { above_input_tokens: 100000 } }, 10), null);
+});
+
 test("multiline UTF-8 SSE and large JSON keep bounds and original bytes", async () => {
   const parser = createUsageObserver(true), raw = 'data: {"usage":\r\ndata: {"input_tokens":0,"output_tokens":0}}\r\n\r\ndata: [DONE]\r\n\r\n';
   const bytes = encoder.encode(raw); for (const byte of bytes) { parser.feed(new Uint8Array([byte])); assert.ok(parser.carryBytes <= 65536); }
