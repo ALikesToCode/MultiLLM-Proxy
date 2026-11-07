@@ -576,7 +576,8 @@ def cache_breakpoints(body: Mapping[str, Any]) -> list[dict]:
     marked = [block for block in system if isinstance(block, dict) and "cache_control" in block] if isinstance(
         system, list) else []
     for turn in body.get("messages") or ():
-        for block in turn.get("content") if isinstance(turn, Mapping) and isinstance(turn.get("content"), list) else ():
+        content = turn.get("content") if isinstance(turn, Mapping) else None
+        for block in content if isinstance(content, list) else ():
             if not isinstance(block, dict):
                 continue
             if "cache_control" in block:
