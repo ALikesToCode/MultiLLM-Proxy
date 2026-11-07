@@ -457,6 +457,37 @@ class AdvisorReservationTest(LedgerTestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertEqual(send.call_count, 1 if status == 200 else 0)
 
+    def stream_cap(self, usd):
+        os.environ["STREAM_COST_BREAKER_ENABLED"] = "true"
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            self.app_module.AuthService.set_key_controls("advised", {"max_stream_cost_usd": usd})
+
+    def test_a_stream_cap_counts_the_advisor_worst_case(self):
+        self.stream_cap(0.005)
+        response, data, send = self.messages({"stream": True}, stream_reply(advised_frames()), key=self.key)
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Stream cost enforcement refused", json.loads(data)["error"]["message"])
+        send.assert_not_called()
+        # The same request without the advisor fits the cap.
+        response, _, _ = self.messages({"stream": True, "tools": []}, stream_reply(advised_frames()), key=self.key)
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_stream_cap_with_room_for_the_advisor_admits_it(self):
+        self.stream_cap(1)
+        response, data, _ = self.messages({"stream": True}, stream_reply(advised_frames()), key=self.key)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data, advised_frames())
+        self.assertAlmostEqual(self.rows()[SONNET]["cost_usd"], SONNET_COST)
+
+    def test_a_stream_capped_key_must_bound_its_advisor(self):
+        self.stream_cap(1)
+        tool = {key: value for key, value in advisor_tool().items() if key != "max_uses"}
+        response, data, send = self.messages({"stream": True, "tools": [tool]}, stream_reply(advised_frames()),
+                                             key=self.key)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_uses", json.loads(data)["error"]["message"])
+        send.assert_not_called()
+
     def test_an_uncapped_key_may_leave_its_advisor_unbounded(self):
         tool = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5"}
         response, _, _ = self.messages({"tools": [tool]}, json_reply(advised_message()), key=self.key)

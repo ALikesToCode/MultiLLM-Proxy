@@ -1242,7 +1242,7 @@
   "services/request_accounting.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "c1569d2af17988ba731f9b07ba7cc4ae46ec0e145ed376a4302fcc2db50d4825"
+    "sha256": "6cb222916d0112e405a6d25426e76fbcf3d3827631e75c965b34823274d479fa"
   },
   "services/request_cancellation.py": {
     "kind": "non-provider",
@@ -1377,7 +1377,7 @@
   "services/stream_cost_breaker.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "e6c28c56363a6f70997331a3bfae13e2a5c3c67dfea155205046fb3df814d6d9"
+    "sha256": "8da70f60f154fb9fa1855f3580a57822ef15125e618f0d0b30443feec7fa22fe"
   },
   "services/stream_preflight.py": {
     "kind": "guarded",

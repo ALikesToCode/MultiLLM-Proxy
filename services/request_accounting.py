@@ -235,6 +235,12 @@ def reservation_price(models, input_tokens, output_tokens, units):
     return max(costs) if costs and all(cost is not None for cost in costs) else None
 
 
+def _unbounded_advisor(context: UsageContext) -> Optional[str]:
+    """The first bound an advisor leaves unset; Claude then applies no limit."""
+    return next((name for advisor in context.advisors for name in ("max_uses", "max_tokens")
+                 if getattr(advisor, name) is None), None)
+
+
 def advisor_exposure(context: UsageContext, models: list[str], strict: bool) -> Optional[float]:
     """The most the request's advisors can cost, in USD; None when strict pricing
     cannot price one.
@@ -330,8 +336,19 @@ def begin() -> Optional[Response]:
                     "responses" if request.path.endswith("/responses") else "chat")
         qualified = [_qualified(candidate, provider) for model in models for candidate in _candidates(model)]
         try:
+            # Claude reports an advisor's tokens only once the stream ends, so the cap
+            # counts each advisor at its worst case from the start.
+            missing = _unbounded_advisor(context)
+            if missing:
+                return _error(400, "invalid_request_error",
+                              f"Set {missing} on the advisor tool: this key's stream cost is capped, so the "
+                              "advisor's cost must be bounded before the request is sent.")
+            reserved = advisor_exposure(context, qualified, strict=True)
+            if reserved is None:
+                raise stream_cost_breaker.failure("stream_cost_unpriced")
             context.stream_cost = stream_cost_breaker.prepare(
-                user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol)
+                user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol,
+                reserved_usd=reserved)
         except APIError as error:
             return _error(error.status_code, error.payload["error"], "Stream cost enforcement refused this request.")
     denied = reserve_attempt(context)
@@ -354,8 +371,7 @@ def reserve_attempt(context):
     qualified = [_qualified(model, context.provider) for model in context.models]
     estimate = None
     if budgeted(user) or charged:
-        missing = next((name for advisor in context.advisors for name in ("max_uses", "max_tokens")
-                        if getattr(advisor, name) is None), None)
+        missing = _unbounded_advisor(context)
         if missing:
             return _error(400, "invalid_request_error",
                           f"Set {missing} on the advisor tool: this key's spending is capped, so the "
