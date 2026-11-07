@@ -246,15 +246,20 @@ def advisor_exposure(context: UsageContext, models: list[str], strict: bool) -> 
     cannot price one.
 
     Each of an advisor's `max_uses` calls reads the transcript (the prompt, the
-    request's output limit and earlier advice) plus its own prompt, and writes up to
-    `max_tokens`. The request's model then reads the transcript again.
+    request's output limit and earlier advice) plus its own prompt, writes that prompt
+    to the cache when the tool asks for caching, and writes up to `max_tokens`. The
+    request's model then reads the transcript again.
     """
     total = 0.0
     executors = [candidate for model in models for candidate in _candidates(model)]
     for advisor in context.advisors:
         uses, tokens = advisor.max_uses or 0, advisor.max_tokens or 0
         transcript = context.input_tokens + context.output_tokens + uses * tokens
-        advice = CostService.estimate(advisor.model, transcript + ADVISOR_PROMPT_TOKENS, tokens)
+        prompt = transcript + ADVISOR_PROMPT_TOKENS
+        advice = CostService.estimate(advisor.model, prompt, tokens)
+        if advice is not None and advisor.cache_write:
+            read = CostService.estimate(advisor.model, prompt, 0)
+            advice = None if read is None else advice + advisor.cache_write * read
         rereads = [CostService.estimate(model, transcript, 0) for model in executors]
         if strict and (advice is None or any(cost is None for cost in rereads)):
             return None

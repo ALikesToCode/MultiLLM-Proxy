@@ -22,11 +22,18 @@ class AdvisorError(ValueError):
     """An advisor tool that names no usable model."""
 
 
+# A cache write costs this much more than reading the same prompt: 1.25 times the
+# input price for five minutes, twice for an hour.
+CACHE_WRITE_EXTRA = {"5m": 0.25, "1h": 1.0}
+
+
 @dataclass(frozen=True)
 class Advisor:
     model: str
     max_uses: Optional[int]
     max_tokens: Optional[int]
+    # The share of the advisor's prompt price each call adds by writing the cache.
+    cache_write: float = 0.0
 
 
 def executor_provider(model: Any, provider: Optional[str] = None) -> str:
@@ -72,9 +79,19 @@ def qualified_model(model: Any, provider: str) -> str:
     return model.lower()
 
 
+def _cache_write(tool: dict) -> float:
+    caching = tool.get("caching")
+    if not isinstance(caching, dict):
+        return 0.0
+    ttl = caching.get("ttl", "5m")
+    # An unknown TTL is priced as the dearer one.
+    return CACHE_WRITE_EXTRA.get(ttl, 1.0) if isinstance(ttl, str) else 1.0
+
+
 def advisors(payload: Any, provider: str) -> list[Advisor]:
     """Every advisor a request declares, with its catalog id and declared bounds."""
-    return [Advisor(qualified_model(tool.get("model"), provider), _bound(tool, "max_uses"), _bound(tool, "max_tokens"))
+    return [Advisor(qualified_model(tool.get("model"), provider), _bound(tool, "max_uses"), _bound(tool, "max_tokens"),
+                    _cache_write(tool))
             for tool in advisor_tools(payload)]
 
 

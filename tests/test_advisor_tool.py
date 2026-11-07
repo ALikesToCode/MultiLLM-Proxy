@@ -510,3 +510,21 @@ def test_strict_reservations_refuse_an_unpriced_advisor(monkeypatch):
     transcript = 1000 + 500 + 2 * 2000
     expected = 2 * ((transcript + 4096) * 2 / 1e6 + 2000 * 10 / 1e6 + transcript * 0.1 / 1e6)
     assert abs(request_accounting.advisor_exposure(priced, [HAIKU], strict=True) - expected) < 1e-12
+
+
+def test_advisor_caching_adds_its_cache_writes_to_the_worst_case(monkeypatch):
+    from services import advisor_tool as advisors_module, request_accounting
+
+    monkeypatch.setenv("MODEL_PRICING_USD_PER_MILLION", SHIPPED_PRICES)
+    transcript = 1000 + 500 + 2 * 2000
+    prompt = (transcript + 4096) * 2 / 1e6
+    plain = 2 * (prompt + 2000 * 10 / 1e6 + transcript * 0.1 / 1e6)
+    for caching, extra in ((None, 0), ({"type": "ephemeral"}, 0.25), ({"type": "ephemeral", "ttl": "5m"}, 0.25),
+                           ({"type": "ephemeral", "ttl": "1h"}, 1.0), ({"type": "ephemeral", "ttl": "2h"}, 1.0),
+                           ({"type": "ephemeral", "ttl": ["1h"]}, 1.0)):
+        tool = advisor_tool(max_uses=2, max_tokens=2000, **({"caching": caching} if caching else {}))
+        [advisor] = advisors_module.advisors({"tools": [tool]}, "anthropic")
+        context = request_accounting.UsageContext("chat", [HAIKU], None, {}, 0.0, 0, input_tokens=1000,
+                                                  output_tokens=500, advisors=(advisor,))
+        exposure = request_accounting.advisor_exposure(context, [HAIKU], strict=True)
+        assert abs(exposure - (plain + 2 * extra * prompt)) < 1e-12, caching
