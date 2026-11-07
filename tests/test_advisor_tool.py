@@ -350,6 +350,18 @@ class AdvisorLedgerTest(LedgerTestCase):
         self.assertEqual((rows[SONNET]["input_tokens"], rows[SONNET]["output_tokens"]), (2778, 685))
         self.assertAlmostEqual(rows[SONNET]["cost_usd"], SONNET_COST)
 
+    def test_a_cached_reply_records_no_advisor(self):
+        accounting = sys.modules["services.request_accounting"]
+        usage = accounting.prompt_cache_cost.CacheObservation.from_body(advised_message())
+        context = accounting.UsageContext("chat", [HAIKU], None, {"username": "advised"}, 0.0, 0,
+                                          path="/v1/messages", cached=True,
+                                          trace=accounting.telemetry_export.trace_context(None))
+        with self.app_module.app.test_request_context("/v1/messages", method="POST"):
+            accounting._record(context, 200, usage, None)
+        rows = self.rows()
+        self.assertEqual(set(rows), {HAIKU})
+        self.assertEqual((rows[HAIKU]["cost_usd"], rows[HAIKU]["cost_basis"]), (0.0, "cache"))
+
     def test_a_reply_without_steps_keeps_one_row(self):
         usage = {"input_tokens": 1000, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         self.messages({"tools": []}, json_reply(advised_message(usage)), key=self.key)
