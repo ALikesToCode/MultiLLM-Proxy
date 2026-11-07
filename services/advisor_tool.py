@@ -41,7 +41,9 @@ def executor_provider(model: Any, provider: Optional[str] = None) -> str:
 
 
 def is_advisor_tool(tool: Any) -> bool:
-    return isinstance(tool, dict) and isinstance(tool.get("type"), str) and tool["type"].startswith(TOOL_PREFIX)
+    # Any spelling of the type is checked; whether Claude accepts it is Claude's call.
+    return (isinstance(tool, dict) and isinstance(tool.get("type"), str)
+            and tool["type"].strip().lower().startswith(TOOL_PREFIX))
 
 
 def advisor_tools(payload: Any) -> list[dict]:

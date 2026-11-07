@@ -174,6 +174,15 @@ class AdvisorPolicyTest(AdvisorTestCase):
                 self.assertIn("anthropic:claude-opus-5-5", json.loads(data)["error"]["message"].lower())
                 send.assert_not_called()
 
+    def test_any_spelling_of_the_tool_type_is_checked(self):
+        key = self.restricted_key()
+        for kind in ("Advisor_20260301", " advisor_20260301", "ADVISOR_20260301", "advisor_20991231"):
+            with self.subTest(kind=kind):
+                tool = advisor_tool("claude-opus-5-5", type=kind)
+                response, _, send = self.messages({"tools": [tool]}, json_reply(advised_message()), key=key)
+                self.assertEqual(response.status_code, 403)
+                send.assert_not_called()
+
     def test_the_refusal_matches_a_disallowed_top_level_model(self):
         key = self.restricted_key()
         _, advised, _ = self.messages({"tools": [advisor_tool("claude-opus-5-5")]}, json_reply(advised_message()), key=key)
