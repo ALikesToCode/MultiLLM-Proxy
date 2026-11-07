@@ -120,7 +120,7 @@ for limits and protocol caveats.
 | Reasoning | `reasoning_effort` → `thinking` with a budget (low 2048 … max 32768, kept below `max_tokens`, dropped under 1024); `none` disables thinking. `thinking` budgets and `output_config.effort` → `reasoning_effort` | `reasoning_effort` ↔ `reasoning.effort` |
 | Reasoning output | `thinking` blocks ↔ `reasoning_content` | `reasoning` items (`reasoning_text` or summaries) ↔ `reasoning_content` |
 | Usage | Anthropic input excludes cache reads and writes; both are kept (`cached_tokens`, `cache_write_tokens`) | `input_tokens_details`/`output_tokens_details` ↔ `prompt_tokens_details`/`completion_tokens_details` |
-| Stop reasons | `end_turn`/`stop_sequence`/`pause_turn` → `stop`, `max_tokens`/`model_context_window_exceeded` → `length`, `tool_use` → `tool_calls`, `refusal` → `content_filter` | `incomplete` with `max_output_tokens` → `length`, `content_filter` → `content_filter` |
+| Stop reasons | `end_turn`/`stop_sequence` → `stop`, `max_tokens`/`model_context_window_exceeded`/`pause_turn` → `length`, `tool_use` → `tool_calls`, `refusal` → `content_filter` | `incomplete` with `max_output_tokens` → `length`, `content_filter` → `content_filter` |
 | Errors | Anthropic `{"type":"error","error":{...}}` ↔ OpenAI `{"error":{...}}`, status kept | Both use the OpenAI envelope and pass through |
 
 Reasoning is round-tripped only where the target can use it: thinking chat

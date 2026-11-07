@@ -209,6 +209,23 @@ class AdvisorExtensionTest(ExtensionTestCase):
                 self.assertEqual(send.call_count, 1)
 
 
+    def test_a_paused_turn_is_reported_as_unfinished(self):
+        pending = {"type": "server_tool_use", "id": "srvtoolu_pending", "name": "advisor", "input": {}}
+        paused = {**advised_message(), "stop_reason": "pause_turn",
+                  "content": [{"type": "text", "text": "Let me check."}, pending]}
+        _, data, _ = self.chat({}, json_reply(paused))
+        choice = json.loads(data)["choices"][0]
+        self.assertEqual((choice["finish_reason"], choice["message"]["content"]), ("length", "Let me check."))
+        _, data, _ = self.responses({}, json_reply(paused))
+        self.assertEqual(json.loads(data)["status"], "incomplete")
+        stream = advised_frames().replace(b'"stop_reason": "end_turn", "stop_sequence"', b'"stop_reason": "pause_turn", "stop_sequence"')
+        self.assertIn(b"pause_turn", stream)
+        _, data, _ = self.chat({"stream": True}, stream_reply(stream))
+        finishes = [choice["finish_reason"] for chunk in frames(data) for choice in chunk.get("choices", [])
+                    if choice.get("finish_reason")]
+        self.assertEqual(finishes, ["length"])
+
+
 class AdvisorExtensionValidationTest(ExtensionTestCase):
     def test_a_malformed_advisor_field_is_refused_before_dispatch(self):
         for advisor in ("claude-sonnet-5-5", {"model": "claude-sonnet-5-5", "max_uses": 0},

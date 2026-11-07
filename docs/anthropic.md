@@ -167,7 +167,10 @@ OpenRouter provider with `providerOptions.openrouter.advisor`, can send it as is
 
 The reply carries the final answer only. Text, function tool calls and
 `response_format` with `json_schema` work as without the advisor, and the
-advisor's blocks are left out. When a signed thinking turn ends in a tool call,
+advisor's blocks are left out. When Claude pauses the turn with an advisor call
+still pending (`stop_reason: "pause_turn"`), the reply ends with `finish_reason:
+"length"` (Responses: `status: "incomplete"`). The gateway does not resume a
+paused turn, so send the request again. When a signed thinking turn ends in a tool call,
 `extra_content.anthropic.content` includes the advisor's blocks; send the same
 `advisor` field with every later request that returns them, or the request gets
 400.
