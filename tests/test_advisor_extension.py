@@ -83,6 +83,16 @@ class AdvisorExtensionTest(ExtensionTestCase):
         self.assertIn("cache_control", tools[0])
         self.assertEqual(tools[1], TOOL)
 
+    def test_lean_leaves_tool_results_in_place_with_the_advisor(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        for body, cleared in (({"tools": [lookup]}, True), ({"tools": [lookup], "advisor": ADVISOR}, False),
+                              ({"advisor": ADVISOR}, False)):
+            with self.subTest(body=list(body)):
+                payload = {"model": HAIKU, "messages": QUESTION, **body}
+                response, data, send = self.post("/lean/v1/chat/completions", payload, json_reply(advised_message()))
+                self.assertEqual(response.status_code, 200, data)
+                self.assertEqual("context_management" in self.upstream(send)[0], cleared)
+
     def test_chat_replies_without_advisor_blocks_and_with_advisor_usage(self):
         for path in CHAT_PATHS:
             with self.subTest(path=path):

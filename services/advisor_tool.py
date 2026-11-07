@@ -98,10 +98,15 @@ def _replays_advice(body: Any) -> bool:
         for block in message["content"])
 
 
+def involves_advisor(body: Any) -> bool:
+    """Whether a Messages body declares the advisor tool or replays its blocks."""
+    return bool(advisor_tools(body)) or _replays_advice(body)
+
+
 def declared_betas(body: Any) -> tuple[str, ...]:
     """The beta a Messages body needs for the advisor tools it declares or the advisor
     blocks its history replays (Claude accepts those without the tool, given the beta)."""
-    return (BETA,) if advisor_tools(body) or _replays_advice(body) else ()
+    return (BETA,) if involves_advisor(body) else ()
 
 
 def _bound(tool: dict, name: str) -> Optional[int]:

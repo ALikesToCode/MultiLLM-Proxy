@@ -2472,12 +2472,12 @@
   "services/lean_mode.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "d1f8e5198689d8d679d21d1d223267b6898d1f28a9ba67e1d1c08ef9179718f2"
+    "sha256": "fab2142b642f7ca80ccfb23cdc385a357c4819f5d973bf4dbf923b6418fd90a4"
   },
   "services/advisor_tool.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "cd6022aa67ba9d730814808abfd2de0bfba42d31ea5c7edaefc581718f523255"
+    "sha256": "96fcafc3b55496478fa641b97ee179ac7937dba4ed5d90946223e20c3870c5a9"
   },
   "services/usage_iterations.py": {
     "kind": "non-provider",
