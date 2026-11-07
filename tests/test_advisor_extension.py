@@ -323,6 +323,16 @@ class AdvisorExtensionTest(ExtensionTestCase):
         self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
 
 
+    def test_tool_choice_none_rules_out_the_advisor_without_function_tools(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        for extra in ({}, {"tools": [lookup]}):
+            with self.subTest(function_tools=bool(extra)):
+                _, data, send = self.chat({"tool_choice": "none", **extra}, json_reply(advised_message()))
+                self.assertEqual(self.upstream(send)[0]["tool_choice"], {"type": "none"}, data)
+        _, data, send = self.responses({"tool_choice": "none"}, json_reply(advised_message()))
+        self.assertEqual(self.upstream(send)[0]["tool_choice"], {"type": "none"}, data)
+
+
 class AdvisorExtensionValidationTest(ExtensionTestCase):
     def test_a_malformed_advisor_field_is_refused_before_dispatch(self):
         for advisor in ("claude-sonnet-5-5", {"model": "claude-sonnet-5-5", "max_uses": 0},

@@ -77,6 +77,9 @@ def responses_request_to_chat(payload: Mapping[str, Any]) -> dict:
             chat["tool_choice"] = choice
         if payload.get("parallel_tool_calls") is False:
             chat["parallel_tool_calls"] = False
+    elif choice == "none" and payload.get("advisor") is not None:
+        # "none" also rules out the advisor tool the field adds.
+        chat["tool_choice"] = "none"
 
     text = payload.get("text")
     response_format = _text_format_to_chat(

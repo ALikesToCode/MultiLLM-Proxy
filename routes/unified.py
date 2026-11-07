@@ -398,6 +398,10 @@ def _dispatch_bridged_chat(
     advisor = _requested_advisor(payload, provider, provider_model, target)
     if advisor is not None:
         body = {**body, "tools": [*(body.get("tools") or []), advisor]}
+        if payload.get("tool_choice") == "none" and "tool_choice" not in body:
+            # Translation keeps tool_choice only beside function tools; "none" rules
+            # out the advisor too, as it does when function tools come along.
+            body["tool_choice"] = {"type": "none"}
         _refuse_disabled_advisors(body, provider)
         body = advisor_tool.upstream_payload(body, provider)
     cache_decision = apply_prompt_cache_policy(

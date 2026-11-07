@@ -201,8 +201,9 @@ The gateway sends it to Claude as the advisor tool with the
 `advisor-tool-2026-03-01` beta; the caller sends no header. Other keys, a request
 for a model outside `anthropic:` (an automatic route included) or a bound that is
 not a positive integer get 400 before anything is sent. A `null` field is no
-advisor. Clients that pass provider options as body fields, such as the AI SDK's
-OpenRouter provider with `providerOptions.openrouter.advisor`, can send it as is.
+advisor, and `tool_choice: "none"` rules the advisor out too. Clients that pass
+provider options as body fields, such as the AI SDK's OpenRouter provider with
+`providerOptions.openrouter.advisor`, can send it as is.
 
 The reply carries the final answer only. Text, function tool calls and
 `response_format` with `json_schema` work as without the advisor, and the

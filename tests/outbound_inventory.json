@@ -402,7 +402,7 @@
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "2dd79d087003e5821dd8a88b5f8435f7384e9162e0628891ad9972359d6e1b9b"
+    "sha256": "9c6519e51a109fd79a8eefbc51261fb297e4123ce20c1e64495e6218cb0bb955"
   },
   "routes/unified_bridge.py": {
     "kind": "non-provider",
@@ -1132,7 +1132,7 @@
   "services/protocol_translation/responses_requests.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "338edb84f38d0b09f7e9bdcc6f400970787745d63d4c720a738574d706efbbfd"
+    "sha256": "d15eb3812880c04770e6a26ccd03c0b30e39a9531885bb2ef8000fdd70824bf4"
   },
   "services/provider_access_policy.py": {
     "kind": "non-provider",
