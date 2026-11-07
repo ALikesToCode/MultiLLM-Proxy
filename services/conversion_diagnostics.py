@@ -140,6 +140,9 @@ def _nested_losses(payload: Mapping[str, Any], prefix: str, source: str, target:
     arrays = ("messages", "input", "output", "choices", "content", "system", "tools")
     opaque_members = {"cache_control", "citations", "signature", "logprobs", "annotations",
                       "encrypted_content", "service_tier", "refusal"}
+    if prefix == "request" and source == translation.CHAT and target == translation.MESSAGES:
+        # Chat content-part breakpoints become Claude's own.
+        opaque_members.discard("cache_control")
 
     def visit(value: Any, path: str, depth: int = 0) -> None:
         if depth > 5:

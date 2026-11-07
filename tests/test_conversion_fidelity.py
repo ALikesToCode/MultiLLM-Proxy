@@ -70,6 +70,13 @@ def test_known_conversion_losses(body, source, target, path, classification):
     assert fields(request_report(body, source, target))[path] == classification
 
 
+def test_chat_breakpoints_are_not_lost_on_the_way_to_claude():
+    body = {"messages": [{"role": "user", "content": [{"type": "text", "text": "private",
+                                                       "cache_control": {"type": "ephemeral"}}]}]}
+    assert "request.messages[].content[].cache_control" not in fields(request_report(body, CHAT, MESSAGES))
+    assert fields(request_report(body, CHAT, RESPONSES))["request.messages[].content[].cache_control"] == "lossy"
+
+
 def test_response_fields_and_tool_values_are_content_free():
     body = copy.deepcopy(CHAT_COMPLETION)
     body["choices"][0]["logprobs"] = {"content": "private"}

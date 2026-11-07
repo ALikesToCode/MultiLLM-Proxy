@@ -44,6 +44,9 @@ from services.protocol_translation.common import (
 
 # Messages requires max_tokens; Chat Completions does not.
 DEFAULT_MAX_TOKENS = 8192
+# Claude reads at most four cache breakpoints in a request.
+MAX_CACHE_BREAKPOINTS = 4
+CACHE_TTLS = frozenset({"5m", "1h"})
 JSON_OBJECT_INSTRUCTION = "Respond with a single valid JSON object and no other text."
 # Server-tool history blocks carry results only Anthropic's runtime can replay.
 _SERVER_HISTORY_BLOCKS = frozenset(
@@ -409,20 +412,18 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
     if not isinstance(messages, list) or not messages:
         raise TranslationError("'messages' must be a non-empty array", param="messages")
 
-    system_parts: list[str] = []
+    system_blocks: list[dict] = []
     turns: list[dict] = []
     for index, message in enumerate(messages):
         if not isinstance(message, Mapping):
             raise TranslationError(f"messages[{index}] must be an object", param="messages")
         role = message.get("role")
         if role in {"system", "developer"}:
-            text = text_of(message.get("content"))
-            if text:
-                system_parts.append(text)
+            system_blocks.extend(_chat_system_blocks(message.get("content"), index))
         elif role == "user":
             _append_turn(turns, "user", _chat_user_blocks(message.get("content"), index))
         elif role == "assistant":
-            _append_turn(turns, "assistant", _chat_assistant_blocks(message))
+            _append_turn(turns, "assistant", _chat_assistant_blocks(message, index))
         elif role == "tool":
             _append_turn(
                 turns,
@@ -462,9 +463,12 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
     body["max_tokens"] = max_tokens
     response_format = payload.get("response_format")
     if isinstance(response_format, Mapping) and response_format.get("type") == "json_object":
-        system_parts.append(JSON_OBJECT_INSTRUCTION)
-    if system_parts:
-        body["system"] = "\n\n".join(system_parts)
+        system_blocks.append({"type": "text", "text": JSON_OBJECT_INSTRUCTION})
+    if any("cache_control" in block for block in system_blocks):
+        # A cache breakpoint needs its own block; otherwise the prompt stays one string.
+        body["system"] = system_blocks
+    elif system_blocks:
+        body["system"] = "\n\n".join(block["text"] for block in system_blocks)
     if isinstance(payload.get("temperature"), (int, float)) and not isinstance(
         payload["temperature"], bool
     ):
@@ -498,7 +502,80 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
         if isinstance(schema, Mapping):
             body["output_config"] = {"format": {"type": "json_schema", "schema": dict(schema)}}
     _apply_thinking(body, payload)
+    _limit_cache_breakpoints(body)
     return body
+
+
+def _cache_control(part: Mapping[str, Any], index: int) -> dict | None:
+    """A content part's prompt cache breakpoint, as Claude reads it."""
+    value = part.get("cache_control")
+    if value is None:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or value.get("type") != "ephemeral"
+        or any(key not in {"type", "ttl"} for key in value)
+        or ("ttl" in value and value["ttl"] not in CACHE_TTLS)
+    ):
+        raise TranslationError(
+            f"messages[{index}] has an invalid cache_control; use "
+            '{"type": "ephemeral"} with an optional "ttl" of "5m" or "1h"',
+            param="messages",
+        )
+    return {"type": "ephemeral", **({"ttl": value["ttl"]} if "ttl" in value else {})}
+
+
+def _with_cache_control(block: dict | None, part: Any, index: int) -> dict | None:
+    if block is None or not isinstance(part, Mapping):
+        return block
+    marker = _cache_control(part, index)
+    return {**block, "cache_control": marker} if marker else block
+
+
+def _marks_cache(content: Any) -> bool:
+    return isinstance(content, list) and any(
+        isinstance(part, Mapping) and part.get("cache_control") is not None for part in content
+    )
+
+
+def _text_blocks(content: list, index: int) -> list[dict]:
+    """One text block per text part, each keeping its cache breakpoint."""
+    blocks = []
+    for part in content:
+        if isinstance(part, str):
+            block = {"type": "text", "text": part} if part else None
+        elif isinstance(part, Mapping) and part.get("type") in {"text", "input_text", "output_text"}:
+            text = part.get("text")
+            block = {"type": "text", "text": text} if isinstance(text, str) and text else None
+        else:
+            block = None
+        block = _with_cache_control(block, part, index)
+        if block:
+            blocks.append(block)
+    return blocks
+
+
+def _chat_system_blocks(content: Any, index: int) -> list[dict]:
+    if _marks_cache(content):
+        return _text_blocks(content, index)
+    text = text_of(content)
+    return [{"type": "text", "text": text}] if text else []
+
+
+def _limit_cache_breakpoints(body: dict) -> None:
+    """Keep the last breakpoints Claude can read; earlier ones cache a shorter prefix."""
+    marked = [block for block in body["system"] if "cache_control" in block] if isinstance(
+        body.get("system"), list) else []
+    for turn in body["messages"]:
+        for block in turn["content"] if isinstance(turn.get("content"), list) else ():
+            if not isinstance(block, dict):
+                continue
+            if "cache_control" in block:
+                marked.append(block)
+            if block.get("type") == "tool_result" and isinstance(block.get("content"), list):
+                marked.extend(item for item in block["content"] if isinstance(item, dict) and "cache_control" in item)
+    for block in marked[:-MAX_CACHE_BREAKPOINTS]:
+        del block["cache_control"]
 
 
 def _append_turn(turns: list[dict], role: str, blocks: list[dict]) -> None:
@@ -511,6 +588,10 @@ def _append_turn(turns: list[dict], role: str, blocks: list[dict]) -> None:
 
 
 def _chat_part_to_block(part: Any, index: int) -> dict | None:
+    return _with_cache_control(_chat_part_block(part, index), part, index)
+
+
+def _chat_part_block(part: Any, index: int) -> dict | None:
     if isinstance(part, str):
         return {"type": "text", "text": part} if part else None
     if not isinstance(part, Mapping):
@@ -565,7 +646,7 @@ def _chat_user_blocks(content: Any, index: int) -> list[dict]:
     return [block for block in (_chat_part_to_block(part, index) for part in content) if block]
 
 
-def _chat_assistant_blocks(message: Mapping[str, Any]) -> list[dict]:
+def _chat_assistant_blocks(message: Mapping[str, Any], index: int = 0) -> list[dict]:
     try:
         native = restore_assistant_content(message)
     except ValueError as error:
@@ -574,17 +655,21 @@ def _chat_assistant_blocks(message: Mapping[str, Any]) -> list[dict]:
         return native
     blocks: list[dict] = []
     content = message.get("content")
-    text = (
-        content
-        if isinstance(content, str)
-        else text_of(
-            [
-                part
-                for part in content or []
-                if isinstance(part, Mapping) and part.get("type") in {"text", "output_text"}
-            ]
+    if _marks_cache(content):
+        blocks.extend(_text_blocks(content, index))
+        text = ""
+    else:
+        text = (
+            content
+            if isinstance(content, str)
+            else text_of(
+                [
+                    part
+                    for part in content or []
+                    if isinstance(part, Mapping) and part.get("type") in {"text", "output_text"}
+                ]
+            )
         )
-    )
     if text:
         blocks.append({"type": "text", "text": text})
     for call in message.get("tool_calls") or []:

@@ -103,6 +103,30 @@ output tokens, so leave room in `max_tokens` for both thinking and the answer.
 The catalog advertises the model's 1,000,000-token context and 128,000-token
 synchronous output limit; configured proxy request and token limits still apply.
 
+### Prompt caching
+
+Chat Completions content parts can carry Claude's cache breakpoints:
+
+```json
+{"model": "anthropic:claude-haiku-5-5",
+ "messages": [
+   {"role": "system", "content": [{"type": "text", "text": "<long instructions>",
+                                   "cache_control": {"type": "ephemeral"}}]},
+   {"role": "user", "content": [{"type": "text", "text": "<long document>",
+                                 "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+                                {"type": "text", "text": "Summarize it"}]}]}
+```
+
+A `cache_control` on a text, image or file part of a system, developer, user,
+assistant or tool message becomes a breakpoint on the matching Claude block. It
+must be `{"type": "ephemeral"}` with an optional `ttl` of `"5m"` or `"1h"`, or
+the request gets 400; Claude also wants `"1h"` breakpoints before `"5m"` ones. A
+system or developer message with a breakpoint is sent as separate system blocks,
+so the breakpoint has a block to sit on. Claude reads at most four breakpoints:
+the gateway keeps the last four in prompt order and removes earlier ones, which
+would cache only a shorter prefix. A request with its own breakpoints gets none
+from the gateway, on `/lean` too. Responses input parts carry no breakpoints.
+
 ## Advisor tool
 
 Claude's [advisor tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool)
