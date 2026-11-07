@@ -36,7 +36,8 @@ class IterationUsage:
     def parse(cls, value: Any) -> IterationUsage | None:
         if not isinstance(value, dict):
             return None
-        kind = value.get("type") if isinstance(value.get("type"), str) else "message"
+        kind = value.get("type")
+        kind = kind if isinstance(kind, str) else "message"
         model = value.get("model")
         model = model if isinstance(model, str) and _MODEL_ID.fullmatch(model) else None
         creation = value.get("cache_creation")

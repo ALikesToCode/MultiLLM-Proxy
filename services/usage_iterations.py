@@ -52,6 +52,7 @@ def by_model(executor: Optional[str], usage: Optional[UsageObservation]) -> list
         model = _qualified(step.model, provider) if step.model else executor
         groups.setdefault(model.lower(), (model.lower(), []))[1].append(step)
     own = groups.pop(executor.lower(), None)
-    parts = [(executor, _aggregate(usage, own[1], executor=True) if own else replace(usage, iterations=()))]
+    parts: list[tuple[Optional[str], Optional[UsageObservation]]] = [
+        (executor, _aggregate(usage, own[1], executor=True) if own else replace(usage, iterations=()))]
     parts.extend((model, _aggregate(usage, steps, executor=False)) for model, steps in groups.values())
     return parts
