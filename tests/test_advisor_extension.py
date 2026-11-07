@@ -32,10 +32,28 @@ ADVISOR = {"model": "anthropic:claude-sonnet-5-5", "max_uses": 1, "max_tokens": 
 TOOL = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5", "max_uses": 1, "max_tokens": 2048}
 QUESTION = [{"role": "user", "content": "A synthetic question"}]
 CHAT_PATHS = ("/v1/chat/completions", "/lean/v1/chat/completions")
+PENDING = {"type": "server_tool_use", "id": "srvtoolu_pending", "name": "advisor", "input": {}}
 
 
 def frames(text):
     return [json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:") and line[5:].strip() != "[DONE]"]
+
+
+def _frames_for(message):
+    """A Messages stream for a complete reply's text and tool_use blocks."""
+    events = [{"type": "message_start", "message": {**message, "content": [], "stop_reason": None,
+                                                   "usage": {"input_tokens": 9, "output_tokens": 1}}}]
+    for index, block in enumerate(message["content"]):
+        if block["type"] == "tool_use":
+            events += [{"type": "content_block_start", "index": index, "content_block": {**block, "input": {}}},
+                       {"type": "content_block_delta", "index": index,
+                        "delta": {"type": "input_json_delta", "partial_json": json.dumps(block["input"])}}]
+        else:
+            events.append({"type": "content_block_start", "index": index, "content_block": block})
+        events.append({"type": "content_block_stop", "index": index})
+    events += [{"type": "message_delta", "delta": {"stop_reason": message["stop_reason"]}, "usage": message["usage"]},
+               {"type": "message_stop"}]
+    return b"".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode() for event in events)
 
 
 class ExtensionTestCase(UnifiedApiTestCase):
@@ -81,6 +99,27 @@ class AdvisorExtensionTest(ExtensionTestCase):
         self.assertEqual([tool.get("name") for tool in tools], ["lookup", "advisor"])
         self.assertIn("cache_control", tools[0])
         self.assertEqual(tools[1], TOOL)
+
+    def test_lean_leaves_tool_results_in_place_with_the_advisor(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        for body, cleared in (({"tools": [lookup]}, True), ({"tools": [lookup], "advisor": ADVISOR}, False),
+                              ({"advisor": ADVISOR}, False)):
+            with self.subTest(body=list(body)):
+                payload = {"model": HAIKU, "messages": QUESTION, **body}
+                response, data, send = self.post("/lean/v1/chat/completions", payload, json_reply(advised_message()))
+                self.assertEqual(response.status_code, 200, data)
+                self.assertEqual("context_management" in self.upstream(send)[0], cleared)
+
+    def test_a_cached_reply_keeps_the_advisor_headers(self):
+        payload = {"model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "temperature": 0}
+        headers = {"Authorization": "Bearer admin-test-key", "X-MultiLLM-Cache": "on"}
+        with patch.object(self.app_module.ProxyService, "make_request",
+                          side_effect=[json_reply(advised_message()), json_reply(advised_message())]) as send:
+            replies = [self.client.post("/v1/chat/completions", json=payload, headers=headers) for _ in range(2)]
+        self.assertEqual(send.call_count, 1)
+        for name in ("X-MultiLLM-Advisor-Model", "X-MultiLLM-Advisor-Calls", "X-MultiLLM-Advisor-Input-Tokens",
+                     "X-MultiLLM-Advisor-Output-Tokens"):
+            self.assertEqual(replies[1].headers.get(name), replies[0].headers[name], name)
 
     def test_chat_replies_without_advisor_blocks_and_with_advisor_usage(self):
         for path in CHAT_PATHS:
@@ -155,11 +194,41 @@ class AdvisorExtensionTest(ExtensionTestCase):
         response, data, send = self.chat({"tools": [lookup], "messages": history}, json_reply(advised_message()))
         self.assertEqual(response.status_code, 200, data)
         self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
+        # Without the field the advice still replays: Claude takes the history with the beta.
+        response, data, send = self.post("/v1/chat/completions", {"model": HAIKU, "tools": [lookup], "messages": history},
+                                         json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        body, headers = self.upstream(send)
+        self.assertEqual(body["messages"][1]["content"], content)
+        self.assertEqual([tool["name"] for tool in body["tools"]], ["lookup"])
+        self.assertIn("advisor-tool-2026-03-01", headers["anthropic-beta"].split(","))
+
+    def test_a_pending_advisor_call_runs_when_the_tool_results_arrive(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        content = [{"type": "text", "text": "Checking."}, PENDING,
+                   {"type": "tool_use", "id": "toolu_synthetic", "name": "lookup", "input": {"q": "x"}}]
+        _, data, _ = self.chat({"tools": [lookup]}, json_reply({**advised_message(), "content": content,
+                                                                 "stop_reason": "tool_use"}))
+        message = json.loads(data)["choices"][0]["message"]
+        self.assertEqual(message["tool_calls"][0]["extra_content"]["anthropic"]["content"], content)
+        history = [*QUESTION, message, {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]
+        response, data, send = self.chat({"tools": [lookup], "messages": history}, json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
         response, data, send = self.post("/v1/chat/completions", {"model": HAIKU, "tools": [lookup], "messages": history},
                                          json_reply(advised_message()))
         self.assertEqual(response.status_code, 400)
         self.assertIn("'advisor'", json.loads(data)["error"]["message"])
         send.assert_not_called()
+        # The call's result opened the next reply, which had no tool calls to carry it.
+        later = [*history, {"role": "assistant", "content": "A synthetic answer."},
+                 {"role": "user", "content": "A synthetic follow-up"}]
+        for body in ({"advisor": ADVISOR}, {}):
+            with self.subTest(advisor=bool(body)):
+                response, data, send = self.post("/v1/chat/completions", {
+                    "model": HAIKU, "tools": [lookup], "messages": later, **body}, json_reply(advised_message()))
+                self.assertEqual(response.status_code, 200, data)
+                self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], [content[0], content[2]])
 
     def test_a_streamed_signed_tool_turn_with_advice_keeps_its_blocks(self):
         lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
@@ -190,6 +259,68 @@ class AdvisorExtensionTest(ExtensionTestCase):
                   for call in choice["delta"].get("tool_calls") or [] if "extra_content" in call]
         kinds = [block["type"] for block in extras[0]["anthropic"]["content"]]
         self.assertEqual(kinds, ["thinking", "server_tool_use", "advisor_tool_result", "tool_use"])
+
+
+    def test_tool_repair_never_asks_an_advised_request_again(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {
+            "type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}}}
+        invalid = {**advised_message(), "stop_reason": "tool_use", "content": [
+            *advised_message()["content"][:2], {"type": "tool_use", "id": "toolu_bad", "name": "lookup", "input": {}}]}
+        for path, body in (("/v1/chat/completions", {"model": HAIKU, "messages": QUESTION}),
+                           ("/v1/responses", {"model": HAIKU, "input": "A synthetic question"})):
+            with self.subTest(path=path), patch.object(self.app_module.ProxyService, "make_request",
+                                                       side_effect=[json_reply(invalid), json_reply(advised_message())]) as send:
+                tools = [lookup] if path.endswith("completions") else [{"type": "function", **lookup["function"]}]
+                response = self.client.post(path, json={**body, "advisor": ADVISOR, "tools": tools},
+                                            headers={"Authorization": "Bearer admin-test-key",
+                                                     "X-MultiLLM-Tool-Repair": "full"})
+                self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+                self.assertEqual(send.call_count, 1)
+
+
+    def test_a_paused_turn_is_reported_as_unfinished(self):
+        pending = {"type": "server_tool_use", "id": "srvtoolu_pending", "name": "advisor", "input": {}}
+        paused = {**advised_message(), "stop_reason": "pause_turn",
+                  "content": [{"type": "text", "text": "Let me check."}, pending]}
+        _, data, _ = self.chat({}, json_reply(paused))
+        choice = json.loads(data)["choices"][0]
+        self.assertEqual((choice["finish_reason"], choice["message"]["content"]), ("length", "Let me check."))
+        _, data, _ = self.responses({}, json_reply(paused))
+        self.assertEqual(json.loads(data)["status"], "incomplete")
+        stream = advised_frames().replace(b'"stop_reason": "end_turn", "stop_sequence"', b'"stop_reason": "pause_turn", "stop_sequence"')
+        self.assertIn(b"pause_turn", stream)
+        _, data, _ = self.chat({"stream": True}, stream_reply(stream))
+        finishes = [choice["finish_reason"] for chunk in frames(data) for choice in chunk.get("choices", [])
+                    if choice.get("finish_reason")]
+        self.assertEqual(finishes, ["length"])
+
+
+    def test_repair_leaves_calls_that_carry_the_native_turn(self):
+        count = {"type": "function", "function": {"name": "count", "parameters": {
+            "type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}
+        content = [{"type": "text", "text": "Counting."}, PENDING,
+                   {"type": "tool_use", "id": "toolu_synthetic", "name": "count", "input": {"n": "42"}}]
+        reply = {**advised_message(), "content": content, "stop_reason": "tool_use"}
+        headers = {"Authorization": "Bearer admin-test-key", "X-MultiLLM-Tool-Repair": "repair"}
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                upstream = stream_reply(_frames_for(reply)) if stream else json_reply(reply)
+                with patch.object(self.app_module.ProxyService, "make_request", return_value=upstream):
+                    response = self.client.post("/v1/chat/completions", headers=headers, json={
+                        "model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "tools": [count], "stream": stream})
+                    data = response.get_data(as_text=True)
+                calls = ([call for chunk in frames(data) for choice in chunk.get("choices", [])
+                          for call in choice["delta"].get("tool_calls") or []] if stream
+                         else json.loads(data)["choices"][0]["message"]["tool_calls"])
+                arguments = "".join(call.get("function", {}).get("arguments", "") for call in calls)
+                self.assertEqual(json.loads(arguments), {"n": "42"})
+        with patch.object(self.app_module.ProxyService, "make_request", return_value=json_reply(reply)):
+            message = json.loads(self.client.post("/v1/chat/completions", headers=headers, json={
+                "model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "tools": [count]}).get_data(as_text=True))["choices"][0]["message"]
+        history = [*QUESTION, message, {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "counted"}]
+        response, data, send = self.chat({"tools": [count], "messages": history}, json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
 
 
 class AdvisorExtensionValidationTest(ExtensionTestCase):
@@ -312,3 +443,16 @@ def test_a_similar_answer_never_stands_in_for_advice():
     payload = {"model": HAIKU, "messages": QUESTION}
     assert semantic_generation_cache.eligible(payload)
     assert not semantic_generation_cache.eligible({**payload, "advisor": ADVISOR})
+
+
+def test_a_result_without_its_advisor_call_is_dropped():
+    from services.protocol_translation.anthropic import chat_request_to_messages
+
+    orphan = {"type": "advisor_tool_result", "tool_use_id": "srvtoolu_gone", "content": ADVICE}
+    use = {"type": "tool_use", "id": "toolu_synthetic", "name": "lookup", "input": {}}
+    call = {"id": "toolu_synthetic", "type": "function", "function": {"name": "lookup", "arguments": "{}"},
+            "extra_content": {"anthropic": {"content": [orphan, use]}}}
+    body = chat_request_to_messages({"model": "claude-haiku-5-5", "messages": [
+        *QUESTION, {"role": "assistant", "content": None, "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]})
+    assert body["messages"][1]["content"] == [use]

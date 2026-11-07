@@ -378,14 +378,16 @@ def _blocks(messages: Any) -> Iterable[dict]:
 def _with_tool_clearing(body: dict, policy: LeanPolicy) -> tuple[dict, bool]:
     """Clear old tool results server-side once the prompt passes the trigger.
 
-    Skipped when the caller manages context itself, and for signed compaction
-    blocks, which cannot be combined with context editing.
+    Skipped when the caller manages context itself, for signed compaction blocks,
+    which cannot be combined with context editing, and with the advisor tool, whose
+    blocks tool clearing does not fully support.
     """
     blocks = list(_blocks(body.get("messages")))
     uses_tools = bool(body.get("tools")) or any(block.get("type") == "tool_result" for block in blocks)
     if (
         policy.clear_trigger_tokens <= 0
         or not uses_tools
+        or advisor_tool.involves_advisor(body)
         or "context_management" in body
         or "compaction" in body
         or any(block.get("type") == "compaction" for block in blocks)

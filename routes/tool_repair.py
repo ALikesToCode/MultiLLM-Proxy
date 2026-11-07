@@ -8,6 +8,7 @@ from flask import Response, g, request
 
 from providers.cline_pass import cline_completion_payload
 from routes.protocol_bridge import ENDPOINT_PROTOCOLS, as_flask_response, translate_downstream_response
+from services import advisor_tool
 from services.protocol_translation import CHAT, translate_request
 from services.tool_repair_runtime import HEADER, SKIP_REASK, log_report, repair_completion, repair_mode, summary_header
 from services.tool_repair_stream import ToolCallBuffer, repair_sse
@@ -100,6 +101,10 @@ def with_chat_tool_repair(dispatch):
         provider = model.split(":", 1)[0] if isinstance(model, str) else "unknown"
         def reask(body):
             if getattr(g, "cascade_deadline", None) is not None or getattr(g, "tool_repair_reasked", False):
+                return SKIP_REASK
+            # A re-ask would run the advisor again, and its usage steps cannot be merged
+            # into the first reply's, so the ledger would miss one call.
+            if isinstance(payload, dict) and payload.get(advisor_tool.EXTENSION) is not None:
                 return SKIP_REASK
             g.tool_repair_reasked = True
             return dispatch(app, auth, metrics, proxy, body, **kwargs)

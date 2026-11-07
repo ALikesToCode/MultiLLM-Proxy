@@ -8,7 +8,8 @@ from services.protocol_translation.common import chat_usage, non_negative_int, u
 STOP_TO_FINISH = {
     "end_turn": "stop",
     "stop_sequence": "stop",
-    "pause_turn": "stop",
+    # Claude paused the turn (an advisor call is still pending); the answer is unfinished.
+    "pause_turn": "length",
     "max_tokens": "length",
     "model_context_window_exceeded": "length",
     "tool_use": "tool_calls",

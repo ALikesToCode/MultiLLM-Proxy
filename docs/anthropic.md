@@ -206,10 +206,19 @@ OpenRouter provider with `providerOptions.openrouter.advisor`, can send it as is
 
 The reply carries the final answer only. Text, function tool calls and
 `response_format` with `json_schema` work as without the advisor, and the
-advisor's blocks are left out. When a signed thinking turn ends in a tool call,
-`extra_content.anthropic.content` includes the advisor's blocks; send the same
-`advisor` field with every later request that returns them, or the request gets
-400.
+advisor's blocks are left out. When Claude pauses the turn with an advisor call
+still pending (`stop_reason: "pause_turn"`), the reply ends with `finish_reason:
+"length"` (Responses: `status: "incomplete"`). The gateway does not resume a
+paused turn, so send the request again.
+
+A reply that ends in tool calls and holds advisor blocks or signed thinking
+carries its native turn in the first tool call's `extra_content.anthropic.content`;
+return it unchanged. Claude can stop for your tools while an advisor call is
+still pending. That call runs when the tool results arrive, so the request that
+sends them needs the same `advisor` field, or it gets 400. Other requests may
+drop the field: earlier advice replays without it, and the gateway adds the beta
+header. A pending call's result opens the next reply. When that reply has no tool
+calls, the result cannot travel with it, so later requests leave the call out.
 
 Usage keeps counting the request's model in `prompt_tokens` and
 `completion_tokens` (`input_tokens` and `output_tokens` on Responses), as Claude
