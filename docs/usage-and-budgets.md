@@ -148,7 +148,15 @@ budget unless one is set explicitly.
 
 Before dispatch the proxy estimates the request's cost from the prompt-token estimate,
 the requested output limit (1024 tokens when none is given) and the image count. For
-an automatic route it uses the most expensive priced candidate. The request is
+an automatic route it uses the most expensive priced candidate. A request with
+an [advisor tool](anthropic.md#advisor-tool) also reserves the advisor's worst
+case: each of its `max_uses` calls reads the transcript (the prompt estimate, the
+output limit and earlier advice, plus 4,096 tokens for the advisor's own prompt)
+at the advisor's prices and writes up to its `max_tokens`, and the request's model
+reads the transcript again after each call. A key with a budget, or one charged
+in credits, must set both `max_uses` and `max_tokens` on every advisor tool;
+without them the request gets 400 `invalid_request_error`, because Claude's
+defaults leave the advisor's cost unbounded. The request is
 admitted only if the ledger total for the period, plus what this process recorded
 since it last read that total, plus the estimates of the key's requests still in
 flight, plus this estimate fits every limit. When the request finishes, its estimate is

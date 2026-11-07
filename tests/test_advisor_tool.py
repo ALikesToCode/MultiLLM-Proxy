@@ -217,8 +217,8 @@ HAIKU_COST = (1097 + 1542) * 0.1 / 1e6 + (92 + 112) * 0.5 / 1e6
 SONNET_COST = 2778 * 2 / 1e6 + 685 * 10 / 1e6
 
 
-class AdvisorLedgerTest(AdvisorTestCase):
-    """Advisor steps are priced at the advisor's model and recorded under it."""
+class LedgerTestCase(AdvisorTestCase):
+    """Production pricing: the shipped table with prompt cache buckets on."""
 
     def setUp(self):
         super().setUp()
@@ -244,6 +244,10 @@ class AdvisorLedgerTest(AdvisorTestCase):
         self.assertTrue(usage_ledger.LEDGER.flush(timeout=5))
         rows = usage_ledger.LEDGER.store().recent("2000-01-01T00:00:00.000Z", "advised", None, 50)
         return {row["selected_model"]: row for row in rows}
+
+
+class AdvisorLedgerTest(LedgerTestCase):
+    """Advisor steps are priced at the advisor's model and recorded under it."""
 
     def assert_priced(self, rows):
         self.assertEqual(set(rows), {HAIKU, SONNET})
@@ -317,3 +321,65 @@ class AdvisorLedgerTest(AdvisorTestCase):
         rows = self.rows()
         self.assertEqual(set(rows), {HAIKU})
         self.assertEqual(rows[HAIKU]["endpoint"], "/v1/messages")
+
+
+class AdvisorReservationTest(LedgerTestCase):
+    """Admission reserves the advisor's worst case, so a cap cannot be overrun."""
+
+    def budget(self, daily):
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            self.app_module.AuthService.set_key_controls("advised", {"daily_budget_usd": daily})
+
+    def test_a_budget_that_fits_the_request_but_not_its_advisor_refuses_it(self):
+        self.budget(0.01)
+        plain = {"input_tokens": 20, "output_tokens": 10, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        response, _, send = self.messages({"tools": []}, json_reply(advised_message(plain)), key=self.key)
+        self.assertEqual(response.status_code, 200)
+        response, data, send = self.messages({}, json_reply(advised_message()), key=self.key)
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(json.loads(data)["error"]["type"], "rate_limit_error")
+        send.assert_not_called()
+
+    def test_the_reserved_estimate_covers_every_advisor_call(self):
+        self.budget(0.0001)
+        _, plain, _ = self.messages({"tools": []}, json_reply(advised_message()), key=self.key)
+        _, once, _ = self.messages({}, json_reply(advised_message()), key=self.key)
+        _, thrice, _ = self.messages({"tools": [advisor_tool(max_uses=3)]}, json_reply(advised_message()), key=self.key)
+        plain, once, thrice = (json.loads(body)["error"]["message"] for body in (plain, once, thrice))
+        estimate = lambda message: float(message.split("estimated at $")[1].split(")")[0])
+        # Each call can write 1,500 Sonnet tokens ($0.015) and read the transcript.
+        self.assertGreater(estimate(once) - estimate(plain), 1500 * 10 / 1e6 + 4096 * 2 / 1e6)
+        self.assertGreater(estimate(thrice) - estimate(plain), 3 * (estimate(once) - estimate(plain)))
+
+    def test_a_capped_key_must_bound_its_advisor(self):
+        self.budget(5)
+        for missing in ("max_uses", "max_tokens"):
+            with self.subTest(missing=missing):
+                tool = {key: value for key, value in advisor_tool().items() if key != missing}
+                response, data, send = self.messages({"tools": [tool]}, json_reply(advised_message()), key=self.key)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(missing, json.loads(data)["error"]["message"])
+                send.assert_not_called()
+
+    def test_an_uncapped_key_may_leave_its_advisor_unbounded(self):
+        tool = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5"}
+        response, _, _ = self.messages({"tools": [tool]}, json_reply(advised_message()), key=self.key)
+        self.assertEqual(response.status_code, 200)
+
+
+def test_strict_reservations_refuse_an_unpriced_advisor(monkeypatch):
+    from services import request_accounting
+    from services.advisor_tool import Advisor
+
+    monkeypatch.setenv("MODEL_PRICING_USD_PER_MILLION", SHIPPED_PRICES)
+    context = request_accounting.UsageContext("chat", [HAIKU], None, {}, 0.0, 0, input_tokens=1000, output_tokens=500,
+                                              advisors=(Advisor("anthropic:claude-unlisted-9", 2, 2000),))
+    assert request_accounting.advisor_exposure(context, [HAIKU], strict=True) is None
+    # Without strict pricing an unpriced advisor adds only the request's own re-reads.
+    rereads = 2 * (1000 + 500 + 2 * 2000) * 0.1 / 1e6
+    assert abs(request_accounting.advisor_exposure(context, [HAIKU], strict=False) - rereads) < 1e-12
+    priced = request_accounting.UsageContext("chat", [HAIKU], None, {}, 0.0, 0, input_tokens=1000, output_tokens=500,
+                                             advisors=(Advisor(SONNET, 2, 2000),))
+    transcript = 1000 + 500 + 2 * 2000
+    expected = 2 * ((transcript + 4096) * 2 / 1e6 + 2000 * 10 / 1e6 + transcript * 0.1 / 1e6)
+    assert abs(request_accounting.advisor_exposure(priced, [HAIKU], strict=True) - expected) < 1e-12

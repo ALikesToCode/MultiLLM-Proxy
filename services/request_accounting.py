@@ -68,6 +68,9 @@ MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}\Z")
 ENDPOINT = re.compile(r"/[A-Za-z0-9._~:/@+-]{0,255}\Z")
 REQUEST_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 DEFAULT_OUTPUT_TOKENS = 1024
+# Room for the advisor's own prompt around the transcript it reads. Claude Sonnet 5.5
+# advising Claude Haiku 5.5 read about 1,600 tokens more than the executor's prompt.
+ADVISOR_PROMPT_TOKENS = 4096
 MAX_USAGE_JSON_BYTES = 16 * 1024 * 1024
 SSE_TAIL_BYTES = 65536
 
@@ -102,6 +105,8 @@ class UsageContext:
     governance_store: Any = None
     dispatched: bool = False
     gateway_subrequest: bool = False
+    # Advisor tools the request declares; their worst case is reserved with it.
+    advisors: tuple = ()
 
 
 def classify() -> Optional[str]:
@@ -230,6 +235,27 @@ def reservation_price(models, input_tokens, output_tokens, units):
     return max(costs) if costs and all(cost is not None for cost in costs) else None
 
 
+def advisor_exposure(context: UsageContext, models: list[str], strict: bool) -> Optional[float]:
+    """The most the request's advisors can cost, in USD; None when strict pricing
+    cannot price one.
+
+    Each of an advisor's `max_uses` calls reads the transcript (the prompt, the
+    request's output limit and earlier advice) plus its own prompt, and writes up to
+    `max_tokens`. The request's model then reads the transcript again.
+    """
+    total = 0.0
+    executors = [candidate for model in models for candidate in _candidates(model)]
+    for advisor in context.advisors:
+        uses, tokens = advisor.max_uses or 0, advisor.max_tokens or 0
+        transcript = context.input_tokens + context.output_tokens + uses * tokens
+        advice = CostService.estimate(advisor.model, transcript + ADVISOR_PROMPT_TOKENS, tokens)
+        rereads = [CostService.estimate(model, transcript, 0) for model in executors]
+        if strict and (advice is None or any(cost is None for cost in rereads)):
+            return None
+        total += uses * ((advice or 0.0) + max((cost for cost in rereads if cost is not None), default=0.0))
+    return total
+
+
 def mark_dispatched():
     """Injected pre-submission hook for managed request owners."""
     context = getattr(g, "usage_context", None)
@@ -292,7 +318,8 @@ def begin() -> Optional[Response]:
     context = UsageContext(kind=kind, models=models, provider=provider, user=user,
                            started=getattr(g, "request_started_at", None) or time.perf_counter(),
                            start_ns=time.time_ns(), units=_image_units(kind, payload),
-                           trace=telemetry_export.trace_context(request.headers.get("traceparent")))
+                           trace=telemetry_export.trace_context(request.headers.get("traceparent")),
+                           advisors=tuple(advisors))
     from services.tenant_hierarchy import current_tenant
     context.tenant = current_tenant()
     context.input_tokens, context.output_tokens = _token_estimates(payload)
@@ -326,9 +353,19 @@ def reserve_attempt(context):
     qualified = [_qualified(model, context.provider) for model in context.models]
     estimate = None
     if budgeted(user) or charged:
+        missing = next((name for advisor in context.advisors for name in ("max_uses", "max_tokens")
+                        if getattr(advisor, name) is None), None)
+        if missing:
+            return _error(400, "invalid_request_error",
+                          f"Set {missing} on the advisor tool: this key's spending is capped, so the "
+                          "advisor's cost must be bounded before the request is sent.")
+        strict = (reservation_store.enabled() and not context.gateway_subrequest) or governance is not None or charged
         estimate = (reservation_price(qualified, context.input_tokens, context.output_tokens, context.units)
-                    if (reservation_store.enabled() and not context.gateway_subrequest) or governance is not None or charged else
+                    if strict else
                     estimate_cost(qualified, context.input_tokens, context.output_tokens, context.units))
+        exposure = advisor_exposure(context, qualified, strict)
+        if estimate is not None:
+            estimate = None if exposure is None else estimate + exposure
     if budgeted(user):
         context.estimate = estimate or 0.0
         decision = BudgetService.check_and_reserve(user, estimate)

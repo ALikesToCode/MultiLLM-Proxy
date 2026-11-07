@@ -124,7 +124,9 @@ advisor results.
 Claude bills the advisor's tokens at the advisor model's prices and reports
 them only in `usage.iterations`, not in the top-level usage. The ledger prices
 every step at its own model and records the advisor's steps under the advisor's
-model; see [usage and budgets](usage-and-budgets.md#cost).
+model; see [usage and budgets](usage-and-budgets.md#cost). Budgets reserve the
+advisor's worst case before the request is sent, so a key with a budget must set
+`max_uses` and `max_tokens` (at least 1024) on the advisor tool.
 
 The advisor's model is held to the key's controls like the request's own model:
 its allowlist, `official_only` and provider data class. A bare id such as
