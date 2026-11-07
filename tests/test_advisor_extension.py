@@ -93,6 +93,17 @@ class AdvisorExtensionTest(ExtensionTestCase):
                 self.assertEqual(response.status_code, 200, data)
                 self.assertEqual("context_management" in self.upstream(send)[0], cleared)
 
+    def test_a_cached_reply_keeps_the_advisor_headers(self):
+        payload = {"model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "temperature": 0}
+        headers = {"Authorization": "Bearer admin-test-key", "X-MultiLLM-Cache": "on"}
+        with patch.object(self.app_module.ProxyService, "make_request",
+                          side_effect=[json_reply(advised_message()), json_reply(advised_message())]) as send:
+            replies = [self.client.post("/v1/chat/completions", json=payload, headers=headers) for _ in range(2)]
+        self.assertEqual(send.call_count, 1)
+        for name in ("X-MultiLLM-Advisor-Model", "X-MultiLLM-Advisor-Calls", "X-MultiLLM-Advisor-Input-Tokens",
+                     "X-MultiLLM-Advisor-Output-Tokens"):
+            self.assertEqual(replies[1].headers.get(name), replies[0].headers[name], name)
+
     def test_chat_replies_without_advisor_blocks_and_with_advisor_usage(self):
         for path in CHAT_PATHS:
             with self.subTest(path=path):

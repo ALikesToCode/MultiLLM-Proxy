@@ -152,7 +152,7 @@
   "routes/chat_cache.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "6abb810dc1ee1ce4d7a14416c8b1618773d4a1ca3f6e9e77a3df8d970eb9392b"
+    "sha256": "b9f202825639914a24a5ec669be39d0a5d47dd9b8d8141079a6c3080a047d8cc"
   },
   "routes/config_snapshots.py": {
     "kind": "non-provider",
