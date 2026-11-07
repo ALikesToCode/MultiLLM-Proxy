@@ -117,15 +117,30 @@ Chat Completions content parts can carry Claude's cache breakpoints:
                                 {"type": "text", "text": "Summarize it"}]}]}
 ```
 
-A `cache_control` on a text, image or file part of a system, developer, user,
-assistant or tool message becomes a breakpoint on the matching Claude block. It
-must be `{"type": "ephemeral"}` with an optional `ttl` of `"5m"` or `"1h"`, or
-the request gets 400; Claude also wants `"1h"` breakpoints before `"5m"` ones. A
-system or developer message with a breakpoint is sent as separate system blocks,
-so the breakpoint has a block to sit on. Claude reads at most four breakpoints:
-the gateway keeps the last four in prompt order and removes earlier ones, which
-would cache only a shorter prefix. A request with its own breakpoints gets none
-from the gateway, on `/lean` too. Responses input parts carry no breakpoints.
+A `cache_control` on a content part becomes a breakpoint on the Claude block made
+from that part:
+
+| Message | Parts |
+| --- | --- |
+| `system`, `developer` | text |
+| `user` | text, image, PDF file |
+| `assistant` | text |
+| `tool` | text, image |
+
+Every `cache_control` must be `{"type": "ephemeral"}` with an optional `ttl` of
+`"5m"` or `"1h"`, or the request gets 400; Claude also wants `"1h"` breakpoints
+before `"5m"` ones. A system or developer message with a breakpoint is sent as
+separate system blocks, so the breakpoint has a block to sit on. Claude reads at
+most four breakpoints: the gateway keeps the last four in prompt order and
+removes earlier ones, which would cache only a shorter prefix. A request with its
+own breakpoints gets none from the gateway, on `/lean` too.
+
+Breakpoints elsewhere are dropped: on a message itself, on a tool, on a part
+Claude gets no block for, and on Responses input parts.
+[Conversion diagnostics](conversion-fidelity.md) report these as lossy. An
+assistant turn returned with `extra_content.anthropic.content` replays Claude's
+own blocks and must keep its `content` as Claude sent it, so put breakpoints on
+other messages, such as the tool results.
 
 ## Advisor tool
 
