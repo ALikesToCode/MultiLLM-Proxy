@@ -562,19 +562,25 @@ def _chat_system_blocks(content: Any, index: int) -> list[dict]:
     return [{"type": "text", "text": text}] if text else []
 
 
-def _limit_cache_breakpoints(body: dict) -> None:
-    """Keep the last breakpoints Claude can read; earlier ones cache a shorter prefix."""
-    marked = [block for block in body["system"] if "cache_control" in block] if isinstance(
-        body.get("system"), list) else []
-    for turn in body["messages"]:
-        for block in turn["content"] if isinstance(turn.get("content"), list) else ():
+def cache_breakpoints(body: Mapping[str, Any]) -> list[dict]:
+    """The system and message blocks of a Messages body that carry `cache_control`."""
+    system = body.get("system")
+    marked = [block for block in system if isinstance(block, dict) and "cache_control" in block] if isinstance(
+        system, list) else []
+    for turn in body.get("messages") or ():
+        for block in turn.get("content") if isinstance(turn, Mapping) and isinstance(turn.get("content"), list) else ():
             if not isinstance(block, dict):
                 continue
             if "cache_control" in block:
                 marked.append(block)
             if block.get("type") == "tool_result" and isinstance(block.get("content"), list):
                 marked.extend(item for item in block["content"] if isinstance(item, dict) and "cache_control" in item)
-    for block in marked[:-MAX_CACHE_BREAKPOINTS]:
+    return marked
+
+
+def _limit_cache_breakpoints(body: dict) -> None:
+    """Keep the last breakpoints Claude can read; earlier ones cache a shorter prefix."""
+    for block in cache_breakpoints(body)[:-MAX_CACHE_BREAKPOINTS]:
         del block["cache_control"]
 
 

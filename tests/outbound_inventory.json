@@ -637,7 +637,7 @@
   "services/conversion_diagnostics.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "78596be6a9fec7a1dc7f27766e09db67647ad6c68f775ab556e9cdd7180a3e34"
+    "sha256": "c234e80c2e140f1fd9d06902d48572bfdf0f8a1828c1fa16588aa9db5ed575d1"
   },
   "services/cost_service.py": {
     "kind": "non-provider",
@@ -1097,7 +1097,7 @@
   "services/protocol_translation/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "b9d0dbec64d6bb415d6f8753b1571dc97a8828b7e192b510d7626902087095d6"
+    "sha256": "3769b9eaf11032328be24d4a8575f96afb852d1ef66fd7f86d298b14aae08927"
   },
   "services/protocol_translation/anthropic_continuation.py": {
     "kind": "non-provider",

@@ -71,10 +71,22 @@ def test_known_conversion_losses(body, source, target, path, classification):
 
 
 def test_chat_breakpoints_are_not_lost_on_the_way_to_claude():
-    body = {"messages": [{"role": "user", "content": [{"type": "text", "text": "private",
-                                                       "cache_control": {"type": "ephemeral"}}]}]}
-    assert "request.messages[].content[].cache_control" not in fields(request_report(body, CHAT, MESSAGES))
+    mark = {"type": "ephemeral"}
+    body = {"messages": [{"role": "user", "content": [{"type": "text", "text": "private", "cache_control": mark}]}]}
+    report = fields(request_report(body, CHAT, MESSAGES))
+    assert "request.messages" in report and "request.messages[].content[].cache_control" not in report
     assert fields(request_report(body, CHAT, RESPONSES))["request.messages[].content[].cache_control"] == "lossy"
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}, "cache_control": mark}
+    for lost, path in (
+        ({"messages": [{"role": "user", "content": "private", "cache_control": mark}]}, "request.messages[].cache_control"),
+        ({**body, "tools": [{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}},
+                             "cache_control": mark}]}, "request.tools[].cache_control"),
+        ({"messages": [{"role": "system", "content": [{"type": "text", "text": "rules"}, image]}, *body["messages"]]},
+         "request.messages[].content[].cache_control"),
+        ({"messages": [{"role": "user", "content": [{"type": "text", "text": f"t{n}", "cache_control": mark}
+                                                    for n in range(5)]}]}, "request.messages[].content[].cache_control"),
+    ):
+        assert fields(request_report(lost, CHAT, MESSAGES))[path] == "lossy", path
 
 
 def test_response_fields_and_tool_values_are_content_free():
