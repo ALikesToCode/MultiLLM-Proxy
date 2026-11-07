@@ -557,7 +557,7 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
         # Steps that ran on another model (an advisor) are priced at that model and
         # recorded as rows of their own; the request's row keeps its model's steps. A
         # reply served from the cache ran no model, so it stays one row.
-        parts = ([(None, usage)] if context.cached else
+        parts = ([(None, replace(usage, iterations=()) if usage is not None else None)] if context.cached else
                  usage_iterations.by_model(_selected_model(context), usage))
         usage = parts[0][1]
         row = _row(context, status, usage, units)

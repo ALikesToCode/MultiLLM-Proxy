@@ -396,6 +396,8 @@ class AdvisorLedgerTest(LedgerTestCase):
         rows = self.rows()
         self.assertEqual(set(rows), {HAIKU})
         self.assertEqual((rows[HAIKU]["cost_usd"], rows[HAIKU]["cost_basis"]), (0.0, "cache"))
+        # The token breakdown matches the row's own tokens, without the advisor's.
+        self.assertEqual((rows[HAIKU]["input_tokens"], rows[HAIKU]["ordinary_input_tokens"]), (2639, 2639))
 
     def test_a_reply_without_steps_keeps_one_row(self):
         usage = {"input_tokens": 1000, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
