@@ -71,7 +71,10 @@ Function tools on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
 are checked at the Container's Chat pivot, including native endpoints, free
 pools, and intelligence routing. `X-MultiLLM-Tool-Repair: repair` repairs JSON
 syntax, unambiguous names and schema primitive types, and extracts declared
-calls from known text formats. Tagged calls may occur within prose; fenced/bare
+calls from known text formats. Calls that carry Claude's native turn in
+`extra_content.anthropic.content` (signed thinking or advisor blocks) pass
+through unrepaired, because that turn replays only while the calls match it.
+Tagged calls may occur within prose; fenced/bare
 JSON requires standalone content or a preamble of at most 200 characters, unless
 a tool is forced.
 Multiple fences are left as content. A bare name line requires JSON-object
@@ -120,7 +123,7 @@ for limits and protocol caveats.
 | Reasoning | `reasoning_effort` → `thinking` with a budget (low 2048 … max 32768, kept below `max_tokens`, dropped under 1024); `none` disables thinking. `thinking` budgets and `output_config.effort` → `reasoning_effort` | `reasoning_effort` ↔ `reasoning.effort` |
 | Reasoning output | `thinking` blocks ↔ `reasoning_content` | `reasoning` items (`reasoning_text` or summaries) ↔ `reasoning_content` |
 | Usage | Anthropic input excludes cache reads and writes; both are kept (`cached_tokens`, `cache_write_tokens`) | `input_tokens_details`/`output_tokens_details` ↔ `prompt_tokens_details`/`completion_tokens_details` |
-| Stop reasons | `end_turn`/`stop_sequence`/`pause_turn` → `stop`, `max_tokens`/`model_context_window_exceeded` → `length`, `tool_use` → `tool_calls`, `refusal` → `content_filter` | `incomplete` with `max_output_tokens` → `length`, `content_filter` → `content_filter` |
+| Stop reasons | `end_turn`/`stop_sequence` → `stop`, `max_tokens`/`model_context_window_exceeded`/`pause_turn` → `length`, `tool_use` → `tool_calls`, `refusal` → `content_filter` | `incomplete` with `max_output_tokens` → `length`, `content_filter` → `content_filter` |
 | Errors | Anthropic `{"type":"error","error":{...}}` ↔ OpenAI `{"error":{...}}`, status kept | Both use the OpenAI envelope and pass through |
 
 Reasoning is round-tripped only where the target can use it: thinking chat

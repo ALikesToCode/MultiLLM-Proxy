@@ -140,6 +140,68 @@ as written, so use bare ids there. An advisor from another provider gets 400.
 Forced provider preferences apply only to OpenRouter, so they do not change an
 `anthropic:` advisor.
 
+### Chat Completions and Responses
+
+`/v1/chat/completions`, `/lean/v1/chat/completions` and `/v1/responses` take the
+advisor as an `advisor` field for `anthropic:` models:
+
+```json
+{"model": "anthropic:claude-haiku-5-5",
+ "messages": [{"role": "user", "content": "..."}],
+ "advisor": {"model": "anthropic:claude-opus-5-5", "max_uses": 1, "max_tokens": 2048}}
+```
+
+| Field | |
+| --- | --- |
+| `model` | Required. A Claude model, as `anthropic:<id>` or a bare id. |
+| `max_uses` | Optional. Most advisor calls in the request. |
+| `max_tokens` | Optional. Most tokens per call, at least 1024. |
+| `caching` | Optional. The advisor's prompt cache, such as `{"type": "ephemeral", "ttl": "5m"}`. |
+
+The gateway sends it to Claude as the advisor tool with the
+`advisor-tool-2026-03-01` beta; the caller sends no header. Other keys, a request
+for a model outside `anthropic:` (an automatic route included) or a bound that is
+not a positive integer get 400 before anything is sent. A `null` field is no
+advisor. Clients that pass provider options as body fields, such as the AI SDK's
+OpenRouter provider with `providerOptions.openrouter.advisor`, can send it as is.
+
+The reply carries the final answer only. Text, function tool calls and
+`response_format` with `json_schema` work as without the advisor, and the
+advisor's blocks are left out. When Claude pauses the turn with an advisor call
+still pending (`stop_reason: "pause_turn"`), the reply ends with `finish_reason:
+"length"` (Responses: `status: "incomplete"`). The gateway does not resume a
+paused turn, so send the request again.
+
+A reply that ends in tool calls and holds advisor blocks or signed thinking
+carries its native turn in the first tool call's `extra_content.anthropic.content`;
+return it unchanged. Claude can stop for your tools while an advisor call is
+still pending. That call runs when the tool results arrive, so the request that
+sends them needs the same `advisor` field, or it gets 400. Other requests may
+drop the field: earlier advice replays without it, and the gateway adds the beta
+header. A pending call's result opens the next reply. When that reply has no tool
+calls, the result cannot travel with it, so later requests leave the call out.
+
+Usage keeps counting the request's model in `prompt_tokens` and
+`completion_tokens` (`input_tokens` and `output_tokens` on Responses), as Claude
+does, and adds the advisor's:
+
+```json
+"usage": {"prompt_tokens": 2639, "completion_tokens": 204, "total_tokens": 2843,
+          "advisor": {"model": "anthropic:claude-sonnet-5-5", "calls": 1,
+                      "prompt_tokens": 2778, "completion_tokens": 685, "total_tokens": 3463,
+                      "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}},
+          "iterations": [...]}
+```
+
+On Responses the advisor's totals use `input_tokens`, `output_tokens` and
+`input_tokens_details`. `iterations` lists Claude's sampling steps as Claude
+reported them. Streams carry the same usage in their last usage chunk. Every
+reply names the advisor in `X-MultiLLM-Advisor-Model`. A reply that is not
+streamed also has `X-MultiLLM-Advisor-Calls`, `X-MultiLLM-Advisor-Input-Tokens`
+and `X-MultiLLM-Advisor-Output-Tokens`. Model controls, budgets, stream cost caps
+and the ledger treat the field like the Messages tool above, and ledger rows for
+the advisor use `/v1/chat/completions/advisor` or `/v1/responses/advisor`.
+
 ## Native API
 
 Native provider routes require an admin proxy key. Use `$PROXY_BASE_URL/anthropic`

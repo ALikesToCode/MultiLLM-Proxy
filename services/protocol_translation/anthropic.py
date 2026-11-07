@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from services.protocol_translation.anthropic_continuation import continuation_extra, restore_assistant_content
+from services.protocol_translation.anthropic_continuation import (
+    continuation_extra,
+    holds_advisor_blocks,
+    restore_assistant_content,
+)
 
 from services.protocol_translation.anthropic_request_policy import (
     output_format as _output_format,
@@ -440,6 +444,12 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
         if turn["role"] == "user":
             # Messages requires tool results before any other user content.
             turn["content"].sort(key=lambda block: block.get("type") != "tool_result")
+    if _settle_advisor_calls(turns) and payload.get("advisor") is None:
+        raise TranslationError(
+            "This conversation has an advisor call still to run; send the same "
+            "'advisor' field to continue it",
+            param="advisor",
+        )
     if not turns:
         raise TranslationError(
             "At least one user or assistant message is required", param="messages"
@@ -489,6 +499,38 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
             body["output_config"] = {"format": {"type": "json_schema", "schema": dict(schema)}}
     _apply_thinking(body, payload)
     return body
+
+
+def _settle_advisor_calls(turns: list[dict]) -> bool:
+    """Drop advisor blocks Claude would refuse; True when the turn being continued
+    has an advisor call for Claude to run.
+
+    An advisor call still pending at a tool call runs when the tool results arrive,
+    and its result opens the next reply. A translated reply without tool calls cannot
+    carry that result, so an earlier call left without one is dropped, as is a result
+    whose call is gone.
+    """
+    assistant = [turn for turn in turns if turn["role"] == "assistant" and holds_advisor_blocks(turn["content"])]
+    if not assistant:
+        return False
+    blocks = [block for turn in assistant for block in turn["content"]]
+    results = {block.get("tool_use_id") for block in blocks if block.get("type") == "advisor_tool_result"}
+    calls = {block.get("id") for block in blocks if block.get("type") == "server_tool_use"}
+    latest = turns[-1] if turns[-1]["role"] == "assistant" else (
+        turns[-2] if len(turns) > 1 and turns[-2]["role"] == "assistant" else None)
+    pending = False
+    for turn in assistant:
+        kept = []
+        for block in turn["content"]:
+            if block.get("type") == "server_tool_use" and block.get("id") not in results:
+                if turn is not latest:
+                    continue
+                pending = True
+            elif block.get("type") == "advisor_tool_result" and block.get("tool_use_id") not in calls:
+                continue
+            kept.append(block)
+        turn["content"] = kept or turn["content"]
+    return pending
 
 
 def _append_turn(turns: list[dict], role: str, blocks: list[dict]) -> None:

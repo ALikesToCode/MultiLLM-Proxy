@@ -30,6 +30,7 @@ from flask import g, has_request_context, request
 
 from middleware.lean_path import LEAN_ENVIRON_KEY
 from providers.protocols import MESSAGES
+from services import advisor_tool
 from services.native_token_count import NativeTokenCountError, count_claude_prompt_tokens
 
 logger = logging.getLogger(__name__)
@@ -357,8 +358,12 @@ def _with_cache_breakpoints(body: dict, ttl: str) -> tuple[dict, bool]:
         cached["system"] = [{"type": "text", "text": system, "cache_control": dict(marker)}]
     elif isinstance(system, list) and system and isinstance(system[-1], dict):
         cached["system"] = [*system[:-1], {**system[-1], "cache_control": dict(marker)}]
-    elif isinstance(tools, list) and tools and isinstance(tools[-1], dict):
-        cached["tools"] = [*tools[:-1], {**tools[-1], "cache_control": dict(marker)}]
+    elif isinstance(tools, list):
+        # The advisor tool caches its own prompt through its `caching` field.
+        last = next((index for index in range(len(tools) - 1, -1, -1)
+                     if isinstance(tools[index], dict) and not advisor_tool.is_advisor_tool(tools[index])), None)
+        if last is not None:
+            cached["tools"] = [*tools[:last], {**tools[last], "cache_control": dict(marker)}, *tools[last + 1:]]
     return cached, True
 
 
@@ -373,14 +378,16 @@ def _blocks(messages: Any) -> Iterable[dict]:
 def _with_tool_clearing(body: dict, policy: LeanPolicy) -> tuple[dict, bool]:
     """Clear old tool results server-side once the prompt passes the trigger.
 
-    Skipped when the caller manages context itself, and for signed compaction
-    blocks, which cannot be combined with context editing.
+    Skipped when the caller manages context itself, for signed compaction blocks,
+    which cannot be combined with context editing, and with the advisor tool, whose
+    blocks tool clearing does not fully support.
     """
     blocks = list(_blocks(body.get("messages")))
     uses_tools = bool(body.get("tools")) or any(block.get("type") == "tool_result" for block in blocks)
     if (
         policy.clear_trigger_tokens <= 0
         or not uses_tools
+        or advisor_tool.involves_advisor(body)
         or "context_management" in body
         or "compaction" in body
         or any(block.get("type") == "compaction" for block in blocks)

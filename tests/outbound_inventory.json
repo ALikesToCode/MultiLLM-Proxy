@@ -152,7 +152,7 @@
   "routes/chat_cache.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "6abb810dc1ee1ce4d7a14416c8b1618773d4a1ca3f6e9e77a3df8d970eb9392b"
+    "sha256": "b9f202825639914a24a5ec669be39d0a5d47dd9b8d8141079a6c3080a047d8cc"
   },
   "routes/config_snapshots.py": {
     "kind": "non-provider",
@@ -397,12 +397,12 @@
   "routes/tool_repair.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "74ebed16c97600531e8b9b1299588a5270793c666e48d63ef6909e357c601a5e"
+    "sha256": "28010d9d14b42d1b9cc31e95b442c7d01faaf747e779b9851861096ff2980b22"
   },
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "0510b4a92f688da2aeafc8e2a2d554997ebf3bf05517946ff188ea85258e16ec"
+    "sha256": "2dd79d087003e5821dd8a88b5f8435f7384e9162e0628891ad9972359d6e1b9b"
   },
   "routes/unified_bridge.py": {
     "kind": "non-provider",
@@ -1097,12 +1097,12 @@
   "services/protocol_translation/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "cff4c368369114275cf11f830cc3b53391c64a4c3e58a06b628e5156ee82133c"
+    "sha256": "352c9dce32a18d311f5cf79f4eadd572f78ffb3a8aff1191bd0ecc63deb87810"
   },
   "services/protocol_translation/anthropic_continuation.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "4c963cca96a891cd909675d15e4c2ea4b48b9e9cf29aa281f84ebd548a6856ed"
+    "sha256": "28e421170640c46570a245c889433ab673beab0e3cfd525a423ceba6e2af0d8f"
   },
   "services/protocol_translation/anthropic_request_policy.py": {
     "kind": "non-provider",
@@ -1117,7 +1117,7 @@
   "services/protocol_translation/anthropic_usage.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "4787051d3c0fa63d0af60dfcc33b4abbb7184548e036946744416ba030113c2a"
+    "sha256": "49e2fdbc08b805acd73cf659efbcb7e9750491e54aaf7ace3af2cd0229bccafe"
   },
   "services/protocol_translation/common.py": {
     "kind": "non-provider",
@@ -1127,12 +1127,12 @@
   "services/protocol_translation/responses.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "7a8acafe8cfc4877c88d17d04f861b4c227c7afbb98dac751dc15c08a85cf5a0"
+    "sha256": "fd21fba638a679136e5b93cc8815526b798eec69784b61e0456584b0c28f9e30"
   },
   "services/protocol_translation/responses_requests.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "f1af21d6e83d3aa9dff063fd28a3a2ba17cf02ac4da813d3f0c617c92e1e48a3"
+    "sha256": "338edb84f38d0b09f7e9bdcc6f400970787745d63d4c720a738574d706efbbfd"
   },
   "services/provider_access_policy.py": {
     "kind": "non-provider",
@@ -1242,7 +1242,7 @@
   "services/request_accounting.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "0539ebac076312c00c96e9eb24b83bf7326726035adc19f95d0a766716ceea81"
+    "sha256": "cf60e632be99613846c5e846ad096a87fb9987959772c80dff3ab1c15cd4fc10"
   },
   "services/request_cancellation.py": {
     "kind": "non-provider",
@@ -1312,7 +1312,7 @@
   "services/semantic_generation_cache.py": {
     "kind": "internal",
     "reason": "Private semantic-cache persistence; embeddings use guarded ProxyService.",
-    "sha256": "4f1d3bfb79533399a8210b84f9f6411840f36a8073f65aae9f2e06f6f8125d5c"
+    "sha256": "5f5465da76b55d1637000f5dd7802811bf2258165bc5cc0918d0aa5ff63b4d46"
   },
   "services/session_tiers.py": {
     "kind": "non-provider",
@@ -1412,7 +1412,7 @@
   "services/tool_call_repair.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "9cdff918fa6c59ccec78b7b48fc02564b1e4316e15fe51c0d699ec50b5f74b52"
+    "sha256": "a09bceed9e142983a3028fadc59915334de2bd6051c97f9cde5e135306ec1412"
   },
   "services/tool_repair_runtime.py": {
     "kind": "non-provider",
@@ -2472,12 +2472,12 @@
   "services/lean_mode.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "154f0eae820ef2a040d16f49e87cee9d42fb623ac3c17b9dc9986d39f1a86937"
+    "sha256": "fab2142b642f7ca80ccfb23cdc385a357c4819f5d973bf4dbf923b6418fd90a4"
   },
   "services/advisor_tool.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "31c6a35b61bc40624b27f1fb5c15d65faa22bc41b8028a745943280f77313e8f"
+    "sha256": "96fcafc3b55496478fa641b97ee179ac7937dba4ed5d90946223e20c3870c5a9"
   },
   "services/usage_iterations.py": {
     "kind": "non-provider",

@@ -86,7 +86,7 @@ def eligible(payload):
     if (not isinstance(payload, dict) or not isinstance(payload.get("model"), str)
             or not _MODEL.fullmatch(payload["model"]) or payload["model"].startswith(("auto:", "free:", "cascade:"))
             or payload.get("stream") or payload.get("n", 1) != 1 or "routing" in payload
-            or any(payload.get(k) for k in ("tools", "functions", "tool_choice", "function_call"))):
+            or any(payload.get(k) for k in ("tools", "functions", "tool_choice", "function_call", "advisor"))):
         return False
     messages = payload.get("messages")
     if not isinstance(messages, list) or not messages or not isinstance(messages[-1], dict):

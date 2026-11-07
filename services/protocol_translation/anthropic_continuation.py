@@ -27,6 +27,19 @@ def _validated_content(content):
             valid = all(
                 isinstance(block.get(key), str) and block[key] for key in ("id", "name")
             ) and isinstance(block.get("input"), dict)
+        elif kind == "server_tool_use":
+            # Only the advisor runs server-side on translated routes; its call and
+            # encrypted result replay with the turn.
+            valid = (
+                block.get("name") == "advisor"
+                and isinstance(block.get("id"), str)
+                and bool(block["id"])
+                and isinstance(block.get("input"), dict)
+            )
+        elif kind == "advisor_tool_result":
+            valid = isinstance(block.get("tool_use_id"), str) and isinstance(
+                block.get("content"), dict
+            )
         else:
             valid = False
         if not valid:
@@ -40,9 +53,20 @@ def _validated_content(content):
     return copy.deepcopy(content)
 
 
+ADVISOR_BLOCKS = frozenset({"server_tool_use", "advisor_tool_result"})
+
+
+def holds_advisor_blocks(content) -> bool:
+    return isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") in ADVISOR_BLOCKS for block in content
+    )
+
+
 def continuation_extra(content):
-    """Attach complete native blocks only when a signed tool turn needs them."""
-    if not any(
+    """Attach complete native blocks only when a tool turn needs them: a signed turn,
+    or one with advisor blocks, whose advisor call may still be pending and then runs
+    when the turn resumes."""
+    if not holds_advisor_blocks(content) and not any(
         isinstance(block, dict)
         and block.get("type") in {"thinking", "redacted_thinking"}
         for block in content

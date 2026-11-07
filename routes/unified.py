@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 
 from services.shadow_eval_sampling import sample_chat_dispatch
 from services.openai_safety import prepare_generation_payload
@@ -80,6 +81,7 @@ from routes.provider_credentials import (
 )
 from services.protocol_translation import (
     CHAT,
+    MESSAGES,
     TranslationError,
     strip_unsigned_thinking,
     translate_request,
@@ -113,6 +115,13 @@ def _resolve_enabled_model(app, model_id: str):
     if ModelRegistry.get_model_status(model_id) == "disabled":
         raise APIError(f"Model is disabled: {model_id}", status_code=400)
     return provider, provider_model, adapter
+
+
+def _refuse_disabled_advisors(body: dict, provider: str) -> None:
+    """An advisor tool naming a disabled model is refused like the model itself."""
+    for advisor in advisor_tool.catalog_models(body, provider):
+        if ModelRegistry.get_model_status(advisor) == "disabled":
+            raise APIError(f"Model is disabled: {advisor}", status_code=400)
 
 
 def _copy_request_payload(payload: dict, provider_model: str) -> dict:
@@ -311,6 +320,10 @@ def _send_native_request(
     lean = prepare_lean_request(
         body, provider=provider, endpoint=endpoint, request_headers=headers_source
     )
+    # The advisor tool needs its beta, on the prompt count as on the request.
+    betas = tuple(beta for beta in advisor_tool.declared_betas(lean.body) if beta not in lean.betas)
+    if betas:
+        lean = replace(lean, betas=(*lean.betas, *betas))
     raw_body = json.dumps(lean.body).encode("utf-8")
 
     def send_request(token: str):
@@ -382,6 +395,11 @@ def _dispatch_bridged_chat(
         body = emit_managed_request(_copy_request_payload(payload, provider_model), CHAT, target)
     except TranslationError as error:
         raise translation_api_error(error) from error
+    advisor = _requested_advisor(payload, provider, provider_model, target)
+    if advisor is not None:
+        body = {**body, "tools": [*(body.get("tools") or []), advisor]}
+        _refuse_disabled_advisors(body, provider)
+        body = advisor_tool.upstream_payload(body, provider)
     cache_decision = apply_prompt_cache_policy(
         body,
         provider=provider,
@@ -418,11 +436,46 @@ def _dispatch_bridged_chat(
         stream=bool(payload.get("stream")),
     )
     observe_managed_response(downstream, response, stream=bool(payload.get("stream")))
+    if advisor is not None:
+        _add_advisor_headers(downstream, advisor, provider)
     return _add_credential_attempt_headers(
         _add_prompt_cache_headers(downstream, cache_decision),
         provider,
         credential_attempts,
     )
+
+
+def _requested_advisor(payload: dict, provider: str, provider_model: str, target: str) -> dict | None:
+    """The Messages advisor tool for a translated request's `advisor` field."""
+    if not isinstance(payload, dict) or payload.get(advisor_tool.EXTENSION) is None:
+        return None
+    if provider != advisor_tool.DEFAULT_PROVIDER or target != MESSAGES:
+        raise APIError("'advisor' works only with anthropic: models", status_code=400)
+    try:
+        return advisor_tool.extension_tool({**payload, "model": f"{provider}:{provider_model}"})
+    except advisor_tool.AdvisorError as error:
+        raise APIError(str(error), status_code=400) from error
+
+
+def _add_advisor_headers(response, advisor: dict, provider: str) -> None:
+    """Name the advisor, and on a complete reply report its usage, in headers."""
+    try:
+        response.headers["X-MultiLLM-Advisor-Model"] = advisor_tool.qualified_model(advisor.get("model"), provider)
+    except advisor_tool.AdvisorError:
+        return
+    if response.is_streamed or response.status_code >= 400:
+        return
+    try:
+        usage = (json.loads(response.get_data()) or {}).get("usage") or {}
+    except (TypeError, ValueError, AttributeError):
+        return
+    summary = usage.get("advisor") if isinstance(usage, dict) else None
+    if not isinstance(summary, dict):
+        response.headers["X-MultiLLM-Advisor-Calls"] = "0"
+        return
+    for header, field in (("Calls", "calls"), ("Input-Tokens", "prompt_tokens"), ("Output-Tokens", "completion_tokens")):
+        if isinstance(summary.get(field), int):
+            response.headers[f"X-MultiLLM-Advisor-{header}"] = str(summary[field])
 
 
 @affinity_candidate
@@ -777,9 +830,7 @@ def _dispatch_native_protocol(
         )
     else:
         upstream_payload = strip_unsigned_thinking(upstream_payload)
-        for advisor in advisor_tool.catalog_models(upstream_payload, provider):
-            if ModelRegistry.get_model_status(advisor) == "disabled":
-                raise APIError(f"Model is disabled: {advisor}", status_code=400)
+        _refuse_disabled_advisors(upstream_payload, provider)
         upstream_payload = advisor_tool.upstream_payload(upstream_payload, provider)
     upstream_payload = _apply_nanogpt_speed_routing(
         app, provider, upstream_payload, headers_source

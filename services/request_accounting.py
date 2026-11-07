@@ -312,7 +312,10 @@ def begin() -> Optional[Response]:
     try:
         # A model named inside the request, such as an advisor tool's, is held to the
         # same controls as the request's own model.
-        advisors = advisor_tool.advisors(payload, advisor_tool.executor_provider(models[0] if models else None, provider))
+        # Chat Completions and Responses ask for one in an `advisor` field.
+        extension = kind in {"chat", "responses"} and not request.path.endswith(("/messages", "/count_tokens"))
+        advisors = advisor_tool.advisors(payload, advisor_tool.executor_provider(models[0] if models else None, provider),
+                                         extension=extension)
     except advisor_tool.AdvisorError as error:
         return _error(400, "invalid_request_error", str(error))
     controlled = [*models, *(advisor.model for advisor in advisors)]

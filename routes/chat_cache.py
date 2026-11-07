@@ -34,6 +34,8 @@ _MAX_AGE = re.compile(r"(?:^|,)\s*max-age\s*=\s*(\d{1,9})\s*(?:,|$)")
 _STORED_HEADERS = (
     "X-MultiLLM-Auto-Route", "X-MultiLLM-Auto-Selected-Model", "X-MultiLLM-Auto-Selected-Priority",
     "X-MultiLLM-Cascade", "X-MultiLLM-Auto-Ordering", "X-MultiLLM-Prompt-Cache", "X-MultiLLM-Prompt-Cache-Mode",
+    "X-MultiLLM-Advisor-Model", "X-MultiLLM-Advisor-Calls", "X-MultiLLM-Advisor-Input-Tokens",
+    "X-MultiLLM-Advisor-Output-Tokens",
 )
 _COMPLETE_FINISH_REASONS = frozenset({"stop", "end_turn", "stop_sequence", "eos"})
 _EXCLUDED_MODELS = frozenset({"auto:intelligence"})
