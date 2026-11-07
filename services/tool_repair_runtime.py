@@ -81,7 +81,12 @@ def followup_payload(request_payload, message, report):
 
 
 def add_usage(first, second):
-    """Keep known counts from both calls, including nested cached/reasoning details."""
+    """Keep known counts from both calls, including nested cached/reasoning details.
+
+    Claude's per-step `iterations`, which the ledger prices instead of the totals, are
+    joined when both calls report them and dropped when only one does, so the ledger
+    falls back to the summed totals rather than pricing one call.
+    """
     if not isinstance(first, dict):
         return second if isinstance(second, dict) else first
     if not isinstance(second, dict):
@@ -93,6 +98,11 @@ def add_usage(first, second):
         elif type(value) is int and value >= 0:
             previous = result.get(key, 0)
             result[key] = (previous if type(previous) is int else 0) + value
+    steps = first.get("iterations"), second.get("iterations")
+    if isinstance(steps[0], list) and isinstance(steps[1], list):
+        result["iterations"] = [*steps[0], *steps[1]]
+    else:
+        result.pop("iterations", None)
     return result
 
 

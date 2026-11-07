@@ -466,3 +466,14 @@ def test_a_result_without_its_advisor_call_is_dropped():
         *QUESTION, {"role": "assistant", "content": None, "tool_calls": [call]},
         {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]})
     assert body["messages"][1]["content"] == [use]
+
+
+def test_repair_usage_joins_the_steps_of_both_replies():
+    from services.tool_repair_runtime import add_usage
+
+    first = {"prompt_tokens": 10, "iterations": [{"type": "message", "input_tokens": 10}]}
+    second = {"prompt_tokens": 5, "iterations": [{"type": "message", "input_tokens": 5}]}
+    assert add_usage(first, second) == {"prompt_tokens": 15, "iterations": [*first["iterations"], *second["iterations"]]}
+    assert add_usage(first, {"prompt_tokens": 5}) == {"prompt_tokens": 15}
+    assert add_usage({"prompt_tokens": 10}, second) == {"prompt_tokens": 15}
+    assert add_usage({"prompt_tokens": 10}, {"prompt_tokens": 5}) == {"prompt_tokens": 15}
