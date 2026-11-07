@@ -103,6 +103,24 @@ output tokens, so leave room in `max_tokens` for both thinking and the answer.
 The catalog advertises the model's 1,000,000-token context and 128,000-token
 synchronous output limit; configured proxy request and token limits still apply.
 
+## Advisor tool
+
+Claude's [advisor tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool)
+lets a stronger model advise while the request's model writes the answer. Send
+it to `/v1/messages` with `anthropic-beta: advisor-tool-2026-03-01`:
+
+```json
+{"model": "anthropic:claude-haiku-5-5", "max_tokens": 2048,
+ "tools": [{"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5",
+            "max_uses": 1, "max_tokens": 1500}],
+ "messages": [{"role": "user", "content": "..."}]}
+```
+
+The reply, streamed or not, passes through as Claude sent it, with its
+`server_tool_use` and `advisor_tool_result` blocks. Append the whole `content`
+to the next turn and keep the advisor tool in `tools` while the history holds
+advisor results.
+
 ## Native API
 
 Native provider routes require an admin proxy key. Use `$PROXY_BASE_URL/anthropic`

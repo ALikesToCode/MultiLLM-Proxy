@@ -134,11 +134,26 @@ def _native_chat_payload(payload, source):
     return {"model": payload.get("model"), "tools": tools, "tool_choice": choice, "stream": payload.get("stream", False)}
 
 
+def _declares_server_tools(payload, source):
+    """Whether a Messages request declares a typed Anthropic tool, such as the advisor.
+
+    Repair goes through Chat Completions, which cannot carry server tool blocks
+    (`server_tool_use`, `advisor_tool_result`) or per-model `usage.iterations`, so
+    the reply must pass through as the provider sent it.
+    """
+    tools = payload.get("tools")
+    return source == "messages" and isinstance(tools, list) and any(
+        isinstance(tool, dict) and isinstance(tool.get("type"), str) and tool["type"] != "custom" for tool in tools)
+
+
 def with_native_tool_repair(dispatch):
     @wraps(dispatch)
     def wrapped(app, auth, metrics, proxy, payload, **kwargs):
         mode = repair_mode(request.headers, app.config)
         response = dispatch(app, auth, metrics, proxy, payload, **kwargs)
+        if _declares_server_tools(payload, ENDPOINT_PROTOCOLS[kwargs["endpoint"]]):
+            response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)
+            return response
         if not payload.get("tools") or mode == "off":
             if payload.get("tools"):
                 response.headers[HEADER] = summary_header({}, streaming=response.mimetype == "text/event-stream", mode=mode)

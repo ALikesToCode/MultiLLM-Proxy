@@ -397,7 +397,7 @@
   "routes/tool_repair.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "71f5d11cd649208d60b1508c6802760aaed18d2882d7ba4da2af832e9a89ebf9"
+    "sha256": "208a0d24aa66d429d5a38785b39367526d9e4f7014cbd93b9fff6f2e7ecccbb5"
   },
   "routes/unified.py": {
     "kind": "guarded",
