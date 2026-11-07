@@ -56,13 +56,37 @@ class IterationUsage:
         return usage
 
 
+UNKNOWN_STEP = IterationUsage("unknown", None, None, None, None, None, None)
+
+
+def _sum(values: list[int | None]) -> int | None:
+    return sum(value for value in values if value is not None) if all(value is not None for value in values) else None
+
+
+def _summed(steps: list[IterationUsage]) -> IterationUsage:
+    first = steps[0]
+    return IterationUsage(first.kind, first.model, *(
+        _sum([getattr(step, name) for step in steps]) for name in (
+            "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")),
+        sum(step.cache_write_1h_tokens or 0 for step in steps) or None)
+
+
 def iterations_from(usage: Any) -> tuple[IterationUsage, ...]:
     entries = usage.get("iterations") if isinstance(usage, dict) else None
     if not isinstance(entries, list) or not entries:
         return ()
     # An entry that cannot be read is kept as unknown, so its cost is unknown too.
-    return tuple(IterationUsage.parse(entry) or IterationUsage("unknown", None, None, None, None, None, None)
-                 for entry in entries[:MAX_ITERATIONS])
+    steps = [IterationUsage.parse(entry) or UNKNOWN_STEP for entry in entries[:MAX_ITERATIONS]]
+    # Steps past the cap are summed per kind and model rather than dropped, so they are
+    # still billed; a sum can only reach a higher long-prompt tier, never a lower one.
+    overflow: dict[tuple[str, str | None], list[IterationUsage]] = {}
+    for entry in entries[MAX_ITERATIONS:]:
+        step = IterationUsage.parse(entry) or UNKNOWN_STEP
+        key = (step.kind, step.model)
+        if key not in overflow and len(overflow) >= MAX_ITERATIONS:
+            key, step = ("unknown", None), UNKNOWN_STEP
+        overflow.setdefault(key, []).append(step)
+    return tuple(steps) + tuple(_summed(group) for group in overflow.values())
 
 
 @dataclass(frozen=True)

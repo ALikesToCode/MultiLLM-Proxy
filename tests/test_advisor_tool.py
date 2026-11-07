@@ -340,6 +340,16 @@ class AdvisorLedgerTest(LedgerTestCase):
         self.assertEqual(set(rows), {HAIKU, SONNET})
         self.assertEqual((rows[HAIKU]["input_tokens"], rows[HAIKU]["output_tokens"]), (2200, 110))
 
+    def test_steps_past_the_cap_are_still_billed(self):
+        steps = [iteration("message", 1000, 10) for _ in range(299)]
+        steps.append(iteration("advisor_message", 2778, 685, model="claude-sonnet-5-5"))
+        self.messages({}, json_reply(advised_message(advised_usage(steps))), key=self.key)
+        rows = self.rows()
+        self.assertEqual((rows[HAIKU]["input_tokens"], rows[HAIKU]["output_tokens"]), (299_000, 2_990))
+        self.assertAlmostEqual(rows[HAIKU]["cost_usd"], (299_000 * 0.1 + 2_990 * 0.5) / 1e6)
+        self.assertEqual((rows[SONNET]["input_tokens"], rows[SONNET]["output_tokens"]), (2778, 685))
+        self.assertAlmostEqual(rows[SONNET]["cost_usd"], SONNET_COST)
+
     def test_a_reply_without_steps_keeps_one_row(self):
         usage = {"input_tokens": 1000, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         self.messages({"tools": []}, json_reply(advised_message(usage)), key=self.key)

@@ -1462,7 +1462,7 @@
   "services/usage_types.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "d8f6c874e97899f2db42cbcd435b7fc2cb18b4b3c469c63f8d02f938cf7ea41d"
+    "sha256": "070f55982d117965ac91ee520232f2dfed597c00f8c46365e2bfed8f038fd2fe"
   },
   "services/user_provisioning.py": {
     "kind": "non-provider",
