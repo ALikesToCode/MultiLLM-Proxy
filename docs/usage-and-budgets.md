@@ -70,6 +70,22 @@ gateway lists, from <https://platform.claude.com/docs/en/about-claude/pricing> a
 a model without an entry is recorded at no cost. Batch, fast-mode and US-only
 inference prices are not modelled.
 
+A Claude reply that ran a server-side loop lists each sampling step in
+`usage.iterations`, and its top-level usage counts only the request's model. An
+[advisor](anthropic.md#advisor-tool) step names its own model, so each step is
+priced at the prices of the model that ran it, with the `long_context` tier
+judged per step. The request's row keeps its own model's steps; the advisor's
+steps get a row of their own, under endpoint `/v1/messages/advisor`
+(`/anthropic/v1/messages/advisor` on the native route) with the advisor's model
+as `requested_model` and `selected_model`, the same `request_id`, status and
+time. The usage page and `GET /v1/usage` therefore list advisor tokens and cost
+under the advisor's model, where one consultation counts as one request. Budgets,
+reservations and credits settle the request's whole cost, advisor included. A
+`message` step always counts as the request's model, whatever id it reports.
+Other steps without a model, such as a context `compaction` step, also run on the
+request's model and are billed with it, although the top-level usage leaves them
+out. A reply served from the response cache stays one row at no cost.
+
 `cost_basis` is `usage` when the provider reported tokens and `estimate` when the
 proxy's own token estimate was used. Requests to unpriced models and failed requests
 (status 400 or above, with no usage reported) have no cost. Configured prices are
@@ -136,7 +152,20 @@ budget unless one is set explicitly.
 
 Before dispatch the proxy estimates the request's cost from the prompt-token estimate,
 the requested output limit (1024 tokens when none is given) and the image count. For
-an automatic route it uses the most expensive priced candidate. The request is
+an automatic route it uses the most expensive priced candidate. A request with
+an [advisor tool](anthropic.md#advisor-tool) also reserves the advisor's worst
+case: each of its `max_uses` calls reads the transcript (the prompt estimate, the
+output limit and earlier advice, plus 4,096 tokens for the advisor's own prompt)
+at the advisor's prices and writes up to its `max_tokens`, and the request's model
+reads the transcript again after each call. A key with a budget, or one charged
+in credits, must set both `max_uses` and `max_tokens` on every advisor tool;
+without them the request gets 400 `invalid_request_error`, because Claude's
+defaults leave the advisor's cost unbounded. A tool with `caching` adds the cost
+of writing that prompt to the cache: a quarter of its input price for `5m`, its
+full input price for `1h`. A key with a stream cost cap follows the same rules: the
+advisor's worst case counts against the cap from the first token, since Claude
+reports the advisor's tokens only when the stream ends. Token counting reserves
+nothing for the advisor. The request is
 admitted only if the ledger total for the period, plus what this process recorded
 since it last read that total, plus the estimates of the key's requests still in
 flight, plus this estimate fits every limit. When the request finishes, its estimate is
@@ -172,7 +201,10 @@ A key may list allowed model IDs or patterns, where `*` matches any characters:
 model is checked before dispatch on chat, responses, images (every item of a batch;
 items without a model use `auto:image`), videos (`auto:video` by default), embeddings,
 audio and provider pass-through routes, where the model is `provider:<body model>`. A
-pass-through request that names no model needs `provider:*` or `*`. An automatic route
+pass-through request that names no model needs `provider:*` or `*`. A model named inside
+a request is checked too: the `model` of each Claude advisor tool on
+`/v1/messages`, as `anthropic:<id>` when it is a bare id (see
+[advisor tool](anthropic.md#advisor-tool)). An automatic route
 is allowed by its own ID; its candidates are the operator's choice. A refused request
 gets 403 `model_not_allowed`. `GET /v1/models` lists only the models the key may use.
 

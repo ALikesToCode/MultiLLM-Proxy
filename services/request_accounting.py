@@ -23,7 +23,8 @@ from flask import Response, current_app, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
-from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
+from services import advisor_tool, key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
+from services import usage_iterations
 from services import credits_admission, tenant_governance
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
@@ -67,6 +68,9 @@ MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}\Z")
 ENDPOINT = re.compile(r"/[A-Za-z0-9._~:/@+-]{0,255}\Z")
 REQUEST_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 DEFAULT_OUTPUT_TOKENS = 1024
+# Room for the advisor's own prompt around the transcript it reads. Claude Sonnet 5.5
+# advising Claude Haiku 5.5 read about 1,600 tokens more than the executor's prompt.
+ADVISOR_PROMPT_TOKENS = 4096
 MAX_USAGE_JSON_BYTES = 16 * 1024 * 1024
 SSE_TAIL_BYTES = 65536
 
@@ -101,6 +105,8 @@ class UsageContext:
     governance_store: Any = None
     dispatched: bool = False
     gateway_subrequest: bool = False
+    # Advisor tools the request declares; their worst case is reserved with it.
+    advisors: tuple = ()
 
 
 def classify() -> Optional[str]:
@@ -229,6 +235,38 @@ def reservation_price(models, input_tokens, output_tokens, units):
     return max(costs) if costs and all(cost is not None for cost in costs) else None
 
 
+def _unbounded_advisor(context: UsageContext) -> Optional[str]:
+    """The first bound an advisor leaves unset; Claude then applies no limit."""
+    return next((name for advisor in context.advisors for name in ("max_uses", "max_tokens")
+                 if getattr(advisor, name) is None), None)
+
+
+def advisor_exposure(context: UsageContext, models: list[str], strict: bool) -> Optional[float]:
+    """The most the request's advisors can cost, in USD; None when strict pricing
+    cannot price one.
+
+    Each of an advisor's `max_uses` calls reads the transcript (the prompt, the
+    request's output limit and earlier advice) plus its own prompt, writes that prompt
+    to the cache when the tool asks for caching, and writes up to `max_tokens`. The
+    request's model then reads the transcript again.
+    """
+    total = 0.0
+    executors = [candidate for model in models for candidate in _candidates(model)]
+    for advisor in context.advisors:
+        uses, tokens = advisor.max_uses or 0, advisor.max_tokens or 0
+        transcript = context.input_tokens + context.output_tokens + uses * tokens
+        prompt = transcript + ADVISOR_PROMPT_TOKENS
+        advice = CostService.estimate(advisor.model, prompt, tokens)
+        if advice is not None and advisor.cache_write:
+            read = CostService.estimate(advisor.model, prompt, 0)
+            advice = None if read is None else advice + advisor.cache_write * read
+        rereads = [CostService.estimate(model, transcript, 0) for model in executors]
+        if strict and (advice is None or any(cost is None for cost in rereads)):
+            return None
+        total += uses * ((advice or 0.0) + max((cost for cost in rereads if cost is not None), default=0.0))
+    return total
+
+
 def mark_dispatched():
     """Injected pre-submission hook for managed request owners."""
     context = getattr(g, "usage_context", None)
@@ -271,10 +309,17 @@ def begin() -> Optional[Response]:
         return None
     payload = _payload()
     models, provider = _requested_models(kind, payload)
+    try:
+        # A model named inside the request, such as an advisor tool's, is held to the
+        # same controls as the request's own model.
+        advisors = advisor_tool.advisors(payload, advisor_tool.executor_provider(models[0] if models else None, provider))
+    except advisor_tool.AdvisorError as error:
+        return _error(400, "invalid_request_error", str(error))
+    controlled = [*models, *(advisor.model for advisor in advisors)]
     from services.key_data_guards import model_permitted
-    if any(not model_permitted(user, model) for model in models) or (provider and not model_permitted(user, provider + ":*")):
+    if any(not model_permitted(user, model) for model in controlled) or (provider and not model_permitted(user, provider + ":*")):
         return _error(403, "provider_class_not_allowed", "This API key cannot use this provider data class.")
-    for model in models:
+    for model in controlled:
         if not key_controls.model_allowed(user, model):
             return _error(403, "model_not_allowed",
                           f"This API key is not allowed to use {str(model)[:128]}.", model=str(model)[:256])
@@ -284,7 +329,9 @@ def begin() -> Optional[Response]:
     context = UsageContext(kind=kind, models=models, provider=provider, user=user,
                            started=getattr(g, "request_started_at", None) or time.perf_counter(),
                            start_ns=time.time_ns(), units=_image_units(kind, payload),
-                           trace=telemetry_export.trace_context(request.headers.get("traceparent")))
+                           trace=telemetry_export.trace_context(request.headers.get("traceparent")),
+                           # Counting tokens never runs the advisor, so it reserves nothing for it.
+                           advisors=() if request.path.endswith("/count_tokens") else tuple(advisors))
     from services.tenant_hierarchy import current_tenant
     context.tenant = current_tenant()
     context.input_tokens, context.output_tokens = _token_estimates(payload)
@@ -294,8 +341,19 @@ def begin() -> Optional[Response]:
                     "responses" if request.path.endswith("/responses") else "chat")
         qualified = [_qualified(candidate, provider) for model in models for candidate in _candidates(model)]
         try:
+            # Claude reports an advisor's tokens only once the stream ends, so the cap
+            # counts each advisor at its worst case from the start.
+            missing = _unbounded_advisor(context)
+            if missing:
+                return _error(400, "invalid_request_error",
+                              f"Set {missing} on the advisor tool: this key's stream cost is capped, so the "
+                              "advisor's cost must be bounded before the request is sent.")
+            reserved = advisor_exposure(context, qualified, strict=True)
+            if reserved is None:
+                raise stream_cost_breaker.failure("stream_cost_unpriced")
             context.stream_cost = stream_cost_breaker.prepare(
-                user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol)
+                user, qualified, max(context.input_tokens, stream_cost_breaker.input_bound(payload)), protocol,
+                reserved_usd=reserved)
         except APIError as error:
             return _error(error.status_code, error.payload["error"], "Stream cost enforcement refused this request.")
     denied = reserve_attempt(context)
@@ -318,9 +376,18 @@ def reserve_attempt(context):
     qualified = [_qualified(model, context.provider) for model in context.models]
     estimate = None
     if budgeted(user) or charged:
+        missing = _unbounded_advisor(context)
+        if missing:
+            return _error(400, "invalid_request_error",
+                          f"Set {missing} on the advisor tool: this key's spending is capped, so the "
+                          "advisor's cost must be bounded before the request is sent.")
+        strict = (reservation_store.enabled() and not context.gateway_subrequest) or governance is not None or charged
         estimate = (reservation_price(qualified, context.input_tokens, context.output_tokens, context.units)
-                    if (reservation_store.enabled() and not context.gateway_subrequest) or governance is not None or charged else
+                    if strict else
                     estimate_cost(qualified, context.input_tokens, context.output_tokens, context.units))
+        exposure = advisor_exposure(context, qualified, strict)
+        if estimate is not None:
+            estimate = None if exposure is None else estimate + exposure
     if budgeted(user):
         context.estimate = estimate or 0.0
         decision = BudgetService.check_and_reserve(user, estimate)
@@ -487,7 +554,14 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
         BudgetService.settle(context.reservation, before_dispatch=True, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
         return
     try:
+        # Steps that ran on another model (an advisor) are priced at that model and
+        # recorded as rows of their own; the request's row keeps its model's steps. A
+        # reply served from the cache ran no model, so it stays one row.
+        parts = ([(None, replace(usage, iterations=()) if usage is not None else None)] if context.cached else
+                 usage_iterations.by_model(_selected_model(context), usage))
+        usage = parts[0][1]
         row = _row(context, status, usage, units)
+        advised = [_advised_row(context, row, model, part) for model, part in parts[1:]]
         budget_row = row
         if row["cost_usd"] is None and usage is not None:
             # Only the budget sees estimates; measured ledger counts remain unchanged.
@@ -499,11 +573,20 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
                         if prompt_cache_cost.enabled() else price(models, estimated.input_tokens,
                                                                   estimated.output_tokens, context.units))
             budget_row = {**row, "cost_usd": estimate}
-        row = _record_budget(context, row, budget_row)
-        usage_ledger.LEDGER.record(row)
-        telemetry_export.EXPORTER.submit({**row, "method": context.method, "trace_id": context.trace[0],
-                                          "parent_span_id": context.trace[1], "start_ns": context.start_ns,
-                                          "end_ns": time.time_ns()})
+        if advised:
+            # Budgets, reservations and credits settle the whole request.
+            settled = _record_budget(context, _with_advice(row, advised), _with_advice(budget_row, advised))
+            main = {**row, "at": settled["at"]}
+            if settled["cost_basis"] is None and row["cost_basis"] == "estimate":
+                main.update(cost_usd=None, cost_basis=None)
+            rows = [main, *({**advice, "at": settled["at"]} for advice in advised)]
+        else:
+            rows = [_record_budget(context, row, budget_row)]
+        for entry in rows:
+            usage_ledger.LEDGER.record(entry)
+            telemetry_export.EXPORTER.submit({**entry, "method": context.method, "trace_id": context.trace[0],
+                                              "parent_span_id": context.trace[1], "start_ns": context.start_ns,
+                                              "end_ns": time.time_ns()})
     except Exception as error:  # Accounting must never fail a served request.
         logger.warning("Usage could not be recorded (%s)", type(error).__name__)
     finally:
@@ -512,13 +595,70 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
             BudgetService.settle(context.reservation, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
 
 
+def _selected_model(context: UsageContext) -> Optional[str]:
+    """The model that served the request, when the route has named it."""
+    qualified = [_qualified(model, context.provider) for model in context.models]
+    requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
+    return context.selected or (requested if requested and requested != "mixed"
+                                and not requested.startswith(("auto:", "free:")) else None)
+
+
+def _step_price(models: list[str], usage: UsageObservation, units: int) -> Optional[float]:
+    """`price` of usage that lists its sampling steps, one step at a time, so each step
+    gets its own long-prompt tier."""
+    if not usage.iterations:
+        return price(models, usage.input_tokens, usage.output_tokens, units)
+    steps = [UsageObservation.from_body({"usage": step.as_usage()}) for step in usage.iterations]
+    costs = [price(models, step.input_tokens, step.output_tokens, units if index == 0 else 0)
+             for index, step in enumerate(steps)]
+    return sum(costs) if all(cost is not None for cost in costs) else None
+
+
+def _measured_cost(model: str, usage: UsageObservation, units: int) -> tuple[Optional[float], dict]:
+    """A measured part's cost at `model`'s prices, step by step when steps are listed."""
+    if prompt_cache_cost.enabled():
+        breakdown = CostService.price_buckets(model, usage, requests=units)
+        return breakdown["cost_usd"], breakdown
+    return _step_price([model], usage, units), {}
+
+
+def _advised_row(context: UsageContext, row: dict, model: str, usage: UsageObservation) -> dict:
+    """The ledger row of steps that ran on another model than the request's, such as
+    an advisor: one row per model, under `<endpoint>/advisor`, with its own cost."""
+    endpoint = f"{row['endpoint']}/advisor"
+    cost, breakdown = _measured_cost(model, usage, 0)
+    advice = {
+        **row,
+        "endpoint": endpoint if ENDPOINT.fullmatch(endpoint) else row["endpoint"],
+        "requested_model": _clean_model(model),
+        "selected_model": _clean_model(model),
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cached_input_tokens": usage.cached_input_tokens,
+        "reasoning_tokens": None,
+        "cost_usd": 0.0 if context.cached and row["status"] < 400 else cost,
+        "cost_basis": "cache" if context.cached and row["status"] < 400 else usage.storage_basis(cost),
+    }
+    if breakdown:
+        advice.update({name: breakdown[name] for name in prompt_cache_cost.ROW_FIELDS})
+    return advice
+
+
+def _with_advice(row: dict, advised: list[dict]) -> dict:
+    """The request's row with its advisors' costs added, for admission settlement."""
+    costs = [advice["cost_usd"] for advice in advised if advice["cost_usd"] is not None]
+    if not costs:
+        return row
+    total = (row["cost_usd"] or 0.0) + sum(costs)
+    return {**row, "cost_usd": total, "cost_basis": row["cost_basis"] or "usage"}
+
+
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
     if usage is not None and context.path == "/v1/embeddings":
         usage = replace(usage, output_tokens=0)
     qualified = [_qualified(model, context.provider) for model in context.models]
     requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
-    selected = context.selected or (requested if requested and requested != "mixed"
-                                    and not requested.startswith(("auto:", "free:")) else None)
+    selected = _selected_model(context)
     if units is not None:
         context.units = units
     cost, basis = None, None
@@ -528,8 +668,7 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         observation = usage if usage is not None else UsageObservation().with_estimates(
             context.input_tokens, context.output_tokens)
         if not (prompt_cache_cost.enabled() and context.kind in {"chat", "responses", "proxy", "embeddings"}):
-            cost = price([selected] if selected else qualified, observation.input_tokens,
-                         observation.output_tokens, context.units)
+            cost = _step_price([selected] if selected else qualified, observation, context.units)
             basis = observation.storage_basis(cost)
     if context.stream_cost is not None and usage is not None:
         breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)

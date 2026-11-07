@@ -56,7 +56,7 @@ from routes.unified_transport import send_configured_unified_provider_request
 from routes.unified_bridge import _add_prompt_cache_headers, dispatch_translated_protocol, record_request_conversion, register_conversion_routes, with_chat_conversion_report
 from services.nanogpt_speed_breaker import NanoGPTSpeedBreaker
 from services.adaptive_context_service import apply_adaptive_glm_context
-from services import cloudflare_ai
+from services import advisor_tool, cloudflare_ai
 from services.media_catalog import (
     image_profile,
     is_video_model,
@@ -777,6 +777,10 @@ def _dispatch_native_protocol(
         )
     else:
         upstream_payload = strip_unsigned_thinking(upstream_payload)
+        for advisor in advisor_tool.catalog_models(upstream_payload, provider):
+            if ModelRegistry.get_model_status(advisor) == "disabled":
+                raise APIError(f"Model is disabled: {advisor}", status_code=400)
+        upstream_payload = advisor_tool.upstream_payload(upstream_payload, provider)
     upstream_payload = _apply_nanogpt_speed_routing(
         app, provider, upstream_payload, headers_source
     )

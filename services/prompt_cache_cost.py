@@ -104,7 +104,7 @@ class CacheObservation(UsageObservation):
         total = _sum((raw, read, write)) if anthropic else raw
         return cls(total, count(typed.output_tokens), typed.basis, typed.provenance, raw, read, write, source,
                    cache_write_1h=one_hour, cached_input_tokens=typed.cached_input_tokens,
-                   reasoning_tokens=typed.reasoning_tokens)
+                   reasoning_tokens=typed.reasoning_tokens, iterations=typed.iterations)
 
     def merge(self, later: UsageObservation) -> CacheObservation:
         if not isinstance(later, CacheObservation):
@@ -123,7 +123,8 @@ class CacheObservation(UsageObservation):
         known = any(v is not None for v in (raw, read, write, output))
         return CacheObservation(total, output, "provider" if known else "unknown", ("provider",) if known else (),
                                 raw, read, write, source, cache_write_1h=one_hour, cached_input_tokens=read,
-                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens)
+                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens,
+                                iterations=later.iterations or self.iterations)
 
 
 def buckets_from(usage: UsageObservation | None) -> dict:
@@ -192,6 +193,31 @@ def _write_cost(amount: int, one_hour: int, five_minute: Decimal | None, hour: D
 
 
 def price_buckets(model: str | None, usage: UsageObservation | None, *, requests: int = 1) -> dict:
+    """Bucket costs of `usage` at `model`'s prices. Usage that lists its sampling steps
+    (`usage.iterations`) is priced step by step, each with its own long-prompt tier;
+    pass only the steps that ran on `model` (see `usage_iterations.by_model`)."""
+    if usage is not None and usage.iterations:
+        return _price_iterations(model, usage, requests)
+    return _price_observation(model, usage, requests=requests)
+
+
+def iteration_observation(step) -> CacheObservation:
+    return CacheObservation.from_body({"type": "message", "usage": step.as_usage()}) or CacheObservation()
+
+
+def _price_iterations(model: str | None, usage: UsageObservation, requests: int) -> dict:
+    parts = [_price_observation(model, iteration_observation(step), requests=requests if index == 0 else 0)
+             for index, step in enumerate(usage.iterations)]
+    result = {**buckets_from(usage), **dict.fromkeys(COST_FIELDS), "cost_usd": None}
+    for name in (*TOKEN_FIELDS[:3], *COST_FIELDS, "cost_usd"):
+        values = [part[name] for part in parts]
+        result[name] = sum(values) if all(value is not None for value in values) else None
+    if result["cost_usd"] is not None and result["cost_usd"] > MAX_MICROUSD / 1_000_000:
+        result["cost_usd"] = None
+    return result
+
+
+def _price_observation(model: str | None, usage: UsageObservation | None, *, requests: int = 1) -> dict:
     buckets = buckets_from(usage)
     result = {**buckets, **dict.fromkeys(COST_FIELDS), "cost_usd": None}
     try:

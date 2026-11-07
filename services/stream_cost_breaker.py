@@ -210,8 +210,10 @@ def _terminal(value) -> bool:
         isinstance(value.get("choices"), list) and any(isinstance(c, dict) and c.get("finish_reason") is not None for c in value["choices"]))
 
 class StreamCostState:
-    def __init__(self, cap, prices, input_tokens, protocol):
+    def __init__(self, cap, prices, input_tokens, protocol, reserved_microusd=0):
         self.cap, self.prices, self.input_tokens, self.protocol = cap, prices, input_tokens, protocol
+        # Spend the stream cannot show, such as an advisor's, counted at its worst case.
+        self.reserved_microusd = reserved_microusd
         self.running_microusd = 0
         self.basis = "conservative_estimate"
         self.exceeded = False
@@ -246,7 +248,7 @@ class StreamCostState:
                 output = measured.output_tokens if measured is not None and measured.output_tokens is not None else 0
                 amount = price.flat + max(self.input_tokens, known_input) * price.bound_input + max(output + additional, self.output_bound) * price.output
             costs.append(amount)
-        self.running_microusd = int(max(costs).to_integral_value(rounding=ROUND_CEILING))
+        self.running_microusd = int(max(costs).to_integral_value(rounding=ROUND_CEILING)) + self.reserved_microusd
         self.basis = "measured" if fully_measured else "conservative_estimate"
 
     def observe(self, frame: bytes) -> bool:
@@ -295,7 +297,9 @@ class StreamCostState:
             value, prefix = {"error": error}, ""
         return (prefix + "data: " + json.dumps(value) + "\n\n").encode()
 
-def prepare(user, models, input_tokens, protocol):
+def prepare(user, models, input_tokens, protocol, reserved_usd=0.0):
+    """The stream's cost state, or None when its key has no cap. `reserved_usd` is
+    spend the stream does not report as it goes, such as an advisor's worst case."""
     if not enabled():
         return None
     cap = cap_for(user)
@@ -305,7 +309,8 @@ def prepare(user, models, input_tokens, protocol):
         raise failure("stream_cost_storage_unavailable")
     if not models:
         raise failure("stream_cost_unpriced")
-    state = StreamCostState(cap, [prices_for(model) for model in models], input_tokens, protocol)
+    reserved = int((Decimal(str(reserved_usd)) * 1_000_000).to_integral_value(rounding=ROUND_CEILING))
+    state = StreamCostState(cap, [prices_for(model) for model in models], input_tokens, protocol, reserved)
     if state.running_microusd > cap:
         raise failure("stream_cost_cap_exceeded", 429)
     return state

@@ -103,6 +103,43 @@ output tokens, so leave room in `max_tokens` for both thinking and the answer.
 The catalog advertises the model's 1,000,000-token context and 128,000-token
 synchronous output limit; configured proxy request and token limits still apply.
 
+## Advisor tool
+
+Claude's [advisor tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool)
+lets a stronger model advise while the request's model writes the answer. Send
+it to `/v1/messages` with `anthropic-beta: advisor-tool-2026-03-01`:
+
+```json
+{"model": "anthropic:claude-haiku-5-5", "max_tokens": 2048,
+ "tools": [{"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5",
+            "max_uses": 1, "max_tokens": 1500}],
+ "messages": [{"role": "user", "content": "..."}]}
+```
+
+The reply, streamed or not, passes through as Claude sent it, with its
+`server_tool_use` and `advisor_tool_result` blocks. Append the whole `content`
+to the next turn and keep the advisor tool in `tools` while the history holds
+advisor results.
+
+Claude bills the advisor's tokens at the advisor model's prices and reports
+them only in `usage.iterations`, not in the top-level usage. The ledger prices
+every step at its own model and records the advisor's steps under the advisor's
+model; see [usage and budgets](usage-and-budgets.md#cost). Budgets and stream
+cost caps count the advisor's worst case before the request is sent, so a key
+with either must set `max_uses` and `max_tokens` (at least 1024) on the advisor
+tool.
+
+The advisor's model is held to the key's controls like the request's own model:
+its allowlist, `official_only` and provider data class. A bare id such as
+`claude-opus-5-5` is checked as its catalog id, `anthropic:claude-opus-5-5`, and
+a key that may not use that model gets the same 403 `model_not_allowed` as a
+request naming it directly, before anything reaches Claude. A model an operator
+disabled gets the same 400 as naming it directly. On `/v1/messages` a catalog id
+is accepted and sent to Claude as its bare id. The native route sends the request
+as written, so use bare ids there. An advisor from another provider gets 400.
+Forced provider preferences apply only to OpenRouter, so they do not change an
+`anthropic:` advisor.
+
 ## Native API
 
 Native provider routes require an admin proxy key. Use `$PROXY_BASE_URL/anthropic`

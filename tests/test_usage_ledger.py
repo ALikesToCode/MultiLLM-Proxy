@@ -226,6 +226,16 @@ def test_recent_requests_survive_a_restart_through_the_ledger(ledger):
     assert {record["route_decision"] for record in records} >= {"ledger"}
 
 
+def test_an_advisor_row_is_not_restored_as_a_request(ledger):
+    at = usage_ledger.utc_timestamp(datetime.now(timezone.utc) - timedelta(hours=1))
+    ledger.record(row(at=at))
+    ledger.record({**row(at=at), "endpoint": "/v1/messages/advisor"})
+    ledger.flush(timeout=5)
+    metrics = MetricsService()
+    assert usage_ledger.hydrate_metrics(metrics) == 1
+    assert [record["endpoint"] for record in metrics.requests] == ["/v1/chat/completions"]
+
+
 def test_hydration_never_displaces_live_requests(ledger):
     ledger.record(row(at=usage_ledger.utc_timestamp(datetime.now(timezone.utc) - timedelta(hours=1))))
     ledger.flush(timeout=5)
