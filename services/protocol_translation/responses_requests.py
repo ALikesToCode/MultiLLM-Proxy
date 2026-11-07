@@ -88,6 +88,9 @@ def responses_request_to_chat(payload: Mapping[str, Any]) -> dict:
     effort = reasoning.get("effort") if isinstance(reasoning, Mapping) else None
     if isinstance(effort, str) and effort:
         chat["reasoning_effort"] = effort
+    if payload.get("advisor") is not None:
+        # Claude's advisor tool; the Messages translation for anthropic: models adds it.
+        chat["advisor"] = payload["advisor"]
     return chat
 
 

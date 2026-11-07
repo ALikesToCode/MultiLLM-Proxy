@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from services.protocol_translation.anthropic_continuation import continuation_extra, restore_assistant_content
+from services.protocol_translation.anthropic_continuation import (
+    continuation_extra,
+    holds_advisor_blocks,
+    restore_assistant_content,
+)
 
 from services.protocol_translation.anthropic_request_policy import (
     output_format as _output_format,
@@ -440,6 +444,12 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
         if turn["role"] == "user":
             # Messages requires tool results before any other user content.
             turn["content"].sort(key=lambda block: block.get("type") != "tool_result")
+        elif payload.get("advisor") is None and holds_advisor_blocks(turn["content"]):
+            raise TranslationError(
+                "This conversation replays advice from the advisor tool; send the same "
+                "'advisor' field with every request that carries it",
+                param="advisor",
+            )
     if not turns:
         raise TranslationError(
             "At least one user or assistant message is required", param="messages"

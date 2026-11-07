@@ -13,6 +13,12 @@ from typing import Any, Optional
 
 BETA = "advisor-tool-2026-03-01"
 TOOL_PREFIX = "advisor_"
+TOOL_TYPE = "advisor_20260301"
+# Chat Completions and Responses requests ask for an advisor with this body field;
+# it becomes the Messages tool when the request is translated for Claude.
+EXTENSION = "advisor"
+EXTENSION_KEYS = ("model", "max_uses", "max_tokens", "caching")
+EXECUTOR_PREFIX = "anthropic:"
 # Executors whose provider is chosen later. A bare advisor id names a Claude model.
 ROUTED_PROVIDERS = frozenset({"auto", "free", "cascade", "intelligence"})
 DEFAULT_PROVIDER = "anthropic"
@@ -60,6 +66,34 @@ def advisor_tools(payload: Any) -> list[dict]:
     return [tool for tool in tools if is_advisor_tool(tool)]
 
 
+def extension_tool(payload: Any) -> Optional[dict]:
+    """The Messages advisor tool a Chat Completions or Responses request asks for in
+    its `advisor` field, or None. The executor must be a Claude model."""
+    value = payload.get(EXTENSION) if isinstance(payload, dict) else None
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise AdvisorError("'advisor' must be an object such as "
+                           '{"model": "anthropic:claude-sonnet-5-5", "max_uses": 1, "max_tokens": 2048}')
+    unknown = next((key for key in value if key not in EXTENSION_KEYS), None)
+    if unknown is not None:
+        raise AdvisorError(f"'advisor' accepts model, max_uses, max_tokens and caching, not {str(unknown)[:64]}")
+    for name in ("max_uses", "max_tokens"):
+        if name in value and _bound(value, name) is None:
+            raise AdvisorError(f"'advisor.{name}' must be a positive integer")
+    if "caching" in value and not isinstance(value["caching"], dict):
+        raise AdvisorError("'advisor.caching' must be an object such as {\"type\": \"ephemeral\", \"ttl\": \"5m\"}")
+    model = payload.get("model")
+    if not isinstance(model, str) or not model.strip().lower().startswith(EXECUTOR_PREFIX):
+        raise AdvisorError("'advisor' works only with anthropic: models")
+    return {"type": TOOL_TYPE, "name": "advisor", **value}
+
+
+def declared_betas(body: Any) -> tuple[str, ...]:
+    """The beta a Messages body needs for the advisor tools it declares."""
+    return (BETA,) if advisor_tools(body) else ()
+
+
 def _bound(tool: dict, name: str) -> Optional[int]:
     value = tool.get(name)
     return value if type(value) is int and value > 0 else None
@@ -88,11 +122,16 @@ def _cache_write(tool: dict) -> float:
     return CACHE_WRITE_EXTRA.get(ttl, 1.0) if isinstance(ttl, str) else 1.0
 
 
-def advisors(payload: Any, provider: str) -> list[Advisor]:
-    """Every advisor a request declares, with its catalog id and declared bounds."""
+def advisors(payload: Any, provider: str, *, extension: bool = False) -> list[Advisor]:
+    """Every advisor a request declares, with its catalog id and declared bounds;
+    `extension` also reads a Chat Completions or Responses `advisor` field."""
+    tools = advisor_tools(payload)
+    requested = extension_tool(payload) if extension else None
+    if requested is not None:
+        tools.append(requested)
     return [Advisor(qualified_model(tool.get("model"), provider), _bound(tool, "max_uses"), _bound(tool, "max_tokens"),
                     _cache_write(tool))
-            for tool in advisor_tools(payload)]
+            for tool in tools]
 
 
 def catalog_models(payload: Any, provider: str) -> list[str]:

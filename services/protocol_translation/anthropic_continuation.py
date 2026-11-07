@@ -27,6 +27,19 @@ def _validated_content(content):
             valid = all(
                 isinstance(block.get(key), str) and block[key] for key in ("id", "name")
             ) and isinstance(block.get("input"), dict)
+        elif kind == "server_tool_use":
+            # Only the advisor runs server-side on translated routes; its call and
+            # encrypted result replay with the turn.
+            valid = (
+                block.get("name") == "advisor"
+                and isinstance(block.get("id"), str)
+                and bool(block["id"])
+                and isinstance(block.get("input"), dict)
+            )
+        elif kind == "advisor_tool_result":
+            valid = isinstance(block.get("tool_use_id"), str) and isinstance(
+                block.get("content"), dict
+            )
         else:
             valid = False
         if not valid:
@@ -38,6 +51,15 @@ def _validated_content(content):
     if len(encoded) > MAX_CONTINUATION_BYTES:
         raise ValueError("Anthropic continuation exceeds its limit")
     return copy.deepcopy(content)
+
+
+ADVISOR_BLOCKS = frozenset({"server_tool_use", "advisor_tool_result"})
+
+
+def holds_advisor_blocks(content) -> bool:
+    return isinstance(content, list) and any(
+        isinstance(block, dict) and block.get("type") in ADVISOR_BLOCKS for block in content
+    )
 
 
 def continuation_extra(content):

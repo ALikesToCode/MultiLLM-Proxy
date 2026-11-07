@@ -30,6 +30,7 @@ from flask import g, has_request_context, request
 
 from middleware.lean_path import LEAN_ENVIRON_KEY
 from providers.protocols import MESSAGES
+from services import advisor_tool
 from services.native_token_count import NativeTokenCountError, count_claude_prompt_tokens
 
 logger = logging.getLogger(__name__)
@@ -357,8 +358,12 @@ def _with_cache_breakpoints(body: dict, ttl: str) -> tuple[dict, bool]:
         cached["system"] = [{"type": "text", "text": system, "cache_control": dict(marker)}]
     elif isinstance(system, list) and system and isinstance(system[-1], dict):
         cached["system"] = [*system[:-1], {**system[-1], "cache_control": dict(marker)}]
-    elif isinstance(tools, list) and tools and isinstance(tools[-1], dict):
-        cached["tools"] = [*tools[:-1], {**tools[-1], "cache_control": dict(marker)}]
+    elif isinstance(tools, list):
+        # The advisor tool caches its own prompt through its `caching` field.
+        last = next((index for index in range(len(tools) - 1, -1, -1)
+                     if isinstance(tools[index], dict) and not advisor_tool.is_advisor_tool(tools[index])), None)
+        if last is not None:
+            cached["tools"] = [*tools[:last], {**tools[last], "cache_control": dict(marker)}, *tools[last + 1:]]
     return cached, True
 
 

@@ -263,13 +263,28 @@ def chat_usage_to_responses(usage: Any) -> dict | None:
         input_details["cache_write_tokens"] = numbers["cache_write"]
     if numbers["cache_write_1h"]:
         input_details["cache_write_1h_tokens"] = numbers["cache_write_1h"]
-    return {
+    converted = {
         "input_tokens": numbers["prompt"],
         "input_tokens_details": input_details,
         "output_tokens": numbers["completion"],
         "output_tokens_details": {"reasoning_tokens": numbers["reasoning"]},
         "total_tokens": numbers["prompt"] + numbers["completion"],
     }
+    # Claude's sampling steps and the advisor's totals (see anthropic_usage).
+    if isinstance(usage.get("iterations"), list):
+        converted["iterations"] = usage["iterations"]
+    advisor = usage.get("advisor")
+    if isinstance(advisor, Mapping):
+        details = advisor.get("prompt_tokens_details")
+        converted["advisor"] = {
+            "model": advisor.get("model"),
+            "calls": advisor.get("calls"),
+            "input_tokens": advisor.get("prompt_tokens"),
+            "input_tokens_details": dict(details) if isinstance(details, Mapping) else {},
+            "output_tokens": advisor.get("completion_tokens"),
+            "total_tokens": advisor.get("total_tokens"),
+        }
+    return converted
 
 
 def response_object(

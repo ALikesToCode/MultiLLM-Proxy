@@ -24,6 +24,42 @@ FINISH_TO_STOP = {
 
 
 def anthropic_usage_to_chat(usage: Mapping[str, Any]) -> dict:
+    """Chat usage for Claude's top-level usage, which counts the request's model. A
+    reply with sampling steps (`usage.iterations`, such as an advisor's) keeps them
+    for the ledger and sums the advisor's in `advisor`."""
+    converted = _top_level_usage_to_chat(usage)
+    steps = usage.get("iterations")
+    if isinstance(steps, list) and steps:
+        converted["iterations"] = steps
+        advisor = advisor_usage(steps)
+        if advisor is not None:
+            converted["advisor"] = advisor
+    return converted
+
+
+def advisor_usage(steps: list) -> dict | None:
+    """OpenAI-shape totals of the advisor's steps, or None when it did not run."""
+    from services.usage_types import iterations_from
+
+    advised = [step for step in iterations_from({"iterations": steps}) if step.kind == "advisor_message"]
+    if not advised:
+        return None
+    cached = sum(step.cache_read_input_tokens or 0 for step in advised)
+    written = sum(step.cache_creation_input_tokens or 0 for step in advised)
+    prompt = sum(step.input_tokens or 0 for step in advised) + cached + written
+    completion = sum(step.output_tokens or 0 for step in advised)
+    model = next((step.model for step in advised if step.model), None)
+    return {
+        "model": model if model is None or ":" in model else f"anthropic:{model}",
+        "calls": len(advised),
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "prompt_tokens_details": {"cached_tokens": cached, "cache_write_tokens": written},
+    }
+
+
+def _top_level_usage_to_chat(usage: Mapping[str, Any]) -> dict:
     from services import prompt_cache_cost
 
     if prompt_cache_cost.enabled():
