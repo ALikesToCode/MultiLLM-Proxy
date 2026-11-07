@@ -81,11 +81,13 @@ explicit tool-call tags retain unknown-name rejection. Invalid extraction
 candidates preserve the entire original message and report `extraction_rejected`.
 Missing arguments remain invalid.
 
-A native Messages request that declares a typed Anthropic tool, such as the
-[advisor](anthropic.md#advisor-tool), is not repaired: repair works on Chat
-Completions, which cannot carry server tool blocks (`server_tool_use`,
+A native Messages request that declares a tool Claude runs itself, such as the
+[advisor](anthropic.md#advisor-tool) or web search, is not repaired: repair works
+on Chat Completions, which cannot carry server tool blocks (`server_tool_use`,
 `advisor_tool_result`) or per-model `usage.iterations`, so the reply passes
-through as Claude sent it.
+through as Claude sent it. Anthropic's client tools (`bash_*`, `text_editor_*`,
+`computer_*`, `memory_*`) are called with ordinary `tool_use` blocks and are
+repaired like custom tools.
 
 `off` preserves the existing response bytes. `full` allows one non-streaming
 follow-up to the same model, includes its usage, and respects free-pool and

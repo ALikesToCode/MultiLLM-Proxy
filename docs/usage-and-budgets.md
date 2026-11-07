@@ -80,7 +80,11 @@ steps get a row of their own, under endpoint `/v1/messages/advisor`
 as `requested_model` and `selected_model`, the same `request_id`, status and
 time. The usage page and `GET /v1/usage` therefore list advisor tokens and cost
 under the advisor's model, where one consultation counts as one request. Budgets,
-reservations and credits settle the request's whole cost, advisor included.
+reservations and credits settle the request's whole cost, advisor included. A
+`message` step always counts as the request's model, whatever id it reports.
+Other steps without a model, such as a context `compaction` step, also run on the
+request's model and are billed with it, although the top-level usage leaves them
+out. A reply served from the response cache stays one row at no cost.
 
 `cost_basis` is `usage` when the provider reported tokens and `estimate` when the
 proxy's own token estimate was used. Requests to unpriced models and failed requests
@@ -156,7 +160,12 @@ at the advisor's prices and writes up to its `max_tokens`, and the request's mod
 reads the transcript again after each call. A key with a budget, or one charged
 in credits, must set both `max_uses` and `max_tokens` on every advisor tool;
 without them the request gets 400 `invalid_request_error`, because Claude's
-defaults leave the advisor's cost unbounded. The request is
+defaults leave the advisor's cost unbounded. A tool with `caching` adds the cost
+of writing that prompt to the cache: a quarter of its input price for `5m`, its
+full input price for `1h`. A key with a stream cost cap follows the same rules: the
+advisor's worst case counts against the cap from the first token, since Claude
+reports the advisor's tokens only when the stream ends. Token counting reserves
+nothing for the advisor. The request is
 admitted only if the ledger total for the period, plus what this process recorded
 since it last read that total, plus the estimates of the key's requests still in
 flight, plus this estimate fits every limit. When the request finishes, its estimate is

@@ -124,18 +124,21 @@ advisor results.
 Claude bills the advisor's tokens at the advisor model's prices and reports
 them only in `usage.iterations`, not in the top-level usage. The ledger prices
 every step at its own model and records the advisor's steps under the advisor's
-model; see [usage and budgets](usage-and-budgets.md#cost). Budgets reserve the
-advisor's worst case before the request is sent, so a key with a budget must set
-`max_uses` and `max_tokens` (at least 1024) on the advisor tool.
+model; see [usage and budgets](usage-and-budgets.md#cost). Budgets and stream
+cost caps count the advisor's worst case before the request is sent, so a key
+with either must set `max_uses` and `max_tokens` (at least 1024) on the advisor
+tool.
 
 The advisor's model is held to the key's controls like the request's own model:
 its allowlist, `official_only` and provider data class. A bare id such as
 `claude-opus-5-5` is checked as its catalog id, `anthropic:claude-opus-5-5`, and
 a key that may not use that model gets the same 403 `model_not_allowed` as a
-request naming it directly, before anything reaches Claude. A catalog id is
-accepted and sent to Claude as its bare id; an advisor from another provider gets
-400. Forced provider preferences apply only to OpenRouter, so they do not change
-an `anthropic:` advisor.
+request naming it directly, before anything reaches Claude. A model an operator
+disabled gets the same 400 as naming it directly. On `/v1/messages` a catalog id
+is accepted and sent to Claude as its bare id. The native route sends the request
+as written, so use bare ids there. An advisor from another provider gets 400.
+Forced provider preferences apply only to OpenRouter, so they do not change an
+`anthropic:` advisor.
 
 ## Native API
 
