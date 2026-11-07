@@ -39,6 +39,23 @@ def frames(text):
     return [json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:") and line[5:].strip() != "[DONE]"]
 
 
+def _frames_for(message):
+    """A Messages stream for a complete reply's text and tool_use blocks."""
+    events = [{"type": "message_start", "message": {**message, "content": [], "stop_reason": None,
+                                                   "usage": {"input_tokens": 9, "output_tokens": 1}}}]
+    for index, block in enumerate(message["content"]):
+        if block["type"] == "tool_use":
+            events += [{"type": "content_block_start", "index": index, "content_block": {**block, "input": {}}},
+                       {"type": "content_block_delta", "index": index,
+                        "delta": {"type": "input_json_delta", "partial_json": json.dumps(block["input"])}}]
+        else:
+            events.append({"type": "content_block_start", "index": index, "content_block": block})
+        events.append({"type": "content_block_stop", "index": index})
+    events += [{"type": "message_delta", "delta": {"stop_reason": message["stop_reason"]}, "usage": message["usage"]},
+               {"type": "message_stop"}]
+    return b"".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode() for event in events)
+
+
 class ExtensionTestCase(UnifiedApiTestCase):
     def setUp(self):
         super().setUp()
@@ -276,6 +293,34 @@ class AdvisorExtensionTest(ExtensionTestCase):
         finishes = [choice["finish_reason"] for chunk in frames(data) for choice in chunk.get("choices", [])
                     if choice.get("finish_reason")]
         self.assertEqual(finishes, ["length"])
+
+
+    def test_repair_leaves_calls_that_carry_the_native_turn(self):
+        count = {"type": "function", "function": {"name": "count", "parameters": {
+            "type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}}}
+        content = [{"type": "text", "text": "Counting."}, PENDING,
+                   {"type": "tool_use", "id": "toolu_synthetic", "name": "count", "input": {"n": "42"}}]
+        reply = {**advised_message(), "content": content, "stop_reason": "tool_use"}
+        headers = {"Authorization": "Bearer admin-test-key", "X-MultiLLM-Tool-Repair": "repair"}
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                upstream = stream_reply(_frames_for(reply)) if stream else json_reply(reply)
+                with patch.object(self.app_module.ProxyService, "make_request", return_value=upstream):
+                    response = self.client.post("/v1/chat/completions", headers=headers, json={
+                        "model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "tools": [count], "stream": stream})
+                    data = response.get_data(as_text=True)
+                calls = ([call for chunk in frames(data) for choice in chunk.get("choices", [])
+                          for call in choice["delta"].get("tool_calls") or []] if stream
+                         else json.loads(data)["choices"][0]["message"]["tool_calls"])
+                arguments = "".join(call.get("function", {}).get("arguments", "") for call in calls)
+                self.assertEqual(json.loads(arguments), {"n": "42"})
+        with patch.object(self.app_module.ProxyService, "make_request", return_value=json_reply(reply)):
+            message = json.loads(self.client.post("/v1/chat/completions", headers=headers, json={
+                "model": HAIKU, "messages": QUESTION, "advisor": ADVISOR, "tools": [count]}).get_data(as_text=True))["choices"][0]["message"]
+        history = [*QUESTION, message, {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "counted"}]
+        response, data, send = self.chat({"tools": [count], "messages": history}, json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
 
 
 class AdvisorExtensionValidationTest(ExtensionTestCase):

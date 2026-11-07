@@ -71,7 +71,10 @@ Function tools on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
 are checked at the Container's Chat pivot, including native endpoints, free
 pools, and intelligence routing. `X-MultiLLM-Tool-Repair: repair` repairs JSON
 syntax, unambiguous names and schema primitive types, and extracts declared
-calls from known text formats. Tagged calls may occur within prose; fenced/bare
+calls from known text formats. Calls that carry Claude's native turn in
+`extra_content.anthropic.content` (signed thinking or advisor blocks) pass
+through unrepaired, because that turn replays only while the calls match it.
+Tagged calls may occur within prose; fenced/bare
 JSON requires standalone content or a preamble of at most 200 characters, unless
 a tool is forced.
 Multiple fences are left as content. A bare name line requires JSON-object

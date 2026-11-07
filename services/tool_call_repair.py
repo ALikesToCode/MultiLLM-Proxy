@@ -274,6 +274,12 @@ def _extract(message, functions, tool_choice):
     return {**message, "content": remaining or None, "tool_calls": [call for _, call in ordered]}, len(calls), None
 
 
+def _replays_native_turn(calls):
+    first = calls[0] if calls else None
+    extra = first.get("extra_content") if isinstance(first, dict) else None
+    return isinstance(extra, dict) and "anthropic" in extra
+
+
 def repair_tool_calls(message, tools, *, tool_choice=None, mode="repair", allow_extraction=True):
     """Return a repaired copy and a bounded report. Invalid calls remain unchanged."""
     report = empty_report()
@@ -294,6 +300,11 @@ def repair_tool_calls(message, tools, *, tool_choice=None, mode="repair", allow_
         if not isinstance(calls, list) or len(calls) > MAX_CALLS:
             report.update(invalid=1, errors=[{"index": 0, "errors": ["$: tool call limit exceeded"]}])
             return message, report
+        if _replays_native_turn(calls):
+            # Claude's native turn rides on the first call and replays only if the calls
+            # still match it, so they pass through as Claude sent them.
+            report["checked"] = len(calls)
+            return result, report
         repaired_calls = []
         for index, call in enumerate(calls):
             report["checked"] += 1
