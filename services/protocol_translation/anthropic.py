@@ -418,6 +418,7 @@ def chat_request_to_messages(payload: Mapping[str, Any]) -> dict:
         if not isinstance(message, Mapping):
             raise TranslationError(f"messages[{index}] must be an object", param="messages")
         role = message.get("role")
+        _check_cache_controls(message.get("content"), index)
         if role in {"system", "developer"}:
             system_blocks.extend(_chat_system_blocks(message.get("content"), index))
         elif role == "user":
@@ -515,7 +516,7 @@ def _cache_control(part: Mapping[str, Any], index: int) -> dict | None:
         not isinstance(value, Mapping)
         or value.get("type") != "ephemeral"
         or any(key not in {"type", "ttl"} for key in value)
-        or ("ttl" in value and value["ttl"] not in CACHE_TTLS)
+        or ("ttl" in value and (not isinstance(value["ttl"], str) or value["ttl"] not in CACHE_TTLS))
     ):
         raise TranslationError(
             f"messages[{index}] has an invalid cache_control; use "
@@ -530,6 +531,12 @@ def _with_cache_control(block: dict | None, part: Any, index: int) -> dict | Non
         return block
     marker = _cache_control(part, index)
     return {**block, "cache_control": marker} if marker else block
+
+
+def _check_cache_controls(content: Any, index: int) -> None:
+    for part in content if isinstance(content, list) else ():
+        if isinstance(part, Mapping):
+            _cache_control(part, index)
 
 
 def _marks_cache(content: Any) -> bool:

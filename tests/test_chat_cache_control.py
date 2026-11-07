@@ -85,10 +85,44 @@ def test_only_the_last_four_breakpoints_are_kept():
 
 
 @pytest.mark.parametrize("marker", [{"type": "persistent"}, {"type": "ephemeral", "ttl": "2h"},
+                                    {"type": "ephemeral", "ttl": ["1h"]},
                                     {"type": "ephemeral", "scope": "global"}, "ephemeral"])
-def test_an_invalid_breakpoint_is_refused(marker):
+@pytest.mark.parametrize("role", ["user", "system", "assistant", "tool"])
+def test_an_invalid_breakpoint_is_refused(marker, role):
+    message = {"role": role, "content": [{"type": "text", "text": "x", "cache_control": marker}]}
+    calls = [{"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function",
+                                                   "function": {"name": "lookup", "arguments": "{}"}}]}]
+    history = [{"role": "user", "content": "q"}, *(calls if role == "tool" else []),
+               {**message, "tool_call_id": "call_1"} if role == "tool" else message, {"role": "user", "content": "q"}]
     with pytest.raises(TranslationError, match="cache_control"):
-        translate([{"role": "user", "content": [{"type": "text", "text": "x", "cache_control": marker}]}])
+        translate(history)
+
+
+def test_a_breakpoint_on_a_part_claude_gets_no_block_for_is_still_checked():
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+    with pytest.raises(TranslationError, match="cache_control"):
+        translate([{"role": "system", "content": [{"type": "text", "text": "S"}, {**image, "cache_control": {"type": "bogus"}}]},
+                   {"role": "user", "content": "q"}])
+
+
+def test_breakpoints_inside_tool_results_count_toward_the_limit():
+    messages = [{"role": "user", "content": [{"type": "text", "text": "q", "cache_control": MARK}]}]
+    for turn in range(4):
+        messages.append({"role": "assistant", "tool_calls": [{"id": f"call_{turn}", "type": "function",
+                                                              "function": {"name": "lookup", "arguments": "{}"}}]})
+        messages.append({"role": "tool", "tool_call_id": f"call_{turn}",
+                         "content": [{"type": "text", "text": f"r{turn}", "cache_control": MARK}]})
+    body = translate(messages)
+    assert "cache_control" not in body["messages"][0]["content"][0]
+    assert [bool(turn["content"][0]["content"][0].get("cache_control")) for turn in body["messages"][2::2]] == [True] * 4
+
+
+def test_the_caller_payload_is_left_unchanged():
+    messages = [{"role": "user", "content": [{"type": "text", "text": f"t{n}", "cache_control": MARK}]} for n in range(6)]
+    payload = {"model": "claude-haiku-5-5", "messages": messages}
+    saved = json.loads(json.dumps(payload))
+    assert len(marks(chat_request_to_messages(payload))) == 4
+    assert payload == saved
 
 
 def test_a_null_breakpoint_is_no_breakpoint():
