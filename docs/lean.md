@@ -135,9 +135,10 @@ wire_api = "responses"
 }
 ```
 
-Chat Completions and Responses requests reach the Claude API translated, and the
-translation drops caller `cache_control`, so for Codex and opencode lean mode's
-caching is what makes cache reads happen at all.
+Chat Completions and Responses requests reach the Claude API translated. Only
+breakpoints on Chat content parts survive the translation (see
+[prompt caching](anthropic.md#prompt-caching)), so for a client that places none,
+lean mode's caching is what makes cache reads happen at all.
 
 ## Settings
 

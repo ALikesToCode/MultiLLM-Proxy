@@ -402,7 +402,7 @@
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "2dd79d087003e5821dd8a88b5f8435f7384e9162e0628891ad9972359d6e1b9b"
+    "sha256": "9c6519e51a109fd79a8eefbc51261fb297e4123ce20c1e64495e6218cb0bb955"
   },
   "routes/unified_bridge.py": {
     "kind": "non-provider",
@@ -637,7 +637,7 @@
   "services/conversion_diagnostics.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "de04c864969fc9b5b2a283775907562fb8aef80d9b425165249834967efe854a"
+    "sha256": "c234e80c2e140f1fd9d06902d48572bfdf0f8a1828c1fa16588aa9db5ed575d1"
   },
   "services/cost_service.py": {
     "kind": "non-provider",
@@ -1097,7 +1097,7 @@
   "services/protocol_translation/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "352c9dce32a18d311f5cf79f4eadd572f78ffb3a8aff1191bd0ecc63deb87810"
+    "sha256": "b561225be370285682aa0877d543c8840d2a3a126f6e95b10ceb2104e2687fc0"
   },
   "services/protocol_translation/anthropic_continuation.py": {
     "kind": "non-provider",
@@ -1132,7 +1132,7 @@
   "services/protocol_translation/responses_requests.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "338edb84f38d0b09f7e9bdcc6f400970787745d63d4c720a738574d706efbbfd"
+    "sha256": "d15eb3812880c04770e6a26ccd03c0b30e39a9531885bb2ef8000fdd70824bf4"
   },
   "services/provider_access_policy.py": {
     "kind": "non-provider",
@@ -1417,7 +1417,7 @@
   "services/tool_repair_runtime.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "1d2c42df65624c21abf9e8fd3e7f2ac00f779983e0f773b499208b53e919cb39"
+    "sha256": "d5cfd314fa97f04094e7a9ecfbe7095e75a74bdcec65e6a667944933d7510545"
   },
   "services/tool_repair_stream.py": {
     "kind": "non-provider",

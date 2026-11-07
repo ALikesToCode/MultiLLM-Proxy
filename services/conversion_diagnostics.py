@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from services import protocol_translation as translation
+from services.protocol_translation.anthropic import cache_breakpoints
 
 HEADER_LIMIT = 2048
 BODY_LIMIT = 1024 * 1024
@@ -140,6 +141,10 @@ def _nested_losses(payload: Mapping[str, Any], prefix: str, source: str, target:
     arrays = ("messages", "input", "output", "choices", "content", "system", "tools")
     opaque_members = {"cache_control", "citations", "signature", "logprobs", "annotations",
                       "encrypted_content", "service_tier", "refusal"}
+    # Chat content-part breakpoints become Claude's own, unless their part is dropped
+    # or more than Claude reads are sent; that is counted against the translation.
+    part_breakpoints = prefix == "request" and source == translation.CHAT and target == translation.MESSAGES
+    part_path = "request.messages[].content[]"
 
     def visit(value: Any, path: str, depth: int = 0) -> None:
         if depth > 5:
@@ -149,7 +154,8 @@ def _nested_losses(payload: Mapping[str, Any], prefix: str, source: str, target:
                 visit(item, path + "[]", depth + 1)
         elif isinstance(value, Mapping):
             for name in opaque_members:
-                if name in value and value[name] is not None:
+                if name in value and value[name] is not None and not (
+                        part_breakpoints and name == "cache_control" and path == part_path):
                     add(f"{path}.{name}")
             for name in ("content", "message", "delta"):
                 if isinstance(value.get(name), (list, Mapping)):
@@ -157,7 +163,21 @@ def _nested_losses(payload: Mapping[str, Any], prefix: str, source: str, target:
 
     for name in arrays:
         visit(payload.get(name), f"{prefix}.{name}")
+    if part_breakpoints and _drops_part_breakpoints(payload):
+        add(f"{part_path}.cache_control")
     return list(fields.values())
+
+
+def _drops_part_breakpoints(payload: Mapping[str, Any]) -> bool:
+    messages = payload.get("messages")
+    sent = sum(
+        1 for message in messages if isinstance(message, Mapping) and isinstance(message.get("content"), list)
+        for part in message["content"] if isinstance(part, Mapping) and part.get("cache_control") is not None
+    ) if isinstance(messages, list) else 0
+    if not sent:
+        return False
+    converted = translation.translate_request(payload, translation.CHAT, translation.MESSAGES)
+    return len(cache_breakpoints(converted)) < sent
 
 
 def request_report(payload: Mapping[str, Any], source: str, target: str) -> dict[str, Any]:

@@ -80,8 +80,29 @@ def followup_payload(request_payload, message, report):
     return body
 
 
+def _as_steps(usage):
+    """A Chat usage's Claude steps, or one step of the request's model built from its
+    totals (prompt tokens include cache reads and writes)."""
+    steps = usage.get("iterations")
+    if isinstance(steps, list):
+        return steps
+    details = usage.get("prompt_tokens_details")
+    details = details if isinstance(details, dict) else {}
+    read, written = (value if type(value) is int and value >= 0 else 0
+                     for value in (details.get("cached_tokens"), details.get("cache_write_tokens")))
+    prompt = usage.get("prompt_tokens")
+    return [{"type": "message", "input_tokens": max(prompt - read - written, 0) if type(prompt) is int else None,
+             "output_tokens": usage.get("completion_tokens"), "cache_read_input_tokens": read,
+             "cache_creation_input_tokens": written}]
+
+
 def add_usage(first, second):
-    """Keep known counts from both calls, including nested cached/reasoning details."""
+    """Keep known counts from both calls, including nested cached/reasoning details.
+
+    The ledger prices Claude's per-step `iterations` instead of the totals, so when
+    either call reports them, the result lists both calls' steps; a call without
+    steps becomes one step of the request's model.
+    """
     if not isinstance(first, dict):
         return second if isinstance(second, dict) else first
     if not isinstance(second, dict):
@@ -93,6 +114,8 @@ def add_usage(first, second):
         elif type(value) is int and value >= 0:
             previous = result.get(key, 0)
             result[key] = (previous if type(previous) is int else 0) + value
+    if isinstance(first.get("iterations"), list) or isinstance(second.get("iterations"), list):
+        result["iterations"] = [*_as_steps(first), *_as_steps(second)]
     return result
 
 

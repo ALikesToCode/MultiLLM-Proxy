@@ -103,6 +103,45 @@ output tokens, so leave room in `max_tokens` for both thinking and the answer.
 The catalog advertises the model's 1,000,000-token context and 128,000-token
 synchronous output limit; configured proxy request and token limits still apply.
 
+### Prompt caching
+
+Chat Completions content parts can carry Claude's cache breakpoints:
+
+```json
+{"model": "anthropic:claude-haiku-5-5",
+ "messages": [
+   {"role": "system", "content": [{"type": "text", "text": "<long instructions>",
+                                   "cache_control": {"type": "ephemeral", "ttl": "1h"}}]},
+   {"role": "user", "content": [{"type": "text", "text": "<long document>",
+                                 "cache_control": {"type": "ephemeral"}},
+                                {"type": "text", "text": "Summarize it"}]}]}
+```
+
+A `cache_control` on a content part becomes a breakpoint on the Claude block made
+from that part:
+
+| Message | Parts |
+| --- | --- |
+| `system`, `developer` | text |
+| `user` | text, image, PDF file |
+| `assistant` | text |
+| `tool` | text, image |
+
+Every `cache_control` must be `{"type": "ephemeral"}` with an optional `ttl` of
+`"5m"` or `"1h"`, or the request gets 400; Claude also wants `"1h"` breakpoints
+before `"5m"` ones. A system or developer message with a breakpoint is sent as
+separate system blocks, so the breakpoint has a block to sit on. Claude reads at
+most four breakpoints: the gateway keeps the last four in prompt order and
+removes earlier ones, which would cache only a shorter prefix. A request with its
+own breakpoints gets none from the gateway, on `/lean` too.
+
+Breakpoints elsewhere are dropped: on a message itself, on a tool, on a part
+Claude gets no block for, and on Responses input parts.
+[Conversion diagnostics](conversion-fidelity.md) report these as lossy. An
+assistant turn returned with `extra_content.anthropic.content` replays Claude's
+own blocks and must keep its `content` as Claude sent it, so put breakpoints on
+other messages, such as the tool results.
+
 ## Advisor tool
 
 Claude's [advisor tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool)
@@ -162,8 +201,9 @@ The gateway sends it to Claude as the advisor tool with the
 `advisor-tool-2026-03-01` beta; the caller sends no header. Other keys, a request
 for a model outside `anthropic:` (an automatic route included) or a bound that is
 not a positive integer get 400 before anything is sent. A `null` field is no
-advisor. Clients that pass provider options as body fields, such as the AI SDK's
-OpenRouter provider with `providerOptions.openrouter.advisor`, can send it as is.
+advisor, and `tool_choice: "none"` rules the advisor out too. Clients that pass
+provider options as body fields, such as the AI SDK's OpenRouter provider with
+`providerOptions.openrouter.advisor`, can send it as is.
 
 The reply carries the final answer only. Text, function tool calls and
 `response_format` with `json_schema` work as without the advisor, and the

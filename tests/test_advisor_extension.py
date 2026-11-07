@@ -323,6 +323,16 @@ class AdvisorExtensionTest(ExtensionTestCase):
         self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
 
 
+    def test_tool_choice_none_rules_out_the_advisor_without_function_tools(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        for extra in ({}, {"tools": [lookup]}):
+            with self.subTest(function_tools=bool(extra)):
+                _, data, send = self.chat({"tool_choice": "none", **extra}, json_reply(advised_message()))
+                self.assertEqual(self.upstream(send)[0]["tool_choice"], {"type": "none"}, data)
+        _, data, send = self.responses({"tool_choice": "none"}, json_reply(advised_message()))
+        self.assertEqual(self.upstream(send)[0]["tool_choice"], {"type": "none"}, data)
+
+
 class AdvisorExtensionValidationTest(ExtensionTestCase):
     def test_a_malformed_advisor_field_is_refused_before_dispatch(self):
         for advisor in ("claude-sonnet-5-5", {"model": "claude-sonnet-5-5", "max_uses": 0},
@@ -456,3 +466,22 @@ def test_a_result_without_its_advisor_call_is_dropped():
         *QUESTION, {"role": "assistant", "content": None, "tool_calls": [call]},
         {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]})
     assert body["messages"][1]["content"] == [use]
+
+
+def test_repair_usage_joins_the_steps_of_both_replies():
+    from services.tool_repair_runtime import add_usage
+
+    first = {"prompt_tokens": 10, "iterations": [{"type": "message", "input_tokens": 10}]}
+    second = {"prompt_tokens": 5, "iterations": [{"type": "message", "input_tokens": 5}]}
+    assert add_usage(first, second) == {"prompt_tokens": 15, "iterations": [*first["iterations"], *second["iterations"]]}
+    assert add_usage({"prompt_tokens": 10}, {"prompt_tokens": 5}) == {"prompt_tokens": 15}
+    # A reply without steps becomes one step of the request's model, so advice stays billed.
+    advised = {"prompt_tokens": 10, "completion_tokens": 2, "iterations": [
+        {"type": "message", "input_tokens": 10, "output_tokens": 2},
+        {"type": "advisor_message", "model": "claude-sonnet-5-5", "input_tokens": 50, "output_tokens": 7}]}
+    plain = {"prompt_tokens": 9, "completion_tokens": 3,
+             "prompt_tokens_details": {"cached_tokens": 4, "cache_write_tokens": 1}}
+    step = {"type": "message", "input_tokens": 4, "output_tokens": 3,
+            "cache_read_input_tokens": 4, "cache_creation_input_tokens": 1}
+    assert add_usage(advised, plain)["iterations"] == [*advised["iterations"], step]
+    assert add_usage(plain, advised)["iterations"] == [step, *advised["iterations"]]
