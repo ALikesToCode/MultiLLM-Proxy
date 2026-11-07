@@ -545,13 +545,14 @@ def _marks_cache(content: Any) -> bool:
     )
 
 
-def _text_blocks(content: list, index: int) -> list[dict]:
-    """One text block per text part, each keeping its cache breakpoint."""
+def _text_blocks(content: list, index: int, kinds: frozenset[str] | None = None) -> list[dict]:
+    """One text block per text part, each keeping its cache breakpoint. The parts are
+    those the unmarked prompt would join: any with text, or only `kinds`."""
     blocks = []
     for part in content:
         if isinstance(part, str):
             block = {"type": "text", "text": part} if part else None
-        elif isinstance(part, Mapping) and part.get("type") in {"text", "input_text", "output_text"}:
+        elif isinstance(part, Mapping) and (kinds is None or part.get("type") in kinds):
             text = part.get("text")
             block = {"type": "text", "text": text} if isinstance(text, str) and text else None
         else:
@@ -669,7 +670,7 @@ def _chat_assistant_blocks(message: Mapping[str, Any], index: int = 0) -> list[d
     blocks: list[dict] = []
     content = message.get("content")
     if _marks_cache(content):
-        blocks.extend(_text_blocks(content, index))
+        blocks.extend(_text_blocks(content, index, frozenset({"text", "output_text"})))
         text = ""
     else:
         text = (

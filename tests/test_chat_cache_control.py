@@ -105,6 +105,13 @@ def test_a_breakpoint_on_a_part_claude_gets_no_block_for_is_still_checked():
                    {"role": "user", "content": "q"}])
 
 
+def test_a_marked_system_prompt_keeps_every_part_the_unmarked_one_joins():
+    body = translate([{"role": "system", "content": [{"text": "Untyped rules"},
+                                                      {"type": "text", "text": "Typed", "cache_control": MARK}]},
+                      {"role": "user", "content": "q"}])
+    assert [block["text"] for block in body["system"]] == ["Untyped rules", "Typed"]
+
+
 def test_breakpoints_inside_tool_results_count_toward_the_limit():
     messages = [{"role": "user", "content": [{"type": "text", "text": "q", "cache_control": MARK}]}]
     for turn in range(4):

@@ -1097,7 +1097,7 @@
   "services/protocol_translation/anthropic.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "c2efae4b8a6b692b9db0a4fc3961850bd80d5424f5178a32d79c340190c9aead"
+    "sha256": "5ef69f5c706d8479ed372b3604a7e1a73e9b6610874a5fa8627b33274b73e6ff"
   },
   "services/protocol_translation/anthropic_continuation.py": {
     "kind": "non-provider",
