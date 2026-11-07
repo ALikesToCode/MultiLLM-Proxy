@@ -43,13 +43,15 @@ def _aggregate(usage: UsageObservation, steps: list[IterationUsage], *, executor
 
 def by_model(executor: Optional[str], usage: Optional[UsageObservation]) -> list[tuple[Optional[str], Optional[UsageObservation]]]:
     """[(request model, its usage), (other model, its usage), ...]; one entry when the
-    reply lists no steps. A step without a model ran on the request's model."""
+    reply lists no steps."""
     if usage is None or not usage.iterations or not executor:
         return [(executor, usage)]
     provider = executor.split(":", 1)[0] if ":" in executor else ""
     groups: dict[str, tuple[str, list[IterationUsage]]] = {}
     for step in usage.iterations:
-        model = _qualified(step.model, provider) if step.model else executor
+        # A `message` step is the request's own model, whatever id (a dated snapshot,
+        # say) it reports; other steps without a model ran on it too.
+        model = _qualified(step.model, provider) if step.model and step.kind != "message" else executor
         groups.setdefault(model.lower(), (model.lower(), []))[1].append(step)
     own = groups.pop(executor.lower(), None)
     parts: list[tuple[Optional[str], Optional[UsageObservation]]] = [

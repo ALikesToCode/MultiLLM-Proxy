@@ -2482,6 +2482,6 @@
   "services/usage_iterations.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "320a31003dc415c3ae0d1bb697246a6a6f3bceada53a444b7f38566d688f1d3a"
+    "sha256": "62ef3070b0e0690990ae969af1c62c47f08ad3192a757860f8fd9f0d3bd63136"
   }
 }

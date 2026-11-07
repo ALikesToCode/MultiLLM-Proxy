@@ -331,6 +331,15 @@ class AdvisorLedgerTest(LedgerTestCase):
         self.assertIsNone(rows["anthropic:claude-unlisted-9"]["cost_usd"])
         self.assertAlmostEqual(rows[HAIKU]["cost_usd"], (2200 * 0.1 + 110 * 0.5) / 1e6)
 
+    def test_a_message_step_naming_a_snapshot_stays_with_the_request(self):
+        steps = [iteration("message", 1000, 50, model="claude-haiku-5-5-20261001"),
+                 iteration("advisor_message", 2000, 500, model="claude-sonnet-5-5"),
+                 iteration("message", 1200, 60, model="claude-haiku-5-5")]
+        self.messages({}, json_reply(advised_message(advised_usage(steps))), key=self.key)
+        rows = self.rows()
+        self.assertEqual(set(rows), {HAIKU, SONNET})
+        self.assertEqual((rows[HAIKU]["input_tokens"], rows[HAIKU]["output_tokens"]), (2200, 110))
+
     def test_a_reply_without_steps_keeps_one_row(self):
         usage = {"input_tokens": 1000, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         self.messages({"tools": []}, json_reply(advised_message(usage)), key=self.key)
