@@ -319,7 +319,8 @@ def begin() -> Optional[Response]:
                            started=getattr(g, "request_started_at", None) or time.perf_counter(),
                            start_ns=time.time_ns(), units=_image_units(kind, payload),
                            trace=telemetry_export.trace_context(request.headers.get("traceparent")),
-                           advisors=tuple(advisors))
+                           # Counting tokens never runs the advisor, so it reserves nothing for it.
+                           advisors=() if request.path.endswith("/count_tokens") else tuple(advisors))
     from services.tenant_hierarchy import current_tenant
     context.tenant = current_tenant()
     context.input_tokens, context.output_tokens = _token_estimates(payload)

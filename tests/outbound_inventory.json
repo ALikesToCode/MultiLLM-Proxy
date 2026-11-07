@@ -1242,7 +1242,7 @@
   "services/request_accounting.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "320b79d0dacd8e60f52e97b42ac2017d14c2d2ea81b61d0d0b8492ee6919b34e"
+    "sha256": "294993600e103c5372114e1ece0163388423d35e9277609629a4990a0f575ef8"
   },
   "services/request_cancellation.py": {
     "kind": "non-provider",

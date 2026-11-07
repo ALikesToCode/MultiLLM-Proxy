@@ -377,6 +377,20 @@ class AdvisorReservationTest(LedgerTestCase):
                 self.assertIn(missing, json.loads(data)["error"]["message"])
                 send.assert_not_called()
 
+    def test_token_counting_needs_no_advisor_bounds(self):
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            self.app_module.AuthService.set_key_controls("admin", {"daily_budget_usd": 5})
+        tool = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5"}
+        payload = {"model": "claude-haiku-5-5", "max_tokens": 1024, "tools": [tool],
+                   "messages": [{"role": "user", "content": "A synthetic question"}]}
+        headers = {"x-api-key": "admin-test-key", **BETA}
+        for path, status in (("/anthropic/v1/messages", 400), ("/anthropic/v1/messages/count_tokens", 200)):
+            with self.subTest(path=path), patch.object(self.app_module.ProxyService, "make_request",
+                                                       return_value=json_reply({"input_tokens": 8})) as send:
+                response = self.client.post(path, json=payload, headers=headers)
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(send.call_count, 1 if status == 200 else 0)
+
     def test_an_uncapped_key_may_leave_its_advisor_unbounded(self):
         tool = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5"}
         response, _, _ = self.messages({"tools": [tool]}, json_reply(advised_message()), key=self.key)
