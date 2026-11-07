@@ -192,6 +192,23 @@ class AdvisorExtensionTest(ExtensionTestCase):
         self.assertEqual(kinds, ["thinking", "server_tool_use", "advisor_tool_result", "tool_use"])
 
 
+    def test_tool_repair_never_asks_an_advised_request_again(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {
+            "type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}}}
+        invalid = {**advised_message(), "stop_reason": "tool_use", "content": [
+            *advised_message()["content"][:2], {"type": "tool_use", "id": "toolu_bad", "name": "lookup", "input": {}}]}
+        for path, body in (("/v1/chat/completions", {"model": HAIKU, "messages": QUESTION}),
+                           ("/v1/responses", {"model": HAIKU, "input": "A synthetic question"})):
+            with self.subTest(path=path), patch.object(self.app_module.ProxyService, "make_request",
+                                                       side_effect=[json_reply(invalid), json_reply(advised_message())]) as send:
+                tools = [lookup] if path.endswith("completions") else [{"type": "function", **lookup["function"]}]
+                response = self.client.post(path, json={**body, "advisor": ADVISOR, "tools": tools},
+                                            headers={"Authorization": "Bearer admin-test-key",
+                                                     "X-MultiLLM-Tool-Repair": "full"})
+                self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+                self.assertEqual(send.call_count, 1)
+
+
 class AdvisorExtensionValidationTest(ExtensionTestCase):
     def test_a_malformed_advisor_field_is_refused_before_dispatch(self):
         for advisor in ("claude-sonnet-5-5", {"model": "claude-sonnet-5-5", "max_uses": 0},
