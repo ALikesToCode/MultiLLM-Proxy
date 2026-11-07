@@ -134,16 +134,26 @@ def _native_chat_payload(payload, source):
     return {"model": payload.get("model"), "tools": tools, "tool_choice": choice, "stream": payload.get("stream", False)}
 
 
+# Anthropic-defined tools the caller runs: Claude calls them with ordinary tool_use blocks.
+CLIENT_TOOL_PREFIXES = ("bash_", "text_editor_", "computer_", "memory_")
+
+
+def _server_tool(tool) -> bool:
+    kind = tool.get("type") if isinstance(tool, dict) else None
+    kind = kind.strip().lower() if isinstance(kind, str) else "custom"
+    return kind != "custom" and not kind.startswith(CLIENT_TOOL_PREFIXES)
+
+
 def _declares_server_tools(payload, source):
-    """Whether a Messages request declares a typed Anthropic tool, such as the advisor.
+    """Whether a Messages request declares a tool Claude runs itself, such as the advisor.
 
     Repair goes through Chat Completions, which cannot carry server tool blocks
     (`server_tool_use`, `advisor_tool_result`) or per-model `usage.iterations`, so
-    the reply must pass through as the provider sent it.
+    the reply must pass through as the provider sent it. An unknown typed tool counts
+    as a server tool: repairing one would drop its blocks.
     """
     tools = payload.get("tools")
-    return source == "messages" and isinstance(tools, list) and any(
-        isinstance(tool, dict) and isinstance(tool.get("type"), str) and tool["type"] != "custom" for tool in tools)
+    return source == "messages" and isinstance(tools, list) and any(_server_tool(tool) for tool in tools)
 
 
 def with_native_tool_repair(dispatch):

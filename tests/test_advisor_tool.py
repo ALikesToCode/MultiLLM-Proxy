@@ -149,6 +149,32 @@ class AdvisorPassthroughTest(AdvisorTestCase):
         self.assertEqual(json.loads(data), reply)
         self.assertEqual(response.headers[HEADER], "checked=0 repaired=0 extracted=0 invalid=0 reasked=0")
 
+    def test_a_client_typed_tool_reply_goes_through_repair(self):
+        lookup = {"name": "lookup", "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}}}
+        reply = {"id": "msg_tool", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+                 "content": [{"type": "tool_use", "id": "toolu_synthetic", "name": "lookup", "input": {"q": "x"}}],
+                 "stop_reason": "tool_use", "stop_sequence": None,
+                 "usage": {"input_tokens": 20, "output_tokens": 10}}
+        response, data, _ = self.messages({"tools": [{"type": "bash_20250124", "name": "bash"}, lookup]},
+                                          json_reply(reply))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(data)["content"], reply["content"])
+        self.assertTrue(response.headers[HEADER].startswith("checked=1 "), response.headers[HEADER])
+
+
+def test_repair_still_checks_anthropic_client_tools():
+    from routes.tool_repair import _declares_server_tools
+
+    lookup = {"name": "lookup", "input_schema": {"type": "object"}}
+    for tools in ([lookup], [{"type": "custom", **lookup}], [{"type": "bash_20250124", "name": "bash"}, lookup],
+                  [{"type": "text_editor_20250728", "name": "str_replace_based_edit_tool"}],
+                  [{"type": "memory_20250818", "name": "memory"}]):
+        assert not _declares_server_tools({"tools": tools}, "messages"), tools
+    for tools in ([advisor_tool()], [{"type": "web_search_20260209", "name": "web_search"}, lookup],
+                  [{"type": "a_future_server_tool_20990101", "name": "future"}]):
+        assert _declares_server_tools({"tools": tools}, "messages"), tools
+    assert not _declares_server_tools({"tools": [advisor_tool()]}, "chat")
+
 
 ADMIN = {"username": "admin", "is_admin": True}
 
