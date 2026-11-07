@@ -474,6 +474,14 @@ def test_repair_usage_joins_the_steps_of_both_replies():
     first = {"prompt_tokens": 10, "iterations": [{"type": "message", "input_tokens": 10}]}
     second = {"prompt_tokens": 5, "iterations": [{"type": "message", "input_tokens": 5}]}
     assert add_usage(first, second) == {"prompt_tokens": 15, "iterations": [*first["iterations"], *second["iterations"]]}
-    assert add_usage(first, {"prompt_tokens": 5}) == {"prompt_tokens": 15}
-    assert add_usage({"prompt_tokens": 10}, second) == {"prompt_tokens": 15}
     assert add_usage({"prompt_tokens": 10}, {"prompt_tokens": 5}) == {"prompt_tokens": 15}
+    # A reply without steps becomes one step of the request's model, so advice stays billed.
+    advised = {"prompt_tokens": 10, "completion_tokens": 2, "iterations": [
+        {"type": "message", "input_tokens": 10, "output_tokens": 2},
+        {"type": "advisor_message", "model": "claude-sonnet-5-5", "input_tokens": 50, "output_tokens": 7}]}
+    plain = {"prompt_tokens": 9, "completion_tokens": 3,
+             "prompt_tokens_details": {"cached_tokens": 4, "cache_write_tokens": 1}}
+    step = {"type": "message", "input_tokens": 4, "output_tokens": 3,
+            "cache_read_input_tokens": 4, "cache_creation_input_tokens": 1}
+    assert add_usage(advised, plain)["iterations"] == [*advised["iterations"], step]
+    assert add_usage(plain, advised)["iterations"] == [step, *advised["iterations"]]

@@ -1417,7 +1417,7 @@
   "services/tool_repair_runtime.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "7601900dee3ba81824b469466cd6cf5c28dcef95000bb8c4de8e7e13ea5c17e2"
+    "sha256": "d5cfd314fa97f04094e7a9ecfbe7095e75a74bdcec65e6a667944933d7510545"
   },
   "services/tool_repair_stream.py": {
     "kind": "non-provider",
