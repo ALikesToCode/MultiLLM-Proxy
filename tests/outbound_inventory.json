@@ -402,7 +402,7 @@
   "routes/unified.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "652ff5a01cee4be43058d3420f388c28ee4535a8bb237379de2da6cc91f8a7ed"
+    "sha256": "7e43cbf6a5b37e987b3eb9491b232d7fc47e0332b48c4f4bec9fe1d7514ca487"
   },
   "routes/unified_bridge.py": {
     "kind": "non-provider",
@@ -1242,7 +1242,7 @@
   "services/request_accounting.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "da61afcdb7e66f1f43a7f9c315fab0de50440c2d0760b90d78a555bbe3b569dc"
+    "sha256": "99ef381b68a70863131717808f66813a4d7e7dbf3705e83becedfbd1f4f36413"
   },
   "services/request_cancellation.py": {
     "kind": "non-provider",
@@ -2473,5 +2473,10 @@
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "154f0eae820ef2a040d16f49e87cee9d42fb623ac3c17b9dc9986d39f1a86937"
+  },
+  "services/advisor_tool.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "9eed6989a78424fac9fedc723fa40f0862d053736da9da6c6689d02af16f518f"
   }
 }

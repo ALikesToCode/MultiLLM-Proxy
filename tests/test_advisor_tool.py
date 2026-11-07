@@ -144,3 +144,66 @@ class AdvisorPassthroughTest(AdvisorTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(data), reply)
         self.assertEqual(response.headers[HEADER], "checked=0 repaired=0 extracted=0 invalid=0 reasked=0")
+
+
+ADMIN = {"username": "admin", "is_admin": True}
+
+
+class AdvisorPolicyTest(AdvisorTestCase):
+    """The advisor's model is held to the key's model controls before dispatch."""
+
+    def restricted_key(self, allowed=(HAIKU,), official_only=True):
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            key = self.app_module.AuthService.create_user("restricted", scopes=["chat", "models"])["api_key"]
+            self.app_module.AuthService.set_key_controls(
+                "restricted", {"allowed_models": list(allowed), "official_only": official_only})
+        return key
+
+    def test_a_restricted_key_cannot_reach_an_opus_advisor(self):
+        key = self.restricted_key()
+        for model in ("claude-opus-5-5", "anthropic:claude-opus-5-5", "Claude-Opus-5-5"):
+            with self.subTest(model=model):
+                response, data, send = self.messages({"tools": [advisor_tool(model)]}, json_reply(advised_message()),
+                                                     key=key)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(json.loads(data)["error"]["type"], "permission_error")
+                self.assertIn("anthropic:claude-opus-5-5", json.loads(data)["error"]["message"].lower())
+                send.assert_not_called()
+
+    def test_the_refusal_matches_a_disallowed_top_level_model(self):
+        key = self.restricted_key()
+        _, advised, _ = self.messages({"tools": [advisor_tool("claude-opus-5-5")]}, json_reply(advised_message()), key=key)
+        _, direct, _ = self.messages({"model": "anthropic:claude-opus-5-5", "tools": []}, json_reply(advised_message()),
+                                     key=key)
+        advised, direct = json.loads(advised), json.loads(direct)
+        self.assertEqual(advised["error"]["type"], direct["error"]["type"])
+        self.assertEqual(advised["error"]["message"], direct["error"]["message"])
+
+    def test_an_allowed_advisor_is_sent_under_its_bare_id(self):
+        key = self.restricted_key(allowed=(HAIKU, SONNET))
+        for model in ("claude-sonnet-5-5", "anthropic:claude-sonnet-5-5"):
+            with self.subTest(model=model):
+                response, _, send = self.messages({"tools": [advisor_tool(model)]}, json_reply(advised_message()),
+                                                  key=key)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(json.loads(send.call_args.kwargs["data"])["tools"], [advisor_tool("claude-sonnet-5-5")])
+
+    def test_a_wildcard_allowlist_admits_its_advisors(self):
+        key = self.restricted_key(allowed=("anthropic:*",))
+        response, _, _ = self.messages({"tools": [advisor_tool("claude-opus-5-5")]}, json_reply(advised_message()), key=key)
+        self.assertEqual(response.status_code, 200)
+
+    def test_an_advisor_from_another_provider_is_refused_before_dispatch(self):
+        for model in ("openai:gpt-5.5", "opencode:claude-opus-5-5", "", None, 5):
+            with self.subTest(model=model):
+                response, data, send = self.messages({"tools": [advisor_tool(model)]}, json_reply(advised_message()))
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(data)["error"]["type"], "invalid_request_error")
+                send.assert_not_called()
+
+    def test_every_advisor_tool_is_checked(self):
+        key = self.restricted_key(allowed=(HAIKU, SONNET))
+        tools = [advisor_tool("claude-sonnet-5-5"), advisor_tool("claude-fable-5-1", name="second")]
+        response, _, send = self.messages({"tools": tools}, json_reply(advised_message()), key=key)
+        self.assertEqual(response.status_code, 403)
+        send.assert_not_called()

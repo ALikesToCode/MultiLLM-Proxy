@@ -172,7 +172,10 @@ A key may list allowed model IDs or patterns, where `*` matches any characters:
 model is checked before dispatch on chat, responses, images (every item of a batch;
 items without a model use `auto:image`), videos (`auto:video` by default), embeddings,
 audio and provider pass-through routes, where the model is `provider:<body model>`. A
-pass-through request that names no model needs `provider:*` or `*`. An automatic route
+pass-through request that names no model needs `provider:*` or `*`. A model named inside
+a request is checked too: the `model` of each Claude advisor tool on
+`/v1/messages`, as `anthropic:<id>` when it is a bare id (see
+[advisor tool](anthropic.md#advisor-tool)). An automatic route
 is allowed by its own ID; its candidates are the operator's choice. A refused request
 gets 403 `model_not_allowed`. `GET /v1/models` lists only the models the key may use.
 

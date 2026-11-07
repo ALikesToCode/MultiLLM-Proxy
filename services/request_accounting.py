@@ -23,7 +23,7 @@ from flask import Response, current_app, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
-from services import key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
+from services import advisor_tool, key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
 from services import credits_admission, tenant_governance
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
@@ -271,10 +271,17 @@ def begin() -> Optional[Response]:
         return None
     payload = _payload()
     models, provider = _requested_models(kind, payload)
+    try:
+        # A model named inside the request, such as an advisor tool's, is held to the
+        # same controls as the request's own model.
+        advisors = advisor_tool.advisors(payload, advisor_tool.executor_provider(models[0] if models else None, provider))
+    except advisor_tool.AdvisorError as error:
+        return _error(400, "invalid_request_error", str(error))
+    controlled = [*models, *(advisor.model for advisor in advisors)]
     from services.key_data_guards import model_permitted
-    if any(not model_permitted(user, model) for model in models) or (provider and not model_permitted(user, provider + ":*")):
+    if any(not model_permitted(user, model) for model in controlled) or (provider and not model_permitted(user, provider + ":*")):
         return _error(403, "provider_class_not_allowed", "This API key cannot use this provider data class.")
-    for model in models:
+    for model in controlled:
         if not key_controls.model_allowed(user, model):
             return _error(403, "model_not_allowed",
                           f"This API key is not allowed to use {str(model)[:128]}.", model=str(model)[:256])

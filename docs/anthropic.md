@@ -121,6 +121,15 @@ The reply, streamed or not, passes through as Claude sent it, with its
 to the next turn and keep the advisor tool in `tools` while the history holds
 advisor results.
 
+The advisor's model is held to the key's controls like the request's own model:
+its allowlist, `official_only` and provider data class. A bare id such as
+`claude-opus-5-5` is checked as its catalog id, `anthropic:claude-opus-5-5`, and
+a key that may not use that model gets the same 403 `model_not_allowed` as a
+request naming it directly, before anything reaches Claude. A catalog id is
+accepted and sent to Claude as its bare id; an advisor from another provider gets
+400. Forced provider preferences apply only to OpenRouter, so they do not change
+an `anthropic:` advisor.
+
 ## Native API
 
 Native provider routes require an admin proxy key. Use `$PROXY_BASE_URL/anthropic`
