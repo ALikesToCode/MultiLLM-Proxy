@@ -63,8 +63,10 @@ def holds_advisor_blocks(content) -> bool:
 
 
 def continuation_extra(content):
-    """Attach complete native blocks only when a signed tool turn needs them."""
-    if not any(
+    """Attach complete native blocks only when a tool turn needs them: a signed turn,
+    or one with advisor blocks, whose advisor call may still be pending and then runs
+    when the turn resumes."""
+    if not holds_advisor_blocks(content) and not any(
         isinstance(block, dict)
         and block.get("type") in {"thinking", "redacted_thinking"}
         for block in content

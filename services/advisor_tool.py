@@ -89,9 +89,19 @@ def extension_tool(payload: Any) -> Optional[dict]:
     return {"type": TOOL_TYPE, "name": "advisor", **value}
 
 
+def _replays_advice(body: Any) -> bool:
+    messages = body.get("messages") if isinstance(body, dict) else None
+    return isinstance(messages, list) and any(
+        isinstance(block, dict) and (block.get("type") == "advisor_tool_result" or (
+            block.get("type") == "server_tool_use" and block.get("name") == "advisor"))
+        for message in messages if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for block in message["content"])
+
+
 def declared_betas(body: Any) -> tuple[str, ...]:
-    """The beta a Messages body needs for the advisor tools it declares."""
-    return (BETA,) if advisor_tools(body) else ()
+    """The beta a Messages body needs for the advisor tools it declares or the advisor
+    blocks its history replays (Claude accepts those without the tool, given the beta)."""
+    return (BETA,) if advisor_tools(body) or _replays_advice(body) else ()
 
 
 def _bound(tool: dict, name: str) -> Optional[int]:

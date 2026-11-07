@@ -32,6 +32,7 @@ ADVISOR = {"model": "anthropic:claude-sonnet-5-5", "max_uses": 1, "max_tokens": 
 TOOL = {"type": "advisor_20260301", "name": "advisor", "model": "claude-sonnet-5-5", "max_uses": 1, "max_tokens": 2048}
 QUESTION = [{"role": "user", "content": "A synthetic question"}]
 CHAT_PATHS = ("/v1/chat/completions", "/lean/v1/chat/completions")
+PENDING = {"type": "server_tool_use", "id": "srvtoolu_pending", "name": "advisor", "input": {}}
 
 
 def frames(text):
@@ -155,11 +156,41 @@ class AdvisorExtensionTest(ExtensionTestCase):
         response, data, send = self.chat({"tools": [lookup], "messages": history}, json_reply(advised_message()))
         self.assertEqual(response.status_code, 200, data)
         self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
+        # Without the field the advice still replays: Claude takes the history with the beta.
+        response, data, send = self.post("/v1/chat/completions", {"model": HAIKU, "tools": [lookup], "messages": history},
+                                         json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        body, headers = self.upstream(send)
+        self.assertEqual(body["messages"][1]["content"], content)
+        self.assertEqual([tool["name"] for tool in body["tools"]], ["lookup"])
+        self.assertIn("advisor-tool-2026-03-01", headers["anthropic-beta"].split(","))
+
+    def test_a_pending_advisor_call_runs_when_the_tool_results_arrive(self):
+        lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
+        content = [{"type": "text", "text": "Checking."}, PENDING,
+                   {"type": "tool_use", "id": "toolu_synthetic", "name": "lookup", "input": {"q": "x"}}]
+        _, data, _ = self.chat({"tools": [lookup]}, json_reply({**advised_message(), "content": content,
+                                                                 "stop_reason": "tool_use"}))
+        message = json.loads(data)["choices"][0]["message"]
+        self.assertEqual(message["tool_calls"][0]["extra_content"]["anthropic"]["content"], content)
+        history = [*QUESTION, message, {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]
+        response, data, send = self.chat({"tools": [lookup], "messages": history}, json_reply(advised_message()))
+        self.assertEqual(response.status_code, 200, data)
+        self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], content)
         response, data, send = self.post("/v1/chat/completions", {"model": HAIKU, "tools": [lookup], "messages": history},
                                          json_reply(advised_message()))
         self.assertEqual(response.status_code, 400)
         self.assertIn("'advisor'", json.loads(data)["error"]["message"])
         send.assert_not_called()
+        # The call's result opened the next reply, which had no tool calls to carry it.
+        later = [*history, {"role": "assistant", "content": "A synthetic answer."},
+                 {"role": "user", "content": "A synthetic follow-up"}]
+        for body in ({"advisor": ADVISOR}, {}):
+            with self.subTest(advisor=bool(body)):
+                response, data, send = self.post("/v1/chat/completions", {
+                    "model": HAIKU, "tools": [lookup], "messages": later, **body}, json_reply(advised_message()))
+                self.assertEqual(response.status_code, 200, data)
+                self.assertEqual(self.upstream(send)[0]["messages"][1]["content"], [content[0], content[2]])
 
     def test_a_streamed_signed_tool_turn_with_advice_keeps_its_blocks(self):
         lookup = {"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}
@@ -346,3 +377,16 @@ def test_a_similar_answer_never_stands_in_for_advice():
     payload = {"model": HAIKU, "messages": QUESTION}
     assert semantic_generation_cache.eligible(payload)
     assert not semantic_generation_cache.eligible({**payload, "advisor": ADVISOR})
+
+
+def test_a_result_without_its_advisor_call_is_dropped():
+    from services.protocol_translation.anthropic import chat_request_to_messages
+
+    orphan = {"type": "advisor_tool_result", "tool_use_id": "srvtoolu_gone", "content": ADVICE}
+    use = {"type": "tool_use", "id": "toolu_synthetic", "name": "lookup", "input": {}}
+    call = {"id": "toolu_synthetic", "type": "function", "function": {"name": "lookup", "arguments": "{}"},
+            "extra_content": {"anthropic": {"content": [orphan, use]}}}
+    body = chat_request_to_messages({"model": "claude-haiku-5-5", "messages": [
+        *QUESTION, {"role": "assistant", "content": None, "tool_calls": [call]},
+        {"role": "tool", "tool_call_id": "toolu_synthetic", "content": "found"}]})
+    assert body["messages"][1]["content"] == [use]
