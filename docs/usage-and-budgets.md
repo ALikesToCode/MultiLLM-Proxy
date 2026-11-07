@@ -70,6 +70,18 @@ gateway lists, from <https://platform.claude.com/docs/en/about-claude/pricing> a
 a model without an entry is recorded at no cost. Batch, fast-mode and US-only
 inference prices are not modelled.
 
+A Claude reply that ran a server-side loop lists each sampling step in
+`usage.iterations`, and its top-level usage counts only the request's model. An
+[advisor](anthropic.md#advisor-tool) step names its own model, so each step is
+priced at the prices of the model that ran it, with the `long_context` tier
+judged per step. The request's row keeps its own model's steps; the advisor's
+steps get a row of their own, under endpoint `/v1/messages/advisor`
+(`/anthropic/v1/messages/advisor` on the native route) with the advisor's model
+as `requested_model` and `selected_model`, the same `request_id`, status and
+time. The usage page and `GET /v1/usage` therefore list advisor tokens and cost
+under the advisor's model, where one consultation counts as one request. Budgets,
+reservations and credits settle the request's whole cost, advisor included.
+
 `cost_basis` is `usage` when the provider reported tokens and `estimate` when the
 proxy's own token estimate was used. Requests to unpriced models and failed requests
 (status 400 or above, with no usage reported) have no cost. Configured prices are

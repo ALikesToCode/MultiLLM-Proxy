@@ -220,6 +220,8 @@ class MetricsService:
         """
         records = []
         for row in ledger_rows:
+            if str(row.get("endpoint") or "").endswith("/advisor"):
+                continue  # An advisor's row belongs to a request already restored.
             try:
                 timestamp = datetime.fromisoformat(str(row["at"]).replace("Z", "+00:00")).timestamp()
             except (KeyError, TypeError, ValueError):

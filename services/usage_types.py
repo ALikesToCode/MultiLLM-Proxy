@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -13,6 +14,56 @@ def _component(value: Any) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+MAX_ITERATIONS = 256
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,255}\Z")
+
+
+@dataclass(frozen=True)
+class IterationUsage:
+    """One sampling step of a Claude request (`usage.iterations[]`), such as an advisor
+    call, with Anthropic's buckets: `input_tokens` excludes cache reads and writes.
+    `model` is set when the step ran on another model than the request's."""
+
+    kind: str
+    model: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_read_input_tokens: int | None
+    cache_creation_input_tokens: int | None
+    cache_write_1h_tokens: int | None
+
+    @classmethod
+    def parse(cls, value: Any) -> IterationUsage | None:
+        if not isinstance(value, dict):
+            return None
+        kind = value.get("type") if isinstance(value.get("type"), str) else "message"
+        model = value.get("model")
+        model = model if isinstance(model, str) and _MODEL_ID.fullmatch(model) else None
+        creation = value.get("cache_creation")
+        one_hour = _component(creation.get("ephemeral_1h_input_tokens")) if isinstance(creation, dict) else None
+        return cls(kind[:64], model, _component(value.get("input_tokens")), _component(value.get("output_tokens")),
+                   _component(value.get("cache_read_input_tokens", 0)),
+                   _component(value.get("cache_creation_input_tokens", 0)), one_hour)
+
+    def as_usage(self) -> dict:
+        """The step as a Claude Messages `usage` object."""
+        usage = {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
+                 "cache_read_input_tokens": self.cache_read_input_tokens,
+                 "cache_creation_input_tokens": self.cache_creation_input_tokens}
+        if self.cache_write_1h_tokens:
+            usage["cache_creation"] = {"ephemeral_1h_input_tokens": self.cache_write_1h_tokens}
+        return usage
+
+
+def iterations_from(usage: Any) -> tuple[IterationUsage, ...]:
+    entries = usage.get("iterations") if isinstance(usage, dict) else None
+    if not isinstance(entries, list) or not entries:
+        return ()
+    # An entry that cannot be read is kept as unknown, so its cost is unknown too.
+    return tuple(IterationUsage.parse(entry) or IterationUsage("unknown", None, None, None, None, None, None)
+                 for entry in entries[:MAX_ITERATIONS])
+
+
 @dataclass(frozen=True)
 class UsageObservation:
     input_tokens: int | None = None
@@ -21,6 +72,8 @@ class UsageObservation:
     provenance: tuple[str, ...] = ()
     cached_input_tokens: int | None = field(default=None, kw_only=True)
     reasoning_tokens: int | None = field(default=None, kw_only=True)
+    # Per-model sampling steps, when the provider reports them (Claude's advisor tool).
+    iterations: tuple[IterationUsage, ...] = field(default=(), kw_only=True)
 
     @classmethod
     def from_body(cls, value: Any) -> UsageObservation | None:
@@ -51,7 +104,8 @@ class UsageObservation:
             output_tokens = 0
         known = input_tokens is not None or output_tokens is not None
         return cls(input_tokens, output_tokens, "provider" if known else "unknown",
-                   ("provider",) if known else (), cached_input_tokens=cached, reasoning_tokens=reasoning)
+                   ("provider",) if known else (), cached_input_tokens=cached, reasoning_tokens=reasoning,
+                   iterations=iterations_from(usage))
 
     def merge(self, later: UsageObservation) -> UsageObservation:
         """Use the latest valid value for each component; null never erases a count."""
@@ -62,7 +116,8 @@ class UsageObservation:
             "provider" if input_tokens is not None or output_tokens is not None else "unknown")
         return UsageObservation(input_tokens, output_tokens, basis, provenance,
                                 cached_input_tokens=later.cached_input_tokens if later.cached_input_tokens is not None else self.cached_input_tokens,
-                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens)
+                                reasoning_tokens=later.reasoning_tokens if later.reasoning_tokens is not None else self.reasoning_tokens,
+                                iterations=later.iterations or self.iterations)
 
     def with_estimates(self, input_tokens: int | None, output_tokens: int | None) -> UsageObservation:
         """Fill missing components explicitly, retaining measured zero and provenance."""

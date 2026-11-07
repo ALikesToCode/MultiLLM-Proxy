@@ -952,7 +952,7 @@
   "services/metrics_service.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "d8894064ab2e8add6184c06c2ccf9303dc583ec9eecf0c0f7c5877fbdf58d880"
+    "sha256": "d515579277998cec9d84e302f2258ea9c795b1e0cc76bf8b3c7d0f0bf6b13067"
   },
   "services/model_catalog_service.py": {
     "kind": "non-provider",
@@ -1072,7 +1072,7 @@
   "services/prompt_cache_cost.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "696b0b57de3ebce1dc49db93b231d49e3f822014d42532285a0b06b04de401ce"
+    "sha256": "4cae256ce2b107fa8a354a4ebee97399b002c89adc077cf29740caf794358ca2"
   },
   "services/prompt_injection_detection.py": {
     "kind": "non-provider",
@@ -1242,7 +1242,7 @@
   "services/request_accounting.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "99ef381b68a70863131717808f66813a4d7e7dbf3705e83becedfbd1f4f36413"
+    "sha256": "2d47dbf555e28907be8d051959edd71b3ab505b4e7882619c24005caf4370b96"
   },
   "services/request_cancellation.py": {
     "kind": "non-provider",
@@ -1462,7 +1462,7 @@
   "services/usage_types.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "d7b74bd38f673925fa882dd4bcd3a34bb2f85adb9ae4e488bfce12e5df43fc2b"
+    "sha256": "92c438b4c12cd830a36afaea3fbd57ae235f1266f2d48d3cfd06973d48960cf0"
   },
   "services/user_provisioning.py": {
     "kind": "non-provider",
@@ -2478,5 +2478,10 @@
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
     "sha256": "9eed6989a78424fac9fedc723fa40f0862d053736da9da6c6689d02af16f518f"
+  },
+  "services/usage_iterations.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "116f2e74b1f6b0f38a3536e312f9e2f14d32540994585370ccfd6fd33e2fe32f"
   }
 }

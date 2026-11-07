@@ -121,6 +121,11 @@ The reply, streamed or not, passes through as Claude sent it, with its
 to the next turn and keep the advisor tool in `tools` while the history holds
 advisor results.
 
+Claude bills the advisor's tokens at the advisor model's prices and reports
+them only in `usage.iterations`, not in the top-level usage. The ledger prices
+every step at its own model and records the advisor's steps under the advisor's
+model; see [usage and budgets](usage-and-budgets.md#cost).
+
 The advisor's model is held to the key's controls like the request's own model:
 its allowlist, `official_only` and provider data class. A bare id such as
 `claude-opus-5-5` is checked as its catalog id, `anthropic:claude-opus-5-5`, and

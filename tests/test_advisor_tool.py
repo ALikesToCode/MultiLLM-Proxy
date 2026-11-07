@@ -14,7 +14,10 @@ from unittest.mock import patch
 
 import requests
 
+from services import usage_ledger
+from services.budget_service import BudgetService
 from services.tool_repair_runtime import HEADER
+from tests.test_claude_pricing import SHIPPED_PRICES
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 HAIKU = "anthropic:claude-haiku-5-5"
@@ -207,3 +210,110 @@ class AdvisorPolicyTest(AdvisorTestCase):
         response, _, send = self.messages({"tools": tools}, json_reply(advised_message()), key=key)
         self.assertEqual(response.status_code, 403)
         send.assert_not_called()
+
+
+# The executor's two steps at Haiku 5.5 prices, and the advisor's at Sonnet 5.5's.
+HAIKU_COST = (1097 + 1542) * 0.1 / 1e6 + (92 + 112) * 0.5 / 1e6
+SONNET_COST = 2778 * 2 / 1e6 + 685 * 10 / 1e6
+
+
+class AdvisorLedgerTest(AdvisorTestCase):
+    """Advisor steps are priced at the advisor's model and recorded under it."""
+
+    def setUp(self):
+        super().setUp()
+        os.environ.update({
+            "USAGE_LEDGER_ENABLED": "true", "USAGE_LEDGER_BACKEND": "sql", "USAGE_LEDGER_FLUSH_SECONDS": "300",
+            "USAGE_DB_PATH": os.path.join(self.temp_dir.name, "usage.sqlite3"),
+            "CONTROL_PLANE_DATABASE_URL": "",
+            "MODEL_PRICING_USD_PER_MILLION": SHIPPED_PRICES,
+            "PROMPT_CACHE_USAGE_BUCKETS_ENABLED": "true",
+            "PROMPT_CACHE_PRICE_METADATA_JSON": "{}",
+        })
+        usage_ledger.LEDGER.reset()
+        BudgetService.reset()
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            self.key = self.app_module.AuthService.create_user("advised", scopes=["chat", "models"])["api_key"]
+
+    def tearDown(self):
+        usage_ledger.LEDGER.reset()
+        BudgetService.reset()
+        super().tearDown()
+
+    def rows(self):
+        self.assertTrue(usage_ledger.LEDGER.flush(timeout=5))
+        rows = usage_ledger.LEDGER.store().recent("2000-01-01T00:00:00.000Z", "advised", None, 50)
+        return {row["selected_model"]: row for row in rows}
+
+    def assert_priced(self, rows):
+        self.assertEqual(set(rows), {HAIKU, SONNET})
+        haiku, sonnet = rows[HAIKU], rows[SONNET]
+        self.assertEqual((haiku["endpoint"], sonnet["endpoint"]), ("/v1/messages", "/v1/messages/advisor"))
+        self.assertEqual((haiku["input_tokens"], haiku["output_tokens"]), (2639, 204))
+        self.assertEqual((sonnet["input_tokens"], sonnet["output_tokens"]), (2778, 685))
+        self.assertAlmostEqual(haiku["cost_usd"], HAIKU_COST)
+        self.assertAlmostEqual(sonnet["cost_usd"], SONNET_COST)
+        self.assertEqual((haiku["cost_basis"], sonnet["cost_basis"]), ("usage", "usage"))
+        self.assertEqual(sonnet["request_id"], haiku["request_id"])
+        self.assertEqual(sonnet["at"], haiku["at"])
+
+    def test_a_three_step_reply_is_priced_per_model(self):
+        response, _, _ = self.messages({}, json_reply(advised_message()), key=self.key)
+        self.assertEqual(response.status_code, 200)
+        self.assert_priced(self.rows())
+
+    def test_a_streamed_reply_is_priced_per_model(self):
+        response, _, _ = self.messages({"stream": True}, stream_reply(advised_frames()), key=self.key)
+        self.assertEqual(response.status_code, 200)
+        self.assert_priced(self.rows())
+
+    def test_v1_usage_lists_the_advisor_under_its_own_model(self):
+        self.messages({}, json_reply(advised_message()), key=self.key)
+        self.assertTrue(usage_ledger.LEDGER.flush(timeout=5))
+        summary = self.client.get("/v1/usage", headers={"Authorization": f"Bearer {self.key}"}).get_json()
+        models = {entry["model"]: entry for entry in summary["models"]}
+        self.assertEqual((models[SONNET]["input_tokens"], models[SONNET]["output_tokens"]), (2778, 685))
+        self.assertAlmostEqual(models[SONNET]["cost_usd"], SONNET_COST)
+        self.assertAlmostEqual(models[HAIKU]["cost_usd"], HAIKU_COST)
+        self.assertAlmostEqual(summary["totals"]["cost_usd"], HAIKU_COST + SONNET_COST)
+
+    def test_a_budget_counts_the_advisor(self):
+        with patch.object(self.app_module.AuthService, "get_current_user", return_value=ADMIN):
+            self.app_module.AuthService.set_key_controls("advised", {"daily_budget_usd": 1, "monthly_budget_usd": 5})
+        self.messages({}, json_reply(advised_message()), key=self.key)
+        self.assertTrue(usage_ledger.LEDGER.flush(timeout=5))
+        budget = self.client.get("/v1/usage", headers={"Authorization": f"Bearer {self.key}"}).get_json()["budget"]
+        self.assertAlmostEqual(budget["daily_remaining_usd"], 1 - HAIKU_COST - SONNET_COST)
+
+    def test_advisor_cache_reads_and_writes_use_the_advisor_prices(self):
+        steps = [iteration("message", 1000, 50),
+                 iteration("advisor_message", 100, 500, model="claude-sonnet-5-5", read=10_000, written=4_000,
+                           one_hour=1_000),
+                 iteration("message", 1200, 60)]
+        self.messages({}, json_reply(advised_message(advised_usage(steps))), key=self.key)
+        sonnet = self.rows()[SONNET]
+        expected = (100 * 2 + 10_000 * 0.2 + 3_000 * 2.5 + 1_000 * 4 + 500 * 10) / 1e6
+        self.assertAlmostEqual(sonnet["cost_usd"], expected)
+        self.assertEqual((sonnet["input_tokens"], sonnet["cached_input_tokens"]), (14_100, 10_000))
+
+    def test_each_step_has_its_own_long_prompt_tier(self):
+        # Two Haiku steps of 60,000 prompt tokens each stay under the 100,000 threshold.
+        steps = [iteration("message", 60_000, 10), iteration("advisor_message", 61_000, 10, model="claude-sonnet-5-5"),
+                 iteration("message", 60_000, 10)]
+        self.messages({}, json_reply(advised_message(advised_usage(steps))), key=self.key)
+        self.assertAlmostEqual(self.rows()[HAIKU]["cost_usd"], (120_000 * 0.1 + 20 * 0.5) / 1e6)
+
+    def test_an_unpriced_advisor_is_recorded_without_a_cost(self):
+        steps = [iteration("message", 1000, 50), iteration("advisor_message", 2000, 500, model="claude-unlisted-9"),
+                 iteration("message", 1200, 60)]
+        self.messages({}, json_reply(advised_message(advised_usage(steps))), key=self.key)
+        rows = self.rows()
+        self.assertIsNone(rows["anthropic:claude-unlisted-9"]["cost_usd"])
+        self.assertAlmostEqual(rows[HAIKU]["cost_usd"], (2200 * 0.1 + 110 * 0.5) / 1e6)
+
+    def test_a_reply_without_steps_keeps_one_row(self):
+        usage = {"input_tokens": 1000, "output_tokens": 50, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        self.messages({"tools": []}, json_reply(advised_message(usage)), key=self.key)
+        rows = self.rows()
+        self.assertEqual(set(rows), {HAIKU})
+        self.assertEqual(rows[HAIKU]["endpoint"], "/v1/messages")

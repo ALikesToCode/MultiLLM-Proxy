@@ -24,6 +24,7 @@ from werkzeug.exceptions import HTTPException
 
 from error_handlers import APIError
 from services import advisor_tool, key_controls, prompt_cache_cost, reservation_store, telemetry_export, usage_ledger, stream_cost_breaker
+from services import usage_iterations
 from services import credits_admission, tenant_governance
 from services.budget_service import BudgetService, budgeted
 from services.cost_service import CostService
@@ -494,7 +495,12 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
         BudgetService.settle(context.reservation, before_dispatch=True, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
         return
     try:
+        # Steps that ran on another model (an advisor) are priced at that model and
+        # recorded as rows of their own; the request's row keeps its model's steps.
+        parts = usage_iterations.by_model(_selected_model(context), usage)
+        usage = parts[0][1]
         row = _row(context, status, usage, units)
+        advised = [_advised_row(context, row, model, part) for model, part in parts[1:]]
         budget_row = row
         if row["cost_usd"] is None and usage is not None:
             # Only the budget sees estimates; measured ledger counts remain unchanged.
@@ -506,11 +512,20 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
                         if prompt_cache_cost.enabled() else price(models, estimated.input_tokens,
                                                                   estimated.output_tokens, context.units))
             budget_row = {**row, "cost_usd": estimate}
-        row = _record_budget(context, row, budget_row)
-        usage_ledger.LEDGER.record(row)
-        telemetry_export.EXPORTER.submit({**row, "method": context.method, "trace_id": context.trace[0],
-                                          "parent_span_id": context.trace[1], "start_ns": context.start_ns,
-                                          "end_ns": time.time_ns()})
+        if advised:
+            # Budgets, reservations and credits settle the whole request.
+            settled = _record_budget(context, _with_advice(row, advised), _with_advice(budget_row, advised))
+            main = {**row, "at": settled["at"]}
+            if settled["cost_basis"] is None and row["cost_basis"] == "estimate":
+                main.update(cost_usd=None, cost_basis=None)
+            rows = [main, *({**advice, "at": settled["at"]} for advice in advised)]
+        else:
+            rows = [_record_budget(context, row, budget_row)]
+        for entry in rows:
+            usage_ledger.LEDGER.record(entry)
+            telemetry_export.EXPORTER.submit({**entry, "method": context.method, "trace_id": context.trace[0],
+                                              "parent_span_id": context.trace[1], "start_ns": context.start_ns,
+                                              "end_ns": time.time_ns()})
     except Exception as error:  # Accounting must never fail a served request.
         logger.warning("Usage could not be recorded (%s)", type(error).__name__)
     finally:
@@ -519,13 +534,70 @@ def _record(context: UsageContext, status: int, usage: Optional[UsageObservation
             BudgetService.settle(context.reservation, **({"governance_store": context.governance_store} if context.governance_store is not None else {}))
 
 
+def _selected_model(context: UsageContext) -> Optional[str]:
+    """The model that served the request, when the route has named it."""
+    qualified = [_qualified(model, context.provider) for model in context.models]
+    requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
+    return context.selected or (requested if requested and requested != "mixed"
+                                and not requested.startswith(("auto:", "free:")) else None)
+
+
+def _step_price(models: list[str], usage: UsageObservation, units: int) -> Optional[float]:
+    """`price` of usage that lists its sampling steps, one step at a time, so each step
+    gets its own long-prompt tier."""
+    if not usage.iterations:
+        return price(models, usage.input_tokens, usage.output_tokens, units)
+    steps = [UsageObservation.from_body({"usage": step.as_usage()}) for step in usage.iterations]
+    costs = [price(models, step.input_tokens, step.output_tokens, units if index == 0 else 0)
+             for index, step in enumerate(steps)]
+    return sum(costs) if all(cost is not None for cost in costs) else None
+
+
+def _measured_cost(model: str, usage: UsageObservation, units: int) -> tuple[Optional[float], dict]:
+    """A measured part's cost at `model`'s prices, step by step when steps are listed."""
+    if prompt_cache_cost.enabled():
+        breakdown = CostService.price_buckets(model, usage, requests=units)
+        return breakdown["cost_usd"], breakdown
+    return _step_price([model], usage, units), {}
+
+
+def _advised_row(context: UsageContext, row: dict, model: str, usage: UsageObservation) -> dict:
+    """The ledger row of steps that ran on another model than the request's, such as
+    an advisor: one row per model, under `<endpoint>/advisor`, with its own cost."""
+    endpoint = f"{row['endpoint']}/advisor"
+    cost, breakdown = _measured_cost(model, usage, 0)
+    advice = {
+        **row,
+        "endpoint": endpoint if ENDPOINT.fullmatch(endpoint) else row["endpoint"],
+        "requested_model": _clean_model(model),
+        "selected_model": _clean_model(model),
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cached_input_tokens": usage.cached_input_tokens,
+        "reasoning_tokens": None,
+        "cost_usd": 0.0 if context.cached and row["status"] < 400 else cost,
+        "cost_basis": "cache" if context.cached and row["status"] < 400 else usage.storage_basis(cost),
+    }
+    if breakdown:
+        advice.update({name: breakdown[name] for name in prompt_cache_cost.ROW_FIELDS})
+    return advice
+
+
+def _with_advice(row: dict, advised: list[dict]) -> dict:
+    """The request's row with its advisors' costs added, for admission settlement."""
+    costs = [advice["cost_usd"] for advice in advised if advice["cost_usd"] is not None]
+    if not costs:
+        return row
+    total = (row["cost_usd"] or 0.0) + sum(costs)
+    return {**row, "cost_usd": total, "cost_basis": row["cost_basis"] or "usage"}
+
+
 def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], units: Optional[int]) -> dict:
     if usage is not None and context.path == "/v1/embeddings":
         usage = replace(usage, output_tokens=0)
     qualified = [_qualified(model, context.provider) for model in context.models]
     requested = qualified[0] if len(qualified) == 1 else ("mixed" if qualified else None)
-    selected = context.selected or (requested if requested and requested != "mixed"
-                                    and not requested.startswith(("auto:", "free:")) else None)
+    selected = _selected_model(context)
     if units is not None:
         context.units = units
     cost, basis = None, None
@@ -535,8 +607,7 @@ def _row(context: UsageContext, status: int, usage: Optional[UsageObservation], 
         observation = usage if usage is not None else UsageObservation().with_estimates(
             context.input_tokens, context.output_tokens)
         if not (prompt_cache_cost.enabled() and context.kind in {"chat", "responses", "proxy", "embeddings"}):
-            cost = price([selected] if selected else qualified, observation.input_tokens,
-                         observation.output_tokens, context.units)
+            cost = _step_price([selected] if selected else qualified, observation, context.units)
             basis = observation.storage_basis(cost)
     if context.stream_cost is not None and usage is not None:
         breakdown = CostService.price_buckets(selected or requested, usage, requests=context.units)
