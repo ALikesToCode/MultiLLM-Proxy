@@ -777,6 +777,9 @@ def _dispatch_native_protocol(
         )
     else:
         upstream_payload = strip_unsigned_thinking(upstream_payload)
+        for advisor in advisor_tool.catalog_models(upstream_payload, provider):
+            if ModelRegistry.get_model_status(advisor) == "disabled":
+                raise APIError(f"Model is disabled: {advisor}", status_code=400)
         upstream_payload = advisor_tool.upstream_payload(upstream_payload, provider)
     upstream_payload = _apply_nanogpt_speed_routing(
         app, provider, upstream_payload, headers_source

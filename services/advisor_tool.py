@@ -76,6 +76,18 @@ def advisors(payload: Any, provider: str) -> list[Advisor]:
             for tool in advisor_tools(payload)]
 
 
+def catalog_models(payload: Any, provider: str) -> list[str]:
+    """The catalog ids of a request's advisors. A tool that names no usable model is
+    refused when the request is admitted, so it is skipped here."""
+    models = []
+    for tool in advisor_tools(payload):
+        try:
+            models.append(qualified_model(tool.get("model"), provider))
+        except AdvisorError:
+            continue
+    return models
+
+
 def upstream_payload(payload: dict, provider: str) -> dict:
     """Send the provider its own model ids: a catalog id loses its provider prefix."""
     if not advisor_tools(payload):

@@ -10,6 +10,7 @@ executor.
 import io
 import json
 import os
+import sys
 from unittest.mock import patch
 
 import requests
@@ -203,6 +204,21 @@ class AdvisorPolicyTest(AdvisorTestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertEqual(json.loads(data)["error"]["type"], "invalid_request_error")
                 send.assert_not_called()
+
+    def test_a_disabled_advisor_model_is_refused_like_the_model_itself(self):
+        fable = "anthropic:claude-fable-5-1"
+        status = lambda model: "disabled" if model == fable else "available"
+        registry = sys.modules["services.model_registry"].ModelRegistry
+        with patch.object(registry, "get_model_status", side_effect=status):
+            for model in ("claude-fable-5-1", fable):
+                with self.subTest(model=model):
+                    response, data, send = self.messages({"tools": [advisor_tool(model)]},
+                                                         json_reply(advised_message()))
+                    self.assertEqual(response.status_code, 400)
+                    self.assertIn(f"Model is disabled: {fable}", json.loads(data)["error"]["message"])
+                    send.assert_not_called()
+            _, direct, _ = self.messages({"model": fable, "tools": []}, json_reply(advised_message()))
+            self.assertIn(f"Model is disabled: {fable}", json.loads(direct)["error"]["message"])
 
     def test_every_advisor_tool_is_checked(self):
         key = self.restricted_key(allowed=(HAIKU, SONNET))
