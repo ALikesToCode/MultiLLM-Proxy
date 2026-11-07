@@ -64,11 +64,13 @@ def _sum(values: list[int | None]) -> int | None:
 
 
 def _summed(steps: list[IterationUsage]) -> IterationUsage:
-    first = steps[0]
-    return IterationUsage(first.kind, first.model, *(
-        _sum([getattr(step, name) for step in steps]) for name in (
-            "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")),
-        sum(step.cache_write_1h_tokens or 0 for step in steps) or None)
+    return IterationUsage(
+        steps[0].kind, steps[0].model,
+        input_tokens=_sum([step.input_tokens for step in steps]),
+        output_tokens=_sum([step.output_tokens for step in steps]),
+        cache_read_input_tokens=_sum([step.cache_read_input_tokens for step in steps]),
+        cache_creation_input_tokens=_sum([step.cache_creation_input_tokens for step in steps]),
+        cache_write_1h_tokens=sum(step.cache_write_1h_tokens or 0 for step in steps) or None)
 
 
 def iterations_from(usage: Any) -> tuple[IterationUsage, ...]:
