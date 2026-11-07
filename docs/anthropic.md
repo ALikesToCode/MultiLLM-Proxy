@@ -111,9 +111,9 @@ Chat Completions content parts can carry Claude's cache breakpoints:
 {"model": "anthropic:claude-haiku-5-5",
  "messages": [
    {"role": "system", "content": [{"type": "text", "text": "<long instructions>",
-                                   "cache_control": {"type": "ephemeral"}}]},
+                                   "cache_control": {"type": "ephemeral", "ttl": "1h"}}]},
    {"role": "user", "content": [{"type": "text", "text": "<long document>",
-                                 "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+                                 "cache_control": {"type": "ephemeral"}},
                                 {"type": "text", "text": "Summarize it"}]}]}
 ```
 
