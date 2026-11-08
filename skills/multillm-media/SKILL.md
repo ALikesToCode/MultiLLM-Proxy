@@ -17,10 +17,10 @@ the provider probe.
 
 | Model | Use it for | Order tried |
 | --- | --- | --- |
-| `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, the same GPT Image models via Codex Everywhere, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
-| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU, Codex Everywhere, FLUX.1 schnell on Workers AI |
+| `auto:image` | Best quality (the default) | The newest GPT Image models GGUU lists (GPT Image 2.6, then 2.5 Sunburst, 2.5 Flare and GPT Image 2 in November 2026), Grok Imagine Image via GGUU, the newest GPT Image models via Codex Everywhere, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
+| `auto:image-fast` | Drafts and iteration | The newest Flare model first, then the other GPT Image models and Grok Imagine Image via GGUU, Codex Everywhere, FLUX.1 schnell on Workers AI |
 | `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Codex Everywhere |
-| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, then via Codex Everywhere, AIHubMix's free GPT Image 2 |
+| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | The newest GPT Image models via GGUU, then via Codex Everywhere, AIHubMix's free GPT Image 2 |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
 | `auto:embed` | Embeddings | `text-embedding-3-small` from OpenAI, then NanoGPT (one model, so vectors stay comparable) |
 | `auto:tts` | Speech | Gemini 3.8 Flash-Lite TTS and 3.8 Flash TTS, OpenAI `gpt-4o-mini-tts`, then Workers AI Aura (English only) |
@@ -49,7 +49,7 @@ curl -sS "$MULTILLM_BASE_URL/v1/images/generations" \
 
   | Model | `size` | `quality` |
   | --- | --- | --- |
-  | GPT Image 2.5 Sunburst and Flare (GGUU, Codex Everywhere, OpenAI) | Any `WIDTHxHEIGHT`: edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels (3840x2160). 4K: `3840x2160`, `2160x3840`, `2880x2880`. Also `2560x1440`, `2048x2048`, `1536x1024`, `1024x1536`, `1024x1024`. | `low`, `medium`, `high`, `xhigh`, `max` |
+  | GPT Image 2.5 and later: 2.6, 2.5 Sunburst and 2.5 Flare (GGUU, Codex Everywhere, OpenAI) | Any `WIDTHxHEIGHT`: edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels (3840x2160). 4K: `3840x2160`, `2160x3840`, `2880x2880`. Also `2560x1440`, `2048x2048`, `1536x1024`, `1024x1536`, `1024x1024`. | `low`, `medium`, `high`, `xhigh`, `max` |
   | GPT Image 2 (GGUU, Codex Everywhere, Together, OpenAI) | Same as GPT Image 2.5 | `low` to `high` |
   | GPT Image 2.5 and 2 on Cloudflare | `1024x1024`, `1536x1024`, `1024x1536` | as above |
   | GPT Image 1 and 1.5 | `1024x1024`, `1536x1024`, `1024x1536` | `low` to `high` |

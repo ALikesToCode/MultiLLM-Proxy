@@ -52,7 +52,10 @@ automatic routing, key controls, accounting, protocol translation and failover.
 `auto:tts-narration` and `auto:stt` for embeddings, speech, narration and
 transcription. Candidates are tried in order; a candidate is skipped before any
 request when its provider cannot generate images, has no configured credential, or
-the model is disabled in Operations. `quality`
+the model is disabled in Operations. A candidate written as
+`<provider>:<family>@latest`, such as `gguu:gpt-image@latest`, stands for the newest
+models of that family the provider lists, so a new release leads the route without an
+edit ([newest model placeholders](media-generation.md#newest-model-placeholders)). `quality`
 defaults to `max` and a generation's `size` to `2880x2880` (4K), and each candidate
 receives the closest settings its model supports (quality, size or aspect ratio, and
 only the fields it accepts).

@@ -67,7 +67,7 @@
   "providers/gpt_image_moderation.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "b21ca2efe3c94d39a4e89ddb6a485ad3bc909a4803485ca2c9a7d717b5a46036"
+    "sha256": "11a403637fe3a4ff8ad7f8457680a11bbca40e39d6ce99a1d3768f2dbc27db56"
   },
   "providers/image_relays.py": {
     "kind": "guarded",
@@ -78,6 +78,11 @@
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
     "sha256": "d87cb7b407afba0ac15caa8b5dd290134b650fcaffd623cfa9a2e9136ccb30f9"
+  },
+  "providers/model_versions.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "cce97e5efb160a0522687e1fd2125e7d34bbbf70f0eb3ec99fd406b122caed86"
   },
   "providers/nanogpt.py": {
     "kind": "non-provider",
@@ -137,7 +142,7 @@
   "routes/auto_routes.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "05eb09d16ff8f001dd48a97a980c55e30777d3ec4294412db2a3b690b9283b1f"
+    "sha256": "df54275ffb4b076ce9696960e025f8697cccace8b87bc91deac327d4e9b84e6f"
   },
   "routes/cascade_deadline.py": {
     "kind": "non-provider",
@@ -387,7 +392,7 @@
   "routes/status_page.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "3e460f0ac27a7392b2552905a73211e13d5d71e7100cf5cf4193646eb3a72114"
+    "sha256": "4010b51685e77053b9980c2d812717030321db0b8532fd579989d813da0eba1f"
   },
   "routes/tenants.py": {
     "kind": "non-provider",
@@ -502,7 +507,7 @@
   "services/auto_route_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "8837d1dd009fc9bb8c16da383caa370cf3f89933cff9ec46b592448709bdb8d1"
+    "sha256": "fa76da7eb3593c91b511d9aff0c6a01a5f29a9bd9de109dd4806d32357145b69"
   },
   "services/bandit_recommendations.py": {
     "kind": "non-provider",
@@ -792,7 +797,12 @@
   "services/image_relay_catalog.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "3ba2d17ed1234d08964fe1fd1e57a6e7d6e19f9ba7b9211f7a1e345c966b4f27"
+    "sha256": "614989f3511b3b87269fa3718239de661eea34c95adab156f90f6044549aedd2"
+  },
+  "services/latest_models.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2083a39d40629b02ed0d9305107b2f2b1a5084155e5a5441b5ed3cf3ffdf14f8"
   },
   "services/intelligence_anthropic.py": {
     "kind": "non-provider",
@@ -927,7 +937,7 @@
   "services/media_catalog.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "f0f12c531156ffc99becb9d607eb0efb18473e1ae58e0562f38333aa85b064f4"
+    "sha256": "06128153e70cfcdda04739cf7ef6b33ea15ef473dd5a21de90a0a9474181d468"
   },
   "services/media_jobs.py": {
     "kind": "internal",
@@ -1672,7 +1682,7 @@
   "worker/gpt-image-moderation.mjs": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "93a7abc49644407f59b4f3d8a69b24f77b9089d52830eabf9f308c0c3114411f"
+    "sha256": "831008db5dd70c2c4feae173ab969b02c68dbbed132ce8d7a49f516180c5568c"
   },
   "worker/health-schedule.mjs": {
     "kind": "non-provider",

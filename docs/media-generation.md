@@ -9,22 +9,48 @@ generated media is kept and returned as durable gateway links; see
 
 ## Routes
 
-The seeded routes follow the Artificial Analysis text-to-image arena (September 2026):
-GPT Image 2.5 Sunburst (Elo 1196) and Flare (1190) lead, then GPT Image 2 (1171) and Grok
-Imagine Image 2.0 (1155). GGUU serves all four first because its public price is a flat
-¥0.04 per image at 1K, 2K and 4K, against about $0.21 for Sunburst at `max` from OpenAI.
-Codex Everywhere's image pool (`ce-image`, $0.015 per image) comes next, then AIHubMix's
-free GPT Image 2 and a Workers AI model. Image routes use no pay-as-you-go provider:
-Cloudflare GPT Image, OpenAI, xAI, Together and OpenRouter are left out. Request them
-by name (for example `openai:gpt-image-2.5-sunburst`) when you want them.
+The seeded image routes start with the newest GPT Image release each relay lists. GGUU
+serves them first because its public price is a flat ¥0.04 per image at 1K, 2K and 4K,
+against about $0.21 for GPT Image 2.5 Sunburst at `max` from OpenAI. Codex Everywhere's
+image pool (`ce-image`, $0.015 per image) comes next, then AIHubMix's free GPT Image 2 and
+a Workers AI model. Image routes use no pay-as-you-go provider: Cloudflare GPT Image,
+OpenAI, xAI, Together and OpenRouter are left out. Request them by name (for example
+`openai:gpt-image-2.5-sunburst`) when you want them.
 
 | Route | Candidates in order |
 | --- | --- |
-| `auto:image` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
-| `auto:image-fast` | `gguu:gpt-image-2.5-flare`, `gguu:gpt-image-2`, `gguu-grok:grok-imagine-image-2.0`, `ce-image:gpt-image-2.5-flare`, `ce-image:gpt-image-2`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
+| `auto:image` | `gguu:gpt-image@latest`, `gguu-grok:grok-imagine-image@latest`, `ce-image:gpt-image@latest`, `aihubmix:gpt-image-2-free`, `cloudflare:@cf/leonardo/lucid-origin` |
+| `auto:image-fast` | `gguu:gpt-image@latest-fast`, `gguu-grok:grok-imagine-image@latest-fast`, `ce-image:gpt-image@latest-fast`, `cloudflare:@cf/black-forest-labs/flux-1-schnell` |
 | `auto:gpt-image-2.5` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5`, `gguu:gpt-image-2.5-flare`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2.5-flare` |
-| `auto:image-edit` | `gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2`, `ce-image:gpt-image-2.5-sunburst`, `ce-image:gpt-image-2`, `aihubmix:gpt-image-2-free` |
+| `auto:image-edit` | `gguu:gpt-image@latest`, `ce-image:gpt-image@latest`, `aihubmix:gpt-image-2-free` |
 | `auto:video` | `gemini:veo-3.1-generate-preview`, `xai:grok-imagine-video-1.5`, `cloudflare:google/veo-3.1`, `openai:sora-2-pro`, `openai:sora-2` |
+
+### Newest model placeholders
+
+`<provider>:<family>@latest` stands for the models of that family the provider lists now,
+newest version first, so a new release leads the route without anyone editing it. On
+2026-11-08 GGUU listed `gpt-image-2`, `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst` and
+`gpt-image-2.6`, so `gguu:gpt-image@latest` meant `gguu:gpt-image-2.6`,
+`gguu:gpt-image-2.5-sunburst`, `gguu:gpt-image-2.5-flare` and `gguu:gpt-image-2`, in that
+order. Within one version, Sunburst (OpenAI's detail model) comes first, then the
+unsuffixed ID, other suffixes, and Flare (the speed model). `@latest-fast` tries speed
+variants (Flare, Lite, Mini) first, newest version first, then the other variants, and
+leaves out Sunburst. Dated snapshots such as `gpt-image-2-2026-04-21` and names without a
+version number such as `grok-imagine-image-lite` are skipped. A placeholder adds at most
+four models, and none when the provider lists no model of the family.
+
+The provider's list is its last good `/v1/models` catalog, which model-list views and the
+half-hourly health check refresh (a relay at most every five minutes per process). Before
+a relay's first refresh the placeholder uses the relay's built-in model list. New GPT
+Image versions also get the newest settings automatically: version 2.5 and later accept
+`xhigh` and `max` quality, and every GPT Image version gets the `moderation: "low"`
+default.
+
+Placeholders work in any route. In Operations, type the provider model as
+`gpt-image@latest` or `gpt-image@latest-fast`; the candidate shows the models it stands
+for now, and saving keeps the placeholder. A misspelled placeholder such as
+`gpt-image@latest-slow` is refused. Responses name the concrete model that served the
+request in `X-MultiLLM-Auto-Selected-Model`.
 
 A candidate without a credential (or Cloudflare AI without its binding) is skipped before
 any request. Operators reorder or extend routes in **Operations**; the order is stored in
@@ -50,7 +76,7 @@ group with batch generation enabled.
 
   | Model | `size` | `quality` |
   | --- | --- | --- |
-  | GPT Image 2.5 Sunburst and Flare (GGUU, Codex Everywhere, OpenAI) | Edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels. 4K: `3840x2160`, `2160x3840`, `2880x2880`. | `low` to `max` |
+  | GPT Image 2.5 and later: 2.6, 2.5 Sunburst and 2.5 Flare (GGUU, Codex Everywhere, OpenAI) | Edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels. 4K: `3840x2160`, `2160x3840`, `2880x2880`. | `low` to `max` |
   | GPT Image 2 (GGUU, Codex Everywhere, Together, OpenAI) | Same as GPT Image 2.5 | `low` to `high` |
   | GPT Image 2.5 and 2 on Cloudflare | `1024x1024`, `1536x1024`, `1024x1536` | as above |
   | GPT Image 1 and 1.5 | `1024x1024`, `1536x1024`, `1024x1536` | `low` to `high` |

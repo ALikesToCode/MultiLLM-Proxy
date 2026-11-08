@@ -10,12 +10,15 @@ from flask import Response
 
 from services.auto_route_service import AutoRouteService
 from services.media_catalog import prepare_image_payload
+from services.provider_catalog_service import ProviderCatalogModel, ProviderCatalogService
 from tests.unified_api_test_case import UnifiedApiTestCase
 
 KEYS = {"gguu": "gguu-test-key", "gguu-grok": "gguu-grok-test-key", "latix": "latix-test-key", "xai": "xai-test-key",
         "openai": "openai-test-key", "gemini": "gemini-test-key"}
 IMAGE = {"created": 1, "data": [{"url": "https://images.example/one.png"}]}
 ADMIN = {"Authorization": "Bearer admin-test-key"}
+GGUU_LIVE = [ProviderCatalogModel("gguu", model, "2026-11-08T04:01:50+00:00") for model in
+             ("gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6")]
 
 
 def upstream(status, body, **attributes):
@@ -152,13 +155,41 @@ class MediaRouteTest(UnifiedApiTestCase):
                          ("openai/gpt-image-2.5-sunburst", "1536x1024", "max"))
 
     def test_seeded_media_routes_put_gguu_first_and_never_use_openrouter(self):
-        routes = {route.id: route.candidates for route in AutoRouteService.list_routes()}
-        self.assertEqual(routes["auto:image"][:4], ("gguu:gpt-image-2.5-sunburst", "gguu:gpt-image-2.5-flare",
-                                                    "gguu:gpt-image-2", "gguu-grok:grok-imagine-image-2.0"))
-        self.assertEqual(routes["auto:image-fast"][:3], ("gguu:gpt-image-2.5-flare", "gguu:gpt-image-2",
-                                                         "gguu-grok:grok-imagine-image-2.0"))
+        with patch.object(ProviderCatalogService, "list_models", return_value=GGUU_LIVE):
+            routes = {route.id: route.candidates for route in AutoRouteService.list_routes()}
+            stored = {route.id: route.candidates for route in AutoRouteService.list_routes(resolve=False)}
+        # The seeds follow GGUU's catalog, so GPT Image 2.6 leads without a code change.
+        self.assertEqual(routes["auto:image"][:5], ("gguu:gpt-image-2.6", "gguu:gpt-image-2.5-sunburst",
+                                                    "gguu:gpt-image-2.5-flare", "gguu:gpt-image-2",
+                                                    "gguu-grok:grok-imagine-image-2.0"))
+        self.assertEqual(routes["auto:image-fast"][:4], ("gguu:gpt-image-2.5-flare", "gguu:gpt-image-2.6",
+                                                         "gguu:gpt-image-2", "gguu-grok:grok-imagine-image-2.0"))
+        self.assertEqual(routes["auto:image-edit"][0], "gguu:gpt-image-2.6")
+        self.assertEqual(stored["auto:image"][:3], ("gguu:gpt-image@latest", "gguu-grok:grok-imagine-image@latest",
+                                                   "ce-image:gpt-image@latest"))
         self.assertFalse([candidate for route in routes.values() for candidate in route if candidate.startswith("openrouter:")])
         self.assertIn("cloudflare:google/veo-3.1", routes["auto:video"])
+
+    def test_a_placeholder_sends_the_newest_listed_model_with_its_settings(self):
+        self.save("auto:image-test", ["gguu:gpt-image@latest"])
+        with patch.object(ProviderCatalogService, "list_models", return_value=GGUU_LIVE):
+            response, make_request = self.post("/v1/images/generations", {"model": "auto:image-test", "prompt": "A red fox"},
+                                               [upstream(200, IMAGE)])
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(make_request.call_args.kwargs["data"])
+        self.assertEqual((body["model"], body["quality"], body["moderation"]), ("gpt-image-2.6", "max", "low"))
+        self.assertEqual(response.headers["X-MultiLLM-Auto-Selected-Model"], "gguu:gpt-image-2.6")
+
+    def test_routes_keep_placeholders_and_refuse_misspelled_ones(self):
+        self.save("auto:image-test", ["gguu:gpt-image@latest-fast", "gguu:gpt-image-2"])
+        self.assertEqual(AutoRouteService.get_route("auto:image-test", resolve=False).candidates,
+                         ("gguu:gpt-image@latest-fast", "gguu:gpt-image-2"))
+        with patch.object(ProviderCatalogService, "list_models", return_value=GGUU_LIVE):
+            self.assertEqual(AutoRouteService.read_candidates("auto:image-test"),
+                             ("gguu:gpt-image-2.5-flare", "gguu:gpt-image-2.6", "gguu:gpt-image-2"))
+        for typo in ("gguu:GPT-Image@latest", "gguu:gpt-image@latest-slow", "gguu:gpt-image@latests"):
+            with self.subTest(typo=typo), self.assertRaisesRegex(ValueError, "@latest"):
+                self.save("auto:image-test", [typo])
 
     def test_stored_copy_of_the_previous_image_default_follows_the_current_one(self):
         from services.auto_route_service import DEFAULT_AUTO_ROUTES, LEGACY_DEFAULT_AUTO_ROUTES
