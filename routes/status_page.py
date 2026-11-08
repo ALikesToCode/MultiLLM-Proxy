@@ -16,6 +16,7 @@ from route_helpers import api_authenticate_only
 from services import route_health_sync
 from services.health_checks import run_free_checks
 from services.provider_catalog_refresh import start_provider_catalog_refresh
+from services.image_relay_catalog import start_image_relay_catalog_refresh
 from services.status_snapshot import build_public_status
 
 PUBLIC_ENDPOINTS = frozenset({"public_status", "public_status_json"})
@@ -101,6 +102,7 @@ def register_status_routes(app, csrf, auth_service_cls, proxy_service_cls) -> No
         report = run_free_checks(app.config["API_BASE_URLS"], auth_service_cls, proxy_service_cls)
         report["stored"] = route_health_sync.flush(force_snapshot=True)
         start_provider_catalog_refresh(app, auth_service_cls, proxy_service_cls)
+        start_image_relay_catalog_refresh(app, auth_service_cls, proxy_service_cls)
         response = jsonify(report)
         response.headers["Cache-Control"] = "no-store"
         return response

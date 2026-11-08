@@ -26,6 +26,34 @@ class ImageRelayCatalogRefresh:
         self._retry_seconds = retry_seconds
         self._next_refresh: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
+        self._thread_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def start(self, app, auth_service_cls, proxy_service_cls) -> threading.Thread | None:
+        """Refresh in a background thread unless one is running; never waits on a relay."""
+        from services.provider_dispatch import capture_dispatch
+
+        with self._thread_lock:
+            if self._thread is not None and self._thread.is_alive():
+                return None
+            # The refresh dispatches as the account whose health check asked for it.
+            self._thread = threading.Thread(
+                target=capture_dispatch(self._refresh_in_background),
+                args=(app.config["API_BASE_URLS"], auth_service_cls, proxy_service_cls),
+                name="image-relay-catalog-refresh",
+                daemon=True,
+            )
+            self._thread.start()
+            return self._thread
+
+    def _refresh_in_background(self, base_urls, auth_service_cls, proxy_service_cls) -> None:
+        try:
+            self.refresh(base_urls, auth_service_cls, proxy_service_cls)
+        except Exception as error:  # noqa: BLE001 - discovery is optional.
+            logger.warning(
+                "Background image relay catalog refresh failed error_type=%s",
+                type(error).__name__,
+            )
 
     def refresh(
         self, base_urls: Mapping[str, str], auth_service_cls, proxy_service_cls
@@ -75,3 +103,13 @@ def refresh_image_relay_catalog(app, auth_service_cls, proxy_service_cls) -> Non
         app.extensions["image_relay_catalog_refresh"].refresh(
             app.config["API_BASE_URLS"], auth_service_cls, proxy_service_cls
         )
+
+
+def start_image_relay_catalog_refresh(app, auth_service_cls, proxy_service_cls):
+    """Refresh relay catalogs off the request thread; the health-check cron asks every 30
+    minutes, so a route that follows a relay's newest model (services.latest_models) sees
+    a release even when nobody opens a model list."""
+    refresher = app.extensions.get("image_relay_catalog_refresh")
+    if refresher is None or not app.config.get("IMAGE_RELAY_CATALOG_AUTO_REFRESH", True):
+        return None
+    return refresher.start(app, auth_service_cls, proxy_service_cls)

@@ -392,7 +392,7 @@
   "routes/status_page.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "3e460f0ac27a7392b2552905a73211e13d5d71e7100cf5cf4193646eb3a72114"
+    "sha256": "4010b51685e77053b9980c2d812717030321db0b8532fd579989d813da0eba1f"
   },
   "routes/tenants.py": {
     "kind": "non-provider",
@@ -797,7 +797,7 @@
   "services/image_relay_catalog.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "3ba2d17ed1234d08964fe1fd1e57a6e7d6e19f9ba7b9211f7a1e345c966b4f27"
+    "sha256": "614989f3511b3b87269fa3718239de661eea34c95adab156f90f6044549aedd2"
   },
   "services/intelligence_anthropic.py": {
     "kind": "non-provider",
