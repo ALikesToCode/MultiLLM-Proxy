@@ -147,3 +147,14 @@ test("gpt-image-2.5 and its automatic route share the GPT Image moderation defau
   }
   assert.equal(isGptImageModel("gpt-image-25"), false);
 });
+
+test("a new GPT Image version gets the moderation default without a code change", async () => {
+  const { applyGptImageModerationDefault, isGptImageModel } = await import("../worker/gpt-image-moderation.mjs");
+  for (const model of ["gpt-image-2.6", "gguu:gpt-image-2.6-sunburst", "openai/gpt-image-2.6-flare", "gpt-image-3"]) {
+    assert.equal(isGptImageModel(model), true, model);
+    assert.equal(applyGptImageModerationDefault({ model, prompt: "x" }).payload.moderation, "low");
+  }
+  for (const model of ["gguu:gpt-image@latest", "chatgpt-image-latest", "gemini-3-pro-image"]) {
+    assert.equal(isGptImageModel(model), false, model);
+  }
+});

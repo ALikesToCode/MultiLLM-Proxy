@@ -1,10 +1,6 @@
-const GPT_IMAGE_MODEL_FAMILIES = Object.freeze([
-  "gpt-image-1",
-  "gpt-image-1-mini",
-  "gpt-image-1.5",
-  "gpt-image-2",
-  "gpt-image-2.5",
-]);
+// Parsed rather than listed, like providers/model_versions.py: any gpt-image-<digit>[.<minor>]
+// with an optional suffix, so a new release gets the default without a code change.
+const GPT_IMAGE_MODEL = /^gpt-image-\d(?:\.\d{1,2})?(?:-.*)?$/;
 const GPT_IMAGE_MODERATION_VALUES = new Set(["auto", "low"]);
 
 export class GPTImageModerationError extends Error {
@@ -23,9 +19,7 @@ export function isGptImageModel(modelId) {
     normalized = normalized.split(":", 2)[1];
   }
   const basename = normalized.split("/").at(-1) ?? "";
-  return GPT_IMAGE_MODEL_FAMILIES.some(
-    (family) => basename === family || basename.startsWith(`${family}-`),
-  );
+  return GPT_IMAGE_MODEL.test(basename);
 }
 
 export function applyGptImageModerationDefault(payload) {

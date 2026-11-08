@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 
 from providers.image_relays import image_relay_spec
+from providers.model_versions import gpt_image_version
 
 DEFAULT_IMAGE_QUALITY = "max"
 # Generations without a size get 4K: 2880x2880 is 3840x2160's pixel count, GPT Image's
@@ -55,12 +56,15 @@ def image_profile(provider: str, provider_model: str) -> ImageProfile | None:
     if provider == "cloudflare" and provider_model.startswith("@cf/"):
         # Workers AI also serves embeddings and audio, which are not image models.
         return None if is_speech_or_embedding_model(provider_model) else WORKERS_AI_IMAGE
-    if name.startswith("gpt-image-2.5"):
+    version = gpt_image_version(name)
+    # 2.5 added xhigh and max and later releases keep them (2.6 does), so a new version
+    # gets the newest settings without a code change.
+    if version is not None and version >= (2, 5):
         # Cloudflare's GPT Image adapter accepts only the standard sizes.
         return ImageProfile(QUALITY_ORDER, max_edge=0) if provider == "cloudflare" else GPT_IMAGE_25
-    if name.startswith("gpt-image-2"):
+    if version is not None and version >= (2, 0):
         return ImageProfile(("low", "medium", "high"), max_edge=0) if provider == "cloudflare" else GPT_IMAGE_2
-    if name.startswith("gpt-image-1"):
+    if version is not None:
         return GPT_IMAGE_1
     if name.startswith("grok-imagine-image-2"):
         return GROK_IMAGE_2
