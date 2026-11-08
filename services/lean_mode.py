@@ -427,7 +427,10 @@ def _estimate(body: Mapping[str, Any]) -> tuple[int, bool, bool]:
     def walk(value: Any) -> None:
         nonlocal characters, tokens, countable, must_count
         if isinstance(value, dict):
-            kind = value.get("type")
+            # Only a block's "type" names it. The walk also reads tool schemas, where
+            # `properties` can hold a parameter called "type" whose value is its schema.
+            raw_kind = value.get("type")
+            kind = raw_kind if isinstance(raw_kind, str) else None
             raw_source = value.get("source")
             source: dict[str, Any] = raw_source if isinstance(raw_source, dict) else {}
             if kind in {"image", "document"}:

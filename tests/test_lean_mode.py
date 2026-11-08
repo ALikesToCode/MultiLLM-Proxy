@@ -451,6 +451,29 @@ class LeanRouteTest(UnifiedApiTestCase):
         self.assertEqual(sent["messages"][-1]["content"][0]["content"], condense_shell_output(SHELL_OUTPUT))
         self.assertEqual(result.headers["X-MultiLLM-Lean"], "applied")
 
+    def test_lean_chat_keeps_a_tool_parameter_named_type(self):
+        # Omni's save_memory tool takes a "type"; on 2026-11-08 every lean chat with it answered 500.
+        parameters = {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "type": {"default": "project", "type": "string", "enum": ["preference", "project"]},
+            },
+            "required": ["content"],
+            "additionalProperties": False,
+        }
+        result, send = self.post(
+            "/lean/v1/chat/completions",
+            {
+                "model": SELECTOR,
+                "tools": [{"type": "function", "function": {"name": "save_memory", "parameters": parameters}}],
+                "messages": [{"role": "user", "content": "Hi"}],
+            },
+        )
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        sent = json.loads(send.call_args.kwargs["data"])
+        self.assertEqual(sent["tools"][0]["input_schema"]["properties"], parameters["properties"])
+
     def test_lean_responses_stream_is_cached(self):
         result, send = self.post(
             "/lean/v1/responses",
