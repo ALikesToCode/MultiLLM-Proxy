@@ -132,13 +132,17 @@
             const controls = document.createElement('span');
             const configured = candidate.configured ? 'configured' : 'not configured';
             const status = candidate.status || 'available';
+            // An @latest placeholder shows the models it stands for until a newer one appears.
+            const resolved = Array.isArray(candidate.resolves_to)
+                ? ` · now ${candidate.resolves_to.join(', ') || 'no listed model'}`
+                : '';
 
             item.className = 'auto-route-candidate';
             priority.className = 'auto-route-candidate__priority';
             priority.textContent = String(index + 1);
             identity.className = 'auto-route-candidate__identity';
             model.textContent = candidate.model_id;
-            metadata.textContent = `${configured} · ${status}`;
+            metadata.textContent = `${configured} · ${status}${resolved}`;
             metadata.className = candidate.configured
                 ? 'tone-positive-text'
                 : 'tone-warning-text';

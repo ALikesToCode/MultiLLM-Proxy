@@ -291,6 +291,8 @@ class CodexEverywhereInstructionTests(IntelligenceApiTestCase):
 
 
 def test_image_routes_keep_gguu_first_then_codex_everywhere_and_no_pay_as_you_go_providers():
+    from providers.image_relays import image_relay_model_ids
+    from services import latest_models
     from services.auto_route_service import (
         DEFAULT_AUTO_ROUTES,
         LEGACY_DEFAULT_AUTO_ROUTES,
@@ -305,9 +307,17 @@ def test_image_routes_keep_gguu_first_then_codex_everywhere_and_no_pay_as_you_go
         assert set(providers[:first_ce]) <= {"gguu", "gguu-grok"}, route
         assert not [candidate for candidate in candidates if candidate.startswith(paid)], route
         previous = LEGACY_DEFAULT_AUTO_ROUTES[route][-1]
-        assert [c for c in previous if not c.startswith(paid)] == list(candidates), (
-            "a stored copy of the previous default follows the new one"
-        )
+        if route == "auto:gpt-image-2.5":
+            assert [c for c in previous if not c.startswith(paid)] == list(candidates), (
+                "a stored copy of the previous default follows the new one"
+            )
+            continue
+        # The previous fixed list is a legacy default, so a stored copy follows the
+        # placeholders, which still reach every model it named.
+        assert not [candidate for candidate in previous if candidate.startswith(paid)], route
+        with patch.object(latest_models, "provider_model_ids", side_effect=image_relay_model_ids):
+            resolved = latest_models.expand_candidates(candidates, 16)
+        assert set(previous) <= set(resolved), (route, set(previous) - set(resolved))
 
 
 def test_chat_routes_for_glm_5_3_and_gpt_6_1_run_cheapest_first():

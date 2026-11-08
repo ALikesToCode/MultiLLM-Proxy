@@ -142,7 +142,7 @@
   "routes/auto_routes.py": {
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
-    "sha256": "05eb09d16ff8f001dd48a97a980c55e30777d3ec4294412db2a3b690b9283b1f"
+    "sha256": "df54275ffb4b076ce9696960e025f8697cccace8b87bc91deac327d4e9b84e6f"
   },
   "routes/cascade_deadline.py": {
     "kind": "non-provider",
@@ -507,7 +507,7 @@
   "services/auto_route_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "8837d1dd009fc9bb8c16da383caa370cf3f89933cff9ec46b592448709bdb8d1"
+    "sha256": "fa76da7eb3593c91b511d9aff0c6a01a5f29a9bd9de109dd4806d32357145b69"
   },
   "services/bandit_recommendations.py": {
     "kind": "non-provider",
@@ -798,6 +798,11 @@
     "kind": "non-provider",
     "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
     "sha256": "614989f3511b3b87269fa3718239de661eea34c95adab156f90f6044549aedd2"
+  },
+  "services/latest_models.py": {
+    "kind": "non-provider",
+    "reason": "Runtime module pinned independently of HTTP client spelling; network attempts require runtime admission.",
+    "sha256": "2083a39d40629b02ed0d9305107b2f2b1a5084155e5a5441b5ed3cf3ffdf14f8"
   },
   "services/intelligence_anthropic.py": {
     "kind": "non-provider",

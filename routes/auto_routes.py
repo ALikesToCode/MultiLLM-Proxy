@@ -9,7 +9,7 @@ from error_handlers import APIError
 from services.model_cooldown import ModelCooldownCapacity, ModelCooldownExhausted
 from providers.registry import get_registry
 from services import cloudflare_ai
-from services import canary_traffic
+from services import canary_traffic, latest_models
 from services.auto_route_service import AutoRoute, AutoRouteService
 from services.media_catalog import (
     TRANSPORT_FAILURE_HEADER,
@@ -377,7 +377,9 @@ def _provider_is_configured(auth_service_cls, provider: str) -> bool:
 
 
 def _admin_payload(app, auth_service_cls) -> dict:
-    stored_routes = AutoRouteService.list_routes()
+    # The editor saves what it shows, so it gets the @latest placeholders, not the models
+    # they mean today; the catalog below lists the resolved models.
+    stored_routes = AutoRouteService.list_routes(resolve=False)
     catalog_updated_at: dict[str, str] = {}
     for model in ProviderCatalogService.list_models():
         catalog_updated_at[model.provider] = max(
@@ -387,7 +389,7 @@ def _admin_payload(app, auth_service_cls) -> dict:
 
     model_catalog = build_model_catalog(
         app.config["API_BASE_URLS"],
-        stored_routes,
+        [AutoRouteService.resolved(route) for route in stored_routes],
     )
 
     provider_ids = sorted(get_registry(app.config["API_BASE_URLS"]))
@@ -433,20 +435,22 @@ def _admin_payload(app, auth_service_cls) -> dict:
         candidates = []
         for priority, model_id in enumerate(route.candidates, start=1):
             provider, provider_model = ModelRegistry.parse_model_id(model_id)
-            candidates.append(
-                {
-                    "model_id": model_id,
-                    "provider": provider,
-                    "model": provider_model,
-                    "priority": priority,
-                    "configured": configured_by_provider.get(provider, False),
-                    "status": model_catalog_by_id.get(model_id, {}).get(
-                        "status",
-                        "unknown",
-                    ),
-                    "health": RouteHealth.summary(model_id),
-                }
-            )
+            candidate = {
+                "model_id": model_id,
+                "provider": provider,
+                "model": provider_model,
+                "priority": priority,
+                "configured": configured_by_provider.get(provider, False),
+                "status": model_catalog_by_id.get(model_id, {}).get(
+                    "status",
+                    "unknown",
+                ),
+                "health": RouteHealth.summary(model_id),
+            }
+            if latest_models.is_placeholder(model_id):
+                candidate["resolves_to"] = list(latest_models.resolve(model_id))
+                candidate["status"] = "available" if candidate["resolves_to"] else "unknown"
+            candidates.append(candidate)
         routes.append(
             {
                 "id": route.id,

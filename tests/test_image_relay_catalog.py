@@ -236,7 +236,36 @@ class ImageRelayCatalogTest(UnifiedApiTestCase):
         for model in ("gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6")
     ]
 
+    def test_operations_menu_shows_placeholders_and_saving_keeps_them(self):
+        from services.auto_route_service import AutoRouteService
+
+        with patch.object(
+            self.app_module.ProxyService,
+            "make_request",
+            return_value=self._catalog_response(data=self.GGUU_NOV_2026),
+        ):
+            response = self._get("/admin/auto-routes")
+            route = next(route for route in response.json["routes"] if route["id"] == "auto:image")
+            first = route["candidates"][0]
+            self.assertEqual(first["model_id"], "gguu:gpt-image@latest")
+            self.assertEqual(first["status"], "available")
+            self.assertEqual(first["resolves_to"], [
+                "gguu:gpt-image-2.6", "gguu:gpt-image-2.5-sunburst",
+                "gguu:gpt-image-2.5-flare", "gguu:gpt-image-2",
+            ])
+            self.assertIn("gguu:gpt-image-2.6", {model["id"] for model in response.json["model_catalog"]})
+
+            # The editor saves the candidates it shows; the placeholder must survive that.
+            saved = self.client.put("/admin/auto-routes", json={
+                "route_id": "auto:image",
+                "candidates": [candidate["model_id"] for candidate in route["candidates"]],
+            })
+        self.assertEqual(saved.status_code, 200, saved.json)
+        self.assertEqual(AutoRouteService.get_route("auto:image", resolve=False).candidates[0], "gguu:gpt-image@latest")
+        self.assertEqual(AutoRouteService.get_route("auto:image").candidates[0], "gguu:gpt-image-2.6")
+
     def test_health_check_finds_a_release_without_a_catalog_view(self):
+        from services.auto_route_service import AutoRouteService
         from services.provider_catalog_service import ProviderCatalogService
 
         def network(session, method, url, **kwargs):
@@ -254,6 +283,7 @@ class ImageRelayCatalogTest(UnifiedApiTestCase):
             thread.join(timeout=10)
             self.assertFalse(thread.is_alive())
         self.assertTrue(ProviderCatalogService.has_model("gguu", "gpt-image-2.6"))
+        self.assertEqual(AutoRouteService.get_route("auto:image").candidates[0], "gguu:gpt-image-2.6")
 
     def test_unconfigured_relays_do_not_make_catalog_requests(self):
         with (

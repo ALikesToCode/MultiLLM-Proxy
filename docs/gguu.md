@@ -76,13 +76,16 @@ curl "$PROXY_BASE_URL/v1/images/generations" \
 ```
 
 The unified endpoint removes the `gguu:` prefix and preserves the remaining
-OpenAI Images request and response fields. `auto:image` and `auto:gpt-image-2.5`
-start with GPT Image 2.5 Sunburst on GGUU at `max` quality and fall back to other
-GGUU models and Codex Everywhere ([media generation](media-generation.md)). GPT
-Image models, including the 2.5 family, receive the automatic `moderation: "low"`
-default. `auto:image` and `auto:image-fast` also try
-`gguu-grok:grok-imagine-image-2.0` after the GPT Image models, which receives
-`aspect_ratio`, `resolution` and a `low` or `medium` quality instead of `size`.
+OpenAI Images request and response fields. `auto:image` starts with
+`gguu:gpt-image@latest`: every GPT Image model GGUU's catalog lists, newest version first,
+at `max` quality. On 2026-11-08 that was `gguu:gpt-image-2.6`, then 2.5 Sunburst, 2.5
+Flare and GPT Image 2. A later release leads the route as soon as GGUU lists it, with no
+code change ([newest model placeholders](media-generation.md#newest-model-placeholders)).
+`auto:gpt-image-2.5` stays on the 2.5 family. Every GPT Image version receives the
+automatic `moderation: "low"` default. `auto:image` and `auto:image-fast` also try
+`gguu-grok:grok-imagine-image@latest` (Grok Imagine Image 2.0 today) after the GPT Image
+models, which receives `aspect_ratio`, `resolution` and a `low` or `medium` quality
+instead of `size`.
 
 Opt-in `quality_check` on the unified endpoint grades the generated image and can
 request up to two further takes. Each take stays on the selected GGUU model/provider;

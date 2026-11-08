@@ -1,13 +1,13 @@
 import re
 import sqlite3
 from contextlib import closing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Iterable, Mapping
 
 from providers.registry import get_registry
 from error_handlers import APIError
-from services import auto_route_d1, canary_traffic, config_revision_sync
+from services import auto_route_d1, canary_traffic, config_revision_sync, latest_models
 from services.model_registry import ModelRegistry
 from services.sqlite_store import connect, storage_path
 
@@ -25,6 +25,9 @@ _CANARY_UNSET = object()
 # as the last resort; the user dropped pay-as-you-go providers (Cloudflare GPT Image,
 # OpenAI, xAI, Together) on 2026-10-15. Operations edits persist in D1 when the Worker
 # provides it; on Container-local SQLite until the Container restarts.
+# The relay entries are placeholders (services.latest_models): `gguu:gpt-image@latest` is
+# every GPT Image model GGUU lists now, newest version first, so a release such as GPT
+# Image 2.6 leads the route without a code change. `@latest-fast` puts Flare first.
 DEFAULT_AUTO_ROUTES = {
     "auto:glm-5.2": (
         "nanogpt:zai-org/glm-5.2:thinking",
@@ -44,22 +47,16 @@ DEFAULT_AUTO_ROUTES = {
         "ce-gpt-pro:gpt-6.1-sol",
     ),
     "auto:image": (
-        "gguu:gpt-image-2.5-sunburst",
-        "gguu:gpt-image-2.5-flare",
-        "gguu:gpt-image-2",
-        "gguu-grok:grok-imagine-image-2.0",
-        "ce-image:gpt-image-2.5-sunburst",
-        "ce-image:gpt-image-2.5-flare",
-        "ce-image:gpt-image-2",
+        "gguu:gpt-image@latest",
+        "gguu-grok:grok-imagine-image@latest",
+        "ce-image:gpt-image@latest",
         "aihubmix:gpt-image-2-free",
         "cloudflare:@cf/leonardo/lucid-origin",
     ),
     "auto:image-fast": (
-        "gguu:gpt-image-2.5-flare",
-        "gguu:gpt-image-2",
-        "gguu-grok:grok-imagine-image-2.0",
-        "ce-image:gpt-image-2.5-flare",
-        "ce-image:gpt-image-2",
+        "gguu:gpt-image@latest-fast",
+        "gguu-grok:grok-imagine-image@latest-fast",
+        "ce-image:gpt-image@latest-fast",
         "cloudflare:@cf/black-forest-labs/flux-1-schnell",
     ),
     "auto:gpt-image-2.5": (
@@ -72,10 +69,8 @@ DEFAULT_AUTO_ROUTES = {
     # Edits and reference images: only candidates that accept source images; see
     # routes/media_edits.py.
     "auto:image-edit": (
-        "gguu:gpt-image-2.5-sunburst",
-        "gguu:gpt-image-2",
-        "ce-image:gpt-image-2.5-sunburst",
-        "ce-image:gpt-image-2",
+        "gguu:gpt-image@latest",
+        "ce-image:gpt-image@latest",
         "aihubmix:gpt-image-2-free",
     ),
     # Embeddings, speech and transcription (routes/media_audio.py). Vectors from different
@@ -190,6 +185,17 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "aihubmix:gpt-image-2-free",
             "cloudflare:@cf/leonardo/lucid-origin",
         ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
+            "ce-image:gpt-image-2.5-sunburst",
+            "ce-image:gpt-image-2.5-flare",
+            "ce-image:gpt-image-2",
+            "aihubmix:gpt-image-2-free",
+            "cloudflare:@cf/leonardo/lucid-origin",
+        ),
     ),
     "auto:image-fast": (
         (
@@ -218,6 +224,14 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "cloudflare:openai/gpt-image-2.5-flare",
             "openai:gpt-image-2.5-flare",
             "xai:grok-imagine-image-2.0",
+            "cloudflare:@cf/black-forest-labs/flux-1-schnell",
+        ),
+        (
+            "gguu:gpt-image-2.5-flare",
+            "gguu:gpt-image-2",
+            "gguu-grok:grok-imagine-image-2.0",
+            "ce-image:gpt-image-2.5-flare",
+            "ce-image:gpt-image-2",
             "cloudflare:@cf/black-forest-labs/flux-1-schnell",
         ),
     ),
@@ -252,6 +266,13 @@ LEGACY_DEFAULT_AUTO_ROUTES = {
             "cloudflare:openai/gpt-image-2.5-sunburst",
             "openai:gpt-image-2.5-sunburst",
             "xai:grok-imagine-image-2.0",
+            "aihubmix:gpt-image-2-free",
+        ),
+        (
+            "gguu:gpt-image-2.5-sunburst",
+            "gguu:gpt-image-2",
+            "ce-image:gpt-image-2.5-sunburst",
+            "ce-image:gpt-image-2",
             "aihubmix:gpt-image-2-free",
         ),
     ),
@@ -416,12 +437,27 @@ class AutoRouteService:
                 raise ValueError("Auto routes cannot contain another auto route")
             if provider not in supported_providers:
                 raise ValueError(f"Unsupported provider in auto route: {provider}")
+            if (latest_models.looks_like_placeholder(provider_model)
+                    and latest_models.parse_placeholder(provider_model) is None):
+                raise ValueError(
+                    "Follow a provider's newest release with <family>@latest or "
+                    "<family>@latest-fast in lowercase, for example gpt-image@latest"
+                )
             model_id = f"{provider}:{provider_model}"
             if model_id in seen:
                 raise ValueError(f"Duplicate auto route candidate: {model_id}")
             seen.add(model_id)
             normalized.append(model_id)
         return tuple(normalized)
+
+    @staticmethod
+    def resolved(route: AutoRoute) -> AutoRoute:
+        """The route with each @latest placeholder replaced by the models it means now."""
+        if not any(latest_models.is_placeholder(candidate) for candidate in route.candidates):
+            return route
+        candidates = latest_models.expand_candidates(route.candidates, MAX_AUTO_ROUTE_CANDIDATES)
+        return replace(route, candidates=candidates,
+                       canary=latest_models.expand_canary(route.canary, candidates))
 
     @classmethod
     def _rows_to_routes(cls, rows: Iterable[sqlite3.Row], configurations=None) -> list[AutoRoute]:
@@ -461,7 +497,13 @@ class AutoRouteService:
         return [routes[route_id] for route_id in sorted(routes)]
 
     @classmethod
-    def list_routes(cls) -> list[AutoRoute]:
+    def list_routes(cls, *, resolve: bool = True) -> list[AutoRoute]:
+        """Every route; resolve=False keeps @latest placeholders for the route editor."""
+        routes = cls._stored_routes()
+        return [cls.resolved(route) for route in routes] if resolve else routes
+
+    @classmethod
+    def _stored_routes(cls) -> list[AutoRoute]:
         if auto_route_d1.using_d1():
             return cls._durable_routes()
         with closing(cls._connect()) as connection:
@@ -480,8 +522,12 @@ class AutoRouteService:
         return cls._rows_to_routes(rows, configurations)
 
     @classmethod
-    def get_route(cls, route_id: object) -> AutoRoute | None:
-        normalized = cls.normalize_route_id(route_id)
+    def get_route(cls, route_id: object, *, resolve: bool = True) -> AutoRoute | None:
+        route = cls._stored_route(cls.normalize_route_id(route_id))
+        return cls.resolved(route) if resolve and route is not None else route
+
+    @classmethod
+    def _stored_route(cls, normalized: str) -> AutoRoute | None:
         if auto_route_d1.using_d1():
             return next((route for route in cls._durable_routes() if route.id == normalized), None)
         with closing(cls._connect()) as connection:
@@ -505,6 +551,11 @@ class AutoRouteService:
     @classmethod
     def read_candidates(cls, route_id: object) -> tuple[str, ...]:
         """Admission reads never seed routes or migrate an operator's stored order."""
+        return latest_models.expand_candidates(
+            cls._read_stored_candidates(route_id), MAX_AUTO_ROUTE_CANDIDATES)
+
+    @classmethod
+    def _read_stored_candidates(cls, route_id: object) -> tuple[str, ...]:
         normalized = cls.normalize_route_id(route_id)
         if auto_route_d1.using_d1():
             route = next((item for item in cls._durable_routes() if item.id == normalized), None)

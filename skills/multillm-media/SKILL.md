@@ -17,10 +17,10 @@ the provider probe.
 
 | Model | Use it for | Order tried |
 | --- | --- | --- |
-| `auto:image` | Best quality (the default) | GPT Image 2.5 Sunburst, Flare and GPT Image 2 via GGUU, Grok Imagine Image 2.0 via GGUU, the same GPT Image models via Codex Everywhere, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
-| `auto:image-fast` | Drafts and iteration | GPT Image 2.5 Flare first, then GPT Image 2 and Grok Imagine Image 2.0 via GGUU, Codex Everywhere, FLUX.1 schnell on Workers AI |
+| `auto:image` | Best quality (the default) | The newest GPT Image models GGUU lists (GPT Image 2.6, then 2.5 Sunburst, 2.5 Flare and GPT Image 2 in November 2026), Grok Imagine Image via GGUU, the newest GPT Image models via Codex Everywhere, AIHubMix's free GPT Image 2, Leonardo Lucid Origin on Workers AI |
+| `auto:image-fast` | Drafts and iteration | The newest Flare model first, then the other GPT Image models and Grok Imagine Image via GGUU, Codex Everywhere, FLUX.1 schnell on Workers AI |
 | `auto:gpt-image-2.5` | Only the GPT Image 2.5 family | GGUU, then Codex Everywhere |
-| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | GPT Image 2.5 Sunburst and GPT Image 2 via GGUU, then via Codex Everywhere, AIHubMix's free GPT Image 2 |
+| `auto:image-edit` | Editing images (the default on `/v1/images/edits`) | The newest GPT Image models via GGUU, then via Codex Everywhere, AIHubMix's free GPT Image 2 |
 | `auto:video` | Video clips | Veo 3.1 (Gemini API), Grok Imagine Video 1.5, Veo 3.1 on Cloudflare AI, Sora 2 Pro, Sora 2 |
 | `auto:embed` | Embeddings | `text-embedding-3-small` from OpenAI, then NanoGPT (one model, so vectors stay comparable) |
 | `auto:tts` | Speech | Gemini 3.8 Flash-Lite TTS and 3.8 Flash TTS, OpenAI `gpt-4o-mini-tts`, then Workers AI Aura (English only) |
