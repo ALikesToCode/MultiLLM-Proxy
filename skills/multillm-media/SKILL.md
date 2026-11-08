@@ -49,7 +49,7 @@ curl -sS "$MULTILLM_BASE_URL/v1/images/generations" \
 
   | Model | `size` | `quality` |
   | --- | --- | --- |
-  | GPT Image 2.5 Sunburst and Flare (GGUU, Codex Everywhere, OpenAI) | Any `WIDTHxHEIGHT`: edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels (3840x2160). 4K: `3840x2160`, `2160x3840`, `2880x2880`. Also `2560x1440`, `2048x2048`, `1536x1024`, `1024x1536`, `1024x1024`. | `low`, `medium`, `high`, `xhigh`, `max` |
+  | GPT Image 2.5 and later: 2.6, 2.5 Sunburst and 2.5 Flare (GGUU, Codex Everywhere, OpenAI) | Any `WIDTHxHEIGHT`: edges up to 3840 in multiples of 16, ratio at most 3:1, at most 8,294,400 pixels (3840x2160). 4K: `3840x2160`, `2160x3840`, `2880x2880`. Also `2560x1440`, `2048x2048`, `1536x1024`, `1024x1536`, `1024x1024`. | `low`, `medium`, `high`, `xhigh`, `max` |
   | GPT Image 2 (GGUU, Codex Everywhere, Together, OpenAI) | Same as GPT Image 2.5 | `low` to `high` |
   | GPT Image 2.5 and 2 on Cloudflare | `1024x1024`, `1536x1024`, `1024x1536` | as above |
   | GPT Image 1 and 1.5 | `1024x1024`, `1536x1024`, `1024x1536` | `low` to `high` |
