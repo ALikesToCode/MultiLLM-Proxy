@@ -1,52 +1,90 @@
+<p align="center"><img src="static/logo.svg" alt="MultiLLM Proxy" width="96"></p>
+
 # MultiLLM Proxy
 
-A powerful proxy server that provides a unified interface for multiple LLM providers. This project simplifies the integration and management of various AI models by providing a single, consistent API endpoint while handling provider-specific requirements behind the scenes.
+**One self-hosted gateway in front of 25 LLM providers.** Point any OpenAI- or Anthropic-compatible client at it and get scoped API keys, automatic failover between providers, rate limiting, streaming and per-request cost and latency records. It runs as a Flask app or on Cloudflare Workers.
+
+```mermaid
+flowchart LR
+    C["Your apps and agents<br/>OpenAI SDK, Anthropic SDK, curl"] -->|one API key| G
+    subgraph G["MultiLLM Proxy"]
+        direction TB
+        A["Auth and scoped keys"] --> R["Routing<br/>provider:model or auto:model"]
+        R --> F["Failover, retries,<br/>circuit breakers"]
+        F --> T["Usage, cost and<br/>latency telemetry"]
+    end
+    G --> P1["OpenAI"]
+    G --> P2["Anthropic"]
+    G --> P3["Gemini and Vertex AI"]
+    G --> P4["Groq, Together, Cerebras,<br/>OpenRouter and 17 more"]
+    G --> P5["Local servers<br/>Ollama, vLLM, llama.cpp"]
+```
+
+## Quick start
+
+You need Python 3.11 or later and one provider key. This example uses Groq.
+
+```bash
+git clone https://github.com/ALikesToCode/MultiLLM-Proxy.git
+cd MultiLLM-Proxy
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+export ADMIN_USERNAME=admin ADMIN_API_KEY=choose-a-long-key
+export FLASK_SECRET_KEY=change-me JWT_SECRET=change-me-too
+export GROQ_API_KEY_1=your-groq-key
+python app.py          # listens on http://localhost:1400
+```
+
+In a second terminal:
+
+```bash
+curl http://localhost:1400/healthz
+
+curl http://localhost:1400/groq/openai/v1/chat/completions \
+  -H "Authorization: Bearer choose-a-long-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+Sign in at `http://localhost:1400` as `admin` with the same key for the dashboard, and open `/docs` there for every endpoint and model your keys can reach. [Setup](#setup) covers `.env` files and all provider keys.
+
+## What it does
+
+- **One API for every provider.** OpenAI-compatible `/v1/chat/completions` and `/v1/responses`, and Anthropic-compatible `/v1/messages`, with request translation between them.
+- **Failover that is safe by construction.** An `auto:<model>` route tries providers in the order you set and moves on only before any output reached the caller.
+- **Keys you can hand out.** Scoped, hashed API keys with quotas, rotation and immediate revocation; provider keys never leave the proxy.
+- **Operations built in.** Provider health, circuit state, route traces, a request explorer, and request, latency and cost telemetry, with opt-in Prometheus metrics.
+- **Two ways to deploy.** A Flask app for a server or container, and a Cloudflare Worker for the edge.
+
+<details>
+<summary><strong>Supported providers</strong></summary>
+
+OpenAI, Anthropic, Groq, Together AI, Google AI on Vertex AI, Google Gemini API and hosted Gemma models, Cerebras, X.AI, Azure AI, Scaleway, Hyperbolic, SambaNova, OpenRouter, OpenCode Go, Xiaomi MiMo Token Plan, NanoGPT, NavyAI, AIHubMix, GGUU AI image generation, Codex Everywhere, Kimi Code, LinkAPI, PaLM API, Nineteen AI and Chutes AI. [Local inference](docs/local-inference.md) adds Ollama, vLLM, LM Studio, llama.cpp and SGLang servers.
+
+</details>
+
+**Licence:** source-available and free for personal, non-commercial use. Other uses need written permission; see [LICENSING.md](LICENSING.md).
 
 ## Features
 
-- 🔒 Secure authentication system with user management and scoped API keys
-- 🔑 Universal API key support with provider-specific key management
-- 🔄 Automatic token-based rate limiting and request distribution
-- 🌐 Support for multiple LLM providers:
-  - OpenAI (GPT models)
-  - Anthropic (Claude Haiku 5.5)
-  - Groq (ultra-fast inference)
-  - Together AI
-  - Google AI on Vertex AI
-  - Google Gemini API and hosted Gemma models
-  - Cerebras
-  - X.AI (formerly Twitter)
-  - Azure AI
-  - Scaleway
-  - Hyperbolic
-  - SambaNova
-  - OpenRouter
-  - OpenCode Go
-  - Xiaomi MiMo Token Plan
-  - NanoGPT
-  - NavyAI
-  - AIHubMix
-  - GGUU AI image generation
-  - Codex Everywhere
-  - Kimi Code
-  - LinkAPI
-  - PaLM API
-  - Nineteen AI
-  - Chutes AI
-- 🧭 Operator control plane with provider health, circuit state, route traces, and request exploration
-- 🔍 [Provider authenticity diagnostics](docs/provider-authenticity.md) give bounded, content-free conformance signals for each provider
-- 🧩 Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
-- 🔄 Four-state provider recovery with bounded parallel half-open probes
-- 🩺 [Upstream outcomes](docs/upstream-outcomes.md) separate valid responses, credential rejection, throttling and ambiguous transport failure in circuit recovery
-- 📊 Request, latency, response-class, and configured cost telemetry
-- 📈 Opt-in Prometheus scrapes for public route health and admin-only request window metrics
-- 🚀 Streaming support for compatible providers
-- 🛂 Opt-in [first-event stream validation](docs/stream-preflight.md) before an `auto:` route commits to a provider
-- 🎭 Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
-- 🪟 Opt-in [candidate-specific roleplay context](docs/roleplay-candidate-context.md) fits protected fallback history to each model window
-- ⚡ Configurable timeouts and retry mechanisms per provider
-- 🔄 Automatic parameter handling and compatibility checks
-- 🧮 [`/v1/messages/count_tokens`](docs/token-counting.md) can use explicitly configured native provider counts, with labeled local estimates otherwise
+- Secure authentication system with user management and scoped API keys
+- Universal API key support with provider-specific key management
+- Automatic token-based rate limiting and request distribution
+- Operator control plane with provider health, circuit state, route traces, and request exploration
+- [Provider authenticity diagnostics](docs/provider-authenticity.md) give bounded, content-free conformance signals for each provider
+- Dashboard-managed `auto:<model>` priorities with safe rate-limit failover across providers
+- Four-state provider recovery with bounded parallel half-open probes
+- [Upstream outcomes](docs/upstream-outcomes.md) separate valid responses, credential rejection, throttling and ambiguous transport failure in circuit recovery
+- Request, latency, response-class, and configured cost telemetry
+- Opt-in Prometheus scrapes for public route health and admin-only request window metrics
+- Streaming support for compatible providers
+- Opt-in [first-event stream validation](docs/stream-preflight.md) before an `auto:` route commits to a provider
+- Cloudflare-native roleplay sessions with adaptive Kimi/GLM routing and durable continuity memory
+- Opt-in [candidate-specific roleplay context](docs/roleplay-candidate-context.md) fits protected fallback history to each model window
+- Configurable timeouts and retry mechanisms per provider
+- Automatic parameter handling and compatibility checks
+- [`/v1/messages/count_tokens`](docs/token-counting.md) can use explicitly configured native provider counts, with labeled local estimates otherwise
 
 The rationale for selectively adopting OmniRoute-style operational features
 without replacing MultiLLM's provider adapters is documented in
