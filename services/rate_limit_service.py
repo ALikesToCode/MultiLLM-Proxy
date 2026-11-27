@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_RESERVED_OUTPUT_TOKENS = 1024
 
 PROVIDER_LIMIT_DEFAULTS = {
+    # Claude models take 1M-token contexts and long outputs; coding agents send both.
+    # RATE_LIMIT_TPM matches the Anthropic account's own input-token limit.
+    "anthropic": {
+        "MAX_REQUEST_BYTES": 16 * 1024 * 1024,
+        "MAX_PROMPT_TOKENS": 1_048_576,
+        "MAX_OUTPUT_TOKENS": 131_072,
+        "RATE_LIMIT_TPM": 2_000_000,
+    },
     # ClinePass models take 1M-token agent contexts.
     "cline-pass": {
         "MAX_REQUEST_BYTES": 16 * 1024 * 1024,

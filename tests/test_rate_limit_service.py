@@ -311,6 +311,22 @@ class RateLimitServiceTest(unittest.TestCase):
 
         self.assertTrue(decision.allowed, decision)
 
+    def test_anthropic_defaults_allow_agent_sized_requests(self):
+        payload = {
+            "messages": [{"role": "user", "content": "drawing sheet " * 60000}],
+            "max_tokens": 64000,
+        }
+
+        decision = RateLimitService.enforce_request(
+            provider="anthropic",
+            user={"username": "alice", "api_key_prefix": "mllm_live_alice"},
+            payload_bytes=b"{}",
+            payload_json=payload,
+            remote_addr="203.0.113.10",
+        )
+
+        self.assertTrue(decision.allowed, decision)
+
     def test_opencode_defaults_allow_glm_sized_output(self):
         payload = {
             "messages": [{"role": "user", "content": "Continue the scene."}],

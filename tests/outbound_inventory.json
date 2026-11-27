@@ -1232,7 +1232,7 @@
   "services/rate_limit_service.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "cc2fa4360ea9227e383ca90871cd352083ca00366058b3e998007ea8b4f10193"
+    "sha256": "05b5069154520d705b77a214dd5e36dd1a083e69c9a2a420f427b13c642d4e15"
   },
   "services/reasoning_policy.py": {
     "kind": "guarded",
@@ -2482,7 +2482,7 @@
   "services/lean_mode.py": {
     "kind": "guarded",
     "reason": "Provider adapter, protocol helper or orchestration; delegates network I/O to the guarded provider clients.",
-    "sha256": "fab2142b642f7ca80ccfb23cdc385a357c4819f5d973bf4dbf923b6418fd90a4"
+    "sha256": "2347be66d441dab1b8e5e432af528d33e348c7c257d36d86fd02eb713a711798"
   },
   "services/advisor_tool.py": {
     "kind": "non-provider",
